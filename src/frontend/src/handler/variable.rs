@@ -17,13 +17,14 @@ use itertools::Itertools;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
-use risingwave_common::system_param::is_mutable;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
+use risingwave_sqlparser::keywords::Keyword;
 
 use super::RwPgResponse;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
@@ -68,7 +69,7 @@ pub fn handle_set(
         .eq_ignore_ascii_case("streaming_parallelism")
         && string_val
             .as_ref()
-            .map(|val| val.eq_ignore_ascii_case("auto"))
+            .map(|val| val.eq_ignore_ascii_case(Keyword::ADAPTIVE.to_string().as_str()))
             .unwrap_or(false)
     {
         string_val = None;
@@ -157,13 +158,18 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<Vec<Row>
         .get_system_params()
         .await?;
     let rows = params
-        .to_kv()
+        .get_all()
         .into_iter()
-        .map(|(k, v)| {
-            let is_mutable_bytes = ScalarRefImpl::Bool(is_mutable(&k).unwrap())
+        .map(|info| {
+            let is_mutable_bytes = ScalarRefImpl::Bool(info.mutable)
                 .text_format(&DataType::Boolean)
                 .into();
-            Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
+            Row::new(vec![
+                Some(info.name.into()),
+                Some(info.value.into()),
+                Some(info.description.into()),
+                Some(is_mutable_bytes),
+            ])
         })
         .collect_vec();
     Ok(rows)

@@ -20,6 +20,7 @@ mod generic_exchange;
 mod group_top_n;
 mod hash_agg;
 mod hop_window;
+mod iceberg_scan;
 mod insert;
 mod join;
 mod limit;
@@ -52,6 +53,7 @@ pub use generic_exchange::*;
 pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
+pub use iceberg_scan::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
@@ -78,7 +80,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
+use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
@@ -235,8 +237,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortOverWindow => SortOverWindowExecutor,
             NodeBody::MaxOneRow => MaxOneRowExecutor,
             // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuidler,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
+            NodeBody::BlockExecutor => BlockExecutorBuilder,
+            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
         }
         .await?;
 

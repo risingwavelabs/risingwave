@@ -536,6 +536,12 @@ impl Timestamp {
         self.0.timestamp_nanos_opt().unwrap()
     }
 
+    pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
+        let secs = timestamp_millis.div_euclid(1_000);
+        let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
+        Self::with_secs_nsecs(secs, nsecs as u32)
+    }
+
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
         let secs = timestamp_micros.div_euclid(1_000_000);
         let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;

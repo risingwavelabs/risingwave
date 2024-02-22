@@ -26,11 +26,13 @@ pub struct FunctionCatalog {
     pub name: String,
     pub owner: u32,
     pub kind: FunctionKind,
+    pub arg_names: Vec<String>,
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
     pub language: String,
-    pub identifier: String,
-    pub link: String,
+    pub identifier: Option<String>,
+    pub body: Option<String>,
+    pub link: Option<String>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug)]
@@ -59,10 +61,12 @@ impl From<&PbFunction> for FunctionCatalog {
             name: prost.name.clone(),
             owner: prost.owner,
             kind: prost.kind.as_ref().unwrap().into(),
+            arg_names: prost.arg_names.clone(),
             arg_types: prost.arg_types.iter().map(|arg| arg.into()).collect(),
             return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),
             identifier: prost.identifier.clone(),
+            body: prost.body.clone(),
             link: prost.link.clone(),
         }
     }

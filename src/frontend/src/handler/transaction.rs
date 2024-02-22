@@ -15,10 +15,10 @@
 use pgwire::pg_response::StatementType;
 use pgwire::types::Row;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::error::Result;
 use crate::session::transaction::AccessMode;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 

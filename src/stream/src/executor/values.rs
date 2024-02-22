@@ -155,7 +155,6 @@ impl Executor for ValuesExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::{
@@ -174,8 +173,7 @@ mod tests {
     #[tokio::test]
     async fn test_values() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let progress = CreateMviewProgress::for_test(barrier_manager);
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
@@ -215,7 +213,7 @@ mod tests {
             identity: "ValuesExecutor".to_string(),
         };
         let values_executor_struct = ValuesExecutor::new(
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             info,
             progress,
             vec![exprs

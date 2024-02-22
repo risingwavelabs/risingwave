@@ -444,6 +444,8 @@ macro_rules! for_all_plain_native_methods {
             {
                 public static native void tracingSlf4jEvent(String threadName, String name, int level, String string);
 
+                public static native boolean tracingSlf4jEventEnabled(int level);
+
                 public static native int vnodeCount();
 
                 // hummock iterator method
@@ -482,13 +484,15 @@ macro_rules! for_all_plain_native_methods {
 
                 static native String iteratorGetStringValue(long pointer, int index);
 
-                static native java.sql.Timestamp iteratorGetTimestampValue(long pointer, int index);
+                static native java.time.LocalDateTime iteratorGetTimestampValue(long pointer, int index);
+
+                static native java.time.OffsetDateTime iteratorGetTimestamptzValue(long pointer, int index);
 
                 static native java.math.BigDecimal iteratorGetDecimalValue(long pointer, int index);
 
-                static native java.sql.Time iteratorGetTimeValue(long pointer, int index);
+                static native java.time.LocalTime iteratorGetTimeValue(long pointer, int index);
 
-                static native java.sql.Date iteratorGetDateValue(long pointer, int index);
+                static native java.time.LocalDate iteratorGetDateValue(long pointer, int index);
 
                 static native String iteratorGetIntervalValue(long pointer, int index);
 
@@ -500,6 +504,8 @@ macro_rules! for_all_plain_native_methods {
                 static native Object iteratorGetArrayValue(long pointer, int index, Class<?> clazz);
 
                 public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
+
+                public static native boolean sendCdcSourceErrorToChannel(long channelPtr, String errorMsg);
 
                 public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
                     recvSinkWriterRequestFromChannel(long channelPtr);
@@ -883,6 +889,7 @@ mod tests {
         let expected = expect_test::expect![[r#"
             [
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V,
+                tracingSlf4jEventEnabled                 (I)Z,
                 vnodeCount                               ()I,
                 iteratorNewHummock                       ([B)J,
                 iteratorNewStreamChunk                   (J)J,
@@ -901,15 +908,17 @@ mod tests {
                 iteratorGetDoubleValue                   (JI)D,
                 iteratorGetBooleanValue                  (JI)Z,
                 iteratorGetStringValue                   (JI)Ljava/lang/String;,
-                iteratorGetTimestampValue                (JI)Ljava/sql/Timestamp;,
+                iteratorGetTimestampValue                (JI)Ljava/time/LocalDateTime;,
+                iteratorGetTimestamptzValue              (JI)Ljava/time/OffsetDateTime;,
                 iteratorGetDecimalValue                  (JI)Ljava/math/BigDecimal;,
-                iteratorGetTimeValue                     (JI)Ljava/sql/Time;,
-                iteratorGetDateValue                     (JI)Ljava/sql/Date;,
+                iteratorGetTimeValue                     (JI)Ljava/time/LocalTime;,
+                iteratorGetDateValue                     (JI)Ljava/time/LocalDate;,
                 iteratorGetIntervalValue                 (JI)Ljava/lang/String;,
                 iteratorGetJsonbValue                    (JI)Ljava/lang/String;,
                 iteratorGetByteaValue                    (JI)[B,
                 iteratorGetArrayValue                    (JILjava/lang/Class;)Ljava/lang/Object;,
                 sendCdcSourceMsgToChannel                (J[B)Z,
+                sendCdcSourceErrorToChannel              (JLjava/lang/String;)Z,
                 recvSinkWriterRequestFromChannel         (J)Lcom/risingwave/java/binding/JniSinkWriterStreamRequest;,
                 sendSinkWriterResponseToChannel          (J[B)Z,
                 sendSinkWriterErrorToChannel             (JLjava/lang/String;)Z,

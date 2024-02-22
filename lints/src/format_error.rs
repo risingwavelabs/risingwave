@@ -17,7 +17,9 @@ use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
 use clippy_utils::ty::implements_trait;
-use clippy_utils::{is_in_cfg_test, is_in_test_function, is_trait_method, match_function_call};
+use clippy_utils::{
+    is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path, match_function_call,
+};
 use rustc_ast::FormatArgsPiece;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
@@ -60,6 +62,8 @@ impl_lint_pass!(FormatError => [FORMAT_ERROR]);
 
 const TRACING_FIELD_DEBUG: [&str; 3] = ["tracing_core", "field", "debug"];
 const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
+const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
+const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
@@ -73,10 +77,15 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
             .or_else(|| match_function_call(cx, expr, &TRACING_FIELD_DISPLAY))
             && let [arg_expr, ..] = args
         {
-            check_fmt_arg(cx, arg_expr);
+            check_fmt_arg_in_tracing_event(cx, arg_expr);
         }
 
-        // `{}`, `{:?}` in format macros.
+        // Indirect `{}`, `{:?}` from other macros.
+        let in_tracing_event_macro = macro_backtrace(expr.span)
+            .any(|macro_call| match_def_path(cx, macro_call.def_id, &TRACING_MACROS_EVENT));
+        let in_anyhow_macro = macro_backtrace(expr.span)
+            .any(|macro_call| match_def_path(cx, macro_call.def_id, &ANYHOW_MACROS_ANYHOW));
+
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
                 && let Some(format_args) = find_format_args(cx, expr, macro_call.expn)
@@ -87,7 +96,17 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
                         && let Some(arg) = format_args.arguments.all_args().get(index)
                         && let Ok(arg_expr) = find_format_arg_expr(expr, arg)
                     {
-                        check_fmt_arg(cx, arg_expr);
+                        if in_tracing_event_macro {
+                            check_fmt_arg_in_tracing_event(cx, arg_expr);
+                        } else if in_anyhow_macro {
+                            if format_args.template.len() == 1 {
+                                check_fmt_arg_in_anyhow_error(cx, arg_expr);
+                            } else {
+                                check_fmt_arg_in_anyhow_context(cx, arg_expr);
+                            }
+                        } else {
+                            check_fmt_arg(cx, arg_expr);
+                        }
                     }
                 }
             }
@@ -103,12 +122,42 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
 }
 
 fn check_fmt_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
-    check_arg(
+    check_fmt_arg_with_help(
         cx,
         arg_expr,
-        arg_expr.span,
         "consider importing `thiserror_ext::AsReport` and using `.as_report()` instead",
+    )
+}
+
+fn check_fmt_arg_in_tracing_event(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
+    // TODO: replace `<error>` with the actual code snippet.
+    check_fmt_arg_with_help(
+        cx,
+        arg_expr,
+        "consider importing `thiserror_ext::AsReport` and recording the error as a field \
+        with `error = %<error>.as_report()` instead",
     );
+}
+
+fn check_fmt_arg_in_anyhow_error(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
+    check_fmt_arg_with_help(
+        cx,
+        arg_expr,
+        "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it",
+    );
+}
+
+fn check_fmt_arg_in_anyhow_context(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
+    check_fmt_arg_with_help(
+        cx,
+        arg_expr,
+        "consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to \
+        attach additional message to the error and make it an error source instead",
+    );
+}
+
+fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: &str) {
+    check_arg(cx, arg_expr, arg_expr.span, help);
 }
 
 fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_span: Span) {

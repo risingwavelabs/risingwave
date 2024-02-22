@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
 use deltalake::protocol::{DeltaOperation, SaveMode};
@@ -26,9 +26,9 @@ use deltalake::table::builder::s3_storage_options::{
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use deltalake::DeltaTable;
 use risingwave_common::array::{to_deltalake_record_batch_with_schema, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -46,7 +46,7 @@ use super::{
 };
 use crate::sink::writer::SinkWriterExt;
 
-pub const DELTALAKE_SINK: &str = "deltalake_rust";
+pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
@@ -268,7 +268,7 @@ impl Sink for DeltaLakeSink {
                 .await,
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow_error!(
+                SinkError::Remote(anyhow!(
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
@@ -370,7 +370,8 @@ impl DeltaLakeSinkWriter {
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         let a = to_deltalake_record_batch_with_schema(self.dl_schema.clone(), &chunk)
-            .map_err(|err| SinkError::DeltaLake(anyhow!("convert record batch error: {}", err)))?;
+            .context("convert record batch error")
+            .map_err(SinkError::DeltaLake)?;
         self.writer.write(a).await?;
         Ok(())
     }
@@ -382,7 +383,8 @@ fn convert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Sc
         let dl_field = deltalake::arrow::datatypes::Field::new(
             field.name(),
             deltalake::arrow::datatypes::DataType::try_from(field.data_type())
-                .map_err(|err| SinkError::DeltaLake(anyhow!("convert schema error: {}", err)))?,
+                .context("convert schema error")
+                .map_err(SinkError::DeltaLake)?,
             field.is_nullable(),
         );
         builder.push(dl_field);
@@ -485,9 +487,8 @@ impl<'a> TryFrom<&'a DeltaLakeWriteResult> for SinkMetadata {
     type Error = SinkError;
 
     fn try_from(value: &'a DeltaLakeWriteResult) -> std::prelude::v1::Result<Self, Self::Error> {
-        let metadata = serde_json::to_vec(&value.adds).map_err(|e| -> SinkError {
-            anyhow!("Can't serialized deltalake sink metadata: {}", e).into()
-        })?;
+        let metadata =
+            serde_json::to_vec(&value.adds).context("cannot serialize deltalake sink metadata")?;
         Ok(SinkMetadata {
             metadata: Some(Serialized(SerializedMetadata { metadata })),
         })
@@ -497,13 +498,11 @@ impl<'a> TryFrom<&'a DeltaLakeWriteResult> for SinkMetadata {
 impl DeltaLakeWriteResult {
     fn try_from(value: &SinkMetadata) -> Result<Self> {
         if let Some(Serialized(v)) = &value.metadata {
-            let adds =
-                serde_json::from_slice::<Vec<Add>>(&v.metadata).map_err(|e| -> SinkError {
-                    anyhow!("Can't deserialize deltalake sink metadata: {}", e).into()
-                })?;
+            let adds = serde_json::from_slice::<Vec<Add>>(&v.metadata)
+                .context("Can't deserialize deltalake sink metadata")?;
             Ok(DeltaLakeWriteResult { adds })
         } else {
-            Err(anyhow!("Can't create deltalake sink write result from empty data!").into())
+            bail!("Can't create deltalake sink write result from empty data!")
         }
     }
 }
@@ -534,7 +533,7 @@ mod test {
             .unwrap();
 
         let properties = hashmap! {
-            "connector".to_string() => "deltalake_rust".to_string(),
+            "connector".to_string() => "deltalake".to_string(),
             "force_append_only".to_string() => "true".to_string(),
             "type".to_string() => "append-only".to_string(),
             "location".to_string() => format!("file://{}", path),

@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod columns;
-pub mod tables;
-pub mod views;
-
-pub use columns::*;
-pub use tables::*;
-pub use views::*;
+mod columns;
+mod tables;
+mod views;

@@ -12,16 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod jni_catalog;
+mod mock_catalog;
 mod prometheus;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Deref;
+use std::sync::Arc;
 
-use anyhow::anyhow;
-use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema, SchemaRef};
+use anyhow::{anyhow, Context};
+use arrow_schema::{
+    DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
+};
 use async_trait::async_trait;
-use icelake::catalog::{load_catalog, CATALOG_NAME, CATALOG_TYPE};
+use icelake::catalog::{
+    load_catalog, load_iceberg_base_catalog_config, BaseCatalogConfig, CatalogRef, CATALOG_NAME,
+    CATALOG_TYPE,
+};
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
 use icelake::io_v2::prometheus::{PrometheusWriterBuilder, WriterMetrics};
 use icelake::io_v2::{
@@ -31,44 +39,36 @@ use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use itertools::Itertools;
-use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
+use risingwave_common::array::{to_iceberg_record_batch_with_schema, Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde::de;
 use serde_derive::Deserialize;
+use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
+use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
-use self::prometheus::monitored_partition_writer::MonitoredFanoutPartitionedWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::deserialize_bool_from_string;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::remote::{CoordinatedRemoteSink, RemoteSinkTrait};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
-pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
 
-#[derive(Debug)]
-pub struct RemoteIceberg;
+static RW_CATALOG_NAME: &str = "risingwave";
 
-impl RemoteSinkTrait for RemoteIceberg {
-    const SINK_NAME: &'static str = REMOTE_ICEBERG_SINK;
-}
-
-pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
-
-#[derive(Debug, Clone, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions, Default)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
     pub connector: String, // Avoid deny unknown field. Must be "iceberg"
@@ -82,7 +82,7 @@ pub struct IcebergConfig {
     pub table_name: String, // Full name of table, must include schema name
 
     #[serde(rename = "database.name")]
-    pub database_name: String, // Use as catalog name.
+    pub database_name: String, // Database name of table
 
     // Catalog type supported by iceberg, such as "storage", "rest".
     // If not set, we use "storage" as default.
@@ -113,7 +113,12 @@ pub struct IcebergConfig {
         deserialize_with = "deserialize_string_seq_from_string"
     )]
     pub primary_key: Option<Vec<String>>,
+
+    // Props for java catalog props.
+    #[serde(skip)]
+    pub java_catalog_props: HashMap<String, String>,
 }
+
 pub(crate) fn deserialize_string_seq_from_string<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<Vec<String>>, D::Error>
@@ -132,8 +137,9 @@ where
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let mut config =
+            serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -160,28 +166,34 @@ impl IcebergConfig {
             }
         }
 
+        // All configs starts with "catalog." will be treated as java configs.
+        config.java_catalog_props = values
+            .iter()
+            .filter(|(k, _v)| {
+                k.starts_with("catalog.") && k != &"catalog.uri" && k != &"catalog.type"
+            })
+            .map(|(k, v)| (k[8..].to_string(), v.to_string()))
+            .collect();
+
         Ok(config)
+    }
+
+    fn catalog_type(&self) -> &str {
+        self.catalog_type.as_deref().unwrap_or("storage")
     }
 
     fn build_iceberg_configs(&self) -> Result<HashMap<String, String>> {
         let mut iceberg_configs = HashMap::new();
 
-        let catalog_type = self
-            .catalog_type
-            .as_deref()
-            .unwrap_or("storage")
-            .to_string();
+        let catalog_type = self.catalog_type().to_string();
 
         iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
-        iceberg_configs.insert(
-            CATALOG_NAME.to_string(),
-            self.database_name.clone().to_string(),
-        );
+        iceberg_configs.insert(CATALOG_NAME.to_string(), RW_CATALOG_NAME.to_string());
 
         match catalog_type.as_str() {
             "storage" => {
                 iceberg_configs.insert(
-                    format!("iceberg.catalog.{}.warehouse", self.database_name),
+                    format!("iceberg.catalog.{}.warehouse", RW_CATALOG_NAME),
                     self.path.clone(),
                 );
             }
@@ -189,13 +201,13 @@ impl IcebergConfig {
                 let uri = self.uri.clone().ok_or_else(|| {
                     SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
                 })?;
-                iceberg_configs.insert(format!("iceberg.catalog.{}.uri", self.database_name), uri);
+                iceberg_configs.insert(format!("iceberg.catalog.{}.uri", RW_CATALOG_NAME), uri);
             }
             _ => {
                 return Err(SinkError::Iceberg(anyhow!(
                     "Unsupported catalog type: {}, only support `storage` and `rest`",
                     catalog_type
-                )))
+                )));
             }
         }
 
@@ -245,6 +257,149 @@ impl IcebergConfig {
 
         Ok(iceberg_configs)
     }
+
+    fn build_jni_catalog_configs(&self) -> Result<(BaseCatalogConfig, HashMap<String, String>)> {
+        let mut iceberg_configs = HashMap::new();
+
+        let base_catalog_config = {
+            let catalog_type = self.catalog_type().to_string();
+
+            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
+            iceberg_configs.insert(CATALOG_NAME.to_string(), "risingwave".to_string());
+
+            if let Some(region) = &self.region {
+                iceberg_configs.insert(
+                    "iceberg.table.io.region".to_string(),
+                    region.clone().to_string(),
+                );
+            }
+
+            if let Some(endpoint) = &self.endpoint {
+                iceberg_configs.insert(
+                    "iceberg.table.io.endpoint".to_string(),
+                    endpoint.clone().to_string(),
+                );
+            }
+
+            iceberg_configs.insert(
+                "iceberg.table.io.access_key_id".to_string(),
+                self.access_key.clone().to_string(),
+            );
+            iceberg_configs.insert(
+                "iceberg.table.io.secret_access_key".to_string(),
+                self.secret_key.clone().to_string(),
+            );
+
+            let (bucket, root) = {
+                let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+                let bucket = url
+                    .host_str()
+                    .ok_or_else(|| {
+                        SinkError::Iceberg(anyhow!(
+                            "Invalid s3 path: {}, bucket is missing",
+                            self.path
+                        ))
+                    })?
+                    .to_string();
+                let root = url.path().trim_start_matches('/').to_string();
+                (bucket, root)
+            };
+
+            iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+            iceberg_configs.insert("iceberg.table.io.root".to_string(), root);
+            // #TODO
+            // Support load config file
+            iceberg_configs.insert(
+                "iceberg.table.io.disable_config_load".to_string(),
+                "true".to_string(),
+            );
+
+            load_iceberg_base_catalog_config(&iceberg_configs)?
+        };
+
+        // Prepare jni configs, for details please see https://iceberg.apache.org/docs/latest/aws/
+        let mut java_catalog_configs = HashMap::new();
+        {
+            if let Some(uri) = self.uri.as_deref() {
+                java_catalog_configs.insert("uri".to_string(), uri.to_string());
+            }
+
+            java_catalog_configs.insert("warehouse".to_string(), self.path.clone());
+            java_catalog_configs.extend(self.java_catalog_props.clone());
+
+            // Currently we only support s3, so let's set it to s3
+            java_catalog_configs.insert(
+                "io-impl".to_string(),
+                "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
+            );
+
+            if let Some(endpoint) = &self.endpoint {
+                iceberg_configs.insert("s3.endpoint".to_string(), endpoint.clone().to_string());
+            }
+
+            iceberg_configs.insert(
+                "s3.access-key-id".to_string(),
+                self.access_key.clone().to_string(),
+            );
+            iceberg_configs.insert(
+                "s3.secret-access-key".to_string(),
+                self.secret_key.clone().to_string(),
+            );
+        }
+
+        Ok((base_catalog_config, java_catalog_configs))
+    }
+
+    async fn create_catalog(&self) -> anyhow::Result<CatalogRef> {
+        match self.catalog_type() {
+            "storage" | "rest" => {
+                let iceberg_configs = self.build_iceberg_configs()?;
+                let catalog = load_catalog(&iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                Ok(catalog)
+            }
+            catalog_type if catalog_type == "hive" || catalog_type == "sql" || catalog_type == "glue" || catalog_type == "dynamodb" => {
+                // Create java catalog
+                let (base_catalog_config, java_catalog_props) = self.build_jni_catalog_configs()?;
+                let catalog_impl = match catalog_type {
+                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
+                    "sql" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
+                    "dynamodb" => "org.apache.iceberg.aws.dynamodb.DynamoDbCatalog",
+                    _ => unreachable!(),
+                };
+
+                jni_catalog::JniCatalog::build(base_catalog_config, "risingwave", catalog_impl, java_catalog_props)
+            }
+            "mock" => Ok(Arc::new(MockCatalog{})),
+            _ => {
+                Err(anyhow!(
+                "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `sql`, `glue`, `dynamodb`",
+                self.catalog_type()
+            ))
+            }
+        }
+    }
+
+    pub async fn load_table(&self) -> anyhow::Result<Table> {
+        let catalog = self
+            .create_catalog()
+            .await
+            .context("Unable to load iceberg catalog")?;
+
+        let table_id = TableIdentifier::new(
+            vec![self.database_name.as_str()]
+                .into_iter()
+                .chain(self.table_name.split('.')),
+        )
+        .context("Unable to parse table name")?;
+
+        catalog
+            .load_table(&table_id)
+            .await
+            .map_err(|err| anyhow!(err))
+    }
 }
 
 pub struct IcebergSink {
@@ -272,18 +427,8 @@ impl Debug for IcebergSink {
 }
 
 impl IcebergSink {
-    async fn create_table(&self) -> Result<Table> {
-        let catalog = load_catalog(&self.config.build_iceberg_configs()?)
-            .await
-            .map_err(|e| SinkError::Iceberg(anyhow!("Unable to load iceberg catalog: {e}")))?;
-
-        let table_id = TableIdentifier::new(self.config.table_name.split('.'))
-            .map_err(|e| SinkError::Iceberg(anyhow!("Unable to parse table name: {e}")))?;
-
-        let table = catalog
-            .load_table(&table_id)
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+    async fn create_and_validate_table(&self) -> Result<Table> {
+        let table = self.config.load_table().await.map_err(SinkError::Iceberg)?;
 
         let sink_schema = self.param.schema();
         let iceberg_schema = table
@@ -340,12 +485,12 @@ impl Sink for IcebergSink {
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
-        let _ = self.create_table().await?;
+        let _ = self.create_and_validate_table().await?;
         Ok(())
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let table = self.create_table().await?;
+        let table = self.create_and_validate_table().await?;
         let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
             IcebergWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
         } else {
@@ -359,7 +504,7 @@ impl Sink for IcebergSink {
                 .await,
             self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow_error!(
+                SinkError::Remote(anyhow!(
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
@@ -370,7 +515,7 @@ impl Sink for IcebergSink {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        let table = self.create_table().await?;
+        let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
 
         Ok(IcebergSinkCommitter {
@@ -391,6 +536,31 @@ enum IcebergWriterEnum {
 }
 
 impl IcebergWriter {
+    fn schema_with_extra_partition_col(table: &Table, idx: usize) -> Result<SchemaRef> {
+        let schema = table.current_arrow_schema()?;
+
+        let mut fields = schema.fields().to_vec();
+        let partition_type =
+            if let ArrowDataType::Struct(s) = table.current_partition_type()?.try_into()? {
+                let fields = Fields::from(
+                    s.into_iter()
+                        .enumerate()
+                        .map(|(id, field)| {
+                            ArrowField::new(format!("f{id}"), field.data_type().clone(), true)
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                ArrowDataType::Struct(fields)
+            } else {
+                unimplemented!()
+            };
+        fields.insert(
+            idx,
+            ArrowField::new("_rw_partition", partition_type, false).into(),
+        );
+        Ok(ArrowSchema::new(fields).into())
+    }
+
     pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let builder_helper = table.builder_helper()?;
 
@@ -402,30 +572,54 @@ impl IcebergWriter {
                 .iceberg_rolling_unflushed_data_file
                 .clone(),
         ));
-        let partition_data_file_builder = MonitoredFanoutPartitionedWriterBuilder::new(
-            builder_helper.fanout_partition_writer_builder(data_file_builder.clone())?,
-            writer_param.sink_metrics.iceberg_partition_num.clone(),
-        );
-        let dispatch_builder = builder_helper
-            .dispatcher_writer_builder(partition_data_file_builder, data_file_builder)?;
-        // wrap a layer with collect write metrics
-        let prometheus_builder = PrometheusWriterBuilder::new(
-            dispatch_builder,
-            WriterMetrics::new(
-                writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                writer_param
-                    .sink_metrics
-                    .iceberg_write_latency
-                    .deref()
-                    .clone(),
-            ),
-        );
-        let schema = table.current_arrow_schema()?;
-        let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
-        Ok(Self {
-            inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
-            schema,
-        })
+        if let Some(extra_partition_col_idx) = writer_param.extra_partition_col_idx {
+            let partition_data_file_builder = builder_helper.precompute_partition_writer_builder(
+                data_file_builder.clone(),
+                extra_partition_col_idx,
+            )?;
+            let dispatch_builder = builder_helper
+                .dispatcher_writer_builder(partition_data_file_builder, data_file_builder)?;
+            let prometheus_builder = PrometheusWriterBuilder::new(
+                dispatch_builder,
+                WriterMetrics::new(
+                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
+                    writer_param
+                        .sink_metrics
+                        .iceberg_write_latency
+                        .deref()
+                        .clone(),
+                ),
+            );
+            let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
+            let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
+            Ok(Self {
+                inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
+                schema,
+            })
+        } else {
+            let partition_data_file_builder =
+                builder_helper.fanout_partition_writer_builder(data_file_builder.clone())?;
+            let dispatch_builder = builder_helper
+                .dispatcher_writer_builder(partition_data_file_builder, data_file_builder)?;
+            // wrap a layer with collect write metrics
+            let prometheus_builder = PrometheusWriterBuilder::new(
+                dispatch_builder,
+                WriterMetrics::new(
+                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
+                    writer_param
+                        .sink_metrics
+                        .iceberg_write_latency
+                        .deref()
+                        .clone(),
+                ),
+            );
+            let schema = table.current_arrow_schema()?;
+            let inner_writer = RecordBatchWriter::new(prometheus_builder.build(&schema).await?);
+            Ok(Self {
+                inner_writer: IcebergWriterEnum::AppendOnly(inner_writer),
+                schema,
+            })
+        }
     }
 
     pub async fn new_upsert(
@@ -457,30 +651,55 @@ impl IcebergWriter {
             equality_delete_builder,
             unique_column_ids,
         );
-        let partition_delta_builder = MonitoredFanoutPartitionedWriterBuilder::new(
-            builder_helper.fanout_partition_writer_builder(delta_builder.clone())?,
-            writer_param.sink_metrics.iceberg_partition_num.clone(),
-        );
-        let dispatch_builder =
-            builder_helper.dispatcher_writer_builder(partition_delta_builder, delta_builder)?;
-        // wrap a layer with collect write metrics
-        let prometheus_builder = PrometheusWriterBuilder::new(
-            dispatch_builder,
-            WriterMetrics::new(
-                writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
-                writer_param
-                    .sink_metrics
-                    .iceberg_write_latency
-                    .deref()
-                    .clone(),
-            ),
-        );
-        let schema = table.current_arrow_schema()?;
-        let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
-        Ok(Self {
-            inner_writer: IcebergWriterEnum::Upsert(inner_writer),
-            schema,
-        })
+        if let Some(extra_partition_col_idx) = writer_param.extra_partition_col_idx {
+            let partition_delta_builder = builder_helper.precompute_partition_writer_builder(
+                delta_builder.clone(),
+                extra_partition_col_idx,
+            )?;
+            let dispatch_builder =
+                builder_helper.dispatcher_writer_builder(partition_delta_builder, delta_builder)?;
+            // wrap a layer with collect write metrics
+            let prometheus_builder = PrometheusWriterBuilder::new(
+                dispatch_builder,
+                WriterMetrics::new(
+                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
+                    writer_param
+                        .sink_metrics
+                        .iceberg_write_latency
+                        .deref()
+                        .clone(),
+                ),
+            );
+            let schema = Self::schema_with_extra_partition_col(&table, extra_partition_col_idx)?;
+            let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
+            Ok(Self {
+                inner_writer: IcebergWriterEnum::Upsert(inner_writer),
+                schema,
+            })
+        } else {
+            let partition_delta_builder =
+                builder_helper.fanout_partition_writer_builder(delta_builder.clone())?;
+            let dispatch_builder =
+                builder_helper.dispatcher_writer_builder(partition_delta_builder, delta_builder)?;
+            // wrap a layer with collect write metrics
+            let prometheus_builder = PrometheusWriterBuilder::new(
+                dispatch_builder,
+                WriterMetrics::new(
+                    writer_param.sink_metrics.iceberg_write_qps.deref().clone(),
+                    writer_param
+                        .sink_metrics
+                        .iceberg_write_latency
+                        .deref()
+                        .clone(),
+                ),
+            );
+            let schema = table.current_arrow_schema()?;
+            let inner_writer = DeltaWriter::new(prometheus_builder.build(&schema).await?);
+            Ok(Self {
+                inner_writer: IcebergWriterEnum::Upsert(inner_writer),
+                schema,
+            })
+        }
     }
 }
 
@@ -507,13 +726,14 @@ impl SinkWriter for IcebergWriter {
                 let filters =
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
-                let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                let chunk =
+                    to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk.compact())
+                        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer.write(chunk).await?;
             }
             IcebergWriterEnum::Upsert(writer) => {
-                let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk)
+                let chunk = to_iceberg_record_batch_with_schema(self.schema.clone(), &chunk)
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
                 writer
@@ -585,12 +805,12 @@ impl WriteResult {
     fn try_from(value: &SinkMetadata, partition_type: &Any) -> Result<Self> {
         if let Some(Serialized(v)) = &value.metadata {
             let mut values = if let serde_json::Value::Object(v) =
-                serde_json::from_slice::<serde_json::Value>(&v.metadata).map_err(
-                    |e| -> SinkError { anyhow!("Can't parse iceberg sink metadata: {}", e).into() },
-                )? {
+                serde_json::from_slice::<serde_json::Value>(&v.metadata)
+                    .context("Can't parse iceberg sink metadata")?
+            {
                 v
             } else {
-                return Err(anyhow!("iceberg sink metadata should be a object").into());
+                bail!("iceberg sink metadata should be a object");
             };
 
             let data_files: Vec<DataFile>;
@@ -615,7 +835,7 @@ impl WriteResult {
                     .into_iter()
                     .map(|value| data_file_from_json(value, partition_type.clone()))
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
-                    .map_err(|e| anyhow!("Failed to parse data file from json: {}", e))?;
+                    .context("Failed to parse data file from json")?;
             } else {
                 return Err(anyhow!("icberg sink metadata should have data_files object").into());
             }
@@ -640,7 +860,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
                 .cloned()
                 .map(data_file_to_json)
                 .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
-                .map_err(|e| anyhow!("Can't serialize data files to json: {}", e))?,
+                .context("Can't serialize data files to json")?,
         );
         let json_delete_files = serde_json::Value::Array(
             value
@@ -649,7 +869,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
                 .cloned()
                 .map(data_file_to_json)
                 .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
-                .map_err(|e| anyhow!("Can't serialize data files to json: {}", e))?,
+                .context("Can't serialize data files to json")?,
         );
         let json_value = serde_json::Value::Object(
             vec![
@@ -661,9 +881,8 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
         );
         Ok(SinkMetadata {
             metadata: Some(Serialized(SerializedMetadata {
-                metadata: serde_json::to_vec(&json_value).map_err(|e| -> SinkError {
-                    anyhow!("Can't serialized iceberg sink metadata: {}", e).into()
-                })?,
+                metadata: serde_json::to_vec(&json_value)
+                    .context("Can't serialize iceberg sink metadata")?,
             })),
         })
     }
@@ -697,11 +916,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             txn.append_data_file(s.data_files);
             txn.append_delete_file(s.delete_files);
         });
-        txn.commit()
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        txn.commit().await.map_err(|err| {
+            tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+            SinkError::Iceberg(anyhow!(err))
+        })?;
 
-        tracing::info!("Succeeded to commit ti iceberg table in epoch {epoch}.");
+        tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
     }
 }

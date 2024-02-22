@@ -19,8 +19,9 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context};
+use jni::objects::{JObject, JString};
 use jni::strings::JNIString;
-use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
+use jni::{InitArgsBuilder, JNIEnv, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
@@ -37,11 +38,14 @@ pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
     pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
-        match JVM_RESULT.get_or_init(|| {
-            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e.as_report()))
-        }) {
+        match JVM_RESULT.get_or_init(Self::inner_new) {
             Ok(jvm) => Ok(jvm),
-            Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
+            Err(e) => {
+                error!(error = %e.as_report(), "jvm not initialized properly");
+                // Note: anyhow!(e) doesn't preserve source
+                // https://github.com/dtolnay/anyhow/issues/341
+                Err(anyhow!(e.to_report_string()).context("jvm not initialized properly"))
+            }
         }
     }
 
@@ -90,6 +94,7 @@ impl JavaVmWrapper {
             )
         };
 
+        // FIXME: passing custom arguments to the embedded jvm when compute node start
         // Build the VM properties
         let args_builder = InitArgsBuilder::new()
             // Pass the JNI API version (default is 8)
@@ -104,7 +109,8 @@ impl JavaVmWrapper {
             // In RisingWave we assume the upstream changelog may contain duplicate events and
             // handle conflicts in the mview operator, thus we don't need to obey the above
             // instructions. So we decrease the wait time here to reclaim jvm thread faster.
-            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
+            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1")
+            .option("-Dcdc.source.wait.streaming.before.exit.seconds=30");
 
         tracing::info!("JVM args: {:?}", args_builder);
         let jvm_args = args_builder.build().context("invalid jvm args")?;
@@ -195,4 +201,44 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
         }
         _ => (0, 0),
     }
+}
+
+pub fn execute_with_jni_env<T>(
+    jvm: &JavaVM,
+    f: impl FnOnce(&mut JNIEnv<'_>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let _guard = jvm
+        .attach_current_thread()
+        .with_context(|| "Failed to attach current rust thread to jvm")?;
+
+    let mut env = jvm.get_env().with_context(|| "Failed to get jni env")?;
+
+    let ret = f(&mut env);
+
+    match env.exception_check() {
+        Ok(true) => env
+            .exception_clear()
+            .inspect_err(|e| {
+                tracing::warn!(error = %e.as_report(), "Exception occurred but failed to clear");
+            })
+            .unwrap(),
+        Ok(false) => {
+            // No exception, do nothing
+        }
+        Err(e) => {
+            tracing::warn!(error = %e.as_report(), "Failed to check exception");
+        }
+    }
+
+    ret
+}
+
+/// A helper method to convert an java object to rust string.
+pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<String> {
+    if !env.is_instance_of(&obj, "java/lang/String")? {
+        bail!("Input object is not a java string and can't be converted!")
+    }
+    let jstr = JString::from(obj);
+    let java_str = env.get_string(&jstr)?;
+    Ok(java_str.to_str()?.to_string())
 }

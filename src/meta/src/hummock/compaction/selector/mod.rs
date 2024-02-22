@@ -25,6 +25,7 @@ mod tombstone_compaction_selector;
 mod ttl_selector;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
@@ -38,7 +39,9 @@ pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
 
 use super::picker::LocalPickerStatistic;
-use super::{create_compaction_task, LevelCompactionPicker, TierCompactionPicker};
+use super::{
+    create_compaction_task, CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker,
+};
 use crate::hummock::compaction::CompactionTask;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
@@ -53,6 +56,7 @@ pub trait CompactionSelector: Sync + Send {
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         table_id_to_options: HashMap<u32, TableOption>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask>;
 
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
@@ -126,6 +130,7 @@ pub mod tests {
             uncompressed_file_size: sst.uncompressed_file_size,
             sub_level_id: sst.get_sst_id(),
             table_infos: vec![sst],
+            ..Default::default()
         });
     }
 
@@ -156,6 +161,7 @@ pub mod tests {
             sub_level_id,
             table_infos,
             uncompressed_file_size,
+            ..Default::default()
         });
     }
 
@@ -241,6 +247,7 @@ pub mod tests {
             total_file_size,
             sub_level_id: 0,
             uncompressed_file_size,
+            ..Default::default()
         }
     }
 
@@ -263,6 +270,7 @@ pub mod tests {
                     uncompressed_file_size: table.uncompressed_file_size,
                     sub_level_id: idx as u64,
                     table_infos: vec![table],
+                    ..Default::default()
                 })
                 .collect_vec(),
             total_file_size,
@@ -287,6 +295,7 @@ pub mod tests {
                         .sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table,
+                    ..Default::default()
                 })
                 .collect_vec(),
             total_file_size: 0,
@@ -321,6 +330,7 @@ pub mod tests {
                         .iter()
                         .map(|sst| sst.uncompressed_file_size)
                         .sum::<u64>(),
+                    ..Default::default()
                 })
                 .collect_vec(),
             total_file_size: 0,

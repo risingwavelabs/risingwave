@@ -17,9 +17,10 @@
 use std::str::FromStr;
 
 use anyhow::Result;
+use clap::error::ErrorKind;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
-use risingwave_cmd_all::{PlaygroundOpts, StandaloneOpts};
+use risingwave_cmd_all::{PlaygroundOpts, SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -98,7 +99,14 @@ enum Component {
     Compactor,
     Ctl,
     Playground,
+    /// Used by cloud to bundle different components into a single node.
+    /// It exposes the low level configuration options of each node.
     Standalone,
+    /// Used by users to run a single node.
+    /// The low level configuration options are hidden.
+    /// We only expose high-level configuration options,
+    /// which map across multiple nodes.
+    SingleNode,
 }
 
 impl Component {
@@ -117,6 +125,7 @@ impl Component {
             Self::Ctl => ctl(parse_opts(matches)),
             Self::Playground => playground(parse_opts(matches)),
             Self::Standalone => standalone(parse_opts(matches)),
+            Self::SingleNode => single_node(parse_opts(matches)),
         }
     }
 
@@ -130,6 +139,7 @@ impl Component {
             Component::Ctl => vec!["risectl"],
             Component::Playground => vec!["play"],
             Component::Standalone => vec![],
+            Component::SingleNode => vec!["single-node", "single"],
         }
     }
 
@@ -143,6 +153,7 @@ impl Component {
             Component::Ctl => CtlOpts::augment_args(cmd),
             Component::Playground => PlaygroundOpts::augment_args(cmd),
             Component::Standalone => StandaloneOpts::augment_args(cmd),
+            Component::SingleNode => SingleNodeOpts::augment_args(cmd),
         }
     }
 
@@ -179,7 +190,23 @@ fn main() -> Result<()> {
                 .subcommands(Component::commands()),
         );
 
-    let matches = command.get_matches();
+    let matches = match command.try_get_matches() {
+        Ok(m) => m,
+        Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
+            // `$ ./risingwave`
+            // NOTE(kwannoel): This is a hack to make `risingwave`
+            // work as an alias of `risingwave single-process`.
+            // If invocation is not a multicall and there's no subcommand,
+            // we will try to invoke it as a single node.
+            let command = Component::SingleNode.augment_args(risingwave());
+            let matches = command.get_matches();
+            Component::SingleNode.start(&matches);
+            return Ok(());
+        }
+        Err(e) => {
+            e.exit();
+        }
+    };
 
     let multicall = matches.subcommand().unwrap();
     let argv_1 = multicall.1.subcommand();
@@ -192,7 +219,7 @@ fn main() -> Result<()> {
 }
 
 fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::new("playground")
+    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);
@@ -200,7 +227,20 @@ fn playground(opts: PlaygroundOpts) {
 }
 
 fn standalone(opts: StandaloneOpts) {
-    let settings = risingwave_rt::LoggerSettings::new("standalone")
+    let opts = risingwave_cmd_all::parse_standalone_opt_args(&opts);
+    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
+        .with_target("risingwave_storage", Level::WARN)
+        .with_thread_name(true);
+    risingwave_rt::init_risingwave_logger(settings);
+    risingwave_rt::main_okk(risingwave_cmd_all::standalone(opts)).unwrap();
+}
+
+/// For single node, the internals are just a config mapping from its
+/// high level options to standalone mode node-level options.
+/// We will start a standalone instance, with all nodes in the same process.
+fn single_node(opts: SingleNodeOpts) {
+    let opts = risingwave_cmd_all::map_single_node_opts_to_standalone_opts(&opts);
+    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
         .with_target("risingwave_storage", Level::WARN)
         .with_thread_name(true);
     risingwave_rt::init_risingwave_logger(settings);

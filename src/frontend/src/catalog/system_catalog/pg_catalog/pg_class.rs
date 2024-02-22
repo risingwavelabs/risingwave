@@ -12,48 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{BuiltinView, SystemCatalogColumnsDef};
-
-pub static PG_CLASS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
-    vec![
-        (DataType::Int32, "oid"),
-        (DataType::Varchar, "relname"),
-        (DataType::Int32, "relnamespace"),
-        (DataType::Int32, "relowner"),
-        (DataType::Varchar, "relkind"), /* r = ordinary table, i = index, S = sequence, t =
-                                         * TOAST table, v = view, m = materialized view, c =
-                                         * composite type, f = foreign table, p = partitioned
-                                         * table, I = partitioned index */
-        (DataType::Int32, "relam"),
-        (DataType::Int32, "reltablespace"),
-        (DataType::List(Box::new(DataType::Varchar)), "reloptions"),
-    ]
-});
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
 /// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
 /// todo: should we add internal tables as well?
-pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_class",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &PG_CLASS_COLUMNS,
-    sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, \
-        CASE \
-            WHEN relation_type = 'table' THEN 'r' \
-            WHEN relation_type = 'system table' THEN 'r' \
-            WHEN relation_type = 'index' THEN 'i' \
-            WHEN relation_type = 'view' THEN 'v' \
-            WHEN relation_type = 'materialized view' THEN 'm' \
-        END relkind, \
-        0 AS relam, \
-        0 AS reltablespace, \
-        ARRAY[]::varchar[] AS reloptions \
-        FROM rw_catalog.rw_relations\
-    "
-    .to_string(),
-});
+#[system_catalog(view, "pg_catalog.pg_class",
+    "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, 'p' as relpersistence,
+    CASE
+        WHEN relation_type = 'table' THEN 'r'
+        WHEN relation_type = 'system table' THEN 'r'
+        WHEN relation_type = 'index' THEN 'i'
+        WHEN relation_type = 'view' THEN 'v'
+        WHEN relation_type = 'materialized view' THEN 'm'
+    END relkind,
+    0 AS relam,
+    0 AS reltablespace,
+    ARRAY[]::varchar[] AS reloptions
+    FROM rw_catalog.rw_relations
+")]
+#[derive(Fields)]
+struct PgClass {
+    oid: i32,
+    relname: String,
+    relnamespace: i32,
+    relowner: i32,
+    // p = permanent table, u = unlogged table, t = temporary table
+    relpersistence: String,
+    // r = ordinary table, i = index, S = sequence, t = TOAST table, v = view, m = materialized view,
+    // c = composite type, f = foreign table, p = partitioned table, I = partitioned index
+    relkind: String,
+    relam: i32,
+    reltablespace: i32,
+    reloptions: Vec<String>,
+}

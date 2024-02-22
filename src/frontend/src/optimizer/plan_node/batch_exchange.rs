@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
@@ -30,14 +30,29 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order, Order
 pub struct BatchExchange {
     pub base: PlanBase<Batch>,
     input: PlanRef,
+    // sequential means each tasks of the exchange node will be executed sequentially.
+    // Currently, it is used to avoid spawn too many tasks for limit operator.
+    sequential: bool,
 }
 
 impl BatchExchange {
     pub fn new(input: PlanRef, order: Order, dist: Distribution) -> Self {
+        Self::new_inner(input, order, dist, false)
+    }
+
+    pub fn new_with_sequential(input: PlanRef, order: Order, dist: Distribution) -> Self {
+        Self::new_inner(input, order, dist, true)
+    }
+
+    fn new_inner(input: PlanRef, order: Order, dist: Distribution, sequential: bool) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let base = PlanBase::new_batch(ctx, schema, dist, order);
-        BatchExchange { base, input }
+        BatchExchange {
+            base,
+            input,
+            sequential,
+        }
     }
 }
 
@@ -53,7 +68,11 @@ impl Distill for BatchExchange {
             distribution: self.base.distribution(),
             input_schema,
         });
-        childless_record("BatchExchange", vec![("order", order), ("dist", dist)])
+        let mut fields = vec![("order", order), ("dist", dist)];
+        if self.sequential {
+            fields.push(("sequential", Pretty::display(&true)));
+        }
+        childless_record("BatchExchange", fields)
     }
 }
 
@@ -63,7 +82,12 @@ impl PlanTreeNodeUnary for BatchExchange {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.order().clone(), self.distribution().clone())
+        Self::new_inner(
+            input,
+            self.order().clone(),
+            self.distribution().clone(),
+            self.sequential,
+        )
     }
 }
 impl_plan_tree_node_for_unary! {BatchExchange}
@@ -80,12 +104,15 @@ impl ToBatchPb for BatchExchange {
         if self.base.order().is_any() {
             NodeBody::Exchange(ExchangeNode {
                 sources: vec![],
+                sequential: self.sequential,
                 input_schema: self.base.schema().to_prost(),
             })
         } else {
+            assert!(!self.sequential);
             NodeBody::MergeSortExchange(MergeSortExchangeNode {
                 exchange: Some(ExchangeNode {
                     sources: vec![],
+                    sequential: self.sequential,
                     input_schema: self.base.schema().to_prost(),
                 }),
                 column_orders: self.base.order().to_protobuf(),

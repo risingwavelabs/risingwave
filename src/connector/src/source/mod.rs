@@ -32,14 +32,14 @@ pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
 mod manager;
+pub mod reader;
 pub mod test_source;
 
 pub use manager::{SourceColumnDesc, SourceColumnType};
 
-pub use crate::parser::additional_columns::{
-    get_connector_compatible_additional_columns, CompatibleAdditionalColumnsFn,
+pub use crate::source::filesystem::opendal_source::{
+    GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
 };
-pub use crate::source::filesystem::opendal_source::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR};
 pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;

@@ -29,7 +29,7 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
     TableUpstreamMvCountMap,
 };
-use crate::manager::{DdlType, FragmentManager, FragmentManagerRef};
+use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
 use crate::MetaResult;
 
@@ -38,7 +38,7 @@ type ConsumedRows = u64;
 #[derive(Clone, Copy, Debug)]
 enum BackfillState {
     Init,
-    ConsumingUpstream(Epoch, ConsumedRows),
+    ConsumingUpstream(#[allow(dead_code)] Epoch, ConsumedRows),
     Done(ConsumedRows),
 }
 
@@ -159,10 +159,10 @@ pub enum TrackingJob {
 }
 
 impl TrackingJob {
-    fn fragment_manager(&self) -> &FragmentManager {
+    fn metadata_manager(&self) -> &MetadataManager {
         match self {
-            TrackingJob::New(command) => command.context.fragment_manager.as_ref(),
-            TrackingJob::Recovered(recovered) => recovered.fragment_manager.as_ref(),
+            TrackingJob::New(command) => command.context.metadata_manager(),
+            TrackingJob::Recovered(recovered) => &recovered.metadata_manager,
         }
     }
 
@@ -191,9 +191,14 @@ impl TrackingJob {
         // Update the state of the table fragments from `Creating` to `Created`, so that the
         // fragments can be scaled.
         if let Some(table_fragments) = table_fragments {
-            self.fragment_manager()
-                .mark_table_fragments_created(table_fragments.table_id())
-                .await?;
+            match self.metadata_manager() {
+                MetadataManager::V1(mgr) => {
+                    mgr.fragment_manager
+                        .mark_table_fragments_created(table_fragments.table_id())
+                        .await?;
+                }
+                MetadataManager::V2(_) => {}
+            }
         }
         Ok(())
     }
@@ -218,19 +223,12 @@ impl TrackingJob {
             TrackingJob::Recovered(recovered) => Some(recovered.fragments.table_id()),
         }
     }
-
-    pub(crate) fn tracks_sink(&self) -> bool {
-        match self {
-            TrackingJob::New(command) => command.tracks_sink(),
-            TrackingJob::Recovered(_) => false,
-        }
-    }
 }
 
 pub struct RecoveredTrackingJob {
     pub fragments: TableFragments,
     pub finished: Notifier,
-    pub fragment_manager: FragmentManagerRef,
+    pub metadata_manager: MetadataManager,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
@@ -240,15 +238,6 @@ pub(super) struct TrackingCommand {
 
     /// Should be called when the command is finished.
     pub notifiers: Vec<Notifier>,
-}
-
-impl TrackingCommand {
-    pub fn tracks_sink(&self) -> bool {
-        match &self.context.command {
-            Command::CreateStreamingJob { ddl_type, .. } => *ddl_type == DdlType::Sink,
-            _ => false,
-        }
-    }
 }
 
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
@@ -282,7 +271,7 @@ impl CreateMviewProgressTracker {
         version_stats: HummockVersionStats,
         mut finished_notifiers: TableNotifierMap,
         mut table_fragment_map: TableFragmentMap,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -317,7 +306,7 @@ impl CreateMviewProgressTracker {
             let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
                 fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
                 finished: finished_notifiers.remove(&creating_table_id).unwrap(),
-                fragment_manager: fragment_manager.clone(),
+                metadata_manager: metadata_manager.clone(),
             });
             progress_map.insert(creating_table_id, (progress, tracking_job));
         }
@@ -438,20 +427,6 @@ impl CreateMviewProgressTracker {
             definition,
         );
         if *ddl_type == DdlType::Sink {
-            // First we duplicate a separate tracking job for sink.
-            // This does not need notifiers, it is solely used for
-            // tracking the backfill progress of sink.
-            // It will still be removed from progress map when
-            // backfill completes.
-            let tracking_job = TrackingJob::New(TrackingCommand {
-                context: command.context.clone(),
-                notifiers: vec![],
-            });
-            let old = self
-                .progress_map
-                .insert(creating_mv_id, (progress, tracking_job));
-            assert!(old.is_none());
-
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
             // We don't need to wait for sink to finish backfill.

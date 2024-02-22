@@ -30,7 +30,11 @@ function App({ Component, pageProps }: AppProps) {
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    router.events.on("routeChangeStart", () => setIsLoading(true))
+    router.events.on("routeChangeStart", (url, { shallow }) => {
+      if (!shallow) {
+        setIsLoading(true)
+      }
+    })
     router.events.on("routeChangeComplete", () => setIsLoading(false))
     router.events.on("routeChangeError", () => setIsLoading(false))
   }, [router.events])

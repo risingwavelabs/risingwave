@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
@@ -55,6 +55,7 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -85,6 +86,7 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -157,7 +159,7 @@ impl MetaClient {
         schema_id: u32,
         owner_id: u32,
         req: create_connection_request::Payload,
-    ) -> Result<(ConnectionId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateConnectionRequest {
             name: connection_name,
             database_id,
@@ -166,7 +168,7 @@ impl MetaClient {
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;
-        Ok((resp.connection_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
@@ -231,12 +233,12 @@ impl MetaClient {
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
-        let worker_node = add_worker_resp
-            .node
-            .expect("AddWorkerNodeResponse::node is empty");
+        let worker_id = add_worker_resp
+            .node_id
+            .expect("AddWorkerNodeResponse::node_id is empty");
 
         let meta_client = Self {
-            worker_id: worker_node.id,
+            worker_id,
             worker_type,
             host_addr: addr.clone(),
             inner: grpc_meta_client,
@@ -260,6 +262,7 @@ impl MetaClient {
     pub async fn activate(&self, addr: &HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
+            node_id: self.worker_id,
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
             Duration::from_secs(self.meta_config.max_heartbeat_interval_secs as u64),
@@ -293,34 +296,34 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: PbDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+    pub async fn create_database(&self, db: PbDatabase) -> Result<CatalogVersion> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.database_id, resp.version))
+        Ok(resp.version)
     }
 
-    pub async fn create_schema(&self, schema: PbSchema) -> Result<(SchemaId, CatalogVersion)> {
+    pub async fn create_schema(&self, schema: PbSchema) -> Result<CatalogVersion> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
         let resp = self.inner.create_schema(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.schema_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_materialized_view(
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
-    ) -> Result<(TableId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.table_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn drop_materialized_view(
@@ -337,28 +340,28 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_source(&self, source: PbSource) -> Result<CatalogVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: None,
         };
 
         let resp = self.inner.create_source(request).await?;
-        Ok((resp.source_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_source_with_graph(
         &self,
         source: PbSource,
         graph: StreamFragmentGraph,
-    ) -> Result<(u32, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateSourceRequest {
             source: Some(source),
             fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
-        Ok((resp.source_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_sink(
@@ -366,7 +369,7 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
-    ) -> Result<(u32, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
@@ -374,18 +377,15 @@ impl MetaClient {
         };
 
         let resp = self.inner.create_sink(request).await?;
-        Ok((resp.sink_id, resp.version))
+        Ok(resp.version)
     }
 
-    pub async fn create_function(
-        &self,
-        function: PbFunction,
-    ) -> Result<(FunctionId, CatalogVersion)> {
+    pub async fn create_function(&self, function: PbFunction) -> Result<CatalogVersion> {
         let request = CreateFunctionRequest {
             function: Some(function),
         };
         let resp = self.inner.create_function(request).await?;
-        Ok((resp.function_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_table(
@@ -394,7 +394,7 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
-    ) -> Result<(TableId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
@@ -403,7 +403,7 @@ impl MetaClient {
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.table_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> Result<CatalogVersion> {
@@ -458,14 +458,24 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_source_with_sr(&self, source: PbSource) -> Result<CatalogVersion> {
+        let request = AlterSourceRequest {
+            source: Some(source),
+        };
+        let resp = self.inner.alter_source(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn alter_parallelism(
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id,
             parallelism: Some(parallelism),
+            deferred,
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -492,11 +502,11 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_view(&self, view: PbView) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_view(&self, view: PbView) -> Result<CatalogVersion> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.view_id, resp.version))
+        Ok(resp.version)
     }
 
     pub async fn create_index(
@@ -504,7 +514,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
-    ) -> Result<(TableId, CatalogVersion)> {
+    ) -> Result<CatalogVersion> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
@@ -512,7 +522,7 @@ impl MetaClient {
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.index_id.into(), resp.version))
+        Ok(resp.version)
     }
 
     pub async fn drop_table(
@@ -575,13 +585,13 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<CatalogVersion> {
         let request = DropDatabaseRequest { database_id };
         let resp = self.inner.drop_database(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_schema(&self, schema_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<CatalogVersion> {
         let request = DropSchemaRequest { schema_id };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp.version)
@@ -732,10 +742,10 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        tracing::warn!(error = %err.as_report(), "Failed to send_heartbeat");
                     }
-                    Err(err) => {
-                        tracing::warn!("Failed to send_heartbeat: timeout {}", err);
+                    Err(_) => {
+                        tracing::warn!("Failed to send_heartbeat: timeout");
                     }
                 }
             }
@@ -1252,6 +1262,15 @@ impl MetaClient {
         })
         .join();
     }
+
+    pub async fn cancel_compact_task(&self, task_id: u64, task_status: TaskStatus) -> Result<bool> {
+        let req = CancelCompactTaskRequest {
+            task_id,
+            task_status: task_status as _,
+        };
+        let resp = self.inner.cancel_compact_task(req).await?;
+        Ok(resp.ret)
+    }
 }
 
 #[async_trait]
@@ -1406,7 +1425,7 @@ impl HummockMetaClient for MetaClient {
                     .expect("Clock may have gone backwards")
                     .as_millis() as u64,
             })
-            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+            .context("Failed to subscribe compaction event")?;
 
         let stream = self
             .inner
@@ -1422,7 +1441,10 @@ impl HummockMetaClient for MetaClient {
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
     async fn fetch_telemetry_info(&self) -> std::result::Result<Option<String>, String> {
-        let resp = self.get_telemetry_info().await.map_err(|e| e.to_string())?;
+        let resp = self
+            .get_telemetry_info()
+            .await
+            .map_err(|e| e.to_report_string())?;
         let tracking_id = resp.get_tracking_id().ok();
         Ok(tracking_id.map(|id| id.to_owned()))
     }
@@ -1558,12 +1580,12 @@ impl MetaMemberManagement {
                         }
                     };
                     if let Err(err) = client {
-                        tracing::warn!("failed to create client from {}: {}", addr, err);
+                        tracing::warn!(%addr, error = %err.as_report(), "failed to create client");
                         continue;
                     }
                     match client.unwrap().members(MembersRequest {}).await {
                         Err(err) => {
-                            tracing::warn!("failed to fetch members from {}: {}", addr, err);
+                            tracing::warn!(%addr, error = %err.as_report(), "failed to fetch members");
                             continue;
                         }
                         Ok(resp) => {
@@ -1680,7 +1702,7 @@ impl GrpcMetaClient {
 
                 let tick_result = member_management.refresh_members().await;
                 if let Err(e) = tick_result.as_ref() {
-                    tracing::warn!("refresh meta member client failed {}", e);
+                    tracing::warn!(error = %e.as_report(),  "refresh meta member client failed");
                 }
 
                 if let Some(sender) = event {
@@ -1761,9 +1783,9 @@ impl GrpcMetaClient {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Failed to connect to meta server {}, trying again: {}",
+                        error = %e.as_report(),
+                        "Failed to connect to meta server {}, trying again",
                         addr,
-                        e
                     )
                 }
             }
@@ -1893,6 +1915,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
             ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
             ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
+            ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -1931,7 +1954,7 @@ impl GrpcMetaClient {
                 .is_ok()
             {
                 if let Ok(Err(e)) = result_receiver.await {
-                    tracing::warn!("force refresh meta client failed {}", e);
+                    tracing::warn!(error = %e.as_report(), "force refresh meta client failed");
                 }
             } else {
                 tracing::debug!("skipping the current refresh, somewhere else is already doing it")

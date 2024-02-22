@@ -23,12 +23,12 @@ use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
+use crate::error::{ErrorCode, Result};
 use crate::handler::cancel_job::handle_cancel;
 use crate::handler::kill_process::handle_kill;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
@@ -40,6 +40,7 @@ mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
+mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
@@ -53,6 +54,7 @@ pub mod create_mv;
 pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
+pub mod create_sql_function;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
@@ -205,20 +207,44 @@ pub async fn handle(
             returns,
             params,
         } => {
-            create_function::handle_create_function(
-                handler_args,
-                or_replace,
-                temporary,
-                name,
-                args,
-                returns,
-                params,
-            )
-            .await
+            // For general udf, `language` clause could be ignored
+            // refer: https://github.com/risingwavelabs/risingwave/pull/10608
+            if params.language.is_none()
+                || !params
+                    .language
+                    .as_ref()
+                    .unwrap()
+                    .real_value()
+                    .eq_ignore_ascii_case("sql")
+            {
+                // User defined function with external source (e.g., language [ python / java ])
+                create_function::handle_create_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            } else {
+                create_sql_function::handle_create_sql_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            }
         }
         Statement::CreateTable {
             name,
             columns,
+            wildcard_idx,
             constraints,
             query,
             with_options: _, // It is put in OptimizerContext
@@ -254,6 +280,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 if_not_exists,
                 source_schema,
@@ -501,13 +528,18 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::SetParallelism { parallelism },
+            operation:
+                AlterTableOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_TABLE,
+                deferred,
             )
             .await
         }
@@ -528,6 +560,23 @@ pub async fn handle(
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
         } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterIndex {
+            name,
+            operation:
+                AlterIndexOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_INDEX,
+                deferred,
+            )
+            .await
+        }
         Statement::AlterView {
             materialized,
             name,
@@ -548,13 +597,18 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetParallelism { parallelism },
+            operation:
+                AlterViewOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } if materialized => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_MATERIALIZED_VIEW,
+                deferred,
             )
             .await
         }
@@ -638,13 +692,18 @@ pub async fn handle(
         }
         Statement::AlterSink {
             name,
-            operation: AlterSinkOperation::SetParallelism { parallelism },
+            operation:
+                AlterSinkOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
         } => {
             alter_parallelism::handle_alter_parallelism(
                 handler_args,
                 name,
                 parallelism,
                 StatementType::ALTER_SINK,
+                deferred,
             )
             .await
         }
@@ -680,6 +739,13 @@ pub async fn handle(
                 None,
             )
             .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::FormatEncode { connector_schema },
+        } => {
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+                .await
         }
         Statement::AlterFunction {
             name,

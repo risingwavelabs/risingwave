@@ -15,7 +15,10 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod arrow;
-pub use arrow::{to_deltalake_record_batch_with_schema, to_record_batch_with_schema};
+pub use arrow::{
+    to_deltalake_record_batch_with_schema, to_iceberg_record_batch_with_schema,
+    to_record_batch_with_schema,
+};
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
@@ -238,7 +241,7 @@ pub trait Array:
     ///
     /// The raw iterator simply iterates values without checking the null bitmap.
     /// The returned value for NULL values is undefined.
-    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+    fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
         (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
     }
 

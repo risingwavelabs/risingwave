@@ -109,10 +109,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn flush(
-        &mut self,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
+    async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -157,7 +154,7 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         panic!("should not clear shared buffer from the panic state store!");
     }
 

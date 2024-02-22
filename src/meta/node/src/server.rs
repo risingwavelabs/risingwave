@@ -15,23 +15,34 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use otlp_embedded::TraceServiceServer;
 use regex::Regex;
+use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::barrier::StreamRpcManager;
+use risingwave_meta::controller::catalog::CatalogController;
+use risingwave_meta::controller::cluster::ClusterController;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
+use risingwave_meta::stream::ScaleController;
+use risingwave_meta::MetaStoreBackend;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
 use risingwave_meta_service::cluster_service::ClusterServiceImpl;
 use risingwave_meta_service::ddl_service::DdlServiceImpl;
+use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::health_service::HealthServiceImpl;
 use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
@@ -44,6 +55,7 @@ use risingwave_meta_service::stream_service::StreamServiceImpl;
 use risingwave_meta_service::system_params_service::SystemParamsServiceImpl;
 use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
+use risingwave_meta_service::AddressInfo;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
@@ -51,6 +63,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
+use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
@@ -63,6 +76,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -94,58 +108,15 @@ use crate::storage::{
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
-#[derive(Debug)]
-pub struct MetaStoreSqlBackend {
-    pub(crate) endpoint: String,
-}
-
-use risingwave_meta::MetaStoreBackend;
-use risingwave_meta_service::event_log_service::EventLogServiceImpl;
-use risingwave_meta_service::AddressInfo;
-use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
-    meta_store_sql_backend: Option<MetaStoreSqlBackend>,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
-    let meta_store_sql = match meta_store_sql_backend {
-        Some(backend) => {
-            let mut options = sea_orm::ConnectOptions::new(backend.endpoint);
-            options
-                .max_connections(20)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30));
-            let conn = sea_orm::Database::connect(options).await?;
-            Some(SqlMetaStore::new(conn))
-        }
-        None => None,
-    };
-
-    let mut election_client = if let Some(sql_store) = &meta_store_sql {
-        let id = address_info.advertise_addr.clone();
-        let conn = sql_store.conn.clone();
-        let election_client: ElectionClientRef = match conn.get_database_backend() {
-            DbBackend::Sqlite => {
-                Arc::new(SqlBackendElectionClient::new(id, SqliteDriver::new(conn)))
-            }
-            DbBackend::Postgres => {
-                Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
-            }
-            DbBackend::MySql => Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn))),
-        };
-
-        election_client.init().await?;
-
-        Some(election_client)
-    } else {
-        None
-    };
-
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -160,31 +131,29 @@ pub async fn rpc_serve(
             let client =
                 EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
                     .await
-                    .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+                    .context("failed to connect etcd")?;
             let meta_store = EtcdMetaStore::new(client).into_ref();
 
-            if election_client.is_none() {
-                // `with_keep_alive` option will break the long connection in election client.
-                let mut election_options = ConnectOptions::default();
-                if let Some((username, password)) = &credentials {
-                    election_options = election_options.with_user(username, password)
-                }
-
-                election_client = Some(Arc::new(
-                    EtcdElectionClient::new(
-                        endpoints,
-                        Some(election_options),
-                        auth_enabled,
-                        address_info.advertise_addr.clone(),
-                    )
-                    .await?,
-                ));
+            // `with_keep_alive` option will break the long connection in election client.
+            let mut election_options = ConnectOptions::default();
+            if let Some((username, password)) = &credentials {
+                election_options = election_options.with_user(username, password)
             }
 
+            let election_client: ElectionClientRef = Arc::new(
+                EtcdElectionClient::new(
+                    endpoints,
+                    Some(election_options),
+                    auth_enabled,
+                    address_info.advertise_addr.clone(),
+                )
+                .await?,
+            );
+
             rpc_serve_with_store(
-                meta_store,
-                election_client,
-                meta_store_sql,
+                Some(meta_store),
+                Some(election_client),
+                None,
                 address_info,
                 max_cluster_heartbeat_interval,
                 lease_interval_secs,
@@ -195,9 +164,54 @@ pub async fn rpc_serve(
         MetaStoreBackend::Mem => {
             let meta_store = MemStore::new().into_ref();
             rpc_serve_with_store(
-                meta_store,
-                election_client,
-                meta_store_sql,
+                Some(meta_store),
+                None,
+                None,
+                address_info,
+                max_cluster_heartbeat_interval,
+                lease_interval_secs,
+                opts,
+                init_system_params,
+            )
+        }
+        MetaStoreBackend::Sql { endpoint } => {
+            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
+                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
+                // here we forcibly specify the number of connections as 1.
+                1
+            } else {
+                10
+            };
+
+            let mut options = sea_orm::ConnectOptions::new(endpoint);
+            options
+                .max_connections(max_connection)
+                .sqlx_logging(false)
+                .connect_timeout(Duration::from_secs(10))
+                .idle_timeout(Duration::from_secs(30));
+            let conn = sea_orm::Database::connect(options).await?;
+            let meta_store_sql = SqlMetaStore::new(conn);
+
+            // Init election client.
+            let id = address_info.advertise_addr.clone();
+            let conn = meta_store_sql.conn.clone();
+            let election_client: ElectionClientRef = match conn.get_database_backend() {
+                DbBackend::Sqlite => {
+                    Arc::new(SqlBackendElectionClient::new(id, SqliteDriver::new(conn)))
+                }
+                DbBackend::Postgres => {
+                    Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
+                }
+                DbBackend::MySql => {
+                    Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn)))
+                }
+            };
+            election_client.init().await?;
+
+            rpc_serve_with_store(
+                None,
+                Some(election_client),
+                Some(meta_store_sql),
                 address_info,
                 max_cluster_heartbeat_interval,
                 lease_interval_secs,
@@ -210,7 +224,7 @@ pub async fn rpc_serve(
 
 #[expect(clippy::type_complexity)]
 pub fn rpc_serve_with_store(
-    meta_store: MetaStoreRef,
+    meta_store: Option<MetaStoreRef>,
     election_client: Option<ElectionClientRef>,
     meta_store_sql: Option<SqlMetaStore>,
     address_info: AddressInfo,
@@ -229,7 +243,7 @@ pub fn rpc_serve_with_store(
                 .run_once(lease_interval_secs as i64, stop_rx.clone())
                 .await
             {
-                tracing::error!("election error happened, {}", e.to_string());
+                tracing::error!(error = %e.as_report(), "election error happened");
             }
         });
 
@@ -247,8 +261,8 @@ pub fn rpc_serve_with_store(
             tokio::select! {
                 _ = svc_shutdown_rx_clone.changed() => return,
                 res = is_leader_watcher.changed() => {
-                    if let Err(err) = res {
-                        tracing::error!("leader watcher recv failed {}", err.to_string());
+                    if res.is_err() {
+                        tracing::error!("leader watcher recv failed");
                     }
                 }
             }
@@ -260,7 +274,6 @@ pub fn rpc_serve_with_store(
 
                 let election_client_ = election_client.clone();
                 Some(tokio::spawn(async move {
-                    let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
                     start_service_as_election_follower(
                         svc_shutdown_rx_clone,
                         follower_shutdown_rx,
@@ -280,8 +293,8 @@ pub fn rpc_serve_with_store(
                         return;
                     }
                     res = is_leader_watcher.changed() => {
-                        if let Err(err) = res {
-                            tracing::error!("leader watcher recv failed {}", err.to_string());
+                        if res.is_err() {
+                            tracing::error!("leader watcher recv failed");
                         }
                     }
                 }
@@ -366,7 +379,7 @@ pub async fn start_service_as_election_follower(
 /// ## Returns
 /// Returns an error if the service initialization failed
 pub async fn start_service_as_election_leader(
-    meta_store: MetaStoreRef,
+    meta_store: Option<MetaStoreRef>,
     meta_store_sql: Option<SqlMetaStore>,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
@@ -390,16 +403,8 @@ pub async fn start_service_as_election_leader(
         meta_store_sql.clone(),
     )
     .await?;
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
-    let system_params_manager = env.system_params_manager_ref();
-    let mut system_params_reader = system_params_manager.get_params().await;
-
-    // Using new reader instead if the controller is set.
-    let system_params_controller = env.system_params_controller_ref();
-    if let Some(ctl) = &system_params_controller {
-        system_params_reader = ctl.get_params().await;
-    }
+    let system_params_reader = env.system_params_reader().await;
 
     let data_directory = system_params_reader.data_directory();
     if !is_correct_data_directory(data_directory) {
@@ -412,20 +417,33 @@ pub async fn start_service_as_election_leader(
         )));
     }
 
-    let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
-            .await
-            .unwrap(),
-    );
+    let metadata_manager = if meta_store_sql.is_some() {
+        let cluster_controller = Arc::new(
+            ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
+                .await
+                .unwrap(),
+        );
+        let catalog_controller = Arc::new(CatalogController::new(env.clone()).unwrap());
+        MetadataManager::new_v2(cluster_controller, catalog_controller)
+    } else {
+        MetadataManager::new_v1(
+            Arc::new(
+                ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
+                    .await
+                    .unwrap(),
+            ),
+            Arc::new(CatalogManager::new(env.clone()).await.unwrap()),
+            Arc::new(FragmentManager::new(env.clone()).await.unwrap()),
+        )
+    };
+
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
     serving::on_meta_start(
         env.notification_manager_ref(),
-        cluster_manager.clone(),
-        fragment_manager.clone(),
+        &metadata_manager,
         serving_vnode_mapping.clone(),
     )
     .await;
-    let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
         hummock::CompactorManager::with_meta(env.clone())
@@ -433,7 +451,8 @@ pub async fn start_service_as_election_leader(
             .unwrap(),
     );
 
-    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+    let heartbeat_srv = HeartbeatServiceImpl::new(metadata_manager.clone());
+
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
 
@@ -441,11 +460,9 @@ pub async fn start_service_as_election_leader(
 
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
-        cluster_manager.clone(),
-        fragment_manager.clone(),
+        metadata_manager.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
-        catalog_manager.clone(),
         compactor_streams_change_tx,
     )
     .await
@@ -461,27 +478,38 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
-        cluster_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
-        hummock_manager.clone(),
-        env.event_log_manager_ref(),
-        prometheus_client.clone(),
-        prometheus_selector.clone(),
-    ));
+    let diagnose_command = match &metadata_manager {
+        MetadataManager::V1(mgr) => Some(Arc::new(
+            risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+                mgr.cluster_manager.clone(),
+                mgr.catalog_manager.clone(),
+                mgr.fragment_manager.clone(),
+                hummock_manager.clone(),
+                env.event_log_manager_ref(),
+                prometheus_client.clone(),
+                prometheus_selector.clone(),
+            ),
+        )),
+        MetadataManager::V2(_) => None,
+    };
+
+    let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
+        max_length: opts.cached_traces_num,
+        max_memory_usage: opts.cached_traces_memory_limit_bytes,
+    });
+    let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
+
     #[cfg(not(madsim))]
     let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
             prometheus_client,
             prometheus_selector,
-            cluster_manager: cluster_manager.clone(),
-            fragment_manager: fragment_manager.clone(),
+            metadata_manager: metadata_manager.clone(),
             compute_clients: ComputeClientPool::default(),
-            meta_store: env.meta_store_ref(),
             ui_path: address_info.ui_path,
             diagnose_command,
+            trace_state,
         };
         let task = tokio::spawn(dashboard_service.serve());
         Some(task)
@@ -499,8 +527,7 @@ pub async fn start_service_as_election_leader(
         SourceManager::new(
             env.clone(),
             barrier_scheduler.clone(),
-            catalog_manager.clone(),
-            fragment_manager.clone(),
+            metadata_manager.clone(),
             meta_metrics.clone(),
         )
         .await
@@ -510,17 +537,26 @@ pub async fn start_service_as_election_leader(
     let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
     let mut sub_tasks = vec![shutdown_handle];
 
-    let barrier_manager = Arc::new(GlobalBarrierManager::new(
+    let stream_rpc_manager = StreamRpcManager::new(env.clone());
+
+    let scale_controller = Arc::new(ScaleController::new(
+        &metadata_manager,
+        source_manager.clone(),
+        stream_rpc_manager.clone(),
+        env.clone(),
+    ));
+
+    let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
-        cluster_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
+        metadata_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
-    ));
+        stream_rpc_manager.clone(),
+        scale_controller.clone(),
+    );
 
     {
         let source_manager = source_manager.clone();
@@ -532,26 +568,33 @@ pub async fn start_service_as_election_leader(
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
             env.clone(),
-            fragment_manager.clone(),
+            metadata_manager.clone(),
             barrier_scheduler.clone(),
-            cluster_manager.clone(),
             source_manager.clone(),
             hummock_manager.clone(),
-            catalog_manager.clone(),
+            stream_rpc_manager,
+            scale_controller.clone(),
         )
         .unwrap(),
     );
 
-    hummock_manager
-        .purge(
-            &catalog_manager
-                .list_tables()
-                .await
-                .into_iter()
-                .map(|t| t.id)
-                .collect_vec(),
-        )
-        .await;
+    let all_state_table_ids = match &metadata_manager {
+        MetadataManager::V1(mgr) => mgr
+            .catalog_manager
+            .list_tables()
+            .await
+            .into_iter()
+            .map(|t| t.id)
+            .collect_vec(),
+        MetadataManager::V2(mgr) => mgr
+            .catalog_controller
+            .list_all_state_table_ids()
+            .await?
+            .into_iter()
+            .map(|id| id as u32)
+            .collect_vec(),
+    };
+    hummock_manager.purge(&all_state_table_ids).await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -580,47 +623,41 @@ pub async fn start_service_as_election_leader(
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
         aws_cli.clone(),
-        catalog_manager.clone(),
+        metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        cluster_manager.clone(),
-        fragment_manager.clone(),
-        barrier_manager.clone(),
+        barrier_manager.context().clone(),
         sink_manager.clone(),
     )
     .await;
 
-    let user_srv = UserServiceImpl::new(env.clone(), catalog_manager.clone());
+    let user_srv = UserServiceImpl::new(env.clone(), metadata_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
-        fragment_manager.clone(),
-        cluster_manager.clone(),
+        metadata_manager.clone(),
         source_manager,
-        catalog_manager.clone(),
         stream_manager.clone(),
-        barrier_manager.clone(),
+        barrier_manager.context().clone(),
+        scale_controller.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
         stream_manager.clone(),
-        catalog_manager.clone(),
-        fragment_manager.clone(),
+        metadata_manager.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         vacuum_manager.clone(),
-        fragment_manager.clone(),
+        metadata_manager.clone(),
     );
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
-        catalog_manager.clone(),
-        cluster_manager.clone(),
+        metadata_manager.clone(),
         hummock_manager.clone(),
-        fragment_manager.clone(),
         backup_manager.clone(),
         serving_vnode_mapping.clone(),
     );
@@ -628,12 +665,12 @@ pub async fn start_service_as_election_leader(
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone(), env.sql_meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(
-        system_params_manager.clone(),
-        system_params_controller.clone(),
+        env.system_params_manager_ref(),
+        env.system_params_controller_ref(),
     );
     let serving_srv =
-        ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
-    let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
+    let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -648,50 +685,54 @@ pub async fn start_service_as_election_leader(
         &env.opts,
     ));
     sub_tasks.push(start_worker_info_monitor(
-        cluster_manager.clone(),
+        metadata_manager.clone(),
         election_client.clone(),
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
     sub_tasks.push(start_fragment_info_monitor(
-        cluster_manager.clone(),
-        catalog_manager,
-        fragment_manager.clone(),
+        metadata_manager.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
     ));
-    if let Some(system_params_ctl) = system_params_controller {
+    if let Some(system_params_ctl) = env.system_params_controller_ref() {
         sub_tasks.push(SystemParamsController::start_params_notifier(
             system_params_ctl,
         ));
     } else {
         sub_tasks.push(SystemParamsManager::start_params_notifier(
-            system_params_manager.clone(),
+            env.system_params_manager_ref().unwrap(),
         ));
     }
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
-    sub_tasks.push(HummockManager::compaction_event_loop(
+    sub_tasks.extend(HummockManager::compaction_event_loop(
         hummock_manager,
         compactor_streams_change_rx,
     ));
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
-            cluster_manager.clone(),
-            fragment_manager.clone(),
+            metadata_manager.clone(),
             serving_vnode_mapping,
         )
         .await,
     );
 
     if cfg!(not(test)) {
-        sub_tasks.push(ClusterManager::start_heartbeat_checker(
-            cluster_manager.clone(),
-            Duration::from_secs(1),
-        ));
+        let task = match &metadata_manager {
+            MetadataManager::V1(mgr) => ClusterManager::start_heartbeat_checker(
+                mgr.cluster_manager.clone(),
+                Duration::from_secs(1),
+            ),
+            MetadataManager::V2(mgr) => ClusterController::start_heartbeat_checker(
+                mgr.cluster_controller.clone(),
+                Duration::from_secs(1),
+            ),
+        };
+        sub_tasks.push(task);
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
-        if env.opts.enable_automatic_parallelism_control {
+        if !env.opts.disable_automatic_parallelism_control {
             sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
         }
     }
@@ -714,8 +755,11 @@ pub async fn start_service_as_election_leader(
     let telemetry_manager = TelemetryManager::new(
         Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
-            cluster_manager,
-            meta_store.meta_store_type(),
+            metadata_manager.clone(),
+            meta_store
+                .as_ref()
+                .map(|m| m.meta_store_type())
+                .unwrap_or(MetaBackend::Sql),
         )),
     );
 
@@ -746,13 +790,13 @@ pub async fn start_service_as_election_leader(
         match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
             Ok(results) => {
                 for result in results {
-                    if let Err(err) = result {
-                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    if result.is_err() {
+                        tracing::warn!("Failed to join shutdown");
                     }
                 }
             }
-            Err(e) => {
-                tracing::warn!("Join shutdown timeout: {:?}", e);
+            Err(_e) => {
+                tracing::warn!("Join shutdown timeout");
             }
         }
     };
@@ -760,8 +804,10 @@ pub async fn start_service_as_election_leader(
     // Persist params before starting services so that invalid params that cause meta node
     // to crash will not be persisted.
     if meta_store_sql.is_none() {
-        system_params_manager.flush_params().await?;
-        env.cluster_id().put_at_meta_store(&meta_store).await?;
+        env.system_params_manager().unwrap().flush_params().await?;
+        env.cluster_id()
+            .put_at_meta_store(meta_store.as_ref().unwrap())
+            .await?;
     }
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
@@ -798,6 +844,7 @@ pub async fn start_service_as_election_leader(
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(TraceServiceServer::new(trace_srv))
         .monitored_serve_with_shutdown(
             address_info.listen_addr,
             "grpc-meta-leader-service",

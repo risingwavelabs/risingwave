@@ -16,13 +16,13 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
@@ -106,16 +106,21 @@ impl DmlExecutor {
         // Note(bugen): Only register after the first barrier message is received, which means the
         // current executor is activated. This avoids the new reader overwriting the old one during
         // the preparation of schema change.
-        let batch_reader = self
-            .dml_manager
-            .register_reader(self.table_id, self.table_version_id, &self.column_descs)
-            .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let handle = self.dml_manager.register_reader(
+            self.table_id,
+            self.table_version_id,
+            &self.column_descs,
+        )?;
+        let reader = handle
+            .stream_reader()
+            .into_stream()
+            .map_err(StreamExecutorError::from)
+            .boxed();
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
+        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -192,6 +197,21 @@ impl DmlExecutor {
                                 batch_group.iter().map(|c| c.cardinality()).sum::<usize>();
 
                             if txn_buffer_cardinality >= self.chunk_size {
+                                // txn buffer is too large, so yield batch group first to preserve the transaction order in the same session.
+                                if !batch_group.is_empty() {
+                                    let vec = mem::take(&mut batch_group);
+                                    for chunk in vec {
+                                        for (op, row) in chunk.rows() {
+                                            if let Some(chunk) = builder.append_row(op, row) {
+                                                yield Message::Chunk(chunk);
+                                            }
+                                        }
+                                    }
+                                    if let Some(chunk) = builder.take() {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+
                                 // txn buffer isn't small, so yield.
                                 for chunk in txn_buffer.vec {
                                     yield Message::Chunk(chunk);
@@ -202,21 +222,23 @@ impl DmlExecutor {
                                 // txn buffer is small and batch group has space.
                                 batch_group.extend(txn_buffer.vec);
                             } else {
-                                // txn buffer is small and batch group has no space, so yield the large one.
-                                if txn_buffer_cardinality < batch_group_cardinality {
-                                    mem::swap(&mut txn_buffer.vec, &mut batch_group);
-                                }
-
-                                for chunk in txn_buffer.vec {
-                                    for (op, row) in chunk.rows() {
-                                        if let Some(chunk) = builder.append_row(op, row) {
-                                            yield Message::Chunk(chunk);
+                                // txn buffer is small and batch group has no space, so yield the batch group first to preserve the transaction order in the same session.
+                                if !batch_group.is_empty() {
+                                    let vec = mem::take(&mut batch_group);
+                                    for chunk in vec {
+                                        for (op, row) in chunk.rows() {
+                                            if let Some(chunk) = builder.append_row(op, row) {
+                                                yield Message::Chunk(chunk);
+                                            }
                                         }
                                     }
+                                    if let Some(chunk) = builder.take() {
+                                        yield Message::Chunk(chunk);
+                                    }
                                 }
-                                if let Some(chunk) = builder.take() {
-                                    yield Message::Chunk(chunk);
-                                }
+
+                                // put txn buffer into the batch group
+                                mem::swap(&mut txn_buffer.vec, &mut batch_group);
                             }
                         }
                         TxnMsg::Rollback(txn_id) => {
@@ -282,12 +304,13 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
+    const TEST_SESSION_ID: u32 = 0;
 
     #[tokio::test]
     async fn test_dml_executor() {
@@ -357,7 +380,9 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, INITIAL_TABLE_VERSION_ID)
             .unwrap();
-        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
 
         // Message from batch
         write_handle.begin().unwrap();

@@ -27,7 +27,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service failed: Internal error
-  2: missing field `properties.bootstrap.server`
+  2: failed to create source worker
+  3: missing field `properties.bootstrap.server`
 
 
 statement error
@@ -37,7 +38,8 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service failed: Internal error
-  2: Unknown fields in the WITH clause: {"unknown_field": "1"}
+  2: failed to create source worker
+  3: Unknown fields in the WITH clause: {"unknown_field": "1"}
 
 
 statement error topic invalid_topic not found
@@ -132,7 +134,7 @@ create source s (
 statement ok
 create materialized view mv_1 as select * from s
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop source s
 
 statement ok

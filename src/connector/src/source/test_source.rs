@@ -24,8 +24,8 @@ use with_options::WithOptions;
 
 use crate::parser::ParserConfig;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceEnumeratorContextRef,
-    SourceProperties, SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
+    SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
 };
 
 pub type BoxListSplits = Box<
@@ -44,7 +44,7 @@ pub type BoxIntoSourceStream = Box<
             ParserConfig,
             SourceContextRef,
             Option<Vec<Column>>,
-        ) -> BoxSourceWithStateStream
+        ) -> BoxChunkSourceStream
         + Send
         + 'static,
 >;
@@ -68,7 +68,7 @@ impl BoxSource {
                 ParserConfig,
                 SourceContextRef,
                 Option<Vec<Column>>,
-            ) -> BoxSourceWithStateStream
+            ) -> BoxChunkSourceStream
             + Send
             + 'static,
     ) -> BoxSource {
@@ -115,7 +115,7 @@ pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
 
 pub const TEST_CONNECTOR: &str = "test";
 
-#[derive(Clone, Debug, WithOptions)]
+#[derive(Clone, Debug, Default, WithOptions)]
 pub struct TestSourceProperties {
     properties: HashMap<String, String>,
 }
@@ -218,7 +218,7 @@ impl SplitReader for TestSourceSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         (get_registry()
             .box_source
             .lock()

@@ -49,6 +49,8 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -88,6 +90,16 @@ pub struct CompactorOpts {
 
     #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
+}
+
+impl risingwave_common::opts::Opts for CompactorOpts {
+    fn name() -> &'static str {
+        "compactor"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
+    }
 }
 
 use std::future::Future;

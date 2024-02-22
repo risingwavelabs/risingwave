@@ -15,31 +15,33 @@
 use std::collections::HashMap;
 use std::iter::once;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
-use risingwave_common::{bail_not_implemented, current_cluster_version, not_implemented};
+use risingwave_common::types::{data_types, DataType, ScalarImpl, Timestamptz};
+use risingwave_common::{bail_not_implemented, current_cluster_version, no_function};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::window_function::{
-    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+    Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
+    RowsFrameBounds, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
     self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
+use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::binder::{Binder, UdfContext};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -52,6 +54,12 @@ pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
     "current_schema",
     "current_timestamp",
 ];
+
+/// The global max calling depth for the global counter in `udf_context`
+/// To reduce the chance that the current running rw thread
+/// be killed by os, the current allowance depth of calling
+/// stack is set to `16`.
+const SQL_UDF_MAX_CALLING_DEPTH: u32 = 16;
 
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -117,7 +125,10 @@ impl Binder {
             return self.bind_array_transform(f);
         }
 
-        let inputs = f
+        // Used later in sql udf expression evaluation
+        let args = f.args.clone();
+
+        let mut inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -152,19 +163,113 @@ impl Binder {
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema.get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
+            && let Some(func) = schema.get_function_by_name_inputs(&function_name, &mut inputs)
         {
             use crate::catalog::function_catalog::FunctionKind::*;
-            match &func.kind {
-                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
-                Table { .. } => {
-                    self.ensure_table_function_allowed()?;
-                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+
+            if func.language == "sql" {
+                if func.body.is_none() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "`body` must exist for sql udf".to_string(),
+                    )
+                    .into());
                 }
-                Aggregate => todo!("support UDAF"),
+
+                // This represents the current user defined function is `language sql`
+                let parse_result = risingwave_sqlparser::parser::Parser::parse_sql(
+                    func.body.as_ref().unwrap().as_str(),
+                );
+                if let Err(ParserError::ParserError(err)) | Err(ParserError::TokenizerError(err)) =
+                    parse_result
+                {
+                    // Here we just return the original parse error message
+                    return Err(ErrorCode::InvalidInputSyntax(err).into());
+                }
+
+                debug_assert!(parse_result.is_ok());
+
+                // We can safely unwrap here
+                let ast = parse_result.unwrap();
+
+                // Stash the current `udf_context`
+                // Note that the `udf_context` may be empty,
+                // if the current binding is the root (top-most) sql udf.
+                // In this case the empty context will be stashed
+                // and restored later, no need to maintain other flags.
+                let stashed_udf_context = self.udf_context.get_context();
+
+                // The actual inline logic for sql udf
+                // Note that we will always create new udf context for each sql udf
+                let Ok(context) = UdfContext::create_udf_context(&args, &Arc::clone(func)) else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to create the `udf_context`, please recheck your function definition and syntax".to_string()
+                    )
+                    .into());
+                };
+
+                let mut udf_context = HashMap::new();
+                for (c, e) in context {
+                    // Note that we need to bind the args before actual delve in the function body
+                    // This will update the context in the subsequent inner calling function
+                    // e.g.,
+                    // - create function print(INT) returns int language sql as 'select $1';
+                    // - create function print_add_one(INT) returns int language sql as 'select print($1 + 1)';
+                    // - select print_add_one(1); # The result should be 2 instead of 1.
+                    // Without the pre-binding here, the ($1 + 1) will not be correctly populated,
+                    // causing the result to always be 1.
+                    let Ok(e) = self.bind_expr(e) else {
+                        return Err(ErrorCode::BindError(
+                            "failed to bind the argument, please recheck the syntax".to_string(),
+                        )
+                        .into());
+                    };
+                    udf_context.insert(c, e);
+                }
+                self.udf_context.update_context(udf_context);
+
+                // Check for potential recursive calling
+                if self.udf_context.global_count() >= SQL_UDF_MAX_CALLING_DEPTH {
+                    return Err(ErrorCode::BindError(format!(
+                        "function {} calling stack depth limit exceeded",
+                        &function_name
+                    ))
+                    .into());
+                } else {
+                    // Update the status for the global counter
+                    self.udf_context.incr_global_count();
+                }
+
+                if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+                    let bind_result = self.bind_expr(expr);
+
+                    // We should properly decrement global count after a successful binding
+                    // Since the subsequent probe operation in `bind_column` or
+                    // `bind_parameter` relies on global counting
+                    self.udf_context.decr_global_count();
+
+                    // Restore context information for subsequent binding
+                    self.udf_context.update_context(stashed_udf_context);
+
+                    return bind_result;
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "failed to parse the input query and extract the udf expression,
+                        please recheck the syntax"
+                            .to_string(),
+                    )
+                    .into());
+                }
+            } else {
+                match &func.kind {
+                    Scalar { .. } => {
+                        return Ok(UserDefinedFunction::new(func.clone(), inputs).into())
+                    }
+                    Table { .. } => {
+                        self.ensure_table_function_allowed()?;
+                        return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                    }
+                    Aggregate => todo!("support UDAF"),
+                }
             }
         }
 
@@ -468,6 +573,8 @@ impl Binder {
         Ok((vec![], args, order_by))
     }
 
+    /// Bind window function calls according to PostgreSQL syntax.
+    /// See <https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS> for syntax detail.
     pub(super) fn bind_window_function(
         &mut self,
         kind: WindowFuncKind,
@@ -507,39 +614,177 @@ impl Binder {
             };
             let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
-                    let convert_bound = |bound| match bound {
-                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
-                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                        WindowFrameBound::Preceding(Some(offset)) => {
-                            FrameBound::Preceding(offset as usize)
-                        }
-                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                        WindowFrameBound::Following(Some(offset)) => {
-                            FrameBound::Following(offset as usize)
-                        }
-                    };
-                    let start = convert_bound(frame.start_bound);
-                    let end = if let Some(end_bound) = frame.end_bound {
-                        convert_bound(end_bound)
-                    } else {
-                        FrameBound::CurrentRow
-                    };
-                    FrameBounds::Rows(start, end)
+                    let (start, end) =
+                        self.bind_window_frame_usize_bounds(frame.start_bound, frame.end_bound)?;
+                    FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
-                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                WindowFrameUnits::Range => {
+                    let order_by_expr = order_by
+                        .sort_exprs
+                        .iter()
+                        // for `RANGE` frame, there should be exactly one `ORDER BY` column
+                        .exactly_one()
+                        .map_err(|_| {
+                            ErrorCode::InvalidInputSyntax(
+                                "there should be exactly one ordering column for `RANGE` frame"
+                                    .to_string(),
+                            )
+                        })?;
+                    let order_data_type = order_by_expr.expr.return_type();
+                    let order_type = order_by_expr.order_type;
+
+                    let offset_data_type = match &order_data_type {
+                        // for numeric ordering columns, `offset` should be the same type
+                        // NOTE: actually in PG it can be a larger type, but we don't support this here
+                        t @ data_types::range_frame_numeric!() => t.clone(),
+                        // for datetime ordering columns, `offset` should be interval
+                        t @ data_types::range_frame_datetime!() => {
+                            if matches!(t, DataType::Date | DataType::Time) {
+                                bail_not_implemented!(
+                                    "`RANGE` frame with offset of type `{}` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`",
+                                    t
+                                );
+                            }
+                            DataType::Interval
+                        }
+                        // other types are not supported
+                        t => {
+                            return Err(ErrorCode::NotSupported(
+                                format!(
+                                    "`RANGE` frame with offset of type `{}` is not supported",
+                                    t
+                                ),
+                                "Please re-consider the `ORDER BY` column".to_string(),
+                            )
+                            .into())
+                        }
+                    };
+
+                    let (start, end) = self.bind_window_frame_scalar_impl_bounds(
+                        frame.start_bound,
+                        frame.end_bound,
+                        &offset_data_type,
+                    )?;
+                    FrameBounds::Range(RangeFrameBounds {
+                        order_data_type,
+                        order_type,
+                        offset_data_type,
+                        start: start.map(RangeFrameOffset::new),
+                        end: end.map(RangeFrameOffset::new),
+                    })
+                }
+                WindowFrameUnits::Groups => {
                     bail_not_implemented!(
                         issue = 9124,
-                        "window frame in `{}` mode is not supported yet",
-                        frame.units
+                        "window frame in `GROUPS` mode is not supported yet",
                     );
                 }
             };
+
+            // Validate the frame bounds, may return `ExprError` to user if the bounds given are not valid.
             bounds.validate()?;
+
             Some(Frame { bounds, exclusion })
         } else {
             None
         };
         Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
+    }
+
+    fn bind_window_frame_usize_bounds(
+        &mut self,
+        start: WindowFrameBound,
+        end: Option<WindowFrameBound>,
+    ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
+        let mut convert_offset = |offset: Box<ast::Expr>| -> Result<usize> {
+            let offset = self
+                .bind_window_frame_bound_offset(*offset, DataType::Int64)?
+                .into_int64();
+            if offset < 0 {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "offset in window frame bounds must be non-negative".to_string(),
+                )
+                .into());
+            }
+            Ok(offset as usize)
+        };
+        let mut convert_bound = |bound| -> Result<FrameBound<usize>> {
+            Ok(match bound {
+                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                WindowFrameBound::Preceding(Some(offset)) => {
+                    FrameBound::Preceding(convert_offset(offset)?)
+                }
+                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                WindowFrameBound::Following(Some(offset)) => {
+                    FrameBound::Following(convert_offset(offset)?)
+                }
+            })
+        };
+        let start = convert_bound(start)?;
+        let end = if let Some(end_bound) = end {
+            convert_bound(end_bound)?
+        } else {
+            FrameBound::CurrentRow
+        };
+        Ok((start, end))
+    }
+
+    fn bind_window_frame_scalar_impl_bounds(
+        &mut self,
+        start: WindowFrameBound,
+        end: Option<WindowFrameBound>,
+        offset_data_type: &DataType,
+    ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
+        let mut convert_bound = |bound| -> Result<FrameBound<_>> {
+            Ok(match bound {
+                WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
+                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
+                ),
+                WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
+                    self.bind_window_frame_bound_offset(*offset, offset_data_type.clone())?,
+                ),
+            })
+        };
+        let start = convert_bound(start)?;
+        let end = if let Some(end_bound) = end {
+            convert_bound(end_bound)?
+        } else {
+            FrameBound::CurrentRow
+        };
+        Ok((start, end))
+    }
+
+    fn bind_window_frame_bound_offset(
+        &mut self,
+        offset: ast::Expr,
+        cast_to: DataType,
+    ) -> Result<ScalarImpl> {
+        let mut offset = self.bind_expr(offset)?;
+        if !offset.is_const() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "offset in window frame bounds must be constant".to_string(),
+            )
+            .into());
+        }
+        if offset.cast_implicit_mut(cast_to.clone()).is_err() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "offset in window frame bounds must be castable to {}",
+                cast_to
+            ))
+            .into());
+        }
+        let offset = offset.fold_const()?;
+        let Some(offset) = offset else {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "offset in window frame bounds must not be NULL".to_string(),
+            )
+            .into());
+        };
+        Ok(offset)
     }
 
     fn bind_builtin_scalar_function(
@@ -714,12 +959,15 @@ impl Binder {
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
-                        (1, raw_call(ExprType::ToTimestamp)),
-                        (2, raw_call(ExprType::ToTimestamp1)),
+                        (1, raw_call(ExprType::SecToTimestamptz)),
+                        (2, raw_call(ExprType::CharToTimestamptz)),
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
                 ("date_part", raw_call(ExprType::DatePart)),
+                ("make_date", raw_call(ExprType::MakeDate)),
+                ("make_time", raw_call(ExprType::MakeTime)),
+                ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
                 ("to_date", raw_call(ExprType::CharToDate)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
                 // string
@@ -773,6 +1021,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("encrypt", raw_call(ExprType::Encrypt)),
+                ("decrypt", raw_call(ExprType::Decrypt)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("int8send", raw_call(ExprType::PgwireSend)),
@@ -980,111 +1230,27 @@ impl Binder {
                 ("current_role", current_user()),
                 ("current_user", current_user()),
                 ("user", current_user()),
-                ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_user_by_id_select(input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                ))),
+                ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
-                ("pg_relation_size", dispatch_by_len(vec![
-                    (1, raw(|binder, inputs|{
-                        let table_name = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    })),
-                    (2, raw(|binder, inputs|{
-                        let table_name = &inputs[0];
-                        match inputs[1].as_literal() {
-                            Some(literal) if literal.return_type() == DataType::Varchar => {
-                                match literal
-                                     .get_data()
-                                     .as_ref()
-                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
-                                     .as_utf8()
-                                     .as_ref() {
-                                        "main" => {
-                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
-                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                                                BoundQuery {
-                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
-                                                    order: vec![],
-                                                    limit: None,
-                                                    offset: None,
-                                                    with_ties: false,
-                                                    extra_order_exprs: vec![],
-                                                },
-                                                SubqueryKind::Scalar,
-                                            ))))
-                                        },
-                                        // These options are invalid in RW so we return 0 value as the result
-                                        "fsm"|"vm"|"init" => {
-                                            Ok(ExprImpl::literal_int(0))
-                                        },
-                                        _ => Err(ErrorCode::InvalidInputSyntax(
-                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
-                                    }
-                            },
-                            _ => Err(ErrorCode::ExprError(
-                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
-                            )
-                            .into())
-                        }
-                    })),
-                    ]
-                )),
-                ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
+                ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
+                ("pg_relation_size", raw(|_binder, mut inputs|{
+                    if inputs.is_empty() {
+                        return Err(ErrorCode::ExprError(
+                            "function pg_relation_size() does not exist".into(),
+                        )
+                        .into());
                     }
-                ))),
-                ("pg_indexes_size", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_indexes_size_select(input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                ))),
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
+                })),
+                ("pg_table_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
+                }))),
+                ("pg_indexes_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgIndexesSize, inputs)?.into())
+                }))),
                 ("pg_get_expr", raw(|_binder, inputs|{
                     if inputs.len() == 2 || inputs.len() == 3 {
                         // TODO: implement pg_get_expr rather than just return empty as an workaround.
@@ -1212,7 +1378,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            // TODO: Also hint other functinos, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }
@@ -1222,27 +1388,22 @@ impl Binder {
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
-            None => Err({
+            None => {
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 
                 let candidates = FUNCTIONS_BKTREE
                     .find(function_name, allowed_distance)
-                    .map(|(_idx, c)| c);
+                    .map(|(_idx, c)| c)
+                    .join(" or ");
 
-                let mut candidates = candidates.peekable();
-
-                let err_msg = if candidates.peek().is_none() {
-                    format!("unsupported function: \"{}\"", function_name)
-                } else {
-                    format!(
-                        "unsupported function \"{}\", do you mean \"{}\"?",
-                        function_name,
-                        candidates.join(" or ")
-                    )
-                };
-
-                not_implemented!(issue = 112, "{}", err_msg).into()
-            }),
+                Err(no_function!(
+                    candidates = (!candidates.is_empty()).then_some(candidates),
+                    "{}({})",
+                    function_name,
+                    inputs.iter().map(|e| e.return_type()).join(", ")
+                )
+                .into())
+            }
         }
     }
 

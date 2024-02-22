@@ -259,22 +259,42 @@
   sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
-  binder_error: |
-    Failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING)
-
-    Caused by:
-      Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+  logical_plan: |-
+    LogicalProject { exprs: [t.x, t.y, max] }
+    └─LogicalOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
+      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+        └─BatchSort { order: [t.y ASC, t.x ASC] }
+          └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, range frame definition with between
   sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING and UNBOUNDED FOLLOWING) from t;
-  binder_error: |
-    Failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)
-
-    Caused by:
-      Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+  logical_plan: |-
+    LogicalProject { exprs: [t.x, t.y, max] }
+    └─LogicalOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+        └─BatchSort { order: [t.y ASC, t.x ASC] }
+          └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate with over clause, unbounded range, with ORDER BY
   sql: |
     create table t(x int, y int);
@@ -716,14 +736,14 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t.z, t.x, t.y] }
-        └── StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x, t.y] } { state table: 0 }
+        └── StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x, t.y] } { tables: [ GroupTopN: 0 ] }
             └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
     StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-    ├── state table: 1
+    ├── tables: [ StreamScan: 1 ]
     ├── Upstream
     └── BatchPlanNode
 
@@ -1115,3 +1135,108 @@
     └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.b ASC ROWS BETWEEN 10 FOLLOWING AND 1 FOLLOWING)] }
       └─LogicalProject { exprs: [t.b, 1:Int32] }
         └─LogicalScan { table: t, columns: [t.b] }
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by i range 1 preceding) as col1,
+        count(*) over (partition by 1::int order by bi range 1 preceding) as col2,
+        count(*) over (partition by 1::int order by d range 1.5 preceding) as col3,
+        count(*) over (partition by 1::int order by f range 1.5 preceding) as col4,
+        -- count(*) over (partition by 1::int order by da range '1 day' preceding) as col5, -- `date` not supported yet
+        -- count(*) over (partition by 1::int order by t range '1 min' preceding) as col6, -- `time` not supported yet
+        count(*) over (partition by 1::int order by ts range '1 day 1 hour' preceding) as col7,
+        count(*) over (partition by 1::int order by tstz range '1 min' preceding) as col8
+    from t;
+  logical_plan: |-
+    LogicalProject { exprs: [count, count, count, count, count, count] }
+    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.i ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY 1:Int32 ORDER BY t.bi ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY 1:Int32 ORDER BY t.d ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY 1:Int32 ORDER BY t.f ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC RANGE BETWEEN 1 day 01:00:00 PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY 1:Int32 ORDER BY t.tstz ASC RANGE BETWEEN 00:01:00 PRECEDING AND CURRENT ROW)] }
+      └─LogicalProject { exprs: [t.i, t.bi, t.d, t.f, t.da, t.t, t.ts, t.tstz, t.itv, t._row_id, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.i, t.bi, t.d, t.f, t.da, t.t, t.ts, t.tstz, t.itv, t._row_id] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [count, count, count, count, count, count] }
+    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.tstz ASC RANGE BETWEEN 00:01:00 PRECEDING AND CURRENT ROW)] }
+      └─LogicalProject { exprs: [t.tstz, 1:Int32, count, count, count, count, count] }
+        └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC RANGE BETWEEN 1 day 01:00:00 PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.ts, t.tstz, 1:Int32, count, count, count, count] }
+            └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.f ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW)] }
+              └─LogicalProject { exprs: [t.f, t.ts, t.tstz, 1:Int32, count, count, count] }
+                └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.d ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW)] }
+                  └─LogicalProject { exprs: [t.d, t.f, t.ts, t.tstz, 1:Int32, count, count] }
+                    └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.bi ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                      └─LogicalProject { exprs: [t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32, count] }
+                        └─LogicalOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.i ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                          └─LogicalProject { exprs: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32] }
+                            └─LogicalScan { table: t, columns: [t.i, t.bi, t.d, t.f, t.ts, t.tstz] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [count, count, count, count, count, count] }
+      └─BatchOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.tstz ASC RANGE BETWEEN 00:01:00 PRECEDING AND CURRENT ROW)] }
+        └─BatchSort { order: [1:Int32 ASC, t.tstz ASC] }
+          └─BatchProject { exprs: [t.tstz, 1:Int32, count, count, count, count, count] }
+            └─BatchOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC RANGE BETWEEN 1 day 01:00:00 PRECEDING AND CURRENT ROW)] }
+              └─BatchSort { order: [1:Int32 ASC, t.ts ASC] }
+                └─BatchProject { exprs: [t.ts, t.tstz, 1:Int32, count, count, count, count] }
+                  └─BatchOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.f ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW)] }
+                    └─BatchSort { order: [1:Int32 ASC, t.f ASC] }
+                      └─BatchProject { exprs: [t.f, t.ts, t.tstz, 1:Int32, count, count, count] }
+                        └─BatchOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.d ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW)] }
+                          └─BatchSort { order: [1:Int32 ASC, t.d ASC] }
+                            └─BatchProject { exprs: [t.d, t.f, t.ts, t.tstz, 1:Int32, count, count] }
+                              └─BatchOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.bi ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                                └─BatchSort { order: [1:Int32 ASC, t.bi ASC] }
+                                  └─BatchProject { exprs: [t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32, count] }
+                                    └─BatchOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.i ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                                      └─BatchExchange { order: [1:Int32 ASC, t.i ASC], dist: HashShard(1:Int32) }
+                                        └─BatchSort { order: [1:Int32 ASC, t.i ASC] }
+                                          └─BatchProject { exprs: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32] }
+                                            └─BatchScan { table: t, columns: [t.i, t.bi, t.d, t.f, t.ts, t.tstz], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [col1, col2, col3, col4, col7, col8, t._row_id(hidden), 1:Int32(hidden)], stream_key: [t._row_id, 1:Int32], pk_columns: [t._row_id, 1:Int32], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [count, count, count, count, count, count, t._row_id, 1:Int32] }
+      └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.tstz ASC RANGE BETWEEN 00:01:00 PRECEDING AND CURRENT ROW)] }
+        └─StreamProject { exprs: [t.tstz, 1:Int32, count, count, count, count, count, t._row_id] }
+          └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC RANGE BETWEEN 1 day 01:00:00 PRECEDING AND CURRENT ROW)] }
+            └─StreamProject { exprs: [t.ts, t.tstz, 1:Int32, count, count, count, count, t._row_id] }
+              └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.f ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW)] }
+                └─StreamProject { exprs: [t.f, t.ts, t.tstz, 1:Int32, count, count, count, t._row_id] }
+                  └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.d ASC RANGE BETWEEN 1.5 PRECEDING AND CURRENT ROW)] }
+                    └─StreamProject { exprs: [t.d, t.f, t.ts, t.tstz, 1:Int32, count, count, t._row_id] }
+                      └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.bi ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                        └─StreamProject { exprs: [t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32, count, t._row_id] }
+                          └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY 1:Int32 ORDER BY t.i ASC RANGE BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+                            └─StreamExchange { dist: HashShard(1:Int32) }
+                              └─StreamProject { exprs: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, 1:Int32, t._row_id] }
+                                └─StreamTableScan { table: t, columns: [t.i, t.bi, t.d, t.f, t.ts, t.tstz, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by da range '1 day' preceding) -- `date` not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY da RANGE '1 day' PRECEDING)
+
+    Caused by:
+      Feature is not yet implemented: `RANGE` frame with offset of type `date` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by t range '1 min' preceding) -- `time` not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY t RANGE '1 min' PRECEDING)
+
+    Caused by:
+      Feature is not yet implemented: `RANGE` frame with offset of type `time without time zone` is not implemented yet, please manually cast the `ORDER BY` column to `timestamp`
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by tstz range '1 day 1 hour' preceding) -- `timestamptz` +/- 'x month x day' not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: count(*) OVER (PARTITION BY CAST(1 AS INT) ORDER BY tstz RANGE '1 day 1 hour' PRECEDING)
+
+    Caused by these errors (recent errors listed first):
+      1: Expr error
+      2: for frame order column of type `timestamptz`, offset should not have non-zero `month` and `day`

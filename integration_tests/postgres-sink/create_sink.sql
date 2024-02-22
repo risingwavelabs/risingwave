@@ -18,3 +18,14 @@ FROM
     type='upsert',
     primary_key = 'id'
 );
+
+CREATE SINK pg_all_data_types_sink
+FROM
+    pg_all_data_types WITH (
+    connector = 'jdbc',
+    jdbc.url = 'jdbc:postgresql://postgres:5432/mydb?user=myuser&password=123456',
+    table.name = 'pg_all_data_types',
+    type='append-only',
+    primary_key = 'id',
+    force_append_only = 'true',
+);

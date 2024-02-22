@@ -36,11 +36,14 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub function_id: FunctionId,
     pub name: String,
+    // encode Vec<String> as comma separated string
+    pub arg_names: String,
     pub arg_types: DataTypeArray,
     pub return_type: DataType,
     pub language: String,
-    pub link: String,
-    pub identifier: String,
+    pub link: Option<String>,
+    pub identifier: Option<String>,
+    pub body: Option<String>,
     pub kind: FunctionKind,
 }
 
@@ -89,11 +92,13 @@ impl From<PbFunction> for ActiveModel {
         Self {
             function_id: Set(function.id as _),
             name: Set(function.name),
+            arg_names: Set(function.arg_names.join(",")),
             arg_types: Set(DataTypeArray(function.arg_types)),
             return_type: Set(DataType(function.return_type.unwrap())),
             language: Set(function.language),
             link: Set(function.link),
             identifier: Set(function.identifier),
+            body: Set(function.body),
             kind: Set(function.kind.unwrap().into()),
         }
     }

@@ -115,7 +115,7 @@ select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90
 233276425899864771438119478
 
 query I
-select float_to_decimal('-1e-10'::float8);
+select float_to_decimal('-1e-10');
 ----
 -0.0000000001000000000000000036
 
@@ -138,17 +138,17 @@ NULL
 false
 
 query T
-select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+select jsonb_concat(ARRAY['null', '1', '"str"', '{}'::jsonb]);
 ----
 [null, 1, "str", {}]
 
 query T
-select jsonb_array_identity(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+select jsonb_array_identity(ARRAY[null, '1', '"str"', '{}'::jsonb]);
 ----
 {NULL,1,"\"str\"","{}"}
 
 query T
-select jsonb_array_struct_identity(ROW(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
+select jsonb_array_struct_identity(ROW(ARRAY[null, '1', '"str"', '{}'::jsonb], 4)::struct<v jsonb[], len int>);
 ----
 ("{NULL,1,""\\""str\\"""",""{}""}",4)
 
@@ -156,18 +156,18 @@ query T
 select (return_all(
     true,
     1 ::smallint,
-    1 ::int,
-    1 ::bigint,
-    1 ::float4,
-    1 ::float8,
-    12345678901234567890.12345678 ::decimal,
+    1,
+    1,
+    1,
+    1,
+    12345678901234567890.12345678,
     date '2023-06-01',
     time '01:02:03.456789',
     timestamp '2023-06-01 01:02:03.456789',
     interval '1 month 2 days 3 seconds',
     'string',
-    'bytes'::bytea,
-    '{"key":1}'::jsonb,
+    'bytes',
+    '{"key":1}',
     row(1, 2)::struct<f1 int, f2 int>
 )).*;
 ----
@@ -177,11 +177,11 @@ query T
 select (return_all_arrays(
     array[null, true],
     array[null, 1 ::smallint],
-    array[null, 1 ::int],
+    array[null, 1],
     array[null, 1 ::bigint],
     array[null, 1 ::float4],
     array[null, 1 ::float8],
-    array[null, 12345678901234567890.12345678 ::decimal],
+    array[null, 12345678901234567890.12345678],
     array[null, date '2023-06-01'],
     array[null, time '01:02:03.456789'],
     array[null, timestamp '2023-06-01 01:02:03.456789'],
@@ -197,21 +197,21 @@ select (return_all_arrays(
 # test large string output
 query I
 select length((return_all(
-    null::boolean,
-    null::smallint,
-    null::int,
-    null::bigint,
-    null::float4,
-    null::float8,
-    null::decimal,
-    null::date,
-    null::time,
-    null::timestamp,
-    null::interval,
-    repeat('a', 100000)::varchar,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    repeat('a', 100000),
     repeat('a', 100000)::bytea,
-    null::jsonb,
-    null::struct<f1 int, f2 int>
+    null,
+    null
 )).varchar);
 ----
 100000
@@ -253,16 +253,13 @@ select count(*) from series(1000000);
 ----
 1000000
 
-# TODO: support argument implicit cast for UDF
-# e.g. extract_tcp_info(E'\\x45');
-
 query T
-select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: bytea);
+select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4');
 ----
 (192.168.0.14,192.168.0.1,861,8374)
 
 query TTII
-select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: BYTEA)).*;
+select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4')).*;
 ----
 192.168.0.14 192.168.0.1 861 8374
 

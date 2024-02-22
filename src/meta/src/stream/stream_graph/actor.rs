@@ -28,11 +28,12 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+    StreamScanType,
 };
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -174,11 +175,20 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
-                // FIXME(kwannoel): This may not hold for Arrangement Backfill.
-                // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
-                // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
-                assert_eq!(upstream_actor_id.len(), 1);
+                let is_arrangement_backfill =
+                    stream_scan.stream_scan_type == StreamScanType::ArrangementBackfill as i32;
+                if !is_arrangement_backfill {
+                    assert_eq!(upstream_actor_id.len(), 1);
+                }
+
+                let upstream_dispatcher_type = if is_arrangement_backfill {
+                    // FIXME(kwannoel): Should the upstream dispatcher type depends on the upstream distribution?
+                    // If singleton, use `Simple` dispatcher, otherwise use `Hash` dispatcher.
+                    DispatcherType::Hash as _
+                } else {
+                    DispatcherType::NoShuffle as _
+                };
 
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
@@ -186,7 +196,7 @@ impl ActorBuilder {
                         node_body: Some(NodeBody::Merge(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                            upstream_dispatcher_type,
                             fields: merge_node.fields.clone(),
                         })),
                         ..merge_node.clone()
@@ -706,7 +716,7 @@ impl ActorGraphBuilder {
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
     pub async fn generate_graph(
         self,
-        id_gen_manager: IdGeneratorManagerRef,
+        env: &MetaSrvEnv,
         job: &StreamingJob,
         expr_context: ExprContext,
     ) -> MetaResult<ActorGraphBuildResult> {
@@ -716,7 +726,11 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
+        let id_gen = if let Some(sql_id_gen) = env.sql_id_gen_manager_ref() {
+            GlobalActorIdGen::new_v2(&sql_id_gen, actor_len)
+        } else {
+            GlobalActorIdGen::new(env.id_gen_manager(), actor_len).await?
+        };
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {

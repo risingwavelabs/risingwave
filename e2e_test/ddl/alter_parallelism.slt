@@ -14,12 +14,15 @@ statement ok
 create view sink_parallelism as select s.name, tf.parallelism from rw_sinks s, rw_table_fragments tf where s.id = tf.table_id;
 
 statement ok
+create view fragment_parallelism as select t.name as table_name, f.fragment_id, f.parallelism from rw_fragments f, rw_tables t where f.table_id = t.id;
+
+statement ok
 create table t (v int);
 
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 alter table t set parallelism = 2;
@@ -30,18 +33,18 @@ select parallelism from table_parallelism where name = 't';
 FIXED(2)
 
 query I
-select parallelism from rw_fragments;
+select parallelism from fragment_parallelism where table_name = 't';
 ----
 2
 2
 
 statement ok
-alter table t set parallelism = auto;
+alter table t set parallelism = adaptive;
 
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 create materialized view m_simple as select * from t;
@@ -49,7 +52,7 @@ create materialized view m_simple as select * from t;
 query T
 select parallelism from mview_parallelism where name = 'm_simple';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 alter materialized view m_simple set parallelism = 3;
@@ -65,7 +68,7 @@ create materialized view m_join as select t1.v as t1v, t2.v as t2v from t t1, t 
 query T
 select parallelism from mview_parallelism where name = 'm_join';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 alter materialized view m_join set parallelism = 3;
@@ -81,7 +84,7 @@ create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2
 query T
 select parallelism from sink_parallelism where name = 's';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 alter sink s set parallelism = 4;
@@ -118,7 +121,7 @@ statement ok
 drop table t;
 
 statement ok
-set streaming_parallelism to auto;
+set streaming_parallelism to adaptive;
 
 statement ok
 create table t (v1 int);
@@ -126,7 +129,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 drop table t;
@@ -140,7 +143,7 @@ create table t (v1 int);
 query T
 select parallelism from table_parallelism where name = 't';
 ----
-AUTO
+ADAPTIVE
 
 statement ok
 drop table t;
@@ -153,3 +156,6 @@ drop view mview_parallelism;
 
 statement ok
 drop view sink_parallelism;
+
+statement ok
+drop view fragment_parallelism;
