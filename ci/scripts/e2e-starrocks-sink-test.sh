@@ -46,7 +46,7 @@ mysql -uroot -P 9030 -h starrocks-fe-server -e "select * from demo.demo_bhv_tabl
 
 
 if cat ./query_result.csv | sed '1d; s/\t/,/g' | awk -F "," '{
-    exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01" && $9 == 0 && $10 = {"v101": 100}); }'; then
+    exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01" && $9 == 0 && $10 = "{"v101": 100}"); }'; then
   echo "Starrocks sink check passed"
 else
   cat ./query_result.csv
