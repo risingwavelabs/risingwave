@@ -340,7 +340,7 @@ impl EpochWithGap {
         self.0 += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
-    pub fn sub(&mut self) {
+    pub fn dec(&mut self) {
         if self.0 >= EPOCH_INC_MIN_STEP_FOR_TEST {
             self.0 -= EPOCH_INC_MIN_STEP_FOR_TEST;
         }

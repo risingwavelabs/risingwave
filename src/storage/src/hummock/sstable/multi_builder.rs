@@ -506,7 +506,7 @@ mod tests {
 
         macro_rules! add {
             () => {
-                epoch.sub();
+                epoch.dec();
                 builder
                     .add_full_key_for_test(
                         FullKey::from_user_key(
