@@ -253,18 +253,19 @@ export default function Streaming() {
   const toast = useErrorToast()
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const fetchNewBP = async () => {
-        const newBP = await getBackPressureWithoutPrometheus()
-        setPreviousBP(currentBP)
-        setCurrentBP(newBP)
-      }
+    if (backPressureDataSourceAlgo === "Embedded") {
+      const interval = setInterval(() => {
+        const fetchNewBP = async () => {
+          const newBP = await getBackPressureWithoutPrometheus()
+          setPreviousBP(currentBP)
+          setCurrentBP(newBP)
+        }
 
-      fetchNewBP().catch(console.error)
-    }, INTERVAL)
-
-    return () => clearInterval(interval)
-  }, [currentBP])
+        fetchNewBP().catch(console.error)
+      }, INTERVAL)
+      return () => clearInterval(interval)
+    }
+  }, [currentBP, backPressureDataSourceAlgo])
 
   useEffect(() => {
     if (currentBP !== null && previousBP !== null) {
