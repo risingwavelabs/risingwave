@@ -1,0 +1,23 @@
+# https://github.com/risingwavelabs/risingwave/issues/15198
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+statement ok
+create materialized view "tumble_with_offset" 
+as ( 
+  with
+    input as (
+        select 1 as id, TO_TIMESTAMP('2024-01-01 01:30:02', 'YYYY-MM-DD HH24:MI:SS') as timestamps
+    )
+  select *
+  from tumble(input, timestamps, interval '1 DAY', '+6 HOURS')
+);
+
+query ITTT
+select * from tumble_with_offset;
+----
+1	2024-01-01 01:30:02+00:00	2023-12-31 06:00:00+00:00	2024-01-01 06:00:00+00:00
+
+statement ok
+drop materialized view tumble_with_offset;
