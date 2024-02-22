@@ -464,24 +464,113 @@ impl ScaleController {
         let mut fragment_state = HashMap::new();
         let mut fragment_to_table = HashMap::new();
 
-        let all_table_fragments = self.list_all_table_fragments().await?;
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
-        for table_fragments in all_table_fragments {
-            fragment_state.extend(
-                table_fragments
-                    .fragment_ids()
-                    .map(|f| (f, table_fragments.state())),
-            );
-            fragment_map.extend(table_fragments.fragments.clone());
-            actor_map.extend(table_fragments.actor_map());
-            actor_status.extend(table_fragments.actor_status.clone());
+                for (_, table_fragments) in guard.table_fragments() {
+                    fragment_state.extend(
+                        table_fragments
+                            .fragment_ids()
+                            .map(|f| (f, table_fragments.state())),
+                    );
 
-            fragment_to_table.extend(
-                table_fragments
-                    .fragment_ids()
-                    .map(|f| (f, table_fragments.table_id())),
-            );
-        }
+                    let fragments = table_fragments.fragments.clone();
+
+                    for (fragment_id, fragment) in fragments {
+                        fn custom_clone_actors(fragment: &Fragment) -> Vec<StreamActor> {
+                            let mut custom_cloned_actors =
+                                Vec::with_capacity(fragment.actors.len());
+
+                            for (
+                                idx,
+                                StreamActor {
+                                    actor_id,
+                                    fragment_id,
+                                    dispatcher,
+                                    upstream_actor_id,
+                                    vnode_bitmap,
+                                    mview_definition,
+                                    expr_context,
+                                    nodes,
+                                },
+                            ) in fragment.actors.iter().enumerate()
+                            {
+                                let nodes = if idx == 0 { nodes.clone() } else { None };
+
+                                let custom_actor = StreamActor {
+                                    actor_id: *actor_id,
+                                    fragment_id: *fragment_id,
+                                    nodes,
+                                    dispatcher: dispatcher.clone(),
+                                    upstream_actor_id: upstream_actor_id.clone(),
+                                    vnode_bitmap: vnode_bitmap.clone(),
+                                    mview_definition: mview_definition.clone(),
+                                    expr_context: expr_context.clone(),
+                                };
+
+                                custom_cloned_actors.push(custom_actor);
+                            }
+
+                            custom_cloned_actors
+                        }
+
+                        let actors = custom_clone_actors(&fragment);
+                        for actor in actors {
+                            actor_map.insert(actor.actor_id, actor);
+                        }
+
+                        fragment_map.insert(
+                            fragment_id,
+                            Fragment {
+                                fragment_id,
+                                fragment_type_mask: fragment.fragment_type_mask,
+                                distribution_type: fragment.distribution_type,
+                                actors: custom_clone_actors(&fragment),
+                                vnode_mapping: fragment.vnode_mapping,
+                                state_table_ids: fragment.state_table_ids,
+                                upstream_fragment_ids: fragment.upstream_fragment_ids,
+                            },
+                        );
+                    }
+
+                    actor_status.extend(table_fragments.actor_status.clone());
+
+                    fragment_to_table.extend(
+                        table_fragments
+                            .fragment_ids()
+                            .map(|f| (f, table_fragments.table_id())),
+                    );
+                }
+            }
+            MetadataManager::V2(_) => {
+                let all_table_fragments = self.list_all_table_fragments().await?;
+
+                for table_fragments in all_table_fragments {
+                    fragment_state.extend(
+                        table_fragments
+                            .fragment_ids()
+                            .map(|f| (f, table_fragments.state())),
+                    );
+
+                    fragment_to_table.extend(
+                        table_fragments
+                            .fragment_ids()
+                            .map(|f| (f, table_fragments.table_id())),
+                    );
+
+                    for (fragment_id, fragment) in table_fragments.fragments {
+                        for actor in &fragment.actors {
+                            actor_map.insert(actor.actor_id, actor.clone());
+                        }
+
+                        fragment_map.insert(fragment_id, fragment);
+                    }
+
+                    actor_status.extend(table_fragments.actor_status.clone());
+                }
+            }
+        };
 
         // NoShuffle relation index
         let mut no_shuffle_source_fragment_ids = HashSet::new();
