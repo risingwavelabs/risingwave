@@ -201,6 +201,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .init(epoch_pair, barrier.is_pause_on_startup())
             .await?;
 
+        let mut is_paused = false;
+
         // Propagate the first barrier
         yield Message::Barrier(barrier);
 
@@ -209,21 +211,33 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    assert!(!is_paused, "Should not receive any data after pause");
                     log_writer.write_chunk(chunk.clone()).await?;
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    // No need to flush barrier to log writer when paused because 
+                    // there will be no data between pause barrier and resume barrier.
+                    if !is_paused {
+                        log_writer
+                            .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                            .await?;
+                    }
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            Mutation::Pause => log_writer.pause()?,
-                            Mutation::Resume => log_writer.resume()?,
+                            Mutation::Pause => {
+                                log_writer.pause()?;
+                                is_paused = true;
+                            }
+                            Mutation::Resume => {
+                                log_writer.resume()?;
+                                is_paused = false;
+                            }
                             _ => (),
                         }
                     }
 
-                    log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
-                        .await?;
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
                         log_writer.update_vnode_bitmap(vnode_bitmap).await?;
                     }
