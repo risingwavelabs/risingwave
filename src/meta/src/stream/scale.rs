@@ -2062,8 +2062,6 @@ impl ScaleController {
             })
             .collect::<HashMap<_, _>>();
 
-        let all_table_fragments = self.list_all_table_fragments().await?;
-
         // FIXME: only need actor id and dispatcher info, avoid clone it.
         let mut actor_map = HashMap::new();
         let mut actor_status = HashMap::new();
@@ -2071,23 +2069,44 @@ impl ScaleController {
         let mut fragment_map = HashMap::new();
         let mut fragment_parallelism = HashMap::new();
 
-        for table_fragments in all_table_fragments {
-            for (fragment_id, fragment) in table_fragments.fragments {
-                fragment
-                    .actors
-                    .iter()
-                    .map(|actor| (actor.actor_id, actor))
-                    .for_each(|(id, actor)| {
-                        actor_map.insert(id as ActorId, CustomActorInfo::from(actor));
-                    });
+        match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
-                fragment_map.insert(fragment_id, CustomFragmentInfo::from(&fragment));
+                for table_fragments in guard.table_fragments().values() {
+                    for (fragment_id, fragment) in &table_fragments.fragments {
+                        for actor in &fragment.actors {
+                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
+                        }
 
-                fragment_parallelism.insert(fragment_id, table_fragments.assigned_parallelism);
+                        fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
+
+                        fragment_parallelism
+                            .insert(*fragment_id, table_fragments.assigned_parallelism);
+                    }
+
+                    actor_status.extend(table_fragments.actor_status.clone());
+                }
             }
+            MetadataManager::V2(_) => {
+                let all_table_fragments = self.list_all_table_fragments().await?;
 
-            actor_status.extend(table_fragments.actor_status);
-        }
+                for table_fragments in all_table_fragments {
+                    for (fragment_id, fragment) in table_fragments.fragments {
+                        for actor in &fragment.actors {
+                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
+                        }
+
+                        fragment_map.insert(fragment_id, CustomFragmentInfo::from(&fragment));
+
+                        fragment_parallelism
+                            .insert(fragment_id, table_fragments.assigned_parallelism);
+                    }
+
+                    actor_status.extend(table_fragments.actor_status);
+                }
+            }
+        };
 
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
