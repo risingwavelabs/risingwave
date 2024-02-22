@@ -445,6 +445,7 @@ struct WatermarkAnalyzer {}
 
 impl WatermarkAnalyzer {
     fn visit_expr(&self, expr: &ExprImpl) -> WatermarkDerivation {
+        println!("expr: {:#?}", expr);
         match expr {
             ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),
             ExprImpl::Literal(_) => WatermarkDerivation::Constant,
@@ -498,11 +499,21 @@ impl WatermarkAnalyzer {
                 _ => WatermarkDerivation::None,
             },
             ExprType::Subtract | ExprType::TumbleStart => {
-                match self.visit_binary_op(func_call.inputs()) {
-                    (Constant, Constant) => Constant,
-                    (Watermark(idx), Constant) => Watermark(idx),
-                    (Nondecreasing, Constant) => Nondecreasing,
-                    _ => WatermarkDerivation::None,
+                if func_call.inputs().len() == 3 {
+                    assert_eq!(ExprType::TumbleStart, func_call.func_type());
+                    match self.visit_ternary_op(func_call.inputs()) {
+                        (Constant, Constant, Constant) => Constant,
+                        (Watermark(idx), Constant, Constant) => Watermark(idx),
+                        (Nondecreasing, Constant, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
+                } else {
+                    match self.visit_binary_op(func_call.inputs()) {
+                        (Constant, Constant) => Constant,
+                        (Watermark(idx), Constant) => Watermark(idx),
+                        (Nondecreasing, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
                 }
             }
             ExprType::Multiply | ExprType::Divide | ExprType::Modulus => {
