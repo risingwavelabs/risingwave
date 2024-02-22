@@ -216,8 +216,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
-                    // No need to flush barrier to log writer when paused because 
-                    // there will be no data between pause barrier and resume barrier.
+                    // No need to flush barrier to log writer when paused because there will be no data between pause barrier and resume barrier.
                     if !is_paused {
                         log_writer
                             .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
