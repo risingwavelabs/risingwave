@@ -160,6 +160,7 @@ profile:
       # If you want to use hdfs as storage backend, configure hdfs namenode:
       - use: opendal
         engine: hdfs
+        namenode: "127.0.0.1:9000"
       - use: compactor
       # - use: prometheus
       # - use: grafana
