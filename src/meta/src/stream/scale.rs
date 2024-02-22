@@ -120,6 +120,7 @@ pub struct CustomFragmentInfo {
     pub actors: Vec<CustomActorInfo>,
 }
 
+#[derive(Default)]
 pub struct CustomActorInfo {
     pub actor_id: u32,
     pub fragment_id: u32,
@@ -163,11 +164,7 @@ impl From<&PbFragment> for CustomFragmentInfo {
                 .first()
                 .cloned()
                 .expect("no actor in fragment"),
-            actors: fragment
-                .actors
-                .iter()
-                .map(|actor| CustomActorInfo::from(actor))
-                .collect(),
+            actors: fragment.actors.iter().map(CustomActorInfo::from).collect(),
         }
     }
 }
@@ -178,7 +175,7 @@ impl CustomFragmentInfo {
     }
 
     pub fn distribution_type(&self) -> FragmentDistributionType {
-        self.distribution_type.clone()
+        self.distribution_type
     }
 }
 
@@ -545,7 +542,7 @@ impl ScaleController {
             MetadataManager::V1(mgr) => {
                 let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
-                for (_, table_fragments) in guard.table_fragments() {
+                for (table_id, table_fragments) in guard.table_fragments() {
                     fragment_state.extend(
                         table_fragments
                             .fragment_ids()
@@ -562,11 +559,8 @@ impl ScaleController {
 
                     actor_status.extend(table_fragments.actor_status.clone());
 
-                    fragment_to_table.extend(
-                        table_fragments
-                            .fragment_ids()
-                            .map(|f| (f, table_fragments.table_id())),
-                    );
+                    fragment_to_table
+                        .extend(table_fragments.fragment_ids().map(|f| (f, *table_id)));
                 }
             }
             MetadataManager::V2(_) => {

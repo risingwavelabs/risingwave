@@ -21,7 +21,6 @@ mod tests {
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping, VirtualNode};
     use risingwave_pb::common::ParallelUnit;
-    use risingwave_pb::stream_plan::CustomActorInfo;
 
     use crate::model::ActorId;
     use crate::stream::scale::rebalance_actor_vnode;
