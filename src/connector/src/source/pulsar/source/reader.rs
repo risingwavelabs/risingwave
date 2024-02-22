@@ -31,6 +31,7 @@ use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioE
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -370,8 +371,9 @@ impl PulsarIcebergReader {
 
         #[for_await]
         for msg in self.as_stream_chunk_stream() {
-            let (_chunk, mapping) =
-                msg.inspect_err(|e| tracing::error!("Failed to read message from iceberg: {}", e))?;
+            let (_chunk, mapping) = msg.inspect_err(
+                |e| tracing::error!(error = %e.as_report(), "Failed to read message from iceberg"),
+            )?;
             last_msg_id = mapping.get(self.split.topic.to_string().as_str()).cloned();
         }
 

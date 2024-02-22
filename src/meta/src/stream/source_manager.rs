@@ -824,7 +824,7 @@ impl SourceManager {
                             break worker;
                         }
                         Err(e) => {
-                            tracing::warn!("failed to create source worker: {}", e);
+                            tracing::warn!(error = %e.as_report(), "failed to create source worker");
                         }
                     }
                 };

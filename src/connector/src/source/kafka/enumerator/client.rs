@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
@@ -106,11 +106,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
-            anyhow!(format!(
-                "failed to fetch metadata from kafka ({}), error: {}",
-                self.broker_address, e
-            ))
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
+            )
         })?;
         let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
         let mut start_offsets = self
@@ -154,11 +154,11 @@ impl KafkaSplitEnumerator {
         expect_start_timestamp_millis: Option<i64>,
         expect_stop_timestamp_millis: Option<i64>,
     ) -> ConnectorResult<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
-            anyhow!(format!(
-                "failed to fetch metadata from kafka ({}), error: {}",
-                self.broker_address, e
-            ))
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
+            )
         })?;
 
         // here we are getting the start offset and end offset for each partition with the given

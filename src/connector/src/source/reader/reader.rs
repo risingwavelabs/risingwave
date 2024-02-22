@@ -24,6 +24,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
 use rw_futures_util::select_all;
+use thiserror_ext::AsReport as _;
 
 use crate::dispatch_source_prop;
 use crate::error::ConnectorResult;
@@ -187,7 +188,7 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
                 }
             }
             Err(err) => {
-                tracing::error!("list object fail, err {}", err);
+                tracing::error!(error = %err.as_report(), "list object fail");
                 return Err(err);
             }
         }

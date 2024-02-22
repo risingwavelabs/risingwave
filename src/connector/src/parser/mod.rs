@@ -703,7 +703,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                             tracing::error!(
-                                %error,
+                                error = %error.as_report(),
                                 split_id = &*msg.split_id,
                                 offset = msg.offset,
                                 suppressed_count,
