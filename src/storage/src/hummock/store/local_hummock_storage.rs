@@ -443,11 +443,7 @@ impl LocalStateStore for LocalHummockStorage {
             self.table_id(), self.instance_id()
         );
         let prev_vnodes = read_version.update_vnode_bitmap(vnodes);
-        assert!(
-            prev_vnodes.is_some(),
-            "Previous vnode bitmap should not be none"
-        );
-        prev_vnodes.unwrap()
+        prev_vnodes.expect("Previous vnode bitmap should not be none")
     }
 }
 
