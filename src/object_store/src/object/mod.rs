@@ -818,15 +818,27 @@ pub async fn build_remote_object_store(
     config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
     match url {
-        s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new_with_config(
-                s3.strip_prefix("s3://").unwrap().to_string(),
-                metrics.clone(),
-                config,
-            )
-            .await
-            .monitored(metrics),
-        ),
+        s3 if s3.starts_with("s3://") => {
+            if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config)
+                        .unwrap()
+                        .monitored(metrics),
+                )
+            } else {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::new_with_config(
+                        s3.strip_prefix("s3://").unwrap().to_string(),
+                        metrics.clone(),
+                        config,
+                    )
+                    .await
+                    .monitored(metrics),
+                )
+            }
+        }
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
