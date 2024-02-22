@@ -955,7 +955,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     .await;
     commit_from_meta_node(
         hummock_manager.borrow(),
-        epoch,
+        epoch.as_u64_for_test(),
         to_local_sstable_info(&original_tables),
     )
     .await
@@ -1075,7 +1075,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     .await;
     commit_from_meta_node(
         hummock_manager.borrow(),
-        epoch,
+        epoch.as_u64_for_test(),
         to_local_sstable_info(&original_tables),
     )
     .await
