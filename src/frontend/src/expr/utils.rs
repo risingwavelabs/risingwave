@@ -500,6 +500,8 @@ impl WatermarkAnalyzer {
             },
             ExprType::Subtract | ExprType::TumbleStart => {
                 if func_call.inputs().len() == 3 {
+                    // With `offset` specified
+                    // e.g., select * from tumble(t1, start, interval, offset);
                     assert_eq!(ExprType::TumbleStart, func_call.func_type());
                     match self.visit_ternary_op(func_call.inputs()) {
                         (Constant, Constant, Constant) => Constant,
