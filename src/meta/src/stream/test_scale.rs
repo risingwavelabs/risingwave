@@ -24,8 +24,8 @@ mod tests {
     use risingwave_pb::stream_plan::CustomActorInfo;
 
     use crate::model::ActorId;
-    use crate::stream::CustomActorInfo;
     use crate::stream::scale::rebalance_actor_vnode;
+    use crate::stream::CustomActorInfo;
 
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT];

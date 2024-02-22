@@ -42,7 +42,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, PbFragment, State}
 use risingwave_pb::meta::FragmentParallelUnitMappings;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamActor, StreamNode,
+    Dispatcher, DispatcherType, FragmentTypeFlag, PbStreamActor, StreamNode,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -116,7 +116,7 @@ pub struct CustomFragmentInfo {
     pub vnode_mapping: Option<ParallelUnitMapping>,
     pub state_table_ids: Vec<u32>,
     pub upstream_fragment_ids: Vec<u32>,
-    pub actor_template: StreamActor,
+    pub actor_template: PbStreamActor,
     pub actors: Vec<CustomActorInfo>,
 }
 
@@ -813,7 +813,7 @@ impl ScaleController {
         &self,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_infos_to_broadcast: BTreeMap<ActorId, ActorInfo>,
-        node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
+        node_actors_to_create: HashMap<WorkerId, Vec<PbStreamActor>>,
         broadcast_worker_ids: HashSet<WorkerId>,
     ) -> MetaResult<()> {
         self.stream_rpc_manager
@@ -1522,7 +1522,7 @@ impl ScaleController {
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
         no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
-        new_actor: &mut StreamActor,
+        new_actor: &mut PbStreamActor,
     ) -> MetaResult<()> {
         let fragment = &ctx.fragment_map.get(&new_actor.fragment_id).unwrap();
         let mut applied_upstream_fragment_actor_ids = HashMap::new();
