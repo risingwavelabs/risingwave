@@ -24,7 +24,6 @@ export interface BackPressuresMetrics {
 
 // Get back pressure from meta node -> prometheus
 export async function getActorBackPressures() {
-  console.log("send api")
   const res: BackPressuresMetrics = await api.get(
     "/metrics/actor/back_pressures"
   )
@@ -68,7 +67,7 @@ function convertToMapAndAgg(
 
   for (const [key, value] of mapValue) {
     // add || 1 to avoid NaN and pass check
-    map.set(key, value / mapNumber.get(key))
+    map.set(key, value / (mapNumber.get(key) || 1))
   }
   return map
 }

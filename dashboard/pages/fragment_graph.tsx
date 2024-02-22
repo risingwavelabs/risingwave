@@ -382,7 +382,7 @@ export default function Streaming() {
 
           const value = algoFunc(m.sample) * 100
           map.set(
-            `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
+            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
             value
           )
         }
