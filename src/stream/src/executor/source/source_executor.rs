@@ -694,7 +694,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = None;
-        let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
@@ -782,7 +781,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
         let row_id_index = None;
-        let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()

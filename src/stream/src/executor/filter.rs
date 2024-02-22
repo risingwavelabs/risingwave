@@ -204,12 +204,7 @@ mod tests {
         };
         let pk_indices = PkIndices::new();
         let source = MockSource::with_chunks(vec![chunk1, chunk2])
-            .to_executor(schema.clone(), pk_indices.clone());
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "FilterExecutor".to_string(),
-        };
+            .into_executor(schema.clone(), pk_indices.clone());
 
         let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 

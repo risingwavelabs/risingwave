@@ -148,7 +148,7 @@ mod tests {
             Message::Barrier(Barrier::new_test_barrier(3)),
         ])
         .stop_on_finish(false)
-        .to_executor(schema.clone(), vec![0]);
+        .into_executor(schema.clone(), vec![0]);
         let source1 = MockSource::with_messages(vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
             Message::Barrier(Barrier::new_test_barrier(1)),
@@ -156,7 +156,7 @@ mod tests {
             Message::Barrier(Barrier::new_test_barrier(2)),
         ])
         .stop_on_finish(false)
-        .to_executor(schema.clone(), vec![0]);
+        .into_executor(schema.clone(), vec![0]);
         let source2 = MockSource::with_messages(vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
             Message::Barrier(Barrier::new_test_barrier(1)),
@@ -164,7 +164,7 @@ mod tests {
             Message::Barrier(Barrier::new_test_barrier(2)),
         ])
         .stop_on_finish(false)
-        .to_executor(schema, vec![0]);
+        .into_executor(schema, vec![0]);
 
         let executor = LookupUnionExecutor::new(vec![source0, source1, source2], vec![2, 1, 0])
             .boxed()

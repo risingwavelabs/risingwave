@@ -16,7 +16,7 @@ use futures::StreamExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Execute, ExecutorInfo};
+use crate::executor::{BoxedMessageStream, Execute};
 use crate::task::{ActorId, FragmentId};
 
 #[derive(Default)]

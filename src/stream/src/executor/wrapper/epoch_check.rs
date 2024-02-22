@@ -84,7 +84,7 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_ok() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(2, false);
@@ -105,7 +105,7 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_bad() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_barrier(100, false);
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(514, false);
@@ -127,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_first_not_barrier() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(114, false);
 
@@ -139,10 +139,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty() {
-        let (_, mut source) = MockSource::channel();
+        let (_, source) = MockSource::channel();
         let source = source
             .stop_on_finish(false)
-            .to_executor(Default::default(), vec![]);
+            .into_executor(Default::default(), vec![]);
         let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 

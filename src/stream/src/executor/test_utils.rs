@@ -151,7 +151,7 @@ impl MockSource {
         }
     }
 
-    pub fn to_executor(self, schema: Schema, pk_indices: Vec<usize>) -> Executor {
+    pub fn into_executor(self, schema: Schema, pk_indices: Vec<usize>) -> Executor {
         Executor::new(
             ExecutorInfo {
                 schema,

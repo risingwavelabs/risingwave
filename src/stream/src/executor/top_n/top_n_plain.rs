@@ -276,7 +276,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(5)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         #[tokio::test]
@@ -724,7 +724,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(2)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         fn create_source_new_before_recovery() -> Executor {
@@ -752,7 +752,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(2)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         fn create_source_new_after_recovery() -> Executor {
@@ -782,7 +782,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(4)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         fn storage_key() -> Vec<ColumnOrder> {
@@ -1045,7 +1045,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(2)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         fn storage_key() -> Vec<ColumnOrder> {
@@ -1175,7 +1175,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(2)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         fn create_source_after_recovery() -> Executor {
@@ -1201,7 +1201,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(4)),
             ])
-            .to_executor(schema, pk_indices())
+            .into_executor(schema, pk_indices())
         }
 
         #[tokio::test]

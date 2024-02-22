@@ -460,7 +460,7 @@ mod tests {
         .await;
 
         let (tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, vec![0]);
+        let source = source.into_executor(schema, vec![0]);
 
         let info = ExecutorInfo {
             schema: source.schema().clone(),

@@ -133,7 +133,7 @@ mod test {
             StreamChunk::from_pretty("I\n + 2"),
         ])
         .stop_on_finish(false)
-        .to_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), PkIndices::new());
 
         let second = MockSource::with_messages(vec![
             Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add(
@@ -152,7 +152,7 @@ mod test {
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
         ])
-        .to_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), PkIndices::new());
 
         let chain = ChainExecutor::new(first, second, progress, false);
 

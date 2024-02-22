@@ -231,17 +231,9 @@ mod tests {
         };
         let pk_indices = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, pk_indices);
+        let source = source.into_executor(schema, pk_indices);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
-
-        let info = ExecutorInfo {
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            pk_indices: vec![],
-            identity: "ProjectExecutor".to_string(),
-        };
 
         let project = ProjectExecutor::new(
             ActorContext::for_test(123),
@@ -319,23 +311,11 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, PkIndices::new());
+        let source = source.into_executor(schema, PkIndices::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
         let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
-
-        let info = ExecutorInfo {
-            schema: Schema {
-                fields: vec![
-                    Field::unnamed(DataType::Int64),
-                    Field::unnamed(DataType::Int64),
-                    Field::unnamed(DataType::Int64),
-                ],
-            },
-            pk_indices: vec![],
-            identity: "ProjectExecutor".to_string(),
-        };
 
         let project = ProjectExecutor::new(
             ActorContext::for_test(123),

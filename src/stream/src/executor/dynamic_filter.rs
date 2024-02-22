@@ -551,9 +551,9 @@ mod tests {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let (tx_l, source_l) = MockSource::channel();
-        let source_l = source_l.to_executor(schema.clone(), vec![0]);
+        let source_l = source_l.into_executor(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel();
-        let source_r = source_r.to_executor(schema, vec![]);
+        let source_r = source_r.into_executor(schema, vec![]);
 
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
             ActorContext::for_test(123),

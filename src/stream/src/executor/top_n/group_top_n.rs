@@ -365,7 +365,7 @@ mod tests {
             Message::Chunk(std::mem::take(&mut chunks[3])),
             Message::Barrier(Barrier::new_test_barrier(5)),
         ])
-        .to_executor(schema, pk_indices())
+        .into_executor(schema, pk_indices())
     }
 
     #[tokio::test]

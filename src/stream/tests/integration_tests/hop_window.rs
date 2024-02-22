@@ -25,7 +25,7 @@ const CHUNK_SIZE: usize = 256;
 
 fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageStream) {
     let (tx, source) = MockSource::channel();
-    let source = source.to_executor(
+    let source = source.into_executor(
         Schema::new(vec![
             Field::unnamed(DataType::Int64),
             Field::unnamed(DataType::Int64),

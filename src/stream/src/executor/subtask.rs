@@ -20,7 +20,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::actor::spawn_blocking_drop_stream;
-use super::{Execute, Executor, ExecutorInfo, Message, MessageStreamItem};
+use super::{Execute, Executor, Message, MessageStreamItem};
 use crate::task::ActorId;
 
 /// Handle used to drive the subtask.
@@ -29,8 +29,6 @@ pub type SubtaskHandle = impl Future<Output = ()> + Send + 'static;
 /// The thin wrapper for subtask-wrapped executor, containing a channel to receive the messages from
 /// the subtask.
 pub struct SubtaskRxExecutor {
-    info: ExecutorInfo,
-
     rx: mpsc::Receiver<MessageStreamItem>,
 }
 
@@ -48,13 +46,7 @@ impl Execute for SubtaskRxExecutor {
 /// single thread.
 pub fn wrap(input: Executor, actor_id: ActorId) -> (SubtaskHandle, SubtaskRxExecutor) {
     let (tx, rx) = mpsc::channel(1);
-    let rx_executor = SubtaskRxExecutor {
-        info: ExecutorInfo {
-            identity: "SubtaskRxExecutor".to_owned(),
-            ..input.info().clone()
-        },
-        rx,
-    };
+    let rx_executor = SubtaskRxExecutor { rx };
 
     let handle = async move {
         let mut input = input.execute();

@@ -30,8 +30,8 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo,
-    Message, Watermark,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    Watermark,
 };
 
 pub trait TopNExecutorBase: Send + 'static {

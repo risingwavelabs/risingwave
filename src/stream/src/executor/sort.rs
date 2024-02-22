@@ -191,7 +191,7 @@ mod tests {
         .await;
 
         let (tx, source) = MockSource::channel();
-        let source = source.to_executor(input_schema, input_pk_indices);
+        let source = source.into_executor(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
             actor_ctx: ActorContext::for_test(123),
             schema: source.schema().clone(),

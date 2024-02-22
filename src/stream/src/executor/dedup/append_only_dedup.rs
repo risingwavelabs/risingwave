@@ -232,7 +232,7 @@ mod tests {
         .await;
 
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, pk_indices);
+        let source = source.into_executor(schema, pk_indices);
         let mut dedup_executor = AppendOnlyDedupExecutor::new(
             ActorContext::for_test(123),
             source,

@@ -120,7 +120,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel();
-    let source = source.to_executor(schema, PkIndices::new());
+    let source = source.into_executor(schema, PkIndices::new());
     tx.push_barrier(1, false);
     for chunk in chunks {
         tx.push_chunk(chunk);

@@ -38,8 +38,8 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message,
-    Mutation, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, Message, Mutation,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 

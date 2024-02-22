@@ -324,7 +324,7 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, vec![2]);
+        let source = source.into_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(

@@ -39,8 +39,8 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo,
-    Message, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 

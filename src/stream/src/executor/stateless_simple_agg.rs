@@ -143,7 +143,7 @@ mod tests {
     async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, vec![2]);
+        let source = source.into_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_barrier(2, false);
         tx.push_barrier(3, false);
@@ -174,7 +174,7 @@ mod tests {
     async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, vec![2]);
+        let source = source.into_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I

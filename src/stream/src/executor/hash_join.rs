@@ -1143,9 +1143,9 @@ mod tests {
             ],
         };
         let (tx_l, source_l) = MockSource::channel();
-        let source_l = source_l.to_executor(schema.clone(), vec![1]);
+        let source_l = source_l.into_executor(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel();
-        let source_r = source_r.to_executor(schema, vec![1]);
+        let source_r = source_r.into_executor(schema, vec![1]);
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
         let cond = with_condition.then(|| create_cond(condition_text));
@@ -1227,9 +1227,9 @@ mod tests {
             ],
         };
         let (tx_l, source_l) = MockSource::channel();
-        let source_l = source_l.to_executor(schema.clone(), vec![0]);
+        let source_l = source_l.into_executor(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel();
-        let source_r = source_r.to_executor(schema, vec![0]);
+        let source_r = source_r.into_executor(schema, vec![0]);
         let params_l = JoinParams::new(vec![0, 1], vec![]);
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(|| create_cond(None));

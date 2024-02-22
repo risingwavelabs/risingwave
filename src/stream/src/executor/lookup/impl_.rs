@@ -198,7 +198,6 @@ impl<S: StateStore> LookupExecutor<S> {
 
         Self {
             ctx,
-            info,
             chunk_data_types,
             last_barrier: None,
             stream_executor: Some(stream),

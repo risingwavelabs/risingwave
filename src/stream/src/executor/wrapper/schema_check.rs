@@ -73,7 +73,7 @@ mod tests {
         };
 
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, vec![1]);
+        let source = source.into_executor(schema, vec![1]);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I     F
             + 100 200.0
@@ -100,7 +100,7 @@ mod tests {
         };
 
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, vec![1]);
+        let source = source.into_executor(schema, vec![1]);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I
             + 100 200

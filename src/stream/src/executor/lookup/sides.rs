@@ -28,7 +28,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{Barrier, BoxedMessageStream, Execute, Executor, Message, MessageStream};
+use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
@@ -429,9 +429,11 @@ mod tests {
         let (mut tx_l, source_l) = MockSource::channel();
         let source_l = source_l
             .stop_on_finish(false)
-            .to_executor(schema.clone(), vec![1]);
+            .into_executor(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel();
-        let source_r = source_r.stop_on_finish(false).to_executor(schema, vec![1]);
+        let source_r = source_r
+            .stop_on_finish(false)
+            .into_executor(schema, vec![1]);
 
         let mut stream = stream_lookup_arrange_this_epoch(source_l, source_r).boxed();
 

@@ -307,7 +307,7 @@ mod tests {
         let dml_manager = Arc::new(DmlManager::for_test());
 
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(schema, pk_indices);
+        let source = source.into_executor(schema, pk_indices);
 
         let dml_executor = DmlExecutor::new(
             source,

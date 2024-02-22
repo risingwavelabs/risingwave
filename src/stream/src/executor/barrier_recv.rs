@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message,
-    PkIndices, StreamExecutorError,
+    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Execute, Message,
+    StreamExecutorError,
 };
 
 /// The executor only for receiving barrier from the meta service. It always resides in the leaves

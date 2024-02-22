@@ -67,7 +67,7 @@ mod tests {
     #[tokio::test]
     async fn test_not_next_to_each_other() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
             "     I
             U-  114
@@ -86,7 +86,7 @@ mod tests {
     #[tokio::test]
     async fn test_first_one_update_insert() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
             "     I
             U+  114",
@@ -102,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn test_last_one_update_delete() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::from_pretty(
             "        I
             U-     114
@@ -119,7 +119,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_chunk() {
         let (mut tx, source) = MockSource::channel();
-        let source = source.to_executor(Default::default(), vec![]);
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
 
         let checked = update_check(source.info().clone().into(), source.execute());

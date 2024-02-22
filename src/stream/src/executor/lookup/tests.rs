@@ -105,7 +105,7 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
         Message::Chunk(chunk2),
         Message::Barrier(Barrier::new_test_barrier(4)),
     ])
-    .to_executor(schema, vec![0]);
+    .into_executor(schema, vec![0]);
 
     Executor::new(
         ExecutorInfo {
@@ -162,16 +162,14 @@ fn create_source() -> Executor {
             .collect_vec(),
     );
 
-    let source = MockSource::with_messages(vec![
+    MockSource::with_messages(vec![
         Message::Barrier(Barrier::new_test_barrier(2)),
         Message::Chunk(chunk1),
         Message::Barrier(Barrier::new_test_barrier(3)),
         Message::Chunk(chunk2),
         Message::Barrier(Barrier::new_test_barrier(4)),
     ])
-    .to_executor(schema, PkIndices::new());
-
-    source
+    .into_executor(schema, PkIndices::new())
 }
 
 async fn next_msg(buffer: &mut Vec<Message>, executor: &mut BoxedMessageStream) {

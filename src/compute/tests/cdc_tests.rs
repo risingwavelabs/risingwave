@@ -134,7 +134,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let memory_state_store = MemoryStateStore::new();
 
     let (mut tx, source) = MockSource::channel();
-    let source = source.to_executor(
+    let source = source.into_executor(
         Schema::new(vec![
             Field::unnamed(DataType::Jsonb), // payload
         ]),

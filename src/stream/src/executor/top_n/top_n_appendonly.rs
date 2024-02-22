@@ -230,7 +230,7 @@ mod tests {
             Message::Barrier(Barrier::new_test_barrier(3)),
             Message::Chunk(std::mem::take(&mut chunks[2])),
         ])
-        .to_executor(create_schema(), pk_indices())
+        .into_executor(create_schema(), pk_indices())
     }
 
     #[tokio::test]

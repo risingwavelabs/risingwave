@@ -92,7 +92,7 @@ mod tests {
             + 6 6 3
             - 7 5 4",
         );
-        let source = MockSource::with_chunks(vec![chunk1]).to_executor(
+        let source = MockSource::with_chunks(vec![chunk1]).into_executor(
             Schema::new(vec![
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),

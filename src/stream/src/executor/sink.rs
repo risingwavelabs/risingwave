@@ -481,7 +481,7 @@ mod test {
                     - 5 6 7",
             ))),
         ])
-        .to_executor(schema.clone(), pk_indices.clone());
+        .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -605,7 +605,7 @@ mod test {
             ))),
             Message::Barrier(Barrier::new_test_barrier(3)),
         ])
-        .to_executor(schema.clone(), vec![0, 1]);
+        .into_executor(schema.clone(), vec![0, 1]);
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -726,7 +726,7 @@ mod test {
             Message::Barrier(Barrier::new_test_barrier(2)),
             Message::Barrier(Barrier::new_test_barrier(3)),
         ])
-        .to_executor(schema.clone(), pk_indices.clone());
+        .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),

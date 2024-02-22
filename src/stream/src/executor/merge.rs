@@ -533,8 +533,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let schema = Schema { fields: vec![] };
-
         let actor_id = 233;
         let (untouched, old, new) = (234, 235, 238); // upstream actors
         let ctx = Arc::new(SharedContext::for_test());
