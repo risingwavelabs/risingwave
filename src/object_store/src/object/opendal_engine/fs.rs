@@ -25,10 +25,9 @@ impl OpendalObjectStore {
     pub fn new_fs_engine(root: String) -> ObjectResult<Self> {
         // Create fs backend builder.
         let mut builder = Fs::default();
-
         builder.root(&root);
-        builder.atomic_write_dir(ATOMIC_WRITE_DIR);
-
+        let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
+        builder.atomic_write_dir(&atomic_write_dir);
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
             .finish();
