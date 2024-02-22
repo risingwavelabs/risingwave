@@ -426,14 +426,14 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+        let (mut tx_l, source_l) = MockSource::channel();
+        let source_l = source_l
+            .stop_on_finish(false)
+            .to_executor(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.stop_on_finish(false).to_executor(schema, vec![1]);
 
-        let mut stream = stream_lookup_arrange_this_epoch(
-            Box::new(source_l.stop_on_finish(false)),
-            Box::new(source_r.stop_on_finish(false)),
-        )
-        .boxed();
+        let mut stream = stream_lookup_arrange_this_epoch(source_l, source_r).boxed();
 
         // Simulate recovery test
         drop(tx_r);

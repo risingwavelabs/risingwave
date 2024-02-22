@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
 use super::{
-    Barrier, BoxedMessageStream, Execute, ExecutorInfo, Message, MessageStream, PkIndices,
+    Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, MessageStream,
     StreamChunk, StreamExecutorResult, Watermark,
 };
 
@@ -44,7 +44,6 @@ pub mod prelude {
 }
 
 pub struct MockSource {
-    info: ExecutorInfo,
     rx: mpsc::UnboundedReceiver<Message>,
 
     /// Whether to send a `Stop` barrier on stream finish.
@@ -104,51 +103,39 @@ impl MessageSender {
     }
 }
 
+// TODO()
 impl std::fmt::Debug for MockSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MockSource")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
+            // .field("schema", &self.info.schema)
+            // .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }
 
 impl MockSource {
-    fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
-        rx: mpsc::UnboundedReceiver<Message>,
-        stop_on_finish: bool,
-    ) -> Self {
-        Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "MockSource".to_string(),
-            },
-            rx,
-            stop_on_finish,
-        }
+    fn new(rx: mpsc::UnboundedReceiver<Message>, stop_on_finish: bool) -> Self {
+        Self { rx, stop_on_finish }
     }
 
     #[allow(dead_code)]
-    pub fn channel(schema: Schema, pk_indices: PkIndices) -> (MessageSender, Self) {
+    pub fn channel() -> (MessageSender, Self) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let source = Self::new(schema, pk_indices, rx, true);
+        let source = Self::new(rx, true);
         (MessageSender(tx), source)
     }
 
     #[allow(dead_code)]
-    pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
-        let (tx, source) = Self::channel(schema, pk_indices);
+    pub fn with_messages(msgs: Vec<Message>) -> Self {
+        let (tx, source) = Self::channel();
         for msg in msgs {
             tx.0.send(msg).unwrap();
         }
         source
     }
 
-    pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
-        let (tx, source) = Self::channel(schema, pk_indices);
+    pub fn with_chunks(chunks: Vec<StreamChunk>) -> Self {
+        let (tx, source) = Self::channel();
         for chunk in chunks {
             tx.0.send(Message::Chunk(chunk)).unwrap();
         }
@@ -162,6 +149,17 @@ impl MockSource {
             stop_on_finish,
             ..self
         }
+    }
+
+    pub fn to_executor(self, schema: Schema, pk_indices: Vec<usize>) -> Executor {
+        Executor::new(
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "MockSource".to_string(),
+            },
+            self.boxed(),
+        )
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -294,7 +292,7 @@ pub mod agg_executor {
     };
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::{
-        ActorContext, ActorContextRef, Execute, Executor, ExecutorInfo, HashAggExecutor, PkIndices,
+        ActorContext, ActorContextRef, Executor, ExecutorInfo, HashAggExecutor, PkIndices,
         SimpleAggExecutor,
     };
 

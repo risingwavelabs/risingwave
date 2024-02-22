@@ -19,7 +19,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{Execute, Executor, NowExecutor};
+use crate::executor::{Executor, NowExecutor};
 use crate::task::ExecutorParams;
 
 pub struct NowExecutorBuilder;

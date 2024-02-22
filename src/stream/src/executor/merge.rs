@@ -75,7 +75,7 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
@@ -460,7 +460,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs, Schema::default());
+        let merger = MergeExecutor::for_test(rxs);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
@@ -569,13 +569,8 @@ mod tests {
             .try_collect()
             .unwrap();
 
-        let merge = MergeExecutor::new(
+        let mut merge = MergeExecutor::new(
             ActorContext::for_test(actor_id),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "MergeExecutor".to_string(),
-            },
             fragment_id,
             upstream_fragment_id,
             inputs,
@@ -585,8 +580,6 @@ mod tests {
         )
         .boxed()
         .execute();
-
-        pin_mut!(merge);
 
         // 2. Take downstream receivers.
         let txs = [untouched, old, new]

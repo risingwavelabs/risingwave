@@ -459,7 +459,8 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(schema, vec![0]);
+        let (tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, vec![0]);
 
         let info = ExecutorInfo {
             schema: source.schema().clone(),
@@ -470,8 +471,8 @@ mod tests {
         (
             WatermarkFilterExecutor::new(
                 ActorContext::for_test(123),
-                info,
-                source.boxed(),
+                &info,
+                source,
                 watermark_expr,
                 1,
                 table,

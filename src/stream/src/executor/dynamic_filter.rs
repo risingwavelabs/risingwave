@@ -550,21 +550,20 @@ mod tests {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![]);
-
-        let schema = source_l.schema().clone();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![0],
-            identity: "DynamicFilterExecutor".to_string(),
-        };
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.to_executor(schema.clone(), vec![0]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.to_executor(schema, vec![]);
 
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
             ActorContext::for_test(123),
-            info,
-            Box::new(source_l),
-            Box::new(source_r),
+            &ExecutorInfo {
+                schema: source_l.schema().clone(),
+                pk_indices: vec![0],
+                identity: "DynamicFilterExecutor".to_string(),
+            },
+            source_l,
+            source_r,
             0,
             comparator,
             mem_state_l,
@@ -574,7 +573,7 @@ mod tests {
             always_relax,
             false,
         );
-        (tx_l, tx_r, Box::new(executor).execute())
+        (tx_l, tx_r, executor.boxed().execute())
     }
 
     #[tokio::test]

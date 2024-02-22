@@ -44,29 +44,22 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
-    expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedExecutor as StreamBoxedExecutor,
-    BoxedMessageStream, CdcBackfillExecutor, Execute, ExecutorInfo, ExternalStorageTable,
-    MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, StreamExecutorError,
+    expect_first_barrier, ActorContext, AddMutation, Barrier, BoxedMessageStream,
+    CdcBackfillExecutor, Execute, Executor as StreamExecutor, ExecutorInfo, ExternalStorageTable,
+    MaterializeExecutor, Message, Mutation, StreamExecutorError,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
 pub struct MockOffsetGenExecutor {
-    upstream: Option<StreamBoxedExecutor>,
-
-    info: ExecutorInfo,
+    upstream: Option<StreamExecutor>,
 
     start_offset: u32,
 }
 
 impl MockOffsetGenExecutor {
-    pub fn new(upstream: StreamBoxedExecutor, schema: Schema, pk_indices: PkIndices) -> Self {
+    pub fn new(upstream: StreamExecutor) -> Self {
         Self {
             upstream: Some(upstream),
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "MockOffsetGenExecutor".to_string(),
-            },
             start_offset: 0,
         }
     }
@@ -133,22 +126,6 @@ impl Execute for MockOffsetGenExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
-    }
 }
 
 #[tokio::test]
@@ -156,21 +133,26 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     use risingwave_common::types::DataType;
     let memory_state_store = MemoryStateStore::new();
 
-    let table_id = TableId::new(1002);
-    let schema = Schema::new(vec![
-        Field::unnamed(DataType::Jsonb),   // payload
-        Field::unnamed(DataType::Varchar), // _rw_offset
-    ]);
-    let column_ids = vec![0.into(), 1.into()];
-
-    let pk_indices = vec![0];
-
-    let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-    let _actor_ctx = ActorContext::for_test(0x3a3a3a);
+    let (mut tx, source) = MockSource::channel();
+    let source = source.to_executor(
+        Schema::new(vec![
+            Field::unnamed(DataType::Jsonb), // payload
+        ]),
+        vec![0],
+    );
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
-    let mock_offset_executor =
-        MockOffsetGenExecutor::new(Box::new(source), schema.clone(), pk_indices.clone());
+    let mock_offset_executor = StreamExecutor::new(
+        ExecutorInfo {
+            schema: Schema::new(vec![
+                Field::unnamed(DataType::Jsonb),   // payload
+                Field::unnamed(DataType::Varchar), // _rw_offset
+            ]),
+            pk_indices: vec![0],
+            identity: "MockOffsetGenExecutor".to_string(),
+        },
+        MockOffsetGenExecutor::new(source).boxed(),
+    );
 
     let binlog_file = String::from("1.binlog");
     // mock binlog watermarks for backfill
@@ -190,13 +172,15 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         Field::with_name(DataType::Int64, "id"), // primary key
         Field::with_name(DataType::Float64, "price"),
     ]);
+    let table_pk_indices = vec![0];
+    let table_pk_order_types = vec![OrderType::ascending()];
     let external_table = ExternalStorageTable::new(
-        table_id,
+        TableId::new(1234),
         table_name,
         ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
         table_schema.clone(),
-        vec![OrderType::ascending()],
-        pk_indices,
+        table_pk_order_types,
+        table_pk_indices.clone(),
         vec![0, 1],
     );
 
@@ -226,32 +210,35 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         vec![0_usize],
     )
     .await;
-    let info = ExecutorInfo {
-        schema: table_schema.clone(),
-        pk_indices: vec![0],
-        identity: "CdcBackfillExecutor".to_string(),
-    };
-    let cdc_backfill = CdcBackfillExecutor::new(
-        ActorContext::for_test(actor_id),
-        info,
-        external_table,
-        Box::new(mock_offset_executor),
-        vec![0, 1],
-        None,
-        Arc::new(StreamingMetrics::unused()),
-        state_table,
-        4, // 4 rows in a snapshot chunk
-        false,
+
+    let cdc_backfill = StreamExecutor::new(
+        ExecutorInfo {
+            schema: table_schema.clone(),
+            pk_indices: table_pk_indices,
+            identity: "CdcBackfillExecutor".to_string(),
+        },
+        CdcBackfillExecutor::new(
+            ActorContext::for_test(actor_id),
+            external_table,
+            mock_offset_executor,
+            vec![0, 1],
+            None,
+            Arc::new(StreamingMetrics::unused()),
+            state_table,
+            4, // 4 rows in a snapshot chunk
+            false,
+        )
+        .boxed(),
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.
+    let materialize_table_id = TableId::new(5678); // TODO()
     let mut materialize = MaterializeExecutor::for_test(
-        Box::new(cdc_backfill),
+        cdc_backfill,
         memory_state_store.clone(),
-        table_id,
+        materialize_table_id,
         vec![ColumnOrder::new(0, OrderType::ascending())],
-        column_ids.clone(),
-        4,
+        vec![0.into(), 1.into()],
         Arc::new(AtomicU64::new(0)),
         ConflictBehavior::Overwrite,
     )
@@ -356,7 +343,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = StorageTable::for_test(
         memory_state_store.clone(),
-        table_id,
+        materialize_table_id,
         column_descs.clone(),
         vec![OrderType::ascending()],
         vec![0],

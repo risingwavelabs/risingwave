@@ -463,28 +463,25 @@ mod test {
             .collect();
         let pk_indices = vec![0];
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk_indices.clone(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 3 2 1",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    "  I I I
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                "  I I I
                     U- 3 2 1
                     U+ 3 4 1
                      + 5 6 7",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     - 5 6 7",
-                ))),
-            ],
-        );
+            ))),
+        ])
+        .to_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -510,7 +507,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
@@ -519,7 +516,7 @@ mod test {
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         executor.next().await.unwrap().unwrap();
@@ -586,32 +583,29 @@ mod test {
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            vec![0, 1],
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 1 10",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 3 30",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 2 20
                     - 1 2 20",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     - 1 1 10",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .to_executor(schema.clone(), vec![0, 1]);
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -637,7 +631,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
@@ -646,7 +640,7 @@ mod test {
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         executor.next().await.unwrap().unwrap();
@@ -727,15 +721,12 @@ mod test {
             .collect();
         let pk_indices = vec![0];
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk_indices.clone(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .to_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -761,7 +752,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns,
@@ -770,7 +761,7 @@ mod test {
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         assert_eq!(

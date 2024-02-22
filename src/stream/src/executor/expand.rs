@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, I64Array, StreamChunk};
 
 use super::error::StreamExecutorError;
-use super::{BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
+use super::{BoxedMessageStream, Execute, Executor, Message};
 
 pub struct ExpandExecutor {
     input: Executor,
@@ -81,7 +81,7 @@ mod tests {
 
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Execute, ExecutorInfo, PkIndices};
+    use crate::executor::{Execute, PkIndices};
 
     #[tokio::test]
     async fn test_expand() {
@@ -92,29 +92,19 @@ mod tests {
             + 6 6 3
             - 7 5 4",
         );
-        let input_schema = Schema {
-            fields: vec![
+        let source = MockSource::with_chunks(vec![chunk1]).to_executor(
+            Schema::new(vec![
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
-            ],
-        };
-        let source = MockSource::with_chunks(input_schema.clone(), PkIndices::new(), vec![chunk1]);
-        let schema = {
-            let mut fields = input_schema.into_fields();
-            fields.extend(fields.clone());
-            fields.push(Field::with_name(DataType::Int64, "flag"));
-            Schema::new(fields)
-        };
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![],
-            identity: "ExpandExecutor".to_string(),
-        };
+            ]),
+            PkIndices::new(),
+        );
 
         let column_subsets = vec![vec![0, 1], vec![1, 2]];
-        let expand = Box::new(ExpandExecutor::new(info, Box::new(source), column_subsets));
-        let mut expand = expand.execute();
+        let mut expand = ExpandExecutor::new(source, column_subsets)
+            .boxed()
+            .execute();
 
         let chunk = expand.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(

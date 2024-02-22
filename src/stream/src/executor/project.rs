@@ -230,7 +230,8 @@ mod tests {
             ],
         };
         let pk_indices = vec![0];
-        let (mut tx, source) = MockSource::channel(schema, pk_indices);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, pk_indices);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
@@ -242,16 +243,15 @@ mod tests {
             identity: "ProjectExecutor".to_string(),
         };
 
-        let project = Box::new(ProjectExecutor::new(
+        let project = ProjectExecutor::new(
             ActorContext::for_test(123),
-            info,
-            Box::new(source),
+            source,
             vec![test_expr],
             MultiMap::new(),
             vec![],
             0.0,
-        ));
-        let mut project = project.execute();
+        );
+        let mut project = project.boxed().execute();
 
         tx.push_barrier(1, false);
         let barrier = project.next().await.unwrap().unwrap();
@@ -318,7 +318,8 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, PkIndices::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
@@ -336,16 +337,15 @@ mod tests {
             identity: "ProjectExecutor".to_string(),
         };
 
-        let project = Box::new(ProjectExecutor::new(
+        let project = ProjectExecutor::new(
             ActorContext::for_test(123),
-            info,
-            Box::new(source),
+            source,
             vec![a_expr, b_expr, c_expr],
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,
-        ));
-        let mut project = project.execute();
+        );
+        let mut project = project.boxed().execute();
 
         tx.push_barrier(1, false);
         tx.push_int64_watermark(0, 100);

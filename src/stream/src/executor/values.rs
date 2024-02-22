@@ -152,7 +152,7 @@ mod tests {
 
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{ActorContext, AddMutation, Barrier, Execute, ExecutorInfo, Mutation};
+    use crate::executor::{ActorContext, AddMutation, Barrier, Execute, Mutation};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
@@ -191,15 +191,9 @@ mod tests {
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Schema>();
-        let pk_indices = vec![schema.len() - 1];
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "ValuesExecutor".to_string(),
-        };
         let values_executor_struct = ValuesExecutor::new(
             ActorContext::for_test(actor_id),
-            info,
+            schema,
             progress,
             vec![exprs
                 .into_iter()

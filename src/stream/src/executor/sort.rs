@@ -190,15 +190,12 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(input_schema, input_pk_indices);
+        let (tx, source) = MockSource::channel();
+        let source = source.to_executor(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
             actor_ctx: ActorContext::for_test(123),
-            info: ExecutorInfo {
-                schema: source.schema().clone(),
-                pk_indices: source.pk_indices().to_vec(),
-                identity: "SortExecutor".to_string(),
-            },
-            input: source.boxed(),
+            schema: source.schema().clone(),
+            input: source,
             buffer_table,
             chunk_size: 1024,
             sort_column_index,

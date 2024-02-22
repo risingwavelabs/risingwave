@@ -88,9 +88,6 @@ where
 
 #[cfg(test)]
 mod test {
-
-    use std::vec;
-
     use futures_async_stream::for_await;
 
     use super::*;
@@ -102,15 +99,10 @@ mod test {
         let test_batch_count = 5;
         let table = gen_basic_table(test_batch_count * test_batch_size).await;
 
-        let info = ExecutorInfo {
-            schema: table.schema().clone(),
-            pk_indices: vec![0, 1],
-            identity: "BatchQuery".to_owned(),
-        };
-
-        let executor = Box::new(BatchQueryExecutor::new(table, test_batch_size, info));
-
-        let stream = executor.execute_with_epoch(u64::MAX);
+        let schema = table.schema().clone();
+        let stream = BatchQueryExecutor::new(table, test_batch_size, schema)
+            .boxed()
+            .execute_with_epoch(u64::MAX);
         let mut batch_cnt = 0;
 
         #[for_await]

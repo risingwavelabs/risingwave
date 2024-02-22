@@ -23,8 +23,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
 use super::{
-    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message,
-    StreamExecutorError, StreamExecutorResult,
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
+    StreamExecutorResult,
 };
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
@@ -203,8 +203,8 @@ mod tests {
             ],
         };
         let pk_indices = PkIndices::new();
-        let source =
-            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk1, chunk2]);
+        let source = MockSource::with_chunks(vec![chunk1, chunk2])
+            .to_executor(schema.clone(), pk_indices.clone());
         let info = ExecutorInfo {
             schema,
             pk_indices,
@@ -213,13 +213,9 @@ mod tests {
 
         let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 
-        let filter = Box::new(FilterExecutor::new(
-            ActorContext::for_test(123),
-            info,
-            Box::new(source),
-            test_expr,
-        ));
-        let mut filter = filter.execute();
+        let mut filter = FilterExecutor::new(ActorContext::for_test(123), source, test_expr)
+            .boxed()
+            .execute();
 
         let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
         assert_eq!(

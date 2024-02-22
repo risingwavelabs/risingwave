@@ -24,7 +24,7 @@ use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::utils::ActorInputMetrics;
-use crate::executor::{expect_first_barrier, BoxedMessageStream, Execute, ExecutorInfo, Message};
+use crate::executor::{expect_first_barrier, BoxedMessageStream, Execute, Message};
 use crate::task::{FragmentId, SharedContext};
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -204,7 +204,6 @@ mod tests {
 
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::Schema;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;
@@ -213,8 +212,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let schema = Schema { fields: vec![] };
-
         let actor_id = 233;
         let (old, new) = (114, 514); // old and new upstream actor id
 
@@ -244,15 +241,8 @@ mod tests {
         )
         .unwrap();
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![],
-            identity: "ReceiverExecutor".to_string(),
-        };
-
         let receiver = ReceiverExecutor::new(
             ActorContext::for_test(actor_id),
-            info,
             fragment_id,
             upstream_fragment_id,
             input,

@@ -323,7 +323,8 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
@@ -352,7 +353,7 @@ mod tests {
         let simple_agg = new_boxed_simple_agg_executor(
             ActorContext::for_test(123),
             store,
-            Box::new(source),
+            source,
             false,
             agg_calls,
             0,

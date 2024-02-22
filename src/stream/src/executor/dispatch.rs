@@ -1042,6 +1042,7 @@ mod tests {
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
+    use crate::executor::Execute;
     use crate::task::test_utils::helper_make_local_actor;
 
     #[derive(Debug)]
@@ -1152,7 +1153,7 @@ mod tests {
         let (tx, rx) = channel_for_test();
         let actor_id = 233;
         let fragment_id = 666;
-        let input = Box::new(ReceiverExecutor::for_test(rx));
+        let input = Executor::new(Default::default(), ReceiverExecutor::for_test(rx).boxed());
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 

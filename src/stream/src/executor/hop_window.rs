@@ -238,8 +238,9 @@ mod tests {
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
     use risingwave_expr::expr::NonStrictExpression;
 
+    use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Execute, ExecutorInfo, StreamChunk};
+    use crate::executor::{ActorContext, Execute, StreamChunk};
 
     const CHUNK_SIZE: usize = 256;
 
@@ -263,7 +264,7 @@ mod tests {
                 .replace('^', "2022-02-02T"),
         );
         let input =
-            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
+            MockSource::with_chunks(vec![chunk]).to_executor(schema.clone(), pk_indices.clone());
         let window_slide = Interval::from_minutes(15);
         let window_size = Interval::from_minutes(30);
         let window_offset = Interval::from_minutes(0);
@@ -276,14 +277,8 @@ mod tests {
         )
         .unwrap();
 
-        super::HopWindowExecutor::new(
+        HopWindowExecutor::new(
             ActorContext::for_test(123),
-            ExecutorInfo {
-                // TODO: the schema is incorrect, but it seems useless here.
-                schema,
-                pk_indices,
-                identity: "HopWindowExecutor".to_string(),
-            },
             input,
             2,
             window_slide,

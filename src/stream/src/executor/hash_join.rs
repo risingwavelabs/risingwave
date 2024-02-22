@@ -1142,8 +1142,10 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.to_executor(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.to_executor(schema, vec![1]);
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
         let cond = with_condition.then(|| create_cond(condition_text));
@@ -1186,8 +1188,8 @@ mod tests {
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::for_test(123),
             info,
-            Box::new(source_l),
-            Box::new(source_r),
+            source_l,
+            source_r,
             params_l,
             params_r,
             vec![null_safe],
@@ -1203,7 +1205,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
         );
-        (tx_l, tx_r, Box::new(executor).execute())
+        (tx_l, tx_r, executor.boxed().execute())
     }
 
     async fn create_classical_executor<const T: JoinTypePrimitive>(
@@ -1224,8 +1226,10 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![0]);
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.to_executor(schema.clone(), vec![0]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.to_executor(schema, vec![0]);
         let params_l = JoinParams::new(vec![0, 1], vec![]);
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(|| create_cond(None));
@@ -1276,8 +1280,8 @@ mod tests {
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             ActorContext::for_test(123),
             info,
-            Box::new(source_l),
-            Box::new(source_r),
+            source_l,
+            source_r,
             params_l,
             params_r,
             vec![false],
@@ -1293,7 +1297,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
         );
-        (tx_l, tx_r, Box::new(executor).execute())
+        (tx_l, tx_r, executor.boxed().execute())
     }
 
     #[tokio::test]

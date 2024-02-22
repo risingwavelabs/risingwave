@@ -25,9 +25,7 @@ use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
-use super::{
-    expect_first_barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Mutation,
-};
+use super::{expect_first_barrier, BoxedMessageStream, Execute, Executor, Message, Mutation};
 use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -308,23 +306,18 @@ mod tests {
         let pk_indices = vec![0];
         let dml_manager = Arc::new(DmlManager::for_test());
 
-        let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "DmlExecutor".to_string(),
-        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, pk_indices);
 
-        let dml_executor = Box::new(DmlExecutor::new(
-            info,
-            Box::new(source),
+        let dml_executor = DmlExecutor::new(
+            source,
             dml_manager.clone(),
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs,
             1024,
-        ));
-        let mut dml_executor = dml_executor.execute();
+        );
+        let mut dml_executor = dml_executor.boxed().execute();
 
         let stream_chunk1 = StreamChunk::from_pretty(
             " I I

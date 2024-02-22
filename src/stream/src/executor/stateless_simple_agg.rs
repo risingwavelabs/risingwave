@@ -142,29 +142,19 @@ mod tests {
     #[tokio::test]
     async fn test_no_chunk() {
         let schema = schema_test_utils::ii();
-        let (mut tx, source) = MockSource::channel(schema, vec![2]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_barrier(2, false);
         tx.push_barrier(3, false);
 
         let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
         let schema = generate_agg_schema(&source, &agg_calls, None);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![],
-            identity: "StatelessSimpleAggExecutor".to_string(),
-        };
 
-        let simple_agg = Box::new(
-            StatelessSimpleAggExecutor::new(
-                ActorContext::for_test(123),
-                info,
-                Box::new(source),
-                agg_calls,
-            )
-            .unwrap(),
-        );
-        let mut simple_agg = simple_agg.execute();
+        let simple_agg =
+            StatelessSimpleAggExecutor::new(ActorContext::for_test(123), source, schema, agg_calls)
+                .unwrap();
+        let mut simple_agg = simple_agg.boxed().execute();
 
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
@@ -183,7 +173,8 @@ mod tests {
     #[tokio::test]
     async fn test_local_simple_agg() {
         let schema = schema_test_utils::iii();
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk\
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
@@ -207,22 +198,11 @@ mod tests {
             AggCall::from_pretty("(sum:int8 $1:int8)"),
         ];
         let schema = generate_agg_schema(&source, &agg_calls, None);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![],
-            identity: "StatelessSimpleAggExecutor".to_string(),
-        };
 
-        let simple_agg = Box::new(
-            StatelessSimpleAggExecutor::new(
-                ActorContext::for_test(123),
-                info,
-                Box::new(source),
-                agg_calls,
-            )
-            .unwrap(),
-        );
-        let mut simple_agg = simple_agg.execute();
+        let simple_agg =
+            StatelessSimpleAggExecutor::new(ActorContext::for_test(123), source, schema, agg_calls)
+                .unwrap();
+        let mut simple_agg = simple_agg.boxed().execute();
 
         // Consume the init barrier
         simple_agg.next().await.unwrap().unwrap();

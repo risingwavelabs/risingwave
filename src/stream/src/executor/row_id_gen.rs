@@ -147,20 +147,16 @@ mod tests {
         let pk_indices = vec![0];
         let row_id_index = 0;
         let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
-        let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
-        let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
+        let (mut tx, upstream) = MockSource::channel();
+        let upstream = upstream.to_executor(schema.clone(), pk_indices.clone());
+
+        let row_id_gen_executor = RowIdGenExecutor::new(
             ActorContext::for_test(233),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "RowIdGenExecutor".to_string(),
-            },
-            Box::new(upstream),
+            upstream,
             row_id_index,
             row_id_generator,
-        ));
-
-        let mut row_id_gen_executor = row_id_gen_executor.execute();
+        );
+        let mut row_id_gen_executor = row_id_gen_executor.boxed().execute();
 
         // Init barrier
         tx.push_barrier(1, false);

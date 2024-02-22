@@ -25,7 +25,7 @@ use super::{ManagedTopNState, TopNCache, NO_GROUP_KEY};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Execute, Executor, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
 /// to keep all the rows seen. As long as a record
@@ -167,7 +167,7 @@ mod tests {
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Barrier, Execute, ExecutorInfo, Message, PkIndices};
+    use crate::executor::{ActorContext, Barrier, Execute, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -220,21 +220,17 @@ mod tests {
         vec![0, 1]
     }
 
-    fn create_source() -> Box<MockSource> {
+    fn create_source() -> Executor {
         let mut chunks = create_stream_chunks();
-        let schema = create_schema();
-        Box::new(MockSource::with_messages(
-            schema,
-            pk_indices(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Chunk(std::mem::take(&mut chunks[2])),
-            ],
-        ))
+        MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(std::mem::take(&mut chunks[0])),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(std::mem::take(&mut chunks[1])),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Chunk(std::mem::take(&mut chunks[2])),
+        ])
+        .to_executor(create_schema(), pk_indices())
     }
 
     #[tokio::test]
@@ -248,24 +244,18 @@ mod tests {
         )
         .await;
 
-        let info = ExecutorInfo {
-            schema: source.schema().clone(),
-            pk_indices: source.pk_indices().to_vec(),
-            identity: "AppendOnlyTopNExecutor 1".to_string(),
-        };
-        let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::<_, false>::new(
-                source as Box<dyn Execute>,
-                ActorContext::for_test(0),
-                info,
-                storage_key,
-                (0, 5),
-                order_by(),
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        let schema = source.schema().clone();
+        let top_n_executor = AppendOnlyTopNExecutor::<_, false>::new(
+            source,
+            ActorContext::for_test(0),
+            schema,
+            storage_key,
+            (0, 5),
+            order_by(),
+            state_table,
+        )
+        .unwrap();
+        let mut top_n_executor = top_n_executor.boxed().execute();
 
         // consume the init epoch
         top_n_executor.next().await.unwrap().unwrap();
@@ -335,24 +325,18 @@ mod tests {
         )
         .await;
 
-        let info = ExecutorInfo {
-            schema: source.schema().clone(),
-            pk_indices: source.pk_indices().to_vec(),
-            identity: "AppendOnlyTopNExecutor 1".to_string(),
-        };
-        let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::<_, false>::new(
-                source as Box<dyn Execute>,
-                ActorContext::for_test(0),
-                info,
-                storage_key(),
-                (3, 4),
-                order_by(),
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        let schema = source.schema().clone();
+        let top_n_executor = AppendOnlyTopNExecutor::<_, false>::new(
+            source,
+            ActorContext::for_test(0),
+            schema,
+            storage_key(),
+            (3, 4),
+            order_by(),
+            state_table,
+        )
+        .unwrap();
+        let mut top_n_executor = top_n_executor.boxed().execute();
 
         // consume the init epoch
         top_n_executor.next().await.unwrap().unwrap();

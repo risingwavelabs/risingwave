@@ -158,7 +158,7 @@ impl<S: StateStore> Execute for NowExecutor<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_storage::memory::MemoryStateStore;
@@ -168,8 +168,7 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{
-        Barrier, BoxedMessageStream, Execute, ExecutorInfo, Mutation, StreamExecutorResult,
-        Watermark,
+        Barrier, BoxedMessageStream, Execute, Mutation, StreamExecutorResult, Watermark,
     };
 
     #[tokio::test]
@@ -392,22 +391,8 @@ mod tests {
 
         let (sender, barrier_receiver) = unbounded_channel();
 
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
-
-        let now_executor = NowExecutor::new(
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "NowExecutor".to_string(),
-            },
-            barrier_receiver,
-            state_table,
-        );
-        (sender, Box::new(now_executor).execute())
+        let now_executor =
+            NowExecutor::new(vec![DataType::Timestamptz], barrier_receiver, state_table);
+        (sender, now_executor.boxed().execute())
     }
 }

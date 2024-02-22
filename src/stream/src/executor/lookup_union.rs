@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
+use super::{Barrier, BoxedMessageStream, Execute, Executor, Message};
 
 /// Merges data from multiple inputs with order. If `order = [2, 1, 0]`, then
 /// it will first pipe data from the third input; after the third input gets a barrier, it will then
@@ -139,52 +139,36 @@ mod tests {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let source0 = MockSource::with_messages(
-            schema.clone(),
-            vec![0],
-            vec![
-                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        )
-        .stop_on_finish(false);
-        let source1 = MockSource::with_messages(
-            schema.clone(),
-            vec![0],
-            vec![
-                Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-            ],
-        )
-        .stop_on_finish(false);
-        let source2 = MockSource::with_messages(
-            schema,
-            vec![0],
-            vec![
-                Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-            ],
-        )
-        .stop_on_finish(false);
+        let source0 = MockSource::with_messages(vec![
+            Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .stop_on_finish(false)
+        .to_executor(schema.clone(), vec![0]);
+        let source1 = MockSource::with_messages(vec![
+            Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+        ])
+        .stop_on_finish(false)
+        .to_executor(schema.clone(), vec![0]);
+        let source2 = MockSource::with_messages(vec![
+            Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+        ])
+        .stop_on_finish(false)
+        .to_executor(schema, vec![0]);
 
-        let executor = Box::new(LookupUnionExecutor::new(
-            ExecutorInfo {
-                schema: source0.schema().clone(),
-                pk_indices: vec![0],
-                identity: "LookupUnionExecutor".to_string(),
-            },
-            vec![Box::new(source0), Box::new(source1), Box::new(source2)],
-            vec![2, 1, 0],
-        ))
-        .execute();
+        let executor = LookupUnionExecutor::new(vec![source0, source1, source2], vec![2, 1, 0])
+            .boxed()
+            .execute();
 
         let outputs: Vec<_> = executor.try_collect().await.unwrap();
         assert_eq!(

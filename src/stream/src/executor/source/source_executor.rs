@@ -731,11 +731,6 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "SourceExecutor".to_string(),
-            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
@@ -743,7 +738,7 @@ mod tests {
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
-        let mut executor = Box::new(executor).execute();
+        let mut executor = executor.boxed().execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
@@ -825,11 +820,6 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "SourceExecutor".to_string(),
-            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
@@ -837,7 +827,7 @@ mod tests {
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
-        let mut handler = Box::new(executor).execute();
+        let mut handler = executor.boxed().execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),

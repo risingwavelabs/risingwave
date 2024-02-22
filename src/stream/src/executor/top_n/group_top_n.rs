@@ -285,7 +285,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Barrier, Message};
+    use crate::executor::{ActorContext, Barrier, Execute, Message};
 
     fn create_schema() -> Schema {
         Schema {
@@ -351,24 +351,21 @@ mod tests {
         vec![chunk0, chunk1, chunk2, chunk3]
     }
 
-    fn create_source() -> Box<MockSource> {
+    fn create_source() -> Executor {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
-        Box::new(MockSource::with_messages(
-            schema,
-            pk_indices(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Chunk(std::mem::take(&mut chunks[2])),
-                Message::Barrier(Barrier::new_test_barrier(4)),
-                Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(Barrier::new_test_barrier(5)),
-            ],
-        ))
+        MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(std::mem::take(&mut chunks[0])),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(std::mem::take(&mut chunks[1])),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Chunk(std::mem::take(&mut chunks[2])),
+            Message::Barrier(Barrier::new_test_barrier(4)),
+            Message::Chunk(std::mem::take(&mut chunks[3])),
+            Message::Barrier(Barrier::new_test_barrier(5)),
+        ])
+        .to_executor(schema, pk_indices())
     }
 
     #[tokio::test]
@@ -384,26 +381,20 @@ mod tests {
             &pk_indices(),
         )
         .await;
-        let info = ExecutorInfo {
-            schema: source.schema().clone(),
-            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
-            identity: "GroupTopNExecutor 1".to_string(),
-        };
-        let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Execute>,
-                ActorContext::for_test(0),
-                info,
-                storage_key(),
-                (0, 2),
-                order_by_1(),
-                vec![1],
-                state_table,
-                Arc::new(AtomicU64::new(0)),
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        let schema = source.schema().clone();
+        let top_n_executor = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            source,
+            ActorContext::for_test(0),
+            schema,
+            storage_key(),
+            (0, 2),
+            order_by_1(),
+            vec![1],
+            state_table,
+            Arc::new(AtomicU64::new(0)),
+        )
+        .unwrap();
+        let mut top_n_executor = top_n_executor.boxed().execute();
 
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
@@ -486,26 +477,20 @@ mod tests {
             &pk_indices(),
         )
         .await;
-        let info = ExecutorInfo {
-            schema: source.schema().clone(),
-            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
-            identity: "GroupTopNExecutor 1".to_string(),
-        };
-        let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Execute>,
-                ActorContext::for_test(0),
-                info,
-                storage_key(),
-                (1, 2),
-                order_by_1(),
-                vec![1],
-                state_table,
-                Arc::new(AtomicU64::new(0)),
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        let schema = source.schema().clone();
+        let top_n_executor = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            source,
+            ActorContext::for_test(0),
+            schema,
+            storage_key(),
+            (1, 2),
+            order_by_1(),
+            vec![1],
+            state_table,
+            Arc::new(AtomicU64::new(0)),
+        )
+        .unwrap();
+        let mut top_n_executor = top_n_executor.boxed().execute();
 
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
@@ -581,26 +566,20 @@ mod tests {
             &pk_indices(),
         )
         .await;
-        let info = ExecutorInfo {
-            schema: source.schema().clone(),
-            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
-            identity: "GroupTopNExecutor 1".to_string(),
-        };
-        let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Execute>,
-                ActorContext::for_test(0),
-                info,
-                storage_key(),
-                (0, 2),
-                order_by_2(),
-                vec![1, 2],
-                state_table,
-                Arc::new(AtomicU64::new(0)),
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
+        let schema = source.schema().clone();
+        let top_n_executor = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            source,
+            ActorContext::for_test(0),
+            schema,
+            storage_key(),
+            (0, 2),
+            order_by_2(),
+            vec![1, 2],
+            state_table,
+            Arc::new(AtomicU64::new(0)),
+        )
+        .unwrap();
+        let mut top_n_executor = top_n_executor.boxed().execute();
 
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();

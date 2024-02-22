@@ -217,7 +217,8 @@ mod tests {
             Field::unnamed(DataType::Int64),
             Field::unnamed(DataType::Int64),
         ]);
-        let pk_indices = vec![0];
+        let dedup_col_indices = vec![0];
+        let pk_indices = dedup_col_indices.clone();
         let order_types = vec![OrderType::ascending()];
 
         let state_store = MemoryStateStore::new();
@@ -230,20 +231,17 @@ mod tests {
         )
         .await;
 
-        let (mut tx, input) = MockSource::channel(schema.clone(), pk_indices.clone());
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "AppendOnlyDedupExecutor".to_string(),
-        };
-        let mut dedup_executor = Box::new(AppendOnlyDedupExecutor::new(
-            Box::new(input),
-            state_table,
-            info,
+        let (mut tx, source) = MockSource::channel();
+        let source = source.to_executor(schema, pk_indices);
+        let mut dedup_executor = AppendOnlyDedupExecutor::new(
             ActorContext::for_test(123),
+            source,
+            dedup_col_indices,
+            state_table,
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
-        ))
+        )
+        .boxed()
         .execute();
 
         tx.push_barrier(1, false);

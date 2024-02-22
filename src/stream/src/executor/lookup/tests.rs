@@ -30,8 +30,8 @@ use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
 use crate::executor::{
-    ActorContext, Barrier, BoxedMessageStream, Execute, ExecutorInfo, MaterializeExecutor, Message,
-    PkIndices,
+    ActorContext, Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo,
+    MaterializeExecutor, Message, PkIndices,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
@@ -68,10 +68,7 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
 /// | +  | 2337  | 8    | 3       |
 /// | -  | 2333  | 6    | 3       |
 /// | b  |       |      | 3 -> 4  |
-async fn create_arrangement(
-    table_id: TableId,
-    memory_state_store: MemoryStateStore,
-) -> Box<dyn Execute + Send> {
+async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateStore) -> Executor {
     // Two columns of int32 type, the second column is arrange key.
     let columns = arrangement_col_descs();
 
@@ -101,30 +98,32 @@ async fn create_arrangement(
             .collect_vec(),
     );
 
-    let source = MockSource::with_messages(
-        schema,
-        vec![0],
-        vec![
-            Message::Barrier(Barrier::new_test_barrier(2)),
-            Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(3)),
-            Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(4)),
-        ],
-    );
+    let source = MockSource::with_messages(vec![
+        Message::Barrier(Barrier::new_test_barrier(2)),
+        Message::Chunk(chunk1),
+        Message::Barrier(Barrier::new_test_barrier(3)),
+        Message::Chunk(chunk2),
+        Message::Barrier(Barrier::new_test_barrier(4)),
+    ])
+    .to_executor(schema, vec![0]);
 
-    Box::new(
+    Executor::new(
+        ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(),
+            identity: "MaterializeExecutor".to_string(),
+        },
         MaterializeExecutor::for_test(
-            Box::new(source),
+            source,
             memory_state_store,
             table_id,
             arrangement_col_arrange_rules(),
             column_ids,
-            1,
             Arc::new(AtomicU64::new(0)),
             ConflictBehavior::NoCheck,
         )
-        .await,
+        .await
+        .boxed(),
     )
 }
 
@@ -139,7 +138,7 @@ async fn create_arrangement(
 /// | b  |       |      | 2 -> 3  |
 /// | -  | 6     | 1    | 3       |
 /// | b  |       |      | 3 -> 4  |
-fn create_source() -> Box<dyn Execute + Send> {
+fn create_source() -> Executor {
     let columns = vec![
         ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
         ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 2),
@@ -163,19 +162,16 @@ fn create_source() -> Box<dyn Execute + Send> {
             .collect_vec(),
     );
 
-    let source = MockSource::with_messages(
-        schema,
-        PkIndices::new(),
-        vec![
-            Message::Barrier(Barrier::new_test_barrier(2)),
-            Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(3)),
-            Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(4)),
-        ],
-    );
+    let source = MockSource::with_messages(vec![
+        Message::Barrier(Barrier::new_test_barrier(2)),
+        Message::Chunk(chunk1),
+        Message::Barrier(Barrier::new_test_barrier(3)),
+        Message::Chunk(chunk2),
+        Message::Barrier(Barrier::new_test_barrier(4)),
+    ])
+    .to_executor(schema, PkIndices::new());
 
-    Box::new(source)
+    source
 }
 
 async fn next_msg(buffer: &mut Vec<Message>, executor: &mut BoxedMessageStream) {
