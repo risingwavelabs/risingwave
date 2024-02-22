@@ -224,6 +224,17 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         Ok((futures::stream::select_all(streams).boxed(), abort_handles))
     }
 
+    /// `source_id | source_name | actor_id | fragment_id`
+    #[inline]
+    fn get_metric_labels(&self) -> [String; 4] {
+        [
+            self.stream_source_core.source_id.to_string(),
+            format!("{}_backfill", self.stream_source_core.source_name.clone()),
+            self.actor_ctx.id.to_string(),
+            self.actor_ctx.fragment_id.to_string(),
+        ]
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(mut self, input: Executor) {
         let mut input = input.execute();
@@ -564,6 +575,16 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                 "Unexpected backfilling state, split_id: {split_id}"
                             );
                         });
+                        self.metrics
+                            .source_backfill_row_count
+                            .with_label_values(
+                                &self
+                                    .get_metric_labels()
+                                    .iter()
+                                    .map(AsRef::as_ref)
+                                    .collect::<Vec<&str>>(),
+                            )
+                            .inc_by(chunk.cardinality() as u64);
 
                         yield Message::Chunk(chunk);
                     }
@@ -648,6 +669,16 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         stage: &mut BackfillStage,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
+        self.metrics
+            .source_split_change_count
+            .with_label_values(
+                &self
+                    .get_metric_labels()
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<&str>>(),
+            )
+            .inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, stage, should_trim_state)
@@ -754,6 +785,16 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
         splits: &mut HashSet<SplitId>,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
+        self.metrics
+            .source_split_change_count
+            .with_label_values(
+                &self
+                    .get_metric_labels()
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<&str>>(),
+            )
+            .inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             self.update_state_if_changed_forward_stage(target_splits, splits, should_trim_state)
                 .await?;
