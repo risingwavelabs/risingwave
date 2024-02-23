@@ -215,16 +215,29 @@ impl CheckpointControl {
         }
     }
 
+    fn inflight_command_num(&self) -> usize {
+        self.inflight_command_ctx_queue.len()
+    }
+
+    fn total_command_num(&self) -> usize {
+        self.inflight_command_ctx_queue.len()
+            + if self.completing_command.is_some() {
+                1
+            } else {
+                0
+            }
+    }
+
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
         self.context
             .metrics
             .in_flight_barrier_nums
-            .set(self.inflight_command_ctx_queue.len() as i64);
+            .set(self.inflight_command_num() as i64);
         self.context
             .metrics
             .all_barrier_nums
-            .set(self.inflight_command_ctx_queue.len() as i64);
+            .set(self.total_command_num() as i64);
     }
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
@@ -253,7 +266,7 @@ impl CheckpointControl {
 
     /// Pause inject barrier until True.
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        let in_flight_not_full = self.inflight_command_ctx_queue.len() < in_flight_barrier_nums;
+        let in_flight_not_full = self.inflight_command_num() < in_flight_barrier_nums;
 
         // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
         let should_pause = self
@@ -312,6 +325,9 @@ struct InflightCommand {
 struct CompletingCommand {
     command_ctx: Arc<CommandContext>,
 
+    // The join handle of a spawned task that completes the barrier.
+    // The return value indicate whether there is some create streaming job command
+    // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
     join_handle: JoinHandle<MetaResult<bool>>,
 }
 
