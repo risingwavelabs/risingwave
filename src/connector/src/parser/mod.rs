@@ -48,7 +48,7 @@ use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::util::{
     extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
@@ -559,7 +559,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
-#[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+#[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
 async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) {
     #[for_await]
     for batch in stream {
