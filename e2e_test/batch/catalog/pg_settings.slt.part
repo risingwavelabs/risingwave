@@ -63,6 +63,14 @@ query TT
 SELECT * FROM pg_catalog.pg_settings where name='dummy';
 ----
 
+# https://github.com/risingwavelabs/risingwave/issues/15125
+query TT
+SELECT min(name) name, context FROM pg_catalog.pg_settings GROUP BY context;
+----
+application_name            user
+backup_storage_directory    postmaster
+block_size_kb               internal
+
 # Tab-completion of `SET` command
 query T
 SELECT name
