@@ -42,7 +42,7 @@ pub struct AvroAccessBuilder {
 
 impl AccessBuilder for AvroAccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
-        self.value = self.parse_avro_value(&payload, Some(&*self.schema)).await?;
+        self.value = Some(self.parse_avro_value(&payload, &*self.schema).await?);
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
             AvroParseOptions::default().with_schema(&self.schema),
@@ -72,29 +72,27 @@ impl AvroAccessBuilder {
     async fn parse_avro_value(
         &self,
         payload: &[u8],
-        reader_schema: Option<&Schema>,
-    ) -> anyhow::Result<Option<Value>> {
+        reader_schema: &Schema,
+    ) -> anyhow::Result<Value> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
         if let Some(resolver) = &self.schema_resolver {
             let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
             let writer_schema = resolver.get(schema_id).await?;
-            Ok(Some(from_avro_datum(
+            return Ok(from_avro_datum(
                 writer_schema.as_ref(),
                 &mut raw_payload,
-                reader_schema,
-            )?))
-        } else if let Some(schema) = reader_schema {
-            let mut reader = Reader::with_schema(schema, payload)?;
-            match reader.next() {
-                Some(Ok(v)) => Ok(Some(v)),
-                Some(Err(e)) => Err(e)?,
-                None => {
-                    anyhow::bail!("avro parse unexpected eof")
-                }
+                Some(reader_schema),
+            )?);
+        }
+        let schema = reader_schema;
+        let mut reader = Reader::with_schema(schema, payload)?;
+        match reader.next() {
+            Some(Ok(v)) => Ok(v),
+            Some(Err(e)) => Err(e)?,
+            None => {
+                anyhow::bail!("avro parse unexpected eof")
             }
-        } else {
-            unreachable!("both schema_resolver and reader_schema not exist");
         }
     }
 }
