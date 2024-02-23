@@ -33,11 +33,11 @@ pub mod cluster;
 pub mod fragment;
 pub mod id;
 pub mod rename;
+pub mod scale;
 pub mod streaming_job;
 pub mod system_param;
 pub mod user;
 pub mod utils;
-mod scale;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {

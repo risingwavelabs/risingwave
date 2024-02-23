@@ -18,29 +18,37 @@ pub struct ScaleControllerV2 {
     metadata_manager: MetadataManager,
 }
 
-pub struct RescheduleV2 {}
+pub struct RescheduleV2 {
+    plan: HashMap<FragmentId, HashMap<WorkerId, usize>>,
+}
 
 use std::collections::HashMap;
 
 use mv2::FragmentId;
 use risingwave_meta_model_v2 as mv2;
 use risingwave_meta_model_v2::actor::Relation::Fragment;
+use risingwave_meta_model_v2::WorkerId;
+use sea_orm::TransactionTrait;
 
 use crate::barrier::Command::RescheduleFragment;
 use crate::manager::MetadataManager;
+use crate::model::Worker;
+use crate::MetaResult;
 
 impl ScaleControllerV2 {
-    pub async fn reschedule(&self, plan: HashMap<FragmentId, usize>) {
+    pub async fn reschedule(&self, reschedule: RescheduleV2) -> MetaResult<()> {
+        let metadata_manager = self.metadata_manager.as_v2_ref();
 
+        let inner = metadata_manager.catalog_controller.inner.write().await;
+        let txn = inner.db.begin().await?;
 
-        // self.metadata_manager.get_upstream_root_fragments()
+        let fragment_ids = reschedule.plan.keys().cloned().collect::<Vec<_>>();
 
-        // let reschedules= Default::default();
-        // let result = RescheduleFragment {
-        //     reschedules,
-        //     table_parallelism: Default::default(),
-        // };
+        let working_set = metadata_manager
+            .catalog_controller
+            .resolve_working_set_for_reschedule(&txn, fragment_ids)
+            .await?;
 
-        todo!()
+        Ok(())
     }
 }
