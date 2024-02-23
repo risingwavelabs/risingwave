@@ -386,7 +386,7 @@ where
 
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
-            FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
+            FeMessage::Startup(msg) => self.process_startup_msg(msg).await?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
@@ -469,7 +469,7 @@ where
         Ok(())
     }
 
-    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
+    async fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
         let db_name = msg
             .config
             .get("database")
@@ -483,7 +483,8 @@ where
 
         let session = self
             .session_mgr
-            .connect(&db_name, &user_name, self.peer_addr.clone())
+            .connect(db_name, user_name, self.peer_addr.clone())
+            .await
             .map_err(PsqlError::StartupError)?;
 
         let application_name = msg.config.get("application_name");
@@ -508,7 +509,7 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth => {
+            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
@@ -525,9 +526,7 @@ where
 
     async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
         let authenticator = self.session.as_ref().unwrap().user_authenticator();
-        authenticator
-            .authenticate(&msg.password, Arc::clone(self.session.as_ref().unwrap()))
-            .await?;
+        authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;

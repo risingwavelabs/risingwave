@@ -46,7 +46,7 @@ use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMod
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
-use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -925,26 +925,29 @@ pub struct SessionManagerImpl {
 impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
-    fn connect(
+    async fn connect(
         &self,
-        database: &str,
-        user_name: &str,
+        database: String,
+        user_name: String,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        let catalog_reader = self.env.catalog_reader();
-        let reader = catalog_reader.read_guard();
-        let database_id = reader
-            .get_database_by_name(database)
-            .map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database),
-                ))
-            })?
-            .id();
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user) = reader.get_user_by_name(user_name) {
+        let database_id = {
+            let catalog_reader = self.env.catalog_reader().read_guard();
+            catalog_reader
+                .get_database_by_name(&database)
+                .map_err(|_| {
+                    Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("database \"{}\" does not exist", database),
+                    ))
+                })?
+                .id()
+        };
+        let user = {
+            let user_reader = self.env.user_info_reader().read_guard();
+            user_reader.get_user_by_name(&user_name).cloned()
+        };
+        if let Some(user) = user {
             if !user.can_login {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
@@ -975,8 +978,15 @@ impl SessionManager for SessionManagerImpl {
                             ),
                             salt,
                         }
-                    } else if auth_info.encryption_type == EncryptionType::OAuth as i32 {
-                        UserAuthenticator::OAuth
+                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                        let reader = self
+                            .env
+                            .meta_client()
+                            .get_system_params()
+                            .await
+                            .map_err(|e| PsqlError::StartupError(e.into()))?;
+                        let oauth_jwks_url = reader.oauth_jwks_url().to_string();
+                        UserAuthenticator::OAuth(oauth_jwks_url)
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,

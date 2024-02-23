@@ -28,7 +28,7 @@ const VALID_MD5_ENCRYPTED_LEN: usize = MD5_ENCRYPTED_PREFIX.len() + 32;
 #[inline(always)]
 pub fn build_oauth_info() -> Option<AuthInfo> {
     Some(AuthInfo {
-        encryption_type: EncryptionType::OAuth as i32,
+        encryption_type: EncryptionType::Oauth as i32,
         encrypted_value: Vec::new(),
     })
 }
@@ -90,7 +90,7 @@ pub fn encrypted_raw_password(info: &AuthInfo) -> String {
         EncryptionType::Plaintext => "",
         EncryptionType::Sha256 => SHA256_ENCRYPTED_PREFIX,
         EncryptionType::Md5 => MD5_ENCRYPTED_PREFIX,
-        EncryptionType::OAuth => "",
+        EncryptionType::Oauth => "",
     };
     format!("{}{}", prefix, encrypted_pwd)
 }

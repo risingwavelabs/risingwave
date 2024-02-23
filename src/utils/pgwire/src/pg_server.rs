@@ -23,7 +23,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
-use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
@@ -50,10 +50,10 @@ pub trait SessionManager: Send + Sync + 'static {
 
     fn connect(
         &self,
-        database: &str,
-        user_name: &str,
+        database: String,
+        user_name: String,
         peer_addr: AddressRef,
-    ) -> Result<Arc<Self::Session>, BoxedError>;
+    ) -> impl Future<Output = Result<Arc<Self::Session>, BoxedError>> + Send;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -164,7 +164,7 @@ pub enum UserAuthenticator {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
-    OAuth,
+    OAuth(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -204,23 +204,14 @@ async fn validate_jwt(jwt: &str, jwks_url: &str) -> Result<bool, BoxedError> {
 }
 
 impl UserAuthenticator {
-    pub async fn authenticate(
-        &self,
-        password: &[u8],
-        session: Arc<impl Session>,
-    ) -> PsqlResult<()> {
+    pub async fn authenticate(&self, password: &[u8]) -> PsqlResult<()> {
         let success = match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
-            UserAuthenticator::OAuth => {
-                let system_params_reader = session
-                    .get_system_params()
-                    .await
-                    .map_err(PsqlError::StartupError)?;
-                let oauth_jwks_url = system_params_reader.oauth_jwks_url();
+            UserAuthenticator::OAuth(oauth_jwks_url) => {
                 validate_jwt(&String::from_utf8_lossy(password), oauth_jwks_url)
                     .await
                     .map_err(PsqlError::StartupError)?
@@ -319,10 +310,10 @@ mod tests {
     impl SessionManager for MockSessionManager {
         type Session = MockSession;
 
-        fn connect(
+        async fn connect(
             &self,
-            _database: &str,
-            _user_name: &str,
+            _database: String,
+            _user_name: String,
             _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))

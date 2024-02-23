@@ -80,10 +80,10 @@ pub struct LocalFrontend {
 impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
-    fn connect(
+    async fn connect(
         &self,
-        _database: &str,
-        _user_name: &str,
+        _database: String,
+        _user_name: String,
         _peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())

@@ -14,7 +14,7 @@ message AuthInfo {
     PLAINTEXT = 1;
     SHA256 = 2;
     MD5 = 3;
-    OAuth = 4;
+    OAUTH = 4;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
