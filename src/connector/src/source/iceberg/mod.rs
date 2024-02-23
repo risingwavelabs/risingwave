@@ -97,7 +97,7 @@ impl SplitMetaData for IcebergSplit {
     }
 
     fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        serde_json::from_value(value.take()).map_err(|e| anyhow!(e).into())
     }
 
     fn encode_to_json(&self) -> JsonbVal {
@@ -139,7 +139,7 @@ impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
         batch_parallelism: usize,
-    ) -> anyhow::Result<Vec<IcebergSplit>> {
+    ) -> ConnectorResult<Vec<IcebergSplit>> {
         let table = self.config.load_table().await?;
         let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
         let files = table
