@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::DataType;
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use thiserror_ext::AsReport;
 
@@ -27,7 +24,7 @@ use super::create_sink::{gen_sink_plan, get_partition_compute_info};
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
-use super::RwPgResponse;
+use super::{RwPgResponse, RwPgResponseBuilderExt};
 use crate::error::{ErrorCode, Result};
 use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
@@ -254,20 +251,17 @@ pub async fn handle_explain(
         }
     }
 
-    let rows = blocks
-        .iter()
-        .flat_map(|b| b.lines().map(|l| l.to_owned()))
-        .map(|l| Row::new(vec![Some(l.into())]))
-        .collect_vec();
+    let rows = blocks.iter().flat_map(|b| b.lines()).map(|l| ExplainRow {
+        query_plan: l.into(),
+    });
 
     Ok(PgResponse::builder(StatementType::EXPLAIN)
-        .values(
-            rows.into(),
-            vec![PgFieldDescriptor::new(
-                "QUERY PLAN".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )],
-        )
+        .rows(rows)
         .into())
+}
+
+#[derive(Fields)]
+#[fields(style = "TITLE CASE")]
+struct ExplainRow {
+    query_plan: String,
 }

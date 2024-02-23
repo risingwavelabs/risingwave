@@ -12,25 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod opendal_object_store;
-pub use opendal_object_store::*;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-#[cfg(feature = "hdfs-backend")]
-pub mod hdfs;
-#[cfg(feature = "hdfs-backend")]
-pub use hdfs::*;
-
-pub mod webhdfs;
-
-pub mod gcs;
-
-pub mod obs;
-
-pub mod azblob;
-pub mod opendal_s3;
-pub mod oss;
-
-pub mod fs;
-
-// To make sure the the operation is consistent, we should specially set `atomic_write_dir` for fs, hdfs and webhdfs services.
-const ATOMIC_WRITE_DIR: &str = "atomic_write_dir/";
+/// The catalog `pg_partitioned_table` stores information about how tables are partitioned. Reference: [`https://www.postgresql.org/docs/current/catalog-pg-partitioned-table.html`]
+#[system_catalog(view, "pg_catalog.pg_partitioned_table")]
+#[derive(Fields)]
+struct PgPartitionedTable {
+    partrelid: i32,
+    partstrat: String,
+    partnatts: i16,
+    partdefid: i32,
+    partattrs: Vec<i16>,
+    partclass: Vec<i32>,
+    partcollation: Vec<i32>,
+    partexprs: Option<String>,
+}
