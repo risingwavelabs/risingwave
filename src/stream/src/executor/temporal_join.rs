@@ -406,8 +406,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         #[try_stream]
                         async {
                             #[allow(unreachable_code)]
+                            #[allow(clippy::diverging_sub_expression)]
                             if false {
-                                return Err(unreachable!("type hints only") as StreamExecutorError);
+                                return unreachable!("type hints only") as StreamExecutorResult<_>;
                             }
                             let mut builder = JoinStreamChunkBuilder::new(
                                 self.chunk_size,
