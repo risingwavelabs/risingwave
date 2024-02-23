@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -279,6 +279,7 @@ pub mod agg_executor {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
+    use futures::future;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
@@ -293,7 +294,6 @@ pub mod agg_executor {
         AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
     use crate::executor::aggregation::AggStateStorage;
-    use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
         ActorContext, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, HashAggExecutor,
         PkIndices, SimpleAggExecutor,
@@ -487,7 +487,7 @@ pub mod agg_executor {
             version: PbAggNodeVersion::Max,
 
             input,
-            actor_ctx: ActorContext::create(123),
+            actor_ctx: ActorContext::for_test(123),
             info,
 
             extreme_cache_size,
@@ -498,7 +498,6 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            metrics: Arc::new(StreamingMetrics::unused()),
 
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
@@ -522,21 +521,18 @@ pub mod agg_executor {
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let mut storages = Vec::with_capacity(agg_calls.iter().len());
-        for (idx, agg_call) in agg_calls.iter().enumerate() {
-            storages.push(
-                create_agg_state_storage(
-                    store.clone(),
-                    TableId::new(idx as u32),
-                    agg_call,
-                    &[],
-                    &pk_indices,
-                    input.as_ref(),
-                    is_append_only,
-                )
-                .await,
+        let storages = future::join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
+            create_agg_state_storage(
+                store.clone(),
+                TableId::new(idx as u32),
+                agg_call,
+                &[],
+                &pk_indices,
+                input.as_ref(),
+                is_append_only,
             )
-        }
+        }))
+        .await;
 
         let intermediate_state_table = create_intermediate_state_table(
             store,
@@ -569,7 +565,6 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-            metrics: Arc::new(StreamingMetrics::unused()),
             extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()

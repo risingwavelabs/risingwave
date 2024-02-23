@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -112,7 +112,6 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             scan_ranges,
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
-            chunk_size: None,
             limit: None,
         });
 
@@ -225,6 +224,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let exchange_node = NodeBody::Exchange(ExchangeNode {
             sources,
+            sequential: true,
             input_schema: self.inner_side_schema.to_prost(),
         });
 

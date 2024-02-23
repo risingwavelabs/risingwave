@@ -4,6 +4,7 @@ package ddl_service;
 
 import "catalog.proto";
 import "common.proto";
+import "meta.proto";
 import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
@@ -15,8 +16,7 @@ message CreateDatabaseRequest {
 
 message CreateDatabaseResponse {
   common.Status status = 1;
-  uint32 database_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropDatabaseRequest {
@@ -34,8 +34,7 @@ message CreateSchemaRequest {
 
 message CreateSchemaResponse {
   common.Status status = 1;
-  uint32 schema_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropSchemaRequest {
@@ -54,8 +53,7 @@ message CreateSourceRequest {
 
 message CreateSourceResponse {
   common.Status status = 1;
-  uint32 source_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropSourceRequest {
@@ -80,17 +78,19 @@ message AlterSourceResponse {
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
+  optional ReplaceTablePlan affected_table_change = 3;
 }
 
 message CreateSinkResponse {
   common.Status status = 1;
-  uint32 sink_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropSinkRequest {
   uint32 sink_id = 1;
   bool cascade = 2;
+  optional ReplaceTablePlan affected_table_change = 3;
 }
 
 message DropSinkResponse {
@@ -105,8 +105,7 @@ message CreateMaterializedViewRequest {
 
 message CreateMaterializedViewResponse {
   common.Status status = 1;
-  uint32 table_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropMaterializedViewRequest {
@@ -125,8 +124,7 @@ message CreateViewRequest {
 
 message CreateViewResponse {
   common.Status status = 1;
-  uint32 view_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropViewRequest {
@@ -139,10 +137,17 @@ message DropViewResponse {
   uint64 version = 2;
 }
 
-// An enum to distinguish different types of the Table streaming job.
+// An enum to distinguish different types of the `Table` streaming job.
 // - GENERAL: Table streaming jobs w/ or w/o a connector
 // - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
+//
 // And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
+//
+// Currently, it's usages include:
+// - When creating the streaming actor graph, different table jobs may need different treatment.
+// - Some adhoc validation when creating the streaming job. e.g., `validate_cdc_table`.
+//
+// It's not included in `catalog.Table`, and thus not persisted. It's only used in the `CreateTableRequest`.
 enum TableJobType {
   TABLE_JOB_TYPE_UNSPECIFIED = 0;
   // table streaming jobs excepts the `SHARED_CDC_SOURCE` type
@@ -162,8 +167,7 @@ message CreateTableRequest {
 
 message CreateTableResponse {
   common.Status status = 1;
-  uint32 table_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message AlterNameRequest {
@@ -213,6 +217,14 @@ message AlterSetSchemaResponse {
   uint64 version = 2;
 }
 
+message AlterParallelismRequest {
+  uint32 table_id = 1;
+  meta.TableParallelism parallelism = 2;
+  bool deferred = 3;
+}
+
+message AlterParallelismResponse {}
+
 message AlterOwnerResponse {
   common.Status status = 1;
   uint64 version = 2;
@@ -224,8 +236,7 @@ message CreateFunctionRequest {
 
 message CreateFunctionResponse {
   common.Status status = 1;
-  uint32 function_id = 2;
-  uint64 version = 3;
+  uint64 version = 2;
 }
 
 message DropFunctionRequest {
@@ -266,8 +277,7 @@ message CreateIndexRequest {
 
 message CreateIndexResponse {
   common.Status status = 1;
-  uint32 index_id = 2;
-  uint64 version = 4;
+  uint64 version = 2;
 }
 
 message DropIndexRequest {
@@ -280,7 +290,7 @@ message DropIndexResponse {
   uint64 version = 2;
 }
 
-message ReplaceTablePlanRequest {
+message ReplaceTablePlan {
   // The new table catalog, with the correct table ID and a new version.
   // If the new version does not match the subsequent version in the meta service's
   // catalog, this request will be rejected.
@@ -288,9 +298,14 @@ message ReplaceTablePlanRequest {
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // The mapping from the old columns to the new columns of the table.
+  // If no column modifications occur (such as for sinking into table), this will be None.
   catalog.ColIndexMapping table_col_index_mapping = 3;
   // Source catalog of table's associated source
   catalog.Source source = 4;
+}
+
+message ReplaceTablePlanRequest {
+  ReplaceTablePlan plan = 1;
 }
 
 message ReplaceTablePlanResponse {
@@ -336,9 +351,8 @@ message CreateConnectionRequest {
 }
 
 message CreateConnectionResponse {
-  uint32 connection_id = 1;
   // global catalog version
-  uint64 version = 2;
+  uint64 version = 1;
 }
 
 message ListConnectionsRequest {}
@@ -393,6 +407,7 @@ service DdlService {
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
+  rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

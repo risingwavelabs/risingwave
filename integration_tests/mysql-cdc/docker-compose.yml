@@ -1,30 +1,18 @@
 ---
 version: "3"
 services:
-  compactor-0:
+  risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
-      service: compactor-0
-  compute-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: compute-node-0
+      service: risingwave-standalone
   etcd-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: etcd-0
-  frontend-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: frontend-node-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
       service: grafana-0
-  meta-node-0:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: meta-node-0
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -64,14 +52,14 @@ services:
     depends_on:
       mysql_prepare:
         condition: service_completed_successfully
-      frontend-node-0:
+      risingwave-standalone:
         condition: service_healthy
     volumes:
       - "./compatibility-rw.sql:/compatibility-rw.sql"
     command:
       - /bin/sh
       - -c
-      - "psql postgresql://root:@frontend-node-0:4566/dev < /compatibility-rw.sql"
+      - "psql postgresql://root:@risingwave-standalone:4566/dev < /compatibility-rw.sql"
   datagen_tpch:
     image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on:
@@ -80,7 +68,7 @@ services:
     container_name: datagen_tpch
     restart: on-failure
 volumes:
-  compute-node-0:
+  risingwave-standalone:
     external: false
   etcd-0:
     external: false

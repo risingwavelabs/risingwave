@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -97,6 +97,12 @@ pub enum TimestampHandlingMode {
     String,
 }
 
+#[derive(Clone, Copy)]
+pub enum TimeHandlingMode {
+    Milli,
+    String,
+}
+
 #[derive(Clone, Copy, Default)]
 pub enum TimestamptzHandlingMode {
     #[default]
@@ -134,8 +140,10 @@ pub enum CustomJsonType {
     // The internal order of the struct should follow the insertion order.
     // The decimal needs verification and calibration.
     Doris(HashMap<String, (u8, u8)>),
-    // Bigquery's json need date is string.
-    Bigquery,
+    // Es's json need jsonb is struct
+    Es,
+    // starrocks' need jsonb is struct
+    StarRocks(HashMap<String, (u8, u8)>),
     None,
 }
 

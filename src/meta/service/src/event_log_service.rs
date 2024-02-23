@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
 
 use risingwave_meta::manager::event_log::EventLogMangerRef;
 use risingwave_pb::meta::event_log_service_server::EventLogService;
-use risingwave_pb::meta::{ListEventLogRequest, ListEventLogResponse};
+use risingwave_pb::meta::{
+    AddEventLogRequest, AddEventLogResponse, ListEventLogRequest, ListEventLogResponse,
+};
 use tonic::{Request, Response, Status};
 
 pub struct EventLogServiceImpl {
@@ -35,5 +37,21 @@ impl EventLogService for EventLogServiceImpl {
     ) -> Result<Response<ListEventLogResponse>, Status> {
         let event_logs = self.event_log_manager.list_event_logs();
         Ok(Response::new(ListEventLogResponse { event_logs }))
+    }
+
+    async fn add_event_log(
+        &self,
+        request: Request<AddEventLogRequest>,
+    ) -> Result<Response<AddEventLogResponse>, Status> {
+        let Some(event) = request.into_inner().event else {
+            return Ok(Response::new(AddEventLogResponse {}));
+        };
+        let e = match event {
+            risingwave_pb::meta::add_event_log_request::Event::WorkerNodePanic(e) => {
+                risingwave_pb::meta::event_log::Event::WorkerNodePanic(e)
+            }
+        };
+        self.event_log_manager.add_event_logs(vec![e]);
+        Ok(Response::new(AddEventLogResponse {}))
     }
 }

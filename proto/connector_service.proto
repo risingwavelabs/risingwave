@@ -39,10 +39,7 @@ message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
     SinkPayloadFormat format = 2;
-  }
-
-  message BeginEpoch {
-    uint64 epoch = 1;
+    TableSchema payload_schema = 3;
   }
 
   message WriteBatch {
@@ -76,9 +73,13 @@ message SinkWriterStreamRequest {
     bool is_checkpoint = 2;
   }
 
+  // reserve for previous BeginEpoch to avoid protobuf breaking change
+  // though there is no harm.
+  reserved 2;
+  reserved "begin_epoch";
+
   oneof request {
     StartSink start = 1;
-    BeginEpoch begin_epoch = 2;
     WriteBatch write_batch = 3;
     Barrier barrier = 4;
   }
@@ -159,6 +160,8 @@ message CdcMessage {
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
+  int64 source_ts_ms = 5;
+  bool is_transaction_meta = 6;
 }
 
 enum SourceType {

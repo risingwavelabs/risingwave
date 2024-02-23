@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,9 +40,9 @@ class UdfProducer extends NoOpFlightProducer {
     void addFunction(String name, UserDefinedFunction function) throws IllegalArgumentException {
         UserDefinedFunctionBatch udf;
         if (function instanceof ScalarFunction) {
-            udf = new ScalarFunctionBatch((ScalarFunction) function, this.allocator);
+            udf = new ScalarFunctionBatch((ScalarFunction) function);
         } else if (function instanceof TableFunction) {
-            udf = new TableFunctionBatch((TableFunction) function, this.allocator);
+            udf = new TableFunctionBatch((TableFunction) function);
         } else {
             throw new IllegalArgumentException(
                     "Unknown function type: " + function.getClass().getName());
@@ -76,21 +76,26 @@ class UdfProducer extends NoOpFlightProducer {
 
     @Override
     public void doExchange(CallContext context, FlightStream reader, ServerStreamListener writer) {
-        try {
+        try (var allocator = this.allocator.newChildAllocator("exchange", 0, Long.MAX_VALUE)) {
             var functionName = reader.getDescriptor().getPath().get(0);
             logger.debug("call function: " + functionName);
 
             var udf = this.functions.get(functionName);
-            try (var root = VectorSchemaRoot.create(udf.getOutputSchema(), this.allocator)) {
+            try (var root = VectorSchemaRoot.create(udf.getOutputSchema(), allocator)) {
                 var loader = new VectorLoader(root);
                 writer.start(root);
                 while (reader.next()) {
-                    var outputBatches = udf.evalBatch(reader.getRoot());
-                    while (outputBatches.hasNext()) {
-                        var outputRoot = outputBatches.next();
-                        var unloader = new VectorUnloader(outputRoot);
-                        loader.load(unloader.getRecordBatch());
-                        writer.putNext();
+                    try (var input = reader.getRoot()) {
+                        var outputBatches = udf.evalBatch(input, allocator);
+                        while (outputBatches.hasNext()) {
+                            try (var outputRoot = outputBatches.next()) {
+                                var unloader = new VectorUnloader(outputRoot);
+                                try (var outputBatch = unloader.getRecordBatch()) {
+                                    loader.load(outputBatch);
+                                }
+                            }
+                            writer.putNext();
+                        }
                     }
                 }
                 writer.completed();

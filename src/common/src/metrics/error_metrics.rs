@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,6 +86,7 @@ pub struct ErrorMetrics {
     pub user_compute_error: ErrorMetricRef<4>,
     pub user_source_reader_error: ErrorMetricRef<5>,
     pub user_source_error: ErrorMetricRef<5>,
+    pub cdc_source_error: ErrorMetricRef<3>,
 }
 
 impl ErrorMetrics {
@@ -123,6 +124,12 @@ impl ErrorMetrics {
                     "table_id",
                 ],
             )),
+            // cdc source is singleton, so we use source_id to identify the connector
+            cdc_source_error: Arc::new(ErrorMetric::new(
+                "cdc_source_error",
+                "CDC source errors in the system, queryable by tags",
+                &["connector_name", "source_id", "error_msg"],
+            )),
         }
     }
 
@@ -132,6 +139,7 @@ impl ErrorMetrics {
             &self.user_compute_error.desc,
             &self.user_source_reader_error.desc,
             &self.user_source_error.desc,
+            &self.cdc_source_error.desc,
         ]
     }
 
@@ -141,6 +149,7 @@ impl ErrorMetrics {
             self.user_compute_error.collect(),
             self.user_source_reader_error.collect(),
             self.user_source_error.collect(),
+            self.cdc_source_error.collect(),
         ]
     }
 }

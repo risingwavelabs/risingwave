@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,54 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
-use thiserror::Error;
+use risingwave_common::error::v2::def_anyhow_newtype;
 
-#[derive(Error, Debug)]
-pub enum ConnectorError {
-    #[error("Parse error: {0}")]
-    Parse(&'static str),
+def_anyhow_newtype! {
+    pub ConnectorError,
 
-    #[error("Invalid parameter {name}: {reason}")]
-    InvalidParam { name: &'static str, reason: String },
-
-    #[error("Kafka error: {0}")]
-    Kafka(#[from] rdkafka::error::KafkaError),
-
-    #[error("Config error: {0}")]
-    Config(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error("Connection error: {0}")]
-    Connection(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error("MySQL error: {0}")]
-    MySql(#[from] mysql_async::Error),
-
-    #[error("Pulsar error: {0}")]
-    Pulsar(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
-
-    #[error(transparent)]
-    Internal(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+    // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
+    mysql_async::Error => "MySQL error",
+    tokio_postgres::Error => "Postgres error",
 }
 
-impl From<ConnectorError> for RwError {
-    fn from(s: ConnectorError) -> Self {
-        ErrorCode::ConnectorError(Box::new(s)).into()
-    }
-}
+pub type ConnectorResult<T> = Result<T, ConnectorError>;

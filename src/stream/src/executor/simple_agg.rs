@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
-use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -91,8 +90,6 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
-
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -151,7 +148,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
-                metrics: args.metrics,
             },
         })
     }
@@ -182,7 +178,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 call_visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
-                this.actor_ctx.clone(),
             )
             .await?;
 
@@ -212,19 +207,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
-            vars.distinct_dedup
-                .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
+            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
             // Flush states into intermediate state table.
             let encoded_states = vars.agg_group.encode_states(&this.agg_funcs)?;
             this.intermediate_state_table
                 .update_without_old_value(encoded_states);
-
-            // Commit all state tables.
-            futures::future::try_join_all(
-                this.all_state_tables_mut().map(|table| table.commit(epoch)),
-            )
-            .await?;
 
             // Retrieve modified states and put the changes into the builders.
             vars.agg_group
@@ -233,15 +221,21 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 .map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
         } else {
             // No state is changed.
-            // Call commit on state table to increment the epoch.
-            this.all_state_tables_mut().for_each(|table| {
-                table.commit_no_data_expected(epoch);
-            });
             None
         };
 
+        // Commit all state tables.
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
+            .await?;
+
         vars.state_changed = false;
         Ok(chunk)
+    }
+
+    async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
+            .await?;
+        Ok(())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -259,10 +253,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         let mut distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
-            &this.watermark_epoch,
+            this.watermark_epoch.clone(),
             &this.distinct_dedup_tables,
-            this.actor_ctx.id,
-            this.metrics.clone(),
+            this.actor_ctx.clone(),
         );
         distinct_dedup.dedup_caches_mut().for_each(|cache| {
             cache.update_epoch(barrier.epoch.curr);
@@ -296,6 +289,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+                    Self::try_flush_data(&mut this).await?;
                 }
                 Message::Barrier(barrier) => {
                     if let Some(chunk) =
@@ -368,7 +362,7 @@ mod tests {
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             store,
             Box::new(source),
             false,

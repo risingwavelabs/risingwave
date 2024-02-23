@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
@@ -143,7 +143,7 @@ impl BatchTaskContext for ComputeNodeContext {
             let executor_mem_usage = metrics
                 .executor_metrics()
                 .mem_usage
-                .with_label_values(&metrics.executor_labels(executor_id));
+                .with_guarded_label_values(&metrics.executor_labels(executor_id));
             MemoryContext::new(Some(self.mem_context.clone()), executor_mem_usage)
         } else {
             MemoryContext::none()
@@ -174,10 +174,7 @@ impl ComputeNodeContext {
         ));
         let mem_context = MemoryContext::new(
             Some(batch_mem_context),
-            batch_metrics
-                .get_task_metrics()
-                .task_mem_usage
-                .with_label_values(&batch_metrics.task_labels()),
+            batch_metrics.task_mem_usage.clone(),
         );
         Self {
             env,

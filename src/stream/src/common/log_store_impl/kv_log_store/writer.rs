@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
@@ -24,6 +23,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 use tokio::sync::watch;
 
@@ -117,7 +117,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 self.state_store.insert(key, value, None)?;
             }
             flush_info.report(&self.metrics);
-            self.state_store.flush(Vec::new()).await?;
+            self.state_store.flush().await?;
 
             let vnode_bitmap = vnode_bitmap_builder.finish();
             self.tx
@@ -150,19 +150,22 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 Ok(())
             })?;
         flush_info.report(&self.metrics);
-        let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
-        if let Some(truncation_offset) = self.tx.pop_truncation(epoch) {
-            for vnode in self.serde.vnodes().iter_vnodes() {
-                let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
-                let range_end = self
-                    .serde
-                    .serialize_truncation_offset_watermark(vnode, truncation_offset);
-                delete_range.push((Included(range_begin), Excluded(range_end)));
-            }
-        }
-        self.state_store.flush(delete_range).await?;
-        self.state_store
-            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
+        let watermark = self.tx.pop_truncation(epoch).map(|truncation_offset| {
+            VnodeWatermark::new(
+                self.serde.vnodes().clone(),
+                self.serde
+                    .serialize_truncation_offset_watermark(truncation_offset),
+            )
+        });
+        self.state_store.flush().await?;
+        let watermark = watermark.into_iter().collect_vec();
+        self.state_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
+                switch_op_consistency_level: None,
+            },
+        );
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())

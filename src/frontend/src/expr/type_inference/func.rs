@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,15 @@
 
 use itertools::Itertools as _;
 use num_integer::Integer as _;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_no_function;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
 pub use risingwave_expr::sig::*;
 
 use super::{align_types, cast_ok_base, CastContext};
+use crate::error::{ErrorCode, Result};
 use crate::expr::type_inference::cast::align_array_and_element;
 use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
 
@@ -28,9 +30,15 @@ use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, Funct
 /// is not supported on backend.
 ///
 /// It also mutates the `inputs` by adding necessary casts.
-pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataType> {
+pub fn infer_type_with_sigmap(
+    func_name: FuncName,
+    inputs: &mut [ExprImpl],
+    sig_map: &FunctionRegistry,
+) -> Result<DataType> {
     // special cases
-    if let FuncName::Scalar(func_type) = func_name && let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
+    if let FuncName::Scalar(func_type) = func_name
+        && let Some(res) = infer_type_for_special(func_type, inputs).transpose()
+    {
         return res;
     }
     if let FuncName::Aggregate(AggKind::Grouping) = func_name {
@@ -44,7 +52,7 @@ pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataTy
             false => Some(e.return_type()),
         })
         .collect_vec();
-    let sig = infer_type_name(&FUNCTION_REGISTRY, func_name, &actuals)?;
+    let sig = infer_type_name(sig_map, func_name, &actuals)?;
 
     // add implicit casts to inputs
     for (expr, t) in inputs.iter_mut().zip_eq_fast(&sig.inputs_type) {
@@ -63,6 +71,10 @@ pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataTy
     let input_types = inputs.iter().map(|expr| expr.return_type()).collect_vec();
     let return_type = (sig.type_infer)(&input_types)?;
     Ok(return_type)
+}
+
+pub fn infer_type(func_name: FuncName, inputs: &mut [ExprImpl]) -> Result<DataType> {
+    infer_type_with_sigmap(func_name, inputs, &FUNCTION_REGISTRY)
 }
 
 pub fn infer_some_all(
@@ -308,6 +320,21 @@ fn infer_type_for_special(
                 // the end. So we align exprs at odd indices as well as the last one when length
                 // is odd.
                 match i.is_odd() || len.is_odd() && i == len - 1 {
+                    true => Some(e),
+                    false => None,
+                }
+            }))
+            .map(Some)
+            .map_err(Into::into)
+        }
+        ExprType::ConstantLookup => {
+            let len = inputs.len();
+            align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                // This optimized `ConstantLookup` organize `inputs` as
+                // [dummy_expression] (cond, res) [else / fallback]? pairs.
+                // So we align exprs at even indices as well as the last one
+                // when length is odd.
+                match i != 0 && i.is_even() || i == len - 1 {
                     true => Some(e),
                     false => None,
                 }
@@ -567,7 +594,7 @@ fn infer_type_for_special(
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
-            Ok(Some(DataType::Int16))
+            Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {
             ensure_arity!("greatest/least", 1 <= | inputs |);
@@ -606,12 +633,12 @@ fn infer_type_for_special(
 ///    4e in `PostgreSQL`. See [`narrow_category`] for details.
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
-fn infer_type_name<'a>(
+pub fn infer_type_name<'a>(
     sig_map: &'a FunctionRegistry,
     func_name: FuncName,
     inputs: &[Option<DataType>],
 ) -> Result<&'a FuncSign> {
-    let candidates = sig_map.get_with_arg_nums(func_name, inputs.len());
+    let candidates = sig_map.get_with_arg_nums(func_name.clone(), inputs.len());
 
     // Binary operators have a special `unknown` handling rule for exact match. We do not
     // distinguish operators from functions as of now.
@@ -633,13 +660,17 @@ fn infer_type_name<'a>(
 
     let mut candidates = top_matches(&candidates, inputs);
 
-    if candidates.is_empty() {
-        return Err(ErrorCode::NoFunction(format!(
+    // show function in error message
+    let sig = || {
+        format!(
             "{}({})",
             func_name,
             inputs.iter().map(TypeDisplay).format(", ")
-        ))
-        .into());
+        )
+    };
+
+    if candidates.is_empty() {
+        bail_no_function!("{}", sig());
     }
 
     // After this line `candidates` will never be empty, as the narrow rules will retain original
@@ -653,9 +684,8 @@ fn infer_type_name<'a>(
         [] => unreachable!(),
         [sig] => Ok(*sig),
         _ => Err(ErrorCode::BindError(format!(
-            "function {}({}) is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
-            func_name,
-            inputs.iter().map(TypeDisplay).format(", "),
+            "function {} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
+            sig(),
         ))
         .into()),
     }

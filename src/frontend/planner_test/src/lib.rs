@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,6 +67,8 @@ pub enum TestType {
     BatchPlanProto,
     /// Batch plan for local execution `.gen_batch_local_plan()`
     BatchLocalPlan,
+    /// Batch plan for local execution `.gen_batch_distributed_plan()`
+    BatchDistributedPlan,
 
     /// Create MV plan `.gen_create_mv_plan()`
     StreamPlan,
@@ -200,6 +202,9 @@ pub struct TestCaseResult {
 
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
+
+    /// Batch plan for distributed execution `.gen_batch_distributed_plan()`
+    pub batch_distributed_plan: Option<String>,
 
     /// Generate sink plan
     pub sink_plan: Option<String>,
@@ -424,6 +429,8 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     cdc_table_info,
+                    include_column_options,
+                    wildcard_idx,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -432,12 +439,14 @@ impl TestCase {
                         handler_args,
                         name,
                         columns,
+                        wildcard_idx,
                         constraints,
                         if_not_exists,
                         source_schema,
                         source_watermarks,
                         append_only,
                         cdc_table_info,
+                        include_column_options,
                     )
                     .await?;
                 }
@@ -446,7 +455,7 @@ impl TestCase {
                         create_source::handle_create_source(handler_args, stmt).await
                     {
                         let actual_result = TestCaseResult {
-                            planner_error: Some(error.to_string()),
+                            planner_error: Some(error.to_report_string()),
                             ..Default::default()
                         };
 
@@ -587,7 +596,8 @@ impl TestCase {
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.expected_outputs.contains(&TestType::LogicalPlan) {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
+                    ret.logical_plan =
+                        Some(explain_plan(&logical_plan.clone().into_unordered_subplan()));
                 }
                 logical_plan
             }
@@ -675,7 +685,7 @@ impl TestCase {
                 // Only generate batch_plan_proto if it is specified in test case
                 if self.expected_outputs.contains(&TestType::BatchPlanProto) {
                     ret.batch_plan_proto = Some(serde_yaml::to_string(
-                        &batch_plan.to_batch_prost_identity(false),
+                        &batch_plan.to_batch_prost_identity(false)?,
                     )?);
                 }
             }
@@ -702,6 +712,36 @@ impl TestCase {
                 // Only generate batch_plan if it is specified in test case
                 if self.expected_outputs.contains(&TestType::BatchLocalPlan) {
                     ret.batch_local_plan = Some(explain_plan(&batch_plan));
+                }
+            }
+        }
+
+        'distributed_batch: {
+            if self
+                .expected_outputs
+                .contains(&TestType::BatchDistributedPlan)
+                || self.expected_outputs.contains(&TestType::BatchError)
+            {
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_report_string_pretty());
+                            break 'distributed_batch;
+                        }
+                    },
+                    Err(err) => {
+                        ret.batch_error = Some(err.to_report_string_pretty());
+                        break 'distributed_batch;
+                    }
+                };
+
+                // Only generate batch_plan if it is specified in test case
+                if self
+                    .expected_outputs
+                    .contains(&TestType::BatchDistributedPlan)
+                {
+                    ret.batch_distributed_plan = Some(explain_plan(&batch_plan));
                 }
             }
         }
@@ -769,7 +809,7 @@ impl TestCase {
 
                 // Only generate stream_dist_plan if it is specified in test case
                 if dist_plan {
-                    let graph = build_graph(stream_plan);
+                    let graph = build_graph(stream_plan)?;
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }
@@ -791,6 +831,9 @@ impl TestCase {
                     "test_db".into(),
                     "test_table".into(),
                     format_desc,
+                    false,
+                    None,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -873,13 +916,14 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
         if let Some(loc) = e.location() {
             anyhow!(
-                "failed to parse yaml: {e}, at {}:{}:{}",
+                "failed to parse yaml: {}, at {}:{}:{}",
+                e.as_report(),
                 file_path.display(),
                 loc.line(),
                 loc.column()
             )
         } else {
-            anyhow!("failed to parse yaml: {e}")
+            anyhow!("failed to parse yaml: {}", e.as_report())
         }
     })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");

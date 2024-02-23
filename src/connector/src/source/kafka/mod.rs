@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+
+use crate::common::KafkaPrivateLinkCommon;
 
 pub mod enumerator;
 pub mod private_link;
@@ -27,7 +31,7 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::common::KafkaCommon;
+use crate::common::{KafkaCommon, RdKafkaPropertiesCommon};
 use crate::source::SourceProperties;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
@@ -106,11 +110,12 @@ pub struct KafkaProperties {
     #[serde(rename = "scan.startup.mode", alias = "kafka.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "scan.startup.timestamp_millis", alias = "kafka.time.offset")]
+    #[serde(
+        rename = "scan.startup.timestamp.millis",
+        alias = "kafka.time.offset",
+        alias = "scan.startup.timestamp_millis" // keep for compatibility
+    )]
     pub time_offset: Option<String>,
-
-    #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
-    pub consumer_group: Option<String>,
 
     /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
@@ -122,7 +127,16 @@ pub struct KafkaProperties {
     pub common: KafkaCommon,
 
     #[serde(flatten)]
-    pub rdkafka_properties: RdKafkaPropertiesConsumer,
+    pub rdkafka_properties_common: RdKafkaPropertiesCommon,
+
+    #[serde(flatten)]
+    pub rdkafka_properties_consumer: RdKafkaPropertiesConsumer,
+
+    #[serde(flatten)]
+    pub privatelink_common: KafkaPrivateLinkCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
 }
 
 impl SourceProperties for KafkaProperties {
@@ -133,10 +147,16 @@ impl SourceProperties for KafkaProperties {
     const SOURCE_NAME: &'static str = KAFKA_CONNECTOR;
 }
 
+impl crate::source::UnknownFields for KafkaProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
 impl KafkaProperties {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
-        self.common.set_client(c);
-        self.rdkafka_properties.set_client(c);
+        self.rdkafka_properties_common.set_client(c);
+        self.rdkafka_properties_consumer.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
     }
@@ -193,6 +213,8 @@ mod test {
             "properties.fetch.max.bytes".to_string() => "114514".to_string(),
             "properties.enable.auto.commit".to_string() => "true".to_string(),
             "properties.fetch.queue.backoff.ms".to_string() => "114514".to_string(),
+            // PrivateLink
+            "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
 
         let props: KafkaProperties =
@@ -200,24 +222,40 @@ mod test {
 
         assert_eq!(props.scan_startup_mode, Some("earliest".to_string()));
         assert_eq!(
-            props.common.rdkafka_properties.receive_message_max_bytes,
+            props.rdkafka_properties_common.receive_message_max_bytes,
             Some(54321)
         );
         assert_eq!(
-            props.common.rdkafka_properties.message_max_bytes,
+            props.rdkafka_properties_common.message_max_bytes,
             Some(12345)
         );
-        assert_eq!(props.rdkafka_properties.queued_min_messages, Some(114514));
         assert_eq!(
-            props.rdkafka_properties.queued_max_messages_kbytes,
+            props.rdkafka_properties_consumer.queued_min_messages,
             Some(114514)
         );
-        assert_eq!(props.rdkafka_properties.fetch_wait_max_ms, Some(114514));
-        assert_eq!(props.rdkafka_properties.fetch_max_bytes, Some(114514));
-        assert_eq!(props.rdkafka_properties.enable_auto_commit, Some(true));
         assert_eq!(
-            props.rdkafka_properties.fetch_queue_backoff_ms,
+            props.rdkafka_properties_consumer.queued_max_messages_kbytes,
             Some(114514)
         );
+        assert_eq!(
+            props.rdkafka_properties_consumer.fetch_wait_max_ms,
+            Some(114514)
+        );
+        assert_eq!(
+            props.rdkafka_properties_consumer.fetch_max_bytes,
+            Some(114514)
+        );
+        assert_eq!(
+            props.rdkafka_properties_consumer.enable_auto_commit,
+            Some(true)
+        );
+        assert_eq!(
+            props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
+            Some(114514)
+        );
+        let hashmap: HashMap<String, String> = hashmap! {
+            "broker1".to_string() => "10.0.0.1:8001".to_string()
+        };
+        assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));
     }
 }

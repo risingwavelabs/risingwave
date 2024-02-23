@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::parse::{Parse, ParseStream};
-use syn::{Error, Expr, FnArg, Ident, ItemFn, Result, Token, Type, Visibility};
+use syn::{Error, FnArg, Ident, ItemFn, Result, Token, Type, Visibility};
 
 use crate::utils::extend_vis_with_super;
 
@@ -223,18 +223,4 @@ pub(super) fn generate_captured_function(
         #orig_user_fn
         #new_user_fn
     })
-}
-
-pub(super) struct CapturedExecutionContextScopeInput {
-    pub context: Expr,
-    pub closure: Expr,
-}
-
-impl Parse for CapturedExecutionContextScopeInput {
-    fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let context: Expr = input.parse()?;
-        input.parse::<Token![,]>()?;
-        let closure: Expr = input.parse()?;
-        Ok(Self { context, closure })
-    }
 }

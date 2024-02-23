@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
+use thiserror_ext::AsReport;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -118,9 +119,9 @@ impl ElectionClient for EtcdElectionClient {
                 Ok(resp) => resp,
                 Err(e) => {
                     tracing::warn!(
-                        "create lease keeper for {} failed {}",
+                        error = %e.as_report(),
+                        "create lease keeper for {} failed",
                         lease_id,
-                        e.to_string()
                     );
                     keep_alive_fail_tx.send(()).unwrap();
                     return;
@@ -148,7 +149,7 @@ impl ElectionClient for EtcdElectionClient {
 
                     _ = ticker.tick(), if !keep_alive_sending => {
                         if let Err(err) = keeper.keep_alive().await {
-                            tracing::debug!("keep alive for lease {} failed {}", lease_id, err);
+                            tracing::debug!(error = %err.as_report(), "keep alive for lease {} failed", lease_id);
                             continue
                         }
 
@@ -179,7 +180,7 @@ impl ElectionClient for EtcdElectionClient {
                                 continue;
                             }
                             Err(e) => {
-                                tracing::error!("lease keeper failed {}", e.to_string());
+                                tracing::error!(error = %e.as_report(), "lease keeper failed");
                                 continue;
                             }
                         };
@@ -264,7 +265,7 @@ impl ElectionClient for EtcdElectionClient {
                             }
                         }
                         Some(Err(e)) => {
-                            tracing::warn!("error {} received from leader observe stream", e.to_string());
+                            tracing::warn!(error = %e.as_report(), "error received from leader observe stream");
                             continue
                         }
                     }

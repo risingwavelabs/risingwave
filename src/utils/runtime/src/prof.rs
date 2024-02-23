@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 use std::path::PathBuf;
 use std::time::Duration;
+
+use thiserror_ext::AsReport;
 
 pub(crate) fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
     tracing::info!("writing prof data to directory {}", profile_path);
@@ -37,7 +39,7 @@ pub(crate) fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle
                     tracing::info!("produced {:?}", profile_svg);
                 }
                 Err(err) => {
-                    tracing::warn!("failed to generate flamegraph: {}", err);
+                    tracing::warn!(error = %err.as_report(), "failed to generate flamegraph");
                 }
             }
             cnt += 1;

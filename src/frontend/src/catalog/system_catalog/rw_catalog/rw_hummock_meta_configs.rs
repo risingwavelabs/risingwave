@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,38 +13,31 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
-pub const RW_HUMMOCK_META_CONFIGS: BuiltinTable = BuiltinTable {
-    name: "rw_hummock_meta_configs",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Varchar, "config_name"),
-        (DataType::Varchar, "config_value"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwHummockMetaConfig {
+    #[primary_key]
+    config_name: String,
+    config_value: String,
+}
 
-impl SysCatalogReaderImpl {
-    pub async fn read_hummock_meta_configs(&self) -> Result<Vec<OwnedRow>> {
-        let configs = self
-            .meta_client
-            .list_hummock_meta_configs()
-            .await?
-            .into_iter()
-            .sorted()
-            .map(|(k, v)| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(k.into())),
-                    Some(ScalarImpl::Utf8(v.into())),
-                ])
-            })
-            .collect_vec();
-        Ok(configs)
-    }
+#[system_catalog(table, "rw_catalog.rw_hummock_meta_configs")]
+async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockMetaConfig>> {
+    let configs = reader
+        .meta_client
+        .list_hummock_meta_configs()
+        .await?
+        .into_iter()
+        .sorted()
+        .map(|(k, v)| RwHummockMetaConfig {
+            config_name: k,
+            config_value: v,
+        })
+        .collect();
+    Ok(configs)
 }

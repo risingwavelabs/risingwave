@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
     };
 
     let project_set = Box::new(ProjectSetExecutor::new(
-        ActorContext::create(123),
+        ActorContext::for_test(123),
         info,
         Box::new(source),
         vec![

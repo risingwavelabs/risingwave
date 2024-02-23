@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,13 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
+
+use crate::error::{ErrorCode, Result as RwResult};
 
 mod agg_call;
 mod correlated_input_ref;
@@ -66,8 +67,8 @@ pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, least_restrictive,
-    CastContext, CastSig, FuncSign,
+    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, infer_type_name,
+    infer_type_with_sigmap, least_restrictive, CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
@@ -165,6 +166,12 @@ impl ExprImpl {
         Literal::new(None, element_type).into()
     }
 
+    /// A literal jsonb value.
+    #[inline(always)]
+    pub fn literal_jsonb(v: JsonbVal) -> Self {
+        Literal::new(Some(v.into()), DataType::Jsonb).into()
+    }
+
     /// A literal list value.
     #[inline(always)]
     pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
@@ -256,6 +263,26 @@ impl ExprImpl {
     /// Shorthand to inplace cast expr to `target` type in explicit context.
     pub fn cast_explicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Explicit)
+    }
+
+    /// Casting to Regclass type means getting the oid of expr.
+    /// See <https://www.postgresql.org/docs/current/datatype-oid.html>
+    pub fn cast_to_regclass(self) -> Result<ExprImpl, CastError> {
+        match self.return_type() {
+            DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                FunctionCall::new_unchecked(ExprType::CastRegclass, vec![self], DataType::Int32),
+            ))),
+            DataType::Int32 => Ok(self),
+            dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
+            _ => Err(CastError("Unsupported input type".to_string())),
+        }
+    }
+
+    /// Shorthand to inplace cast expr to `regclass` type.
+    pub fn cast_to_regclass_mut(&mut self) -> Result<(), CastError> {
+        let owned = std::mem::replace(self, ExprImpl::literal_bool(false));
+        *self = owned.cast_to_regclass()?;
+        Ok(())
     }
 
     /// Ensure the return type of this expression is an array of some type.
@@ -712,6 +739,16 @@ impl ExprImpl {
                         && op1.count_nows() > 0
                         && op1.is_now_offset()
                     {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
+                ty @ ExprType::Equal => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 {
                         Some((op2, Self::reverse_comparison(ty), op1))
                     } else {
                         None

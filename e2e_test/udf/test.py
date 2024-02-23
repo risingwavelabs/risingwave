@@ -1,4 +1,4 @@
-# Copyright 2023 RisingWave Labs
+# Copyright 2024 RisingWave Labs
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
-sys.path.append("src/udf/python")  # noqa
+sys.path.append("src/expr/udf/python")  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
 
@@ -82,6 +82,11 @@ def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
         dec = dec * (1 << (4 * len(chunk))) + chunk_value
         hex = hex[16:]
     return dec
+
+
+@udf(input_types=["FLOAT8"], result_type="DECIMAL")
+def float_to_decimal(f: float) -> Decimal:
+    return Decimal(f)
 
 
 @udf(input_types=["DECIMAL", "DECIMAL"], result_type="DECIMAL")
@@ -217,6 +222,7 @@ if __name__ == "__main__":
     server.add_function(split)
     server.add_function(extract_tcp_info)
     server.add_function(hex_to_dec)
+    server.add_function(float_to_decimal)
     server.add_function(decimal_add)
     server.add_function(array_access)
     server.add_function(jsonb_access)

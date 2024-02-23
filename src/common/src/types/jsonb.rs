@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -235,9 +235,14 @@ impl<'a> JsonbRef<'a> {
         buf
     }
 
+    /// Returns a jsonb `null` value.
+    pub fn null() -> Self {
+        Self(ValueRef::Null)
+    }
+
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
-        self.0.as_null().is_some()
+        self.0.is_null()
     }
 
     /// Returns true if this is a jsonb null, boolean, number or string.
@@ -250,12 +255,12 @@ impl<'a> JsonbRef<'a> {
 
     /// Returns true if this is a jsonb array.
     pub fn is_array(&self) -> bool {
-        matches!(self.0, ValueRef::Array(_))
+        self.0.is_array()
     }
 
     /// Returns true if this is a jsonb object.
     pub fn is_object(&self) -> bool {
-        matches!(self.0, ValueRef::Object(_))
+        self.0.is_object()
     }
 
     /// Returns the type name of this jsonb.

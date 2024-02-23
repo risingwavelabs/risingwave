@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use self::non_zero64::ConfigNonZeroU64;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
+use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING_STRINGS};
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
@@ -93,7 +94,12 @@ pub struct ConfigMap {
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
-    /// The max gap allowed to transform small range scan scan into multi point lookup.
+    /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
+    /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
+    #[parameter(default = false, rename = "batch_enable_distributed_dml")]
+    batch_enable_distributed_dml: bool,
+
+    /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,
 
@@ -109,7 +115,7 @@ pub struct ConfigMap {
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
     #[parameter(default = IsolationLevel::default())]
-    transaction_isolation_level: IsolationLevel,
+    transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.
@@ -136,6 +142,10 @@ pub struct ConfigMap {
     /// Enable arrangement backfill for streaming queries. Defaults to false.
     #[parameter(default = false)]
     streaming_enable_arrangement_backfill: bool,
+
+    /// Allow `jsonb` in stream key
+    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    streaming_allow_jsonb_in_stream_key: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, rename = "rw_enable_join_ordering")]
@@ -171,11 +181,11 @@ pub struct ConfigMap {
     batch_parallelism: ConfigNonZeroU64,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[parameter(default = "9.5.0")]
+    #[parameter(default = PG_VERSION)]
     server_version: String,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[parameter(default = 90500)]
+    #[parameter(default = SERVER_VERSION_NUM)]
     server_version_num: i32,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-MIN-MESSAGES>
@@ -183,7 +193,7 @@ pub struct ConfigMap {
     client_min_messages: String,
 
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
-    #[parameter(default = "UTF8", check_hook = check_client_encoding)]
+    #[parameter(default = SERVER_ENCODING, check_hook = check_client_encoding)]
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
@@ -195,12 +205,16 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     synchronize_seqscans: bool,
 
-    /// Abort any statement that takes more than the specified amount of time. If
+    /// Abort query statement that takes more than the specified amount of time in sec. If
     /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
-    #[parameter(default = 0)]
-    statement_timeout: i32,
+    #[parameter(default = 0u32)]
+    statement_timeout: u32,
+
+    /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
+    #[parameter(default = 60000u32)]
+    idle_in_transaction_session_timeout: u32,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
     /// Unused in RisingWave, support for compatibility.
@@ -213,16 +227,12 @@ pub struct ConfigMap {
     row_security: bool,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
-    #[parameter(default = "on")]
+    #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_rate_limit: ConfigNonZeroU64,
-
-    /// Enable backfill for CDC table to allow lock-free and incremental snapshot
-    #[parameter(default = false)]
-    cdc_backfill: bool,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
@@ -234,7 +244,7 @@ pub struct ConfigMap {
     background_ddl: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
-    #[parameter(default = "UTF8")]
+    #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
@@ -307,4 +317,26 @@ pub trait ConfigReporter {
 // Report nothing.
 impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(SessionConfig)]
+    struct TestConfig {
+        #[parameter(default = 1, alias = "test_param_alias" | "alias_param_test")]
+        test_param: i32,
+    }
+
+    #[test]
+    fn test_session_config_alias() {
+        let mut config = TestConfig::default();
+        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "2");
+        config
+            .set("alias_param_test", "3".to_string(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("test_param_alias").unwrap(), "3");
+    }
 }

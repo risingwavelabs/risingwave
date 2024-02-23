@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,11 @@ use std::convert::Infallible;
 pub use anyhow::anyhow;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
+use thiserror_ext::Construct;
 
-#[derive(Error, Debug)]
+use crate::error::BoxedError;
+
+#[derive(Error, Debug, Construct)]
 pub enum ArrayError {
     #[error("Pb decode error: {0}")]
     PbDecode(#[from] prost::DecodeError),
@@ -34,10 +37,18 @@ pub enum ArrayError {
     ),
 
     #[error("Convert from arrow error: {0}")]
-    FromArrow(String),
+    FromArrow(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Convert to arrow error: {0}")]
-    ToArrow(String),
+    ToArrow(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 }
 
 impl From<PbFieldNotFound> for ArrayError {

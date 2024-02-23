@@ -21,8 +21,9 @@ byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.12"
-openssl = "0.10.57"
+openssl = "0.10.60"
 panic-message = "0.3"
+parking_lot = "0.12"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 thiserror = "1"

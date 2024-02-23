@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::epoch::Epoch;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
+use crate::error::{ErrorCode, Result};
 use crate::scheduler::ReadSnapshot;
 use crate::user::user_service::UserInfoWriter;
 
@@ -193,6 +193,11 @@ impl SessionImpl {
             State::Implicit(ctx) => ctx,
             State::Explicit(ctx) => ctx,
         })
+    }
+
+    /// Unpin snapshot by replacing the snapshot with None.
+    pub fn unpin_snapshot(&self) {
+        self.txn_ctx().snapshot = None;
     }
 
     /// Acquires and pins a snapshot for the current transaction.

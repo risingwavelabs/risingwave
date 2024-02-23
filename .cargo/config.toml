@@ -34,7 +34,7 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
-    # uncomment the following two lines to enable `TaskLocalAlloc`
+    # Uncomment the following two lines to enable `TaskLocalAlloc`.
     # "--cfg",
     # "enable_task_local_alloc",
 ]

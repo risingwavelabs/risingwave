@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -311,7 +311,7 @@ mod tests {
         iterator_test_bytes_user_key_of, iterator_test_user_key_of, iterator_test_value_of,
         mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::UnorderedMergeIteratorInner;
+    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
@@ -350,7 +350,7 @@ mod tests {
             BackwardSstableIterator::new(table0, sstable_store),
         ];
 
-        let mi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mi = MergeIterator::new(backward_iters);
         let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
         let mut i = 3 * TEST_KEYS_COUNT;
         ui.rewind().await.unwrap();
@@ -401,7 +401,7 @@ mod tests {
             BackwardSstableIterator::new(table2, sstable_store),
         ];
 
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
 
         // right edge case
@@ -460,7 +460,7 @@ mod tests {
             BackwardSstableIterator::new(table0, sstable_store.clone()),
             BackwardSstableIterator::new(table1, sstable_store),
         ];
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
 
         bui.rewind().await.unwrap();
@@ -503,7 +503,7 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
         let end_key = Included(iterator_test_bytes_user_key_of(7));
@@ -580,7 +580,7 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
 
         let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
         let end_key = Included(iterator_test_bytes_user_key_of(7));
@@ -658,7 +658,7 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, end_key));
@@ -734,7 +734,7 @@ mod tests {
         let handle =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, Unbounded));
@@ -830,7 +830,7 @@ mod tests {
         };
 
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
-        let bmi = UnorderedMergeIteratorInner::new(backward_iters);
+        let bmi = MergeIterator::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
         let num_puts: usize = truth
             .iter()
@@ -1071,7 +1071,7 @@ mod tests {
         let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
-        let mi = UnorderedMergeIteratorInner::new(backward_iters);
+        let mi = MergeIterator::new(backward_iters);
         let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();
 

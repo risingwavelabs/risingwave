@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::fmt::Write;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
 use risingwave_expr::{function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 /// Just a wrapper to reuse the `map_err` logic.
 #[inline(always)]
@@ -27,7 +28,7 @@ pub fn time_zone_err(inner_err: String) -> ExprError {
     }
 }
 
-#[function("to_timestamp(float8) -> timestamptz")]
+#[function("sec_to_timestamptz(float8) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
     // TODO(#4515): handle +/- infinity
     let micros = (elem.0 * 1e6)
@@ -87,7 +88,7 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
     elem.parse().or_else(|_| {
         timestamp_at_time_zone(
             elem.parse::<Timestamp>()
-                .map_err(|err| ExprError::Parse(err.to_string().into()))?,
+                .map_err(|err| ExprError::Parse(err.to_report_string().into()))?,
             time_zone,
         )
     })

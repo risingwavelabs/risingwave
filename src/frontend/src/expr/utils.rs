@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -498,11 +498,23 @@ impl WatermarkAnalyzer {
                 _ => WatermarkDerivation::None,
             },
             ExprType::Subtract | ExprType::TumbleStart => {
-                match self.visit_binary_op(func_call.inputs()) {
-                    (Constant, Constant) => Constant,
-                    (Watermark(idx), Constant) => Watermark(idx),
-                    (Nondecreasing, Constant) => Nondecreasing,
-                    _ => WatermarkDerivation::None,
+                if func_call.inputs().len() == 3 {
+                    // With `offset` specified
+                    // e.g., select * from tumble(t1, start, interval, offset);
+                    assert_eq!(ExprType::TumbleStart, func_call.func_type());
+                    match self.visit_ternary_op(func_call.inputs()) {
+                        (Constant, Constant, Constant) => Constant,
+                        (Watermark(idx), Constant, Constant) => Watermark(idx),
+                        (Nondecreasing, Constant, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
+                } else {
+                    match self.visit_binary_op(func_call.inputs()) {
+                        (Constant, Constant) => Constant,
+                        (Watermark(idx), Constant) => Watermark(idx),
+                        (Nondecreasing, Constant) => Nondecreasing,
+                        _ => WatermarkDerivation::None,
+                    }
                 }
             }
             ExprType::Multiply | ExprType::Divide | ExprType::Modulus => {
@@ -577,8 +589,8 @@ impl WatermarkAnalyzer {
                 },
                 _ => unreachable!(),
             },
-            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
-            ExprType::ToTimestamp1 => WatermarkDerivation::None,
+            ExprType::SecToTimestamptz => self.visit_unary_op(func_call.inputs()),
+            ExprType::CharToTimestamptz => WatermarkDerivation::None,
             ExprType::Cast => {
                 // TODO: need more derivation
                 WatermarkDerivation::None

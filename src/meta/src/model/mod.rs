@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod barrier;
 mod catalog;
 mod cluster;
 mod error;
@@ -28,7 +27,6 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-pub use barrier::*;
 pub use cluster::*;
 pub use error::*;
 pub use migration_plan::*;
@@ -36,6 +34,7 @@ pub use notification::*;
 use prost::Message;
 pub use stream::*;
 
+use crate::hummock::model::ext::Transaction as TransactionV2;
 use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
 
 /// A global, unique identifier of an actor
@@ -166,7 +165,6 @@ macro_rules! for_all_metadata_models {
         $macro! {
             // These items should be included in a meta snapshot.
             // So be sure to update meta backup/restore when adding new items.
-            { risingwave_pb::hummock::HummockVersion },
             { risingwave_pb::hummock::HummockVersionStats },
             { crate::hummock::model::CompactionGroup },
             { risingwave_pb::catalog::Database },
@@ -184,7 +182,7 @@ macro_rules! for_all_metadata_models {
             { crate::model::cluster::Worker },
             { risingwave_pb::hummock::CompactTaskAssignment },
             { crate::hummock::compaction::CompactStatus },
-            { risingwave_pb::hummock::HummockVersionDelta },
+            { risingwave_hummock_sdk::version::HummockVersionDelta },
             { risingwave_pb::hummock::HummockPinnedSnapshot },
             { risingwave_pb::hummock::HummockPinnedVersion },
         }
@@ -473,6 +471,10 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
         self.tree_ref
     }
 
+    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
+        self.tree_ref
+    }
+
     /// Get the value of the provided key by merging the staging value and the original value
     pub fn get(&self, key: &K) -> Option<&V> {
         self.staging
@@ -664,6 +666,264 @@ impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction
             self.new_value.upsert_in_transaction(txn).await?
         }
         Ok(())
+    }
+}
+
+pub enum BTreeMapTransactionWrapper<'a, K: Ord, V> {
+    V1(BTreeMapTransaction<'a, K, V, Transaction>),
+    V2(BTreeMapTransaction<'a, K, V, TransactionV2>),
+}
+
+impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
+    pub fn tree_ref(&self) -> &BTreeMap<K, V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
+            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
+        }
+    }
+
+    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
+            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
+        }
+    }
+
+    /// Get the value of the provided key by merging the staging value and the original value
+    pub fn get(&self, key: &K) -> Option<&V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.get(key),
+            BTreeMapTransactionWrapper::V2(v) => v.get(key),
+        }
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.contains_key(key),
+            BTreeMapTransactionWrapper::V2(v) => v.contains_key(key),
+        }
+    }
+
+    pub fn get_mut(&mut self, key: K) -> Option<BTreeMapTransactionValueGuard<'_, K, V>> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.get_mut(key),
+            BTreeMapTransactionWrapper::V2(v) => v.get_mut(key),
+        }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.insert(key, value),
+            BTreeMapTransactionWrapper::V2(v) => v.insert(key, value),
+        }
+    }
+
+    pub fn remove(&mut self, key: K) -> Option<V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.remove(key),
+            BTreeMapTransactionWrapper::V2(v) => v.remove(key),
+        }
+    }
+
+    pub fn commit_memory(self) {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v.commit_memory(),
+            BTreeMapTransactionWrapper::V2(v) => v.commit_memory(),
+        }
+    }
+
+    pub fn new_entry_txn_or_default(
+        &mut self,
+        key: K,
+        default_val: V,
+    ) -> BTreeMapEntryTransactionWrapper<'_, K, V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => BTreeMapEntryTransactionWrapper::V1(
+                BTreeMapEntryTransaction::new(v.tree_ref, key, Some(default_val))
+                    .expect("default value is provided and should return `Some`"),
+            ),
+            BTreeMapTransactionWrapper::V2(v) => BTreeMapEntryTransactionWrapper::V2(
+                BTreeMapEntryTransaction::new(v.tree_ref, key, Some(default_val))
+                    .expect("default value is provided and should return `Some`"),
+            ),
+        }
+    }
+
+    pub fn new_entry_insert_txn(
+        &mut self,
+        key: K,
+        val: V,
+    ) -> BTreeMapEntryTransactionWrapper<'_, K, V> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => BTreeMapEntryTransactionWrapper::V1(
+                BTreeMapEntryTransaction::new_insert(v.tree_ref, key, val),
+            ),
+            BTreeMapTransactionWrapper::V2(v) => BTreeMapEntryTransactionWrapper::V2(
+                BTreeMapEntryTransaction::new_insert(v.tree_ref, key, val),
+            ),
+        }
+    }
+}
+
+impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
+    pub fn into_v1(self) -> BTreeMapTransaction<'a, K, V, Transaction> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v,
+            BTreeMapTransactionWrapper::V2(_) => panic!("expect V1, found V2"),
+        }
+    }
+
+    pub fn as_v1_ref(&self) -> &BTreeMapTransaction<'a, K, V, Transaction> {
+        match self {
+            BTreeMapTransactionWrapper::V1(v) => v,
+            BTreeMapTransactionWrapper::V2(_) => panic!("expect V1, found V2"),
+        }
+    }
+
+    pub fn into_v2(self) -> BTreeMapTransaction<'a, K, V, TransactionV2> {
+        match self {
+            BTreeMapTransactionWrapper::V1(_) => panic!("expect V2, found V1"),
+            BTreeMapTransactionWrapper::V2(v) => v,
+        }
+    }
+
+    pub fn as_v2_ref(&self) -> &BTreeMapTransaction<'a, K, V, TransactionV2> {
+        match self {
+            BTreeMapTransactionWrapper::V1(_) => panic!("expect V2, found V1"),
+            BTreeMapTransactionWrapper::V2(v) => v,
+        }
+    }
+}
+
+pub enum BTreeMapEntryTransactionWrapper<'a, K, V> {
+    V1(BTreeMapEntryTransaction<'a, K, V, Transaction>),
+    V2(BTreeMapEntryTransaction<'a, K, V, TransactionV2>),
+}
+
+impl<'a, K: Ord + Debug, V: Clone> Deref for BTreeMapEntryTransactionWrapper<'a, K, V> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            BTreeMapEntryTransactionWrapper::V1(v) => v.deref(),
+            BTreeMapEntryTransactionWrapper::V2(v) => v.deref(),
+        }
+    }
+}
+
+impl<'a, K: Ord + Debug, V: Clone> DerefMut for BTreeMapEntryTransactionWrapper<'a, K, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            BTreeMapEntryTransactionWrapper::V1(v) => v.deref_mut(),
+            BTreeMapEntryTransactionWrapper::V2(v) => v.deref_mut(),
+        }
+    }
+}
+
+impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransactionWrapper<'a, K, V> {
+    pub fn as_v1_ref(&self) -> &BTreeMapEntryTransaction<'a, K, V, Transaction> {
+        match self {
+            BTreeMapEntryTransactionWrapper::V1(v) => v,
+            BTreeMapEntryTransactionWrapper::V2(_) => {
+                panic!("expect V1, found V2")
+            }
+        }
+    }
+
+    pub fn into_v1(self) -> BTreeMapEntryTransaction<'a, K, V, Transaction> {
+        match self {
+            BTreeMapEntryTransactionWrapper::V1(v) => v,
+            BTreeMapEntryTransactionWrapper::V2(_) => {
+                panic!("expect V1, found V2")
+            }
+        }
+    }
+
+    pub fn as_v2_ref(&self) -> &BTreeMapEntryTransaction<'a, K, V, TransactionV2> {
+        match self {
+            BTreeMapEntryTransactionWrapper::V1(_) => {
+                panic!("expect V2, found V1")
+            }
+            BTreeMapEntryTransactionWrapper::V2(v) => v,
+        }
+    }
+
+    pub fn into_v2(self) -> BTreeMapEntryTransaction<'a, K, V, TransactionV2> {
+        match self {
+            BTreeMapEntryTransactionWrapper::V1(_) => {
+                panic!("expect V2, found V1")
+            }
+            BTreeMapEntryTransactionWrapper::V2(v) => v,
+        }
+    }
+}
+
+pub enum VarTransactionWrapper<'a, T: Transactional<Transaction> + Transactional<TransactionV2>> {
+    V1(VarTransaction<'a, Transaction, T>),
+    V2(VarTransaction<'a, TransactionV2, T>),
+}
+
+impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>>
+    VarTransactionWrapper<'a, T>
+{
+    pub fn as_v1_ref(&self) -> &VarTransaction<'a, Transaction, T> {
+        match self {
+            VarTransactionWrapper::V1(v) => v,
+            VarTransactionWrapper::V2(_) => {
+                panic!("expect V1, found V2")
+            }
+        }
+    }
+
+    pub fn into_v1(self) -> VarTransaction<'a, Transaction, T> {
+        match self {
+            VarTransactionWrapper::V1(v) => v,
+            VarTransactionWrapper::V2(_) => {
+                panic!("expect V1, found V2")
+            }
+        }
+    }
+
+    pub fn as_v2_ref(&self) -> &VarTransaction<'a, TransactionV2, T> {
+        match self {
+            VarTransactionWrapper::V1(_) => {
+                panic!("expect V2, found V1")
+            }
+            VarTransactionWrapper::V2(v) => v,
+        }
+    }
+
+    pub fn into_v2(self) -> VarTransaction<'a, TransactionV2, T> {
+        match self {
+            VarTransactionWrapper::V1(_) => {
+                panic!("expect V2, found V1")
+            }
+            VarTransactionWrapper::V2(v) => v,
+        }
+    }
+}
+
+impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>> Deref
+    for VarTransactionWrapper<'a, T>
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            VarTransactionWrapper::V1(v) => v.deref(),
+            VarTransactionWrapper::V2(v) => v.deref(),
+        }
+    }
+}
+
+impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2> + Clone> DerefMut
+    for VarTransactionWrapper<'a, T>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            VarTransactionWrapper::V1(v) => v.deref_mut(),
+            VarTransactionWrapper::V2(v) => v.deref_mut(),
+        }
     }
 }
 

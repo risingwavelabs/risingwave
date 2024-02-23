@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn test_database() -> MetadataModelResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let store = env.meta_store();
+        let store = env.meta_store_checked();
         let databases = Database::list(store).await?;
         assert!(databases.is_empty());
         assert!(Database::select(store, &0).await.unwrap().is_none());

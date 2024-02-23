@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -134,7 +135,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
+                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();
@@ -424,10 +425,10 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
 
 #[derive(Debug, Error)]
 #[error("{0}")]
-pub struct CastError(String);
+pub struct CastError(pub(super) String);
 
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
-        ErrorCode::BindError(value.to_string())
+        ErrorCode::BindError(value.to_report_string())
     }
 }

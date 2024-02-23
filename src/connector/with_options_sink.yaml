@@ -66,6 +66,26 @@ ClickHouseConfig:
   - name: r#type
     field_type: String
     required: true
+DeltaLakeConfig:
+  fields:
+  - name: s3.access.key
+    field_type: String
+    required: false
+  - name: s3.secret.key
+    field_type: String
+    required: false
+  - name: location
+    field_type: String
+    required: true
+  - name: s3.region
+    field_type: String
+    required: false
+  - name: s3.endpoint
+    field_type: String
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 DorisConfig:
   fields:
   - name: doris.url
@@ -129,15 +149,15 @@ IcebergConfig:
     field_type: Vec<String>
     required: false
     default: Default::default
+  - name: java_catalog_props
+    field_type: HashMap<String,String>
+    required: false
 KafkaConfig:
   fields:
   - name: properties.bootstrap.server
     field_type: String
     required: true
     alias: kafka.brokers
-  - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
-    required: false
   - name: topic
     field_type: String
     required: true
@@ -149,6 +169,9 @@ KafkaConfig:
   - name: properties.security.protocol
     field_type: String
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    required: false
+  - name: properties.ssl.endpoint.identification.algorithm
+    field_type: String
     required: false
   - name: properties.ssl.ca.location
     field_type: String
@@ -202,6 +225,18 @@ KafkaConfig:
     field_type: String
     comments: Configurations for SASL/OAUTHBEARER.
     required: false
+  - name: properties.retry.max
+    field_type: u32
+    required: false
+    default: '3'
+  - name: properties.retry.interval
+    field_type: Duration
+    required: false
+    default: 'Duration :: from_millis (100)'
+  - name: primary_key
+    field_type: String
+    comments: We have parsed the primary key for an upsert kafka sink into a `usize` vector representing  the indices of the pk columns in the frontend, so we simply store the primary key here  as a string.
+    required: false
   - name: properties.message.max.bytes
     field_type: usize
     comments: Maximum Kafka protocol request message size. Due to differing framing overhead between  protocol versions the producer is unable to reliably enforce a strict max message limit at  produce time and may exceed the maximum size by one message in protocol ProduceRequests,  the broker will enforce the the topic's max.message.bytes limit
@@ -217,17 +252,8 @@ KafkaConfig:
     field_type: String
     comments: Client identifier
     required: false
-  - name: properties.retry.max
-    field_type: u32
-    required: false
-    default: '3'
-  - name: properties.retry.interval
-    field_type: Duration
-    required: false
-    default: 'Duration :: from_millis (100)'
-  - name: primary_key
-    field_type: String
-    comments: We have parsed the primary key for an upsert kafka sink into a `usize` vector representing  the indices of the pk columns in the frontend, so we simply store the primary key here  as a string.
+  - name: properties.enable.ssl.certificate.verification
+    field_type: bool
     required: false
   - name: properties.allow.auto.create.topics
     field_type: bool
@@ -279,6 +305,10 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
+    required: false
 KinesisSinkConfig:
   fields:
   - name: stream
@@ -424,5 +454,43 @@ PulsarConfig:
 RedisConfig:
   fields:
   - name: redis.url
+    field_type: String
+    required: true
+StarrocksConfig:
+  fields:
+  - name: starrocks.host
+    field_type: String
+    comments: The StarRocks host address.
+    required: true
+  - name: starrocks.mysqlport
+    field_type: String
+    comments: The port to the MySQL server of StarRocks FE.
+    required: true
+    alias: starrocks.query_port
+  - name: starrocks.httpport
+    field_type: String
+    comments: The port to the HTTP server of StarRocks FE.
+    required: true
+    alias: starrocks.http_port
+  - name: starrocks.user
+    field_type: String
+    comments: The user name used to access the StarRocks database.
+    required: true
+  - name: starrocks.password
+    field_type: String
+    comments: The password associated with the user.
+    required: true
+  - name: starrocks.database
+    field_type: String
+    comments: The StarRocks database where the target table is located
+    required: true
+  - name: starrocks.table
+    field_type: String
+    comments: The StarRocks table you want to sink data to.
+    required: true
+  - name: starrocks.partial_update
+    field_type: String
+    required: false
+  - name: r#type
     field_type: String
     required: true

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
@@ -22,9 +21,10 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,6 +32,8 @@ pub struct BatchLimit {
     pub base: PlanBase<Batch>,
     core: generic::Limit<PlanRef>,
 }
+
+const LIMIT_SEQUENTIAL_EXCHANGE_THRESHOLD: u64 = 1024;
 
 impl BatchLimit {
     pub fn new(core: generic::Limit<PlanRef>) -> Self {
@@ -52,7 +54,17 @@ impl BatchLimit {
 
         let single_dist = RequiredDist::single();
         let ensure_single_dist = if !batch_partial_limit.distribution().satisfies(&single_dist) {
-            single_dist.enforce_if_not_satisfies(batch_partial_limit.into(), &any_order)?
+            if new_limit < LIMIT_SEQUENTIAL_EXCHANGE_THRESHOLD {
+                BatchExchange::new_with_sequential(
+                    batch_partial_limit.into(),
+                    any_order,
+                    Distribution::Single,
+                )
+                .into()
+            } else {
+                BatchExchange::new(batch_partial_limit.into(), any_order, Distribution::Single)
+                    .into()
+            }
         } else {
             // The input's distribution is singleton, so use one phase limit is enough.
             return Ok(self.clone_with_input(new_input).into());

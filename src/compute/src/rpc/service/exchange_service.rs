@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ use risingwave_pb::task_service::{
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
+use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -37,7 +38,7 @@ const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
-    stream_mgr: Arc<LocalStreamManager>,
+    stream_mgr: LocalStreamManager,
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
@@ -63,7 +64,11 @@ impl ExchangeService for ExchangeServiceImpl {
             .expect("Failed to get task output id.");
         let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
-            error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
+            error!(
+                %peer_addr,
+                error = %e.as_report(),
+                "Failed to serve exchange RPC"
+            );
             return Err(e.into());
         }
 
@@ -101,8 +106,8 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver((up_actor_id, down_actor_id))
-            .await?;
+            .context()
+            .take_receiver((up_actor_id, down_actor_id))?;
 
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
@@ -123,7 +128,7 @@ impl ExchangeService for ExchangeServiceImpl {
 impl ExchangeServiceImpl {
     pub fn new(
         mgr: Arc<BatchManager>,
-        stream_mgr: Arc<LocalStreamManager>,
+        stream_mgr: LocalStreamManager,
         metrics: Arc<ExchangeServiceMetrics>,
     ) -> Self {
         ExchangeServiceImpl {

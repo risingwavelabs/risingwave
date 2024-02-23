@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,13 @@ pub mod webhdfs;
 
 pub mod gcs;
 
-pub mod oss;
+pub mod obs;
 
 pub mod azblob;
+pub mod opendal_s3;
+pub mod oss;
 
 pub mod fs;
+
+// To make sure the the operation is consistent, we should specially set `atomic_write_dir` for fs, hdfs and webhdfs services.
+const ATOMIC_WRITE_DIR: &str = "atomic_write_dir/";

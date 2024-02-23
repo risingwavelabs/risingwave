@@ -24,7 +24,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
-cargo make ci-start ci-clickhouse-test
+cargo make ci-start ci-sink-test
 sleep 1
 
 
@@ -35,7 +35,7 @@ sleep 2
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/clickhouse_sink.slt'
-sleep 1
+sleep 5
 ./clickhouse client --host=clickhouse-server --port=9000 --query="select * from demo_test FORMAT CSV;" > ./query_result.csv
 
 
@@ -52,6 +52,7 @@ if ($1 == 1 && $2 == 50 && $3 == "\"1-50\"") c1++;
   echo "Clickhouse sink check passed"
 else
   echo "The output is not as expected."
+  cat ./query_result.csv
   exit 1
 fi
 

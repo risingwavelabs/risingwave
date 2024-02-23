@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_stream::task::FragmentId;
 use serde_yaml;
+use thiserror_ext::AsReport;
 
 use crate::cmd_impl::meta::ReschedulePayload;
 use crate::common::CtlContext;
@@ -119,7 +120,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
     } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            fail!("Failed to fetch cluster info: {}", e);
+            fail!("Failed to fetch cluster info: {}", e.as_report());
         }
     };
 
@@ -300,7 +301,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
     } = match response {
         Ok(response) => response,
         Err(e) => {
-            fail!("Failed to generate plan: {:?}", e);
+            fail!("Failed to generate plan: {}", e.as_report());
         }
     };
 
@@ -364,7 +365,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
             match meta_client.reschedule(reschedules, revision, false).await {
                 Ok(response) => response,
                 Err(e) => {
-                    fail!("Failed to execute plan: {:?}", e);
+                    fail!("Failed to execute plan: {}", e.as_report());
                 }
             };
 
@@ -391,7 +392,7 @@ pub async fn update_schedulability(
     let GetClusterInfoResponse { worker_nodes, .. } = match meta_client.get_cluster_info().await {
         Ok(resp) => resp,
         Err(e) => {
-            fail!("Failed to get cluster info: {:?}", e);
+            fail!("Failed to get cluster info: {}", e.as_report());
         }
     };
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -219,11 +219,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         right_table: Table,
     ) -> Option<Expr> {
         // We always generate an equi join, to avoid stream nested loop join.
-        let Some((base_join_on_expr, remaining_equi_columns)) =
-            self.gen_single_equi_join_expr(left_columns, right_columns)
-        else {
-            return None;
-        };
+        let (base_join_on_expr, remaining_equi_columns) =
+            self.gen_single_equi_join_expr(left_columns, right_columns)?;
 
         // Add more expressions
         let extra_expr = match self.rng.gen_range(1..=100) {
@@ -263,11 +260,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         right_columns: Vec<Column>,
         right_table: Table,
     ) -> Option<JoinOperator> {
-        let Some(join_constraint) =
-            self.gen_join_constraint(left_columns, left_table, right_columns, right_table)
-        else {
-            return None;
-        };
+        let join_constraint =
+            self.gen_join_constraint(left_columns, left_table, right_columns, right_table)?;
 
         // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
         // If many failures due to `StreamNestedLoopJoin`, try disable the others.
@@ -290,14 +284,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let left_columns = left_table.get_qualified_columns();
         let (right_factor, right_table) = self.gen_table_factor();
         let right_columns = right_table.get_qualified_columns();
-        let Some(join_operator) = self.gen_join_operator(
+        let join_operator = self.gen_join_operator(
             left_columns,
             left_table.clone(),
             right_columns,
             right_table.clone(),
-        ) else {
-            return None;
-        };
+        )?;
 
         let right_factor_with_join = Join {
             relation: right_factor,

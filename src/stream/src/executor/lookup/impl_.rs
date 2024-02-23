@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@ use risingwave_storage::StateStore;
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
 use crate::common::metrics::MetricsInfo;
-use crate::common::JoinStreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;

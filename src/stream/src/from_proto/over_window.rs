@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, OverWindowExecutor, OverWindowExecutorArgs};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct OverWindowExecutorBuilder;
 
@@ -35,7 +35,6 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let calls: Vec<_> = node
@@ -73,7 +72,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             order_key_order_types,
 
             state_table,
-            watermark_epoch: stream.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
             metrics: params.executor_stats,
 
             chunk_size: params.env.config().developer.chunk_size,

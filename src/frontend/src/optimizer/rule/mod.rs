@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -90,6 +90,8 @@ pub use top_n_on_index_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::split_now_and_rule::*;
+pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
@@ -152,8 +154,10 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
+mod pull_up_correlated_predicate_agg_rule;
 mod values_extract_project_rule;
 pub use batch::batch_push_limit_to_scan_rule::*;
+pub use pull_up_correlated_predicate_agg_rule::*;
 pub use values_extract_project_rule::*;
 
 #[macro_export]
@@ -189,6 +193,8 @@ macro_rules! for_all_rules {
             , { AggProjectMergeRule }
             , { UnionMergeRule }
             , { DagToTreeRule }
+            , { SplitNowAndRule }
+            , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
@@ -223,6 +229,7 @@ macro_rules! for_all_rules {
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
+            , { PullUpCorrelatedPredicateAggRule }
         }
     };
 }

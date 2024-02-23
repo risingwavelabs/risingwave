@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,12 @@
 
 use std::marker::PhantomData;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::CdcSourceTypeTrait;
-use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -66,14 +66,13 @@ impl MySqlCdcSplit {
     pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid mysql offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid mysql offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {
@@ -106,14 +105,13 @@ impl PostgresCdcSplit {
     pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid postgres offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid postgres offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {

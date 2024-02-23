@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "task_service",
+        "telemetry",
         "user",
     ];
     let protos: Vec<String> = proto_files
@@ -63,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
         ".hummock.CompactTask",
+        ".catalog.StreamSourceInfo",
     ];
 
     // Build protobuf structs.
@@ -114,8 +116,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalColumn.column_type",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.AdditionalColumnNormal", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnKey", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.AdditionalColumnPartition",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "plan_common.AdditionalColumnTimestamp",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute(
+            "plan_common.AdditionalColumnFilename",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.AdditionalColumnHeader", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnHeaders", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnOffset", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
+        .type_attribute("common.Buffer", "#[derive(Eq)]")
         // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model_v2.
         .type_attribute("hummock.TableStats", "#[derive(Eq)]")
         .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
@@ -133,6 +158,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")
         .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
         .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
+        .type_attribute("hummock.TableWatermarks", "#[derive(Eq)]")
+        .type_attribute("hummock.VnodeWatermark", "#[derive(Eq)]")
+        .type_attribute(
+            "hummock.TableWatermarks.EpochNewWatermarks",
+            "#[derive(Eq)]",
+        )
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

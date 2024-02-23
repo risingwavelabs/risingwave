@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
@@ -32,6 +31,7 @@ use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -311,6 +311,7 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
+    let mut can_timeout_cancel = true;
     // Acquire the write guard for DML statements.
     match stmt_type {
         StatementType::INSERT
@@ -320,6 +321,7 @@ async fn execute(
         | StatementType::UPDATE
         | StatementType::UPDATE_RETURNING => {
             session.txn_write_guard()?;
+            can_timeout_cancel = false;
         }
         _ => {}
     }
@@ -341,7 +343,7 @@ async fn execute(
     let mut row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query).await?,
+            local_execute(session.clone(), query, can_timeout_cancel).await?,
             column_types,
             formats,
             session.clone(),
@@ -349,7 +351,7 @@ async fn execute(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(session.clone(), query).await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -451,8 +453,17 @@ async fn execute(
 async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
+    can_timeout_cancel: bool,
 ) -> Result<DistributedQueryStream> {
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
+        Some(session.statement_timeout())
+    } else {
+        None
+    };
+    let execution_context: ExecutionContextRef =
+        ExecutionContext::new(session.clone(), timeout).into();
     let query_manager = session.env().query_manager().clone();
 
     query_manager
@@ -462,14 +473,26 @@ async fn distribute_execute(
 }
 
 #[expect(clippy::unused_async)]
-async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
+async fn local_execute(
+    session: Arc<SessionImpl>,
+    query: Query,
+    can_timeout_cancel: bool,
+) -> Result<LocalQueryStream> {
+    let timeout = if cfg!(madsim) {
+        None
+    } else if can_timeout_cancel {
+        Some(session.statement_timeout())
+    } else {
+        None
+    };
     let front_env = session.env();
 
     // TODO: if there's no table scan, we don't need to acquire snapshot.
     let snapshot = session.pinned_snapshot();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session);
+    let execution =
+        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
 
     Ok(execution.stream_rows())
 }

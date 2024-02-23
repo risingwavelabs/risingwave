@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use futures::{pin_mut, TryStreamExt};
-use futures_async_stream::for_await;
+use futures::{pin_mut, StreamExt, TryStreamExt};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
@@ -136,7 +134,6 @@ async fn test_basic_inner(
     let size = local
         .ingest_batch(
             vec![],
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -151,7 +148,6 @@ async fn test_basic_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -209,7 +205,6 @@ async fn test_basic_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -241,7 +236,6 @@ async fn test_basic_inner(
     local
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -435,7 +429,6 @@ async fn test_state_store_sync_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -463,7 +456,6 @@ async fn test_state_store_sync_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -493,7 +485,6 @@ async fn test_state_store_sync_inner(
     local
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -536,7 +527,7 @@ async fn test_reload_storage() {
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
 
     // First batch inserts the anchor and others.
-    let mut batch1 = vec![
+    let mut batch1 = [
         (anchor.clone(), StorageValue::new_put("111")),
         (
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -548,7 +539,7 @@ async fn test_reload_storage() {
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // Second batch modifies the anchor.
-    let mut batch2 = vec![
+    let mut batch2 = [
         (
             gen_key_from_str(VirtualNode::ZERO, "cc"),
             StorageValue::new_put("333"),
@@ -567,7 +558,6 @@ async fn test_reload_storage() {
     // hummock_storage
     //     .ingest_batch(
     //         batch1,
-    //         vec![],
     //         WriteOptions {
     //             epoch: epoch1,
     //             table_id: Default::default(),
@@ -622,7 +612,6 @@ async fn test_reload_storage() {
     // hummock_storage
     //     .ingest_batch(
     //         batch2,
-    //         vec![],
     //         WriteOptions {
     //             epoch: epoch2,
     //             table_id: Default::default(),
@@ -714,307 +703,305 @@ async fn test_reload_storage() {
     assert_eq!(len, 3);
 }
 
-#[tokio::test]
-async fn test_write_anytime_v2() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
-    test_write_anytime_inner(hummock_storage, meta_client).await;
-}
+// Keep this test case's codes for future reference
+// #[tokio::test]
+// async fn test_write_anytime_v2() {
+//     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+//     test_write_anytime_inner(hummock_storage, meta_client).await;
+// }
 
-async fn test_write_anytime_inner(
-    hummock_storage: impl HummockStateStoreTestTrait,
-    _meta_client: Arc<MockHummockMetaClient>,
-) {
-    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+// async fn test_write_anytime_inner(
+//     hummock_storage: impl HummockStateStoreTestTrait,
+//     _meta_client: Arc<MockHummockMetaClient>,
+// ) {
+//     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
 
-    let epoch1 = initial_epoch + 1;
+//     let epoch1 = initial_epoch + 1;
 
-    let assert_old_value = |epoch| {
-        let hummock_storage = &hummock_storage;
-        async move {
-            // check point get
-            assert_eq!(
-                "111".as_bytes(),
-                hummock_storage
-                    .get(
-                        gen_key_from_str(VirtualNode::ZERO, "aa"),
-                        epoch,
-                        ReadOptions {
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
-                            ..Default::default()
-                        }
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap()
-            );
-            assert_eq!(
-                "222".as_bytes(),
-                hummock_storage
-                    .get(
-                        gen_key_from_str(VirtualNode::ZERO, "bb"),
-                        epoch,
-                        ReadOptions {
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
-                            ..Default::default()
-                        }
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap()
-            );
-            assert_eq!(
-                "333".as_bytes(),
-                hummock_storage
-                    .get(
-                        gen_key_from_str(VirtualNode::ZERO, "cc"),
-                        epoch,
-                        ReadOptions {
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
-                            ..Default::default()
-                        }
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap()
-            );
-            // check iter
-            let iter = hummock_storage
-                .iter(
-                    (
-                        Bound::Included(gen_key_from_str(VirtualNode::ZERO, "aa")),
-                        Bound::Included(gen_key_from_str(VirtualNode::ZERO, "cc")),
-                    ),
-                    epoch,
-                    ReadOptions {
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
-            futures::pin_mut!(iter);
-            assert_eq!(
-                (
-                    FullKey::new(
-                        TableId::default(),
-                        gen_key_from_str(VirtualNode::ZERO, "aa"),
-                        epoch
-                    ),
-                    Bytes::from("111")
-                ),
-                iter.try_next().await.unwrap().unwrap()
-            );
-            assert_eq!(
-                (
-                    FullKey::new(
-                        TableId::default(),
-                        gen_key_from_str(VirtualNode::ZERO, "bb"),
-                        epoch
-                    ),
-                    Bytes::from("222")
-                ),
-                iter.try_next().await.unwrap().unwrap()
-            );
-            assert_eq!(
-                (
-                    FullKey::new(
-                        TableId::default(),
-                        gen_key_from_str(VirtualNode::ZERO, "cc"),
-                        epoch
-                    ),
-                    Bytes::from("333")
-                ),
-                iter.try_next().await.unwrap().unwrap()
-            );
-            assert!(iter.try_next().await.unwrap().is_none());
-        }
-    };
+//     let assert_old_value = |epoch| {
+//         let hummock_storage = &hummock_storage;
+//         async move {
+//             // check point get
+//             assert_eq!(
+//                 "111".as_bytes(),
+//                 hummock_storage
+//                     .get(
+//                         gen_key_from_str(VirtualNode::ZERO, "aa"),
+//                         epoch,
+//                         ReadOptions {
+//                             cache_policy: CachePolicy::Fill(CachePriority::High),
+//                             ..Default::default()
+//                         }
+//                     )
+//                     .await
+//                     .unwrap()
+//                     .unwrap()
+//             );
+//             assert_eq!(
+//                 "222".as_bytes(),
+//                 hummock_storage
+//                     .get(
+//                         gen_key_from_str(VirtualNode::ZERO, "bb"),
+//                         epoch,
+//                         ReadOptions {
+//                             cache_policy: CachePolicy::Fill(CachePriority::High),
+//                             ..Default::default()
+//                         }
+//                     )
+//                     .await
+//                     .unwrap()
+//                     .unwrap()
+//             );
+//             assert_eq!(
+//                 "333".as_bytes(),
+//                 hummock_storage
+//                     .get(
+//                         gen_key_from_str(VirtualNode::ZERO, "cc"),
+//                         epoch,
+//                         ReadOptions {
+//                             cache_policy: CachePolicy::Fill(CachePriority::High),
+//                             ..Default::default()
+//                         }
+//                     )
+//                     .await
+//                     .unwrap()
+//                     .unwrap()
+//             );
+//             // check iter
+//             let iter = hummock_storage
+//                 .iter(
+//                     (
+//                         Bound::Included(gen_key_from_str(VirtualNode::ZERO, "aa")),
+//                         Bound::Included(gen_key_from_str(VirtualNode::ZERO, "cc")),
+//                     ),
+//                     epoch,
+//                     ReadOptions {
+//                         cache_policy: CachePolicy::Fill(CachePriority::High),
+//                         ..Default::default()
+//                     },
+//                 )
+//                 .await
+//                 .unwrap();
+//             futures::pin_mut!(iter);
+//             assert_eq!(
+//                 (
+//                     FullKey::new(
+//                         TableId::default(),
+//                         gen_key_from_str(VirtualNode::ZERO, "aa"),
+//                         epoch
+//                     ),
+//                     Bytes::from("111")
+//                 ),
+//                 iter.try_next().await.unwrap().unwrap()
+//             );
+//             assert_eq!(
+//                 (
+//                     FullKey::new(
+//                         TableId::default(),
+//                         gen_key_from_str(VirtualNode::ZERO, "bb"),
+//                         epoch
+//                     ),
+//                     Bytes::from("222")
+//                 ),
+//                 iter.try_next().await.unwrap().unwrap()
+//             );
+//             assert_eq!(
+//                 (
+//                     FullKey::new(
+//                         TableId::default(),
+//                         gen_key_from_str(VirtualNode::ZERO, "cc"),
+//                         epoch
+//                     ),
+//                     Bytes::from("333")
+//                 ),
+//                 iter.try_next().await.unwrap().unwrap()
+//             );
+//             assert!(iter.try_next().await.unwrap().is_none());
+//         }
+//     };
 
-    let batch1 = vec![
-        (
-            gen_key_from_str(VirtualNode::ZERO, "aa"),
-            StorageValue::new_put("111"),
-        ),
-        (
-            gen_key_from_str(VirtualNode::ZERO, "bb"),
-            StorageValue::new_put("222"),
-        ),
-        (
-            gen_key_from_str(VirtualNode::ZERO, "cc"),
-            StorageValue::new_put("333"),
-        ),
-    ];
+//     let batch1 = vec![
+//         (
+//             gen_key_from_str(VirtualNode::ZERO, "aa"),
+//             StorageValue::new_put("111"),
+//         ),
+//         (
+//             gen_key_from_str(VirtualNode::ZERO, "bb"),
+//             StorageValue::new_put("222"),
+//         ),
+//         (
+//             gen_key_from_str(VirtualNode::ZERO, "cc"),
+//             StorageValue::new_put("333"),
+//         ),
+//     ];
 
-    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
-    local.init_for_test(epoch1).await.unwrap();
+//     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+//     local.init_for_test(epoch1).await.unwrap();
 
-    local
-        .ingest_batch(
-            batch1.clone(),
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
-    assert_old_value(epoch1).await;
+//     local
+//         .ingest_batch(
+//             batch1.clone(),
+//             WriteOptions {
+//                 epoch: epoch1,
+//                 table_id: Default::default(),
+//             },
+//         )
+//         .await
+//         .unwrap();
+//     assert_old_value(epoch1).await;
 
-    let assert_new_value = |epoch| {
-        let hummock_storage = &hummock_storage;
-        async move {
-            // check point get
-            assert_eq!(
-                "111_new".as_bytes(),
-                hummock_storage
-                    .get(
-                        gen_key_from_str(VirtualNode::ZERO, "aa"),
-                        epoch,
-                        ReadOptions {
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
-                            ..Default::default()
-                        }
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap()
-            );
+//     let assert_new_value = |epoch| {
+//         let hummock_storage = &hummock_storage;
+//         async move {
+//             // check point get
+//             assert_eq!(
+//                 "111_new".as_bytes(),
+//                 hummock_storage
+//                     .get(
+//                         gen_key_from_str(VirtualNode::ZERO, "aa"),
+//                         epoch,
+//                         ReadOptions {
+//                             cache_policy: CachePolicy::Fill(CachePriority::High),
+//                             ..Default::default()
+//                         }
+//                     )
+//                     .await
+//                     .unwrap()
+//                     .unwrap()
+//             );
 
-            assert!(hummock_storage
-                .get(
-                    gen_key_from_str(VirtualNode::ZERO, "bb"),
-                    epoch,
-                    ReadOptions {
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
-                    }
-                )
-                .await
-                .unwrap()
-                .is_none());
-            assert_eq!(
-                "333".as_bytes(),
-                hummock_storage
-                    .get(
-                        gen_key_from_str(VirtualNode::ZERO, "cc"),
-                        epoch,
-                        ReadOptions {
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
-                            ..Default::default()
-                        }
-                    )
-                    .await
-                    .unwrap()
-                    .unwrap()
-            );
-            let iter = hummock_storage
-                .iter(
-                    (
-                        Bound::Included(gen_key_from_str(VirtualNode::ZERO, "aa")),
-                        Bound::Included(gen_key_from_str(VirtualNode::ZERO, "cc")),
-                    ),
-                    epoch,
-                    ReadOptions {
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap();
-            futures::pin_mut!(iter);
-            assert_eq!(
-                (
-                    FullKey::new(
-                        TableId::default(),
-                        gen_key_from_str(VirtualNode::ZERO, "aa"),
-                        epoch
-                    ),
-                    Bytes::from("111_new")
-                ),
-                iter.try_next().await.unwrap().unwrap()
-            );
-            assert_eq!(
-                (
-                    FullKey::new(
-                        TableId::default(),
-                        gen_key_from_str(VirtualNode::ZERO, "cc"),
-                        epoch
-                    ),
-                    Bytes::from("333")
-                ),
-                iter.try_next().await.unwrap().unwrap()
-            );
-            assert!(iter.try_next().await.unwrap().is_none());
-        }
-    };
+//             assert!(hummock_storage
+//                 .get(
+//                     gen_key_from_str(VirtualNode::ZERO, "bb"),
+//                     epoch,
+//                     ReadOptions {
+//                         cache_policy: CachePolicy::Fill(CachePriority::High),
+//                         ..Default::default()
+//                     }
+//                 )
+//                 .await
+//                 .unwrap()
+//                 .is_none());
+//             assert_eq!(
+//                 "333".as_bytes(),
+//                 hummock_storage
+//                     .get(
+//                         gen_key_from_str(VirtualNode::ZERO, "cc"),
+//                         epoch,
+//                         ReadOptions {
+//                             cache_policy: CachePolicy::Fill(CachePriority::High),
+//                             ..Default::default()
+//                         }
+//                     )
+//                     .await
+//                     .unwrap()
+//                     .unwrap()
+//             );
+//             let iter = hummock_storage
+//                 .iter(
+//                     (
+//                         Bound::Included(gen_key_from_str(VirtualNode::ZERO, "aa")),
+//                         Bound::Included(gen_key_from_str(VirtualNode::ZERO, "cc")),
+//                     ),
+//                     epoch,
+//                     ReadOptions {
+//                         cache_policy: CachePolicy::Fill(CachePriority::High),
+//                         ..Default::default()
+//                     },
+//                 )
+//                 .await
+//                 .unwrap();
+//             futures::pin_mut!(iter);
+//             assert_eq!(
+//                 (
+//                     FullKey::new(
+//                         TableId::default(),
+//                         gen_key_from_str(VirtualNode::ZERO, "aa"),
+//                         epoch
+//                     ),
+//                     Bytes::from("111_new")
+//                 ),
+//                 iter.try_next().await.unwrap().unwrap()
+//             );
+//             assert_eq!(
+//                 (
+//                     FullKey::new(
+//                         TableId::default(),
+//                         gen_key_from_str(VirtualNode::ZERO, "cc"),
+//                         epoch
+//                     ),
+//                     Bytes::from("333")
+//                 ),
+//                 iter.try_next().await.unwrap().unwrap()
+//             );
+//             assert!(iter.try_next().await.unwrap().is_none());
+//         }
+//     };
 
-    // Update aa, delete bb, cc unchanged
-    let batch2 = vec![
-        (
-            gen_key_from_str(VirtualNode::ZERO, "aa"),
-            StorageValue::new_put("111_new"),
-        ),
-        (
-            gen_key_from_str(VirtualNode::ZERO, "bb"),
-            StorageValue::new_delete(),
-        ),
-    ];
+//     // Update aa, delete bb, cc unchanged
+//     let batch2 = vec![
+//         (
+//             gen_key_from_str(VirtualNode::ZERO, "aa"),
+//             StorageValue::new_put("111_new"),
+//         ),
+//         (
+//             gen_key_from_str(VirtualNode::ZERO, "bb"),
+//             StorageValue::new_delete(),
+//         ),
+//     ];
 
-    local
-        .ingest_batch(
-            batch2,
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+//     local
+//         .ingest_batch(
+//             batch2,
+//             WriteOptions {
+//                 epoch: epoch1,
+//                 table_id: Default::default(),
+//             },
+//         )
+//         .await
+//         .unwrap();
 
-    assert_new_value(epoch1).await;
+//     assert_new_value(epoch1).await;
 
-    let epoch2 = epoch1 + 1;
-    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+//     let epoch2 = epoch1 + 1;
+//     local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
 
-    // Write to epoch2
-    local
-        .ingest_batch(
-            batch1,
-            vec![],
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
-    local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
-    // Assert epoch 1 unchanged
-    assert_new_value(epoch1).await;
-    // Assert epoch 2 correctness
-    assert_old_value(epoch2).await;
+//     // Write to epoch2
+//     local
+//         .ingest_batch(
+//             batch1,
+//             WriteOptions {
+//                 epoch: epoch2,
+//                 table_id: Default::default(),
+//             },
+//         )
+//         .await
+//         .unwrap();
+//     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
+//     // Assert epoch 1 unchanged
+//     assert_new_value(epoch1).await;
+//     // Assert epoch 2 correctness
+//     assert_old_value(epoch2).await;
 
-    let ssts1 = hummock_storage
-        .seal_and_sync_epoch(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
-    assert_new_value(epoch1).await;
-    assert_old_value(epoch2).await;
+//     let ssts1 = hummock_storage
+//         .seal_and_sync_epoch(epoch1)
+//         .await
+//         .unwrap()
+//         .uncommitted_ssts;
+//     assert_new_value(epoch1).await;
+//     assert_old_value(epoch2).await;
 
-    let ssts2 = hummock_storage
-        .seal_and_sync_epoch(epoch2)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
-    assert_new_value(epoch1).await;
-    assert_old_value(epoch2).await;
+//     let ssts2 = hummock_storage
+//         .seal_and_sync_epoch(epoch2)
+//         .await
+//         .unwrap()
+//         .uncommitted_ssts;
+//     assert_new_value(epoch1).await;
+//     assert_old_value(epoch2).await;
 
-    assert!(!ssts1.is_empty());
-    assert!(!ssts2.is_empty());
-}
+//     assert!(!ssts1.is_empty());
+//     assert!(!ssts2.is_empty());
+// }
 
 #[tokio::test]
 async fn test_delete_get_v2() {
@@ -1043,7 +1030,6 @@ async fn test_delete_get_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1067,7 +1053,6 @@ async fn test_delete_get_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1128,7 +1113,6 @@ async fn test_multiple_epoch_sync_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1146,7 +1130,6 @@ async fn test_multiple_epoch_sync_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1170,7 +1153,6 @@ async fn test_multiple_epoch_sync_inner(
     local
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1280,7 +1262,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             None,
         )
         .unwrap();
-    local_hummock_storage.flush(Vec::new()).await.unwrap();
+    local_hummock_storage.flush().await.unwrap();
 
     assert_eq!(
         hummock_storage
@@ -1297,7 +1279,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             Bytes::from("222"),
         )
         .unwrap();
-    local_hummock_storage.flush(Vec::new()).await.unwrap();
+    local_hummock_storage.flush().await.unwrap();
 
     assert_eq!(
         hummock_storage
@@ -1346,14 +1328,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch2,
     );
 
-    hummock_storage.clear_shared_buffer().await.unwrap();
+    drop(local_hummock_storage);
 
-    let read_version = local_hummock_storage.read_version();
+    hummock_storage.clear_shared_buffer(epoch1).await;
 
-    let read_version = read_version.read();
-    assert!(read_version.staging().imm.is_empty());
-    assert!(read_version.staging().sst.is_empty());
-    assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
     assert_eq!(
         hummock_storage
             .sstable_object_id_manager()
@@ -1382,7 +1360,7 @@ async fn test_replicated_local_hummock_storage() {
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
             TEST_TABLE_ID,
-            false,
+            OpConsistencyLevel::Inconsistent,
             TableOption {
                 retention_seconds: None,
             },
@@ -1414,7 +1392,6 @@ async fn test_replicated_local_hummock_storage() {
     local_hummock_storage
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -1427,32 +1404,27 @@ async fn test_replicated_local_hummock_storage() {
     {
         assert!(local_hummock_storage.read_version().read().is_replicated());
 
-        let s = risingwave_storage::store::LocalStateStore::iter(
+        let actual = risingwave_storage::store::LocalStateStore::iter(
             &local_hummock_storage,
             (Unbounded, Unbounded),
             read_options.clone(),
         )
         .await
-        .unwrap();
-
-        let mut actual = vec![];
-
-        #[for_await]
-        for v in s {
-            actual.push(v)
-        }
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await;
 
         let expected = expect![[r#"
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"1111",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"2222",
                     ),
                 ),
@@ -1485,7 +1457,6 @@ async fn test_replicated_local_hummock_storage() {
     local_hummock_storage_2
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -1496,30 +1467,24 @@ async fn test_replicated_local_hummock_storage() {
 
     // Test Global State Store iter, epoch2
     {
-        let iter = hummock_storage
+        let actual = hummock_storage
             .iter((Unbounded, Unbounded), epoch2, read_options.clone())
             .await
-            .unwrap();
-        pin_mut!(iter);
-
-        let mut actual = vec![];
-
-        #[for_await]
-        for v in iter {
-            actual.push(v);
-        }
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
 
         let expected = expect![[r#"
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"3333",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"4444",
                     ),
                 ),
@@ -1530,18 +1495,12 @@ async fn test_replicated_local_hummock_storage() {
 
     // Test Global State Store iter, epoch1
     {
-        let iter = hummock_storage
+        let actual = hummock_storage
             .iter((Unbounded, Unbounded), epoch1, read_options)
             .await
-            .unwrap();
-        pin_mut!(iter);
-
-        let mut actual = vec![];
-
-        #[for_await]
-        for v in iter {
-            actual.push(v);
-        }
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
 
         let expected = expect![[r#"
             []

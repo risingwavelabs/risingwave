@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@
 #![feature(extract_if)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(result_option_inspect)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
@@ -31,7 +30,6 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(type_name_of_val)]
 
 pub mod backup_restore;
 pub mod barrier;
@@ -60,4 +58,7 @@ pub enum MetaStoreBackend {
         credentials: Option<(String, String)>,
     },
     Mem,
+    Sql {
+        endpoint: String,
+    },
 }

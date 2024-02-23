@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,12 +135,16 @@ where
         self.managed_state.flush(epoch).await
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        self.managed_state.try_flush().await
+    }
+
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
@@ -255,7 +259,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key,
                 (0, 5),
@@ -342,7 +346,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (3, 4),

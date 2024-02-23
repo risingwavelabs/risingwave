@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::pin::pin;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_sdk_s3::operation::get_object::GetObjectError;
@@ -25,7 +25,7 @@ use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
 use io::StreamReader;
-use risingwave_common::error::RwError;
+use risingwave_common::array::StreamChunk;
 use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
@@ -36,11 +36,10 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
-    StreamChunkWithState,
-};
+use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta};
+
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
@@ -63,7 +62,9 @@ impl S3FileReader {
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
+        let fragment_id = source_ctx.source_info.fragment_id.to_string();
         let source_id = source_ctx.source_info.source_id.to_string();
+        let source_name = source_ctx.source_info.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -84,11 +85,7 @@ impl S3FileReader {
                 return Ok(());
             }
             Err(e) => {
-                return Err(anyhow!(
-                    "S3 GetObject from {} error: {}",
-                    bucket_name,
-                    e.to_string()
-                ));
+                return Err(anyhow!(e).context(format!("S3 GetObject from {bucket_name} error")));
             }
         };
 
@@ -122,18 +119,24 @@ impl S3FileReader {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(batch_size as u64);
+                let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
-                yield batch.clone();
-                batch.clear();
+                yield yield_batch;
             }
         }
         if !batch.is_empty() {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id])
+                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
                 .inc_by(batch_size as u64);
             yield batch;
         }
@@ -177,12 +180,12 @@ impl SplitReader for S3FileReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let config = AwsAuthProps::from(&props);
 
         let sdk_config = config.build_config().await?;
 
-        let bucket_name = props.bucket_name;
+        let bucket_name = props.common.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
         let s3_file_reader = S3FileReader {
@@ -197,17 +200,19 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         self.into_chunk_stream()
     }
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
+            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
             let source_id = self.source_ctx.source_info.source_id.to_string();
+            let source_name = self.source_ctx.source_info.source_name.to_string();
             let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
@@ -221,10 +226,7 @@ impl S3FileReader {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if matches!(
-                parser,
-                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-            ) {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)
@@ -235,8 +237,14 @@ impl S3FileReader {
                 self.source_ctx
                     .metrics
                     .partition_input_count
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
@@ -253,20 +261,22 @@ mod tests {
         CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
         SpecificParserConfig,
     };
-    use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
+    use crate::source::filesystem::s3::S3PropertiesCommon;
+    use crate::source::filesystem::S3SplitEnumerator;
     use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     #[ignore]
     async fn test_s3_split_reader() {
-        let props = S3Properties {
+        let props: S3Properties = S3PropertiesCommon {
             region_name: "ap-southeast-1".to_owned(),
             bucket_name: "mingchao-s3-source".to_owned(),
             match_pattern: None,
             access: None,
             secret: None,
             endpoint_url: None,
-        };
+        }
+        .into();
         let mut enumerator =
             S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
                 .await

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,7 +86,6 @@ async fn test_failpoints_state_store_read_upload() {
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: 1,
                 table_id: Default::default(),
@@ -125,7 +124,6 @@ async fn test_failpoints_state_store_read_upload() {
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: 3,
                 table_id: Default::default(),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,12 +169,16 @@ where
         self.managed_state.flush(epoch).await
     }
 
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        self.managed_state.try_flush().await
+    }
+
     fn info(&self) -> &ExecutorInfo {
         &self.info
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.state_table.init_epoch(epoch);
+        self.managed_state.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
@@ -299,7 +303,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (3, 1000),
@@ -400,7 +404,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 4),
@@ -513,7 +517,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, true>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 4),
@@ -625,7 +629,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (3, 4),
@@ -757,7 +761,7 @@ mod tests {
         }
 
         fn create_source_new_before_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 1 4 1001",
@@ -788,7 +792,7 @@ mod tests {
         }
 
         fn create_source_new_after_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 9 1 1003
@@ -857,7 +861,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (1, 3),
@@ -941,7 +945,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (1, 3),
@@ -1001,7 +1005,7 @@ mod tests {
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (1, 3),
@@ -1135,7 +1139,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 3),
@@ -1205,7 +1209,7 @@ mod tests {
         }
 
         fn create_source_before_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     "  I I
                     +  1 0
@@ -1244,7 +1248,7 @@ mod tests {
         }
 
         fn create_source_after_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I
                     - 1 0",
@@ -1291,7 +1295,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 3),
@@ -1354,7 +1358,7 @@ mod tests {
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::create(0),
+                    ActorContext::for_test(0),
                     info,
                     storage_key(),
                     (0, 3),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::{CreateType, JobStatus};
+use crate::{CreateType, JobStatus, StreamingParallelism};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "streaming_job")]
@@ -24,6 +24,7 @@ pub struct Model {
     pub job_status: JobStatus,
     pub create_type: CreateType,
     pub timezone: Option<String>,
+    pub parallelism: StreamingParallelism,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

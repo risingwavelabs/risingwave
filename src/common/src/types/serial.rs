@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::error::Error;
 use std::hash::Hash;
 
-use postgres_types::{ToSql as _, Type};
+use bytes::BytesMut;
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use serde::{Serialize, Serializer};
 
 use crate::estimate_size::ZeroHeapSize;
@@ -23,6 +25,12 @@ use crate::util::row_id::RowId;
 // Serial is an alias for i64
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Serial(i64);
+
+impl From<Serial> for i64 {
+    fn from(value: Serial) -> i64 {
+        value.0
+    }
+}
 
 impl From<i64> for Serial {
     fn from(value: i64) -> Self {
@@ -75,5 +83,18 @@ impl crate::types::to_binary::ToBinary for Serial {
         let mut output = bytes::BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
         Ok(Some(output.freeze()))
+    }
+}
+
+impl ToSql for Serial {
+    accepts!(INT8);
+
+    to_sql_checked!();
+
+    fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
     }
 }

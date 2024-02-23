@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,7 +53,6 @@ struct ExecutorInner<S: StateStore> {
 
 struct ExecutionVars<S: StateStore> {
     buffer: SortBuffer<S>,
-    buffer_changed: bool,
 }
 
 impl<S: StateStore> Executor for SortExecutor<S> {
@@ -103,7 +102,6 @@ impl<S: StateStore> SortExecutor<S> {
 
         let mut vars = ExecutionVars {
             buffer: SortBuffer::new(this.sort_column_index, &this.buffer_table),
-            buffer_changed: false,
         };
 
         // Populate the sort buffer cache on initialization.
@@ -131,7 +129,6 @@ impl<S: StateStore> SortExecutor<S> {
                     if let Some(chunk) = chunk_builder.take() {
                         yield Message::Chunk(chunk);
                     }
-                    vars.buffer_changed = true;
 
                     yield Message::Watermark(watermark);
                 }
@@ -141,15 +138,10 @@ impl<S: StateStore> SortExecutor<S> {
                 }
                 Message::Chunk(chunk) => {
                     vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
-                    vars.buffer_changed = true;
+                    this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    if vars.buffer_changed {
-                        this.buffer_table.commit(barrier.epoch).await?;
-                    } else {
-                        this.buffer_table.commit_no_data_expected(barrier.epoch);
-                    }
-                    vars.buffer_changed = false;
+                    this.buffer_table.commit(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
@@ -212,7 +204,7 @@ mod tests {
 
         let (tx, source) = MockSource::channel(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
-            actor_ctx: ActorContext::create(123),
+            actor_ctx: ActorContext::for_test(123),
             info: ExecutorInfo {
                 schema: source.schema().clone(),
                 pk_indices: source.pk_indices().to_vec(),

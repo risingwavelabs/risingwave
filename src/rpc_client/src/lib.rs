@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 //! response gRPC message structs.
 
 #![feature(trait_alias)]
-#![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(coroutines)]
@@ -26,6 +25,7 @@
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
+#![feature(panic_update_hook)]
 
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
@@ -33,7 +33,7 @@ use std::future::Future;
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
@@ -46,7 +46,7 @@ use risingwave_pb::meta::heartbeat_request::extra_info;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub mod error;
-use error::{Result, RpcError};
+use error::Result;
 mod compactor_client;
 mod compute_client;
 mod connector_client;
@@ -61,7 +61,7 @@ pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef}
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
-use risingwave_common::util::await_future_with_monitor_error_stream;
+use rw_futures_util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
@@ -120,9 +120,7 @@ where
                 S::new_clients(addr.clone(), self.connection_pool_size as usize),
             )
             .await
-            .map_err(|e| -> RpcError {
-                anyhow!("failed to create RPC client to {addr}: {:?}", e).into()
-            })?
+            .with_context(|| format!("failed to create RPC client to {addr}"))?
             .choose(&mut rand::thread_rng())
             .unwrap()
             .clone())

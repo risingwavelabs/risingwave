@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,9 @@
 
 use std::vec;
 
-use context::{
-    generate_captured_function, CaptureContextAttr, CapturedExecutionContextScopeInput,
-    DefineContextAttr,
-};
+use context::{generate_captured_function, CaptureContextAttr, DefineContextAttr};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote};
 use syn::{Error, ItemFn, Result};
 
 mod context;
@@ -191,11 +187,10 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim_array(anyarray, int32) -> anyarray")]
-/// fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> ListValue {...}
+/// fn trim_array(array: ListRef<'_>, n: Option<i32>) -> ListValue {...}
 /// ```
 ///
-/// Note that we currently only support all arguments being either `Option` or non-`Option`. Mixed
-/// cases are not supported.
+/// This function will be called when `n` is null, but not when `array` is null.
 ///
 /// ## Return Value
 ///
@@ -282,11 +277,11 @@ mod utils;
 /// }
 /// ```
 ///
-/// The `prebuild` argument can be specified, and its value is a Rust expression used to construct a
-/// new variable from the input arguments of the function. Here `$1`, `$2` represent the second and
-/// third arguments of the function (indexed from 0), and their types are `&str`. In the Rust
-/// function signature, these positions of parameters will be omitted, replaced by an extra new
-/// variable at the end.
+/// The `prebuild` argument can be specified, and its value is a Rust expression `Type::method(...)`
+/// used to construct a new variable of `Type` from the input arguments of the function.
+/// Here `$1`, `$2` represent the second and third arguments of the function (indexed from 0),
+/// and their types are `&str`. In the Rust function signature, these positions of parameters will
+/// be omitted, replaced by an extra new variable at the end.
 ///
 /// This macro generates two versions of the function. If all the input parameters that `prebuild`
 /// depends on are constants, it will precompute them during the build function. Otherwise, it will
@@ -401,7 +396,7 @@ mod utils;
 /// | anyarray               | `any[]`              | `ListValue`   | `ListRef<'_>`      |
 /// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
 /// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
-/// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
+/// | struct<`name_T`[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
 ///
 /// [^1]: `T` could be any base type
 ///
@@ -526,8 +521,8 @@ struct UserFunctionAttr {
     write: bool,
     /// Whether the last argument type is `retract: bool`.
     retract: bool,
-    /// The argument type are `Option`s.
-    arg_option: bool,
+    /// Whether each argument type is `Option<T>`.
+    args_option: Vec<bool>,
     /// If the first argument type is `&mut T`, then `Some(T)`.
     first_mut_ref_arg: Option<String>,
     /// The return type kind.
@@ -614,7 +609,7 @@ impl UserFunctionAttr {
         !self.async_
             && !self.write
             && !self.context
-            && !self.arg_option
+            && self.args_option.iter().all(|b| !b)
             && self.return_type_kind == ReturnTypeKind::T
     }
 }
@@ -645,40 +640,6 @@ pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         generate_captured_function(attr, user_fn)
     }
     match inner(attr, item) {
-        Ok(tokens) => tokens.into(),
-        Err(e) => e.to_compile_error().into(),
-    }
-}
-
-/// Add scope to provide the captured context variables for the closure.
-/// For now, we add this when building an Executor and when an Exetutor is run.
-#[proc_macro]
-pub fn captured_execution_context_scope(input: TokenStream) -> TokenStream {
-    fn inner(input: TokenStream) -> Result<TokenStream2> {
-        let CapturedExecutionContextScopeInput { context, closure } = syn::parse(input)?;
-
-        let ctx = quote! { let ctx = #context; };
-        let mut body = quote! { #closure };
-        let fields = vec![format_ident!("time_zone")];
-        fields.iter().for_each(|field| {
-            let local_key_name = format_ident!("{}", field.to_string().to_uppercase());
-            body = quote! {
-                async {
-                    use risingwave_expr::captured_execution_context::#local_key_name;
-                    #local_key_name::scope(ctx.#field.to_owned(), #body).await
-                }
-            };
-        });
-        body = quote! {
-            async {
-                #ctx
-                #body.await
-            }
-        };
-        Ok(body)
-    }
-
-    match inner(input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }

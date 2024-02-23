@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,8 +50,7 @@ impl StreamDedup {
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         let schema = self.core.schema();
-        let mut builder =
-            TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
+        let mut builder = TableCatalogBuilder::default();
 
         schema.fields().iter().for_each(|field| {
             builder.add_column(field);

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -93,7 +93,9 @@ impl MonitoredStorageMetrics {
         buckets.push(16.0); // 16s
 
         // 1ms - 100s
-        let state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
+        let mut state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
+        state_store_read_time_buckets.push(40.0);
+        state_store_read_time_buckets.push(100.0);
 
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
@@ -125,7 +127,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            size_buckets
+            size_buckets.clone(),
         );
         let iter_item =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -187,14 +189,14 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_sync_duration",
             "Histogram of time spent on compacting shared buffer to remote storage",
-            time_buckets.clone()
+            time_buckets,
         );
         let sync_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_sync_size",
             "Total size of upload to l0 every epoch",
-            time_buckets
+            size_buckets,
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
 

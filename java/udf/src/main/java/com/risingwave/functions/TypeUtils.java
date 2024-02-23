@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -245,7 +245,8 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, ((BigDecimal) values[i]).toString().getBytes());
+                    // use `toPlainString` to avoid scientific notation
+                    vector.set(i, ((BigDecimal) values[i]).toPlainString().getBytes());
                 }
             }
         } else if (fieldVector instanceof DateDayVector) {
@@ -286,7 +287,13 @@ class TypeUtils {
             }
         } else if (fieldVector instanceof VarCharVector) {
             var vector = (VarCharVector) fieldVector;
-            vector.allocateNew(values.length);
+            int totalBytes = 0;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    totalBytes += ((String) values[i]).length();
+                }
+            }
+            vector.allocateNew(totalBytes, values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
                     vector.set(i, ((String) values[i]).getBytes());
@@ -294,7 +301,13 @@ class TypeUtils {
             }
         } else if (fieldVector instanceof LargeVarCharVector) {
             var vector = (LargeVarCharVector) fieldVector;
-            vector.allocateNew(values.length);
+            int totalBytes = 0;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    totalBytes += ((String) values[i]).length();
+                }
+            }
+            vector.allocateNew(totalBytes, values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
                     vector.set(i, ((String) values[i]).getBytes());
@@ -302,7 +315,13 @@ class TypeUtils {
             }
         } else if (fieldVector instanceof VarBinaryVector) {
             var vector = (VarBinaryVector) fieldVector;
-            vector.allocateNew(values.length);
+            int totalBytes = 0;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    totalBytes += ((byte[]) values[i]).length;
+                }
+            }
+            vector.allocateNew(totalBytes, values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
                     vector.set(i, (byte[]) values[i]);
@@ -311,83 +330,30 @@ class TypeUtils {
         } else if (fieldVector instanceof ListVector) {
             var vector = (ListVector) fieldVector;
             vector.allocateNew();
-            if (vector.getDataVector() instanceof BitVector) {
-                TypeUtils.<BitVector, Boolean>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val ? 1 : 0));
-            } else if (vector.getDataVector() instanceof SmallIntVector) {
-                TypeUtils.<SmallIntVector, Short>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof IntVector) {
-                TypeUtils.<IntVector, Integer>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof BigIntVector) {
-                TypeUtils.<BigIntVector, Long>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof Float4Vector) {
-                TypeUtils.<Float4Vector, Float>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof Float8Vector) {
-                TypeUtils.<Float8Vector, Double>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof LargeVarBinaryVector) {
-                TypeUtils.<LargeVarBinaryVector, BigDecimal>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val.toString().getBytes()));
-            } else if (vector.getDataVector() instanceof DateDayVector) {
-                TypeUtils.<DateDayVector, LocalDate>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, (int) val.toEpochDay()));
-            } else if (vector.getDataVector() instanceof TimeMicroVector) {
-                TypeUtils.<TimeMicroVector, LocalTime>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val.toNanoOfDay() / 1000));
-            } else if (vector.getDataVector() instanceof TimeStampMicroVector) {
-                TypeUtils.<TimeStampMicroVector, LocalDateTime>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, timestampToMicros(val)));
-            } else if (vector.getDataVector() instanceof IntervalMonthDayNanoVector) {
-                TypeUtils.<IntervalMonthDayNanoVector, PeriodDuration>fillListVector(
-                        vector,
-                        values,
-                        (vec, i, val) -> {
-                            var months = (int) val.getPeriod().toTotalMonths();
-                            var days = val.getPeriod().getDays();
-                            var nanos = val.getDuration().toNanos();
-                            vec.set(i, months, days, nanos);
-                        });
-            } else if (vector.getDataVector() instanceof VarCharVector) {
-                TypeUtils.<VarCharVector, String>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val.getBytes()));
-            } else if (vector.getDataVector() instanceof LargeVarCharVector) {
-                TypeUtils.<LargeVarCharVector, String>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val.getBytes()));
-            } else if (vector.getDataVector() instanceof VarBinaryVector) {
-                TypeUtils.<VarBinaryVector, byte[]>fillListVector(
-                        vector, values, (vec, i, val) -> vec.set(i, val));
-            } else if (vector.getDataVector() instanceof StructVector) {
-                // flatten the `values`
-                var flattenLength = 0;
-                for (int i = 0; i < values.length; i++) {
-                    if (values[i] == null) {
-                        continue;
-                    }
-                    var len = Array.getLength(values[i]);
-                    vector.startNewValue(i);
-                    vector.endValue(i, len);
-                    flattenLength += len;
+            // flatten the `values`
+            var flattenLength = 0;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] == null) {
+                    continue;
                 }
-                var flattenValues = new Object[flattenLength];
-                var ii = 0;
-                for (var list : values) {
-                    if (list == null) {
-                        continue;
-                    }
-                    var length = Array.getLength(list);
-                    for (int i = 0; i < length; i++) {
-                        flattenValues[ii++] = Array.get(list, i);
-                    }
-                }
-                fillVector(vector.getDataVector(), flattenValues);
-            } else {
-                throw new IllegalArgumentException(
-                        "Unsupported type: " + vector.getDataVector().getClass());
+                var len = Array.getLength(values[i]);
+                vector.startNewValue(i);
+                vector.endValue(i, len);
+                flattenLength += len;
             }
+            var flattenValues = new Object[flattenLength];
+            var ii = 0;
+            for (var list : values) {
+                if (list == null) {
+                    continue;
+                }
+                var length = Array.getLength(list);
+                for (int i = 0; i < length; i++) {
+                    flattenValues[ii++] = Array.get(list, i);
+                }
+            }
+            // fill the inner vector
+            fillVector(vector.getDataVector(), flattenValues);
         } else if (fieldVector instanceof StructVector) {
             var vector = (StructVector) fieldVector;
             vector.allocateNew();
@@ -428,33 +394,6 @@ class TypeUtils {
             throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
         }
         fieldVector.setValueCount(values.length);
-    }
-
-    @FunctionalInterface
-    interface TriFunction<T, U, V> {
-        void apply(T t, U u, V v);
-    }
-
-    @SuppressWarnings("unchecked")
-    static <V extends FieldVector, T> void fillListVector(
-            ListVector vector, Object[] values, TriFunction<V, Integer, T> set) {
-        var innerVector = (V) vector.getDataVector();
-        int ii = 0;
-        for (int i = 0; i < values.length; i++) {
-            var array = (T[]) values[i];
-            if (array == null) {
-                continue;
-            }
-            vector.startNewValue(i);
-            for (T v : array) {
-                if (v == null) {
-                    innerVector.setNull(ii++);
-                } else {
-                    set.apply(innerVector, ii++, v);
-                }
-            }
-            vector.endValue(i, array.length);
-        }
     }
 
     static long timestampToMicros(LocalDateTime timestamp) {

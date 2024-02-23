@@ -25,13 +25,8 @@ message RowSeqScanNode {
   // Whether the order on output columns should be preserved.
   bool ordered = 5;
 
-  message ChunkSize {
-    uint32 chunk_size = 1;
-  }
-  // If along with `batch_limit`, `chunk_size` will be set.
-  ChunkSize chunk_size = 6;
   // The pushed down `batch_limit`. Max rows needed to return.
-  optional uint64 limit = 7;
+  optional uint64 limit = 6;
 }
 
 message SysRowSeqScanNode {
@@ -63,7 +58,7 @@ message ScanRange {
 message SourceNode {
   uint32 source_id = 1;
   repeated plan_common.ColumnCatalog columns = 2;
-  map<string, string> properties = 3;
+  map<string, string> with_properties = 3;
   bytes split = 4;
   catalog.StreamSourceInfo info = 5;
 }
@@ -93,6 +88,9 @@ message InsertNode {
   // be filled in streaming.
   optional uint32 row_id_index = 3;
   bool returning = 4;
+
+  // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
+  uint32 session_id = 7;
 }
 
 message DeleteNode {
@@ -101,6 +99,9 @@ message DeleteNode {
   // Version of the table.
   uint64 table_version_id = 3;
   bool returning = 2;
+
+  // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
+  uint32 session_id = 4;
 }
 
 message UpdateNode {
@@ -112,6 +113,9 @@ message UpdateNode {
   bool returning = 3;
   // The columns indices in the input schema, representing the columns need to send to streamDML exeuctor.
   repeated uint32 update_column_indices = 5;
+
+  // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
+  uint32 session_id = 6;
 }
 
 message ValuesNode {
@@ -237,6 +241,8 @@ message ExchangeSource {
 
 message ExchangeNode {
   repeated ExchangeSource sources = 1;
+  // sequential means each tasks of the exchange node will be executed sequentially.
+  bool sequential = 2;
   repeated plan_common.Field input_schema = 3;
 }
 
@@ -285,6 +291,8 @@ message SortOverWindowNode {
   repeated common.ColumnOrder order_by = 3;
 }
 
+message MaxOneRowNode {}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -316,10 +324,11 @@ message PlanNode {
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
     SourceNode source = 34;
-    SortOverWindowNode sort_over_window = 37;
+    SortOverWindowNode sort_over_window = 35;
+    MaxOneRowNode max_one_row = 36;
     // The following nodes are used for testing.
-    bool block_executor = 35;
-    bool busy_loop_executor = 36;
+    bool block_executor = 100;
+    bool busy_loop_executor = 101;
   }
   string identity = 24;
 }

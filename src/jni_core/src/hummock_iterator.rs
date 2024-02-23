@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
-use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range_with_vnode, TableKeyRange};
+use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::java_binding::key_range::Bound;
@@ -32,10 +32,13 @@ use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
-use risingwave_storage::hummock::{CachePolicy, FileCache, SstableStore};
-use risingwave_storage::monitor::HummockStateStoreMetrics;
+use risingwave_storage::hummock::{
+    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore, SstableStoreConfig,
+};
+use risingwave_storage::monitor::{global_hummock_state_store_metrics, HummockStateStoreMetrics};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
+use rw_futures_util::select_all;
 use tokio::sync::mpsc::unbounded_channel;
 
 type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
@@ -63,17 +66,21 @@ impl HummockJavaBindingIterator {
             )
             .await,
         );
-        let sstable_store = Arc::new(SstableStore::new(
-            object_store,
-            read_plan.data_dir,
-            1 << 10,
-            1 << 10,
-            0,
-            1 << 10,
-            FileCache::none(),
-            FileCache::none(),
-            None,
-        ));
+        let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
+            store: object_store,
+            path: read_plan.data_dir,
+            block_cache_capacity: 1 << 10,
+            meta_cache_capacity: 1 << 10,
+            high_priority_ratio: 0,
+            prefetch_buffer_capacity: 1 << 10,
+            max_prefetch_block_number: 16,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
+            recent_filter: None,
+            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
+                MetricLevel::Disabled,
+            )),
+        }));
         let reader = HummockVersionReader::new(
             sstable_store,
             Arc::new(HummockStateStoreMetrics::unused()),
@@ -82,22 +89,31 @@ impl HummockJavaBindingIterator {
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
-        let pin_version = PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0);
+        let pin_version = PinnedVersion::new(
+            HummockVersion::from_rpc_protobuf(&read_plan.version.unwrap()),
+            unbounded_channel().0,
+        );
+        let table_id = read_plan.table_id.into();
 
         for vnode in read_plan.vnode_ids {
+            let vnode = VirtualNode::from_index(vnode as usize);
+            let key_range = table_key_range_from_prost(vnode, key_range.clone());
+            let (key_range, read_version_tuple) = get_committed_read_version_tuple(
+                pin_version.clone(),
+                table_id,
+                key_range,
+                read_plan.epoch,
+            );
             let stream = reader
                 .iter(
-                    table_key_range_from_prost(
-                        VirtualNode::from_index(vnode as usize),
-                        key_range.clone(),
-                    ),
+                    key_range,
                     read_plan.epoch,
                     ReadOptions {
-                        table_id: read_plan.table_id.into(),
+                        table_id,
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()
                     },
-                    (vec![], vec![], pin_version.clone()),
+                    read_version_tuple,
                 )
                 .await?;
             streams.push(stream);
@@ -154,5 +170,5 @@ fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange 
     let left = map_bound(left_bound, r.left);
     let right = map_bound(right_bound, r.right);
 
-    map_table_key_range(prefixed_range_with_vnode((left, right), vnode))
+    prefixed_range_with_vnode((left, right), vnode)
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
-#![feature(result_option_inspect)]
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(lazy_cell)]
@@ -36,6 +35,7 @@ use std::pin::Pin;
 
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,8 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -72,7 +74,7 @@ pub struct ComputeNodeOpts {
     pub prometheus_listener_addr: String,
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    pub meta_address: MetaAddressStrategy,
 
     /// Endpoint of the connector node
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
@@ -91,10 +93,6 @@ pub struct ComputeNodeOpts {
     /// Total available memory for the compute node in bytes. Used by both computing and storage.
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
-
-    /// Spill threshold for mem table.
-    #[clap(long, env = "RW_MEM_TABLE_SPILL_THRESHOLD", default_value_t = default_mem_table_spill_threshold())]
-    pub mem_table_spill_threshold: usize,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
@@ -133,6 +131,16 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+}
+
+impl risingwave_common::opts::Opts for ComputeNodeOpts {
+    fn name() -> &'static str {
+        "compute"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_address.clone()
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -217,18 +225,14 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     })
 }
 
-fn default_total_memory_bytes() -> usize {
+pub fn default_total_memory_bytes() -> usize {
     (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
-fn default_mem_table_spill_threshold() -> usize {
-    (4 << 20) as usize
-}
-
-fn default_parallelism() -> usize {
+pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn default_role() -> Role {
+pub fn default_role() -> Role {
     Role::Both
 }
