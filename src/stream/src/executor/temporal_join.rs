@@ -476,7 +476,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         {
                             // All chunks are newly created in the previous phase, so no holes should exist.
                             assert!(chunk.visibility().all());
-                            // For non matched row, we should evaluate on it.
+                            // For non matched row, we shouldn't evaluate on it.
                             // So we treat `row_matched` as visibility here.
                             let chunk = chunk.clone_with_vis(row_matched.clone());
                             let (data_chunk, ops) = chunk.into_parts();
