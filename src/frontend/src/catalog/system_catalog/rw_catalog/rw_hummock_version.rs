@@ -22,6 +22,7 @@ use crate::error::Result;
 
 #[derive(Fields)]
 struct RwHummockVersion {
+    #[primary_key]
     version_id: i64,
     max_committed_epoch: i64,
     safe_epoch: i64,

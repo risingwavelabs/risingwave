@@ -30,6 +30,7 @@ use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
+use thiserror_ext::AsReport;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
@@ -455,7 +456,7 @@ impl DashboardService {
                     proxy::proxy(req, cache).await.or_else(|err| {
                         Ok((
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", err),
+                            err.context("Unhandled internal error").to_report_string(),
                         )
                             .into_response())
                     })

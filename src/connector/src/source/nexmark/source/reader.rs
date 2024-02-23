@@ -27,6 +27,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::time::Instant;
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::nexmark::source::combined_event::{
@@ -64,7 +65,7 @@ impl SplitReader for NexmarkSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
@@ -163,7 +164,7 @@ impl NexmarkSplitReader {
         }
     }
 
-    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
+    #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
@@ -213,7 +214,7 @@ mod tests {
     use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
-    async fn test_nexmark_split_reader() -> anyhow::Result<()> {
+    async fn test_nexmark_split_reader() -> crate::error::ConnectorResult<()> {
         let props = NexmarkProperties {
             split_num: 2,
             min_event_gap_in_ns: 0,
@@ -247,7 +248,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_nexmark_event_num() -> anyhow::Result<()> {
+    async fn test_nexmark_event_num() -> crate::error::ConnectorResult<()> {
         let max_chunk_size = 32;
         let event_num = max_chunk_size * 128 + 1;
         let props = NexmarkProperties {

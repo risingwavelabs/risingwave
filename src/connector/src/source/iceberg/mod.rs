@@ -21,6 +21,7 @@ use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::sink::iceberg::IcebergConfig;
 use crate::source::{
@@ -95,7 +96,7 @@ impl SplitMetaData for IcebergSplit {
         self.split_id.to_string().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
     }
 
@@ -103,7 +104,7 @@ impl SplitMetaData for IcebergSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
         unimplemented!()
     }
 }
@@ -121,14 +122,14 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let iceberg_config = properties.to_iceberg_config();
         Ok(Self {
             config: iceberg_config,
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
         // Iceberg source does not support streaming queries
         Ok(vec![])
     }
@@ -191,7 +192,7 @@ impl SplitReader for IcebergFileReader {
         _parser_config: ParserConfig,
         _source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         unimplemented!()
     }
 

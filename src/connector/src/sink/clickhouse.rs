@@ -30,6 +30,7 @@ use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -132,7 +133,7 @@ impl ClickHouseEngine {
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<ClickHouseClient> {
+    pub(crate) fn build_client(&self) -> ConnectorResult<ClickHouseClient> {
         use hyper_tls::HttpsConnector;
 
         let https = HttpsConnector::new();
