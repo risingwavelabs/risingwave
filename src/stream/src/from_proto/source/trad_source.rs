@@ -22,8 +22,9 @@ use risingwave_connector::source::{
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp, ColumnDescVersion,
-    FormatType, PbEncodeType,
+    AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp,
+    AdditionalColumnType as LegacyAdditionalColumnType, ColumnDescVersion, FormatType,
+    PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -93,7 +94,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                     &desc.version()
                                 )
                                     && is_bytea
-                                    // the column is from a legacy version
+                                    // the column is from a legacy version (before v1.5.x)
                                     && desc.version == ColumnDescVersion::Unspecified as i32
                                 {
                                     desc.additional_column = Some(AdditionalColumn {
@@ -101,10 +102,17 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                             AdditionalColumnKey {},
                                         )),
                                     });
-                                    tracing::info!(
-                                        "set column {}'s additional_column_type to Key",
-                                        desc.name
-                                    );
+                                }
+
+                                // the column is from a legacy version (v1.6.x)
+                                if desc.additional_column_type
+                                    == LegacyAdditionalColumnType::Key as i32
+                                {
+                                    desc.additional_column = Some(AdditionalColumn {
+                                        column_type: Some(AdditionalColumnType::Key(
+                                            AdditionalColumnKey {},
+                                        )),
+                                    });
                                 }
                             }
                         }

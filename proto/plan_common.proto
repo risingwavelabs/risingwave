@@ -54,10 +54,8 @@ message ColumnDesc {
   // This field is used to represent the connector-spec additional column type.
   // UNSPECIFIED or unset for normal column.
 
-  // deprecated, use AdditionalColumn instead
-  // AdditionalColumnType additional_column_type = 9;
-  reserved "additional_column_type";
-  reserved 9;
+  // deprecated, use AdditionalColumn instead, keep for compatibility with v1.6.x
+  AdditionalColumnType additional_column_type = 9;
 
   ColumnDescVersion version = 10;
 
@@ -218,3 +216,15 @@ message AdditionalColumn {
     AdditionalColumnHeaders headers = 7;
   }
 }
+
+enum AdditionalColumnType {
+  AdditionalColumnType_UNSPECIFIED = 0;
+  AdditionalColumnType_KEY = 1;
+  AdditionalColumnType_TIMESTAMP = 2;
+  AdditionalColumnType_PARTITION = 3;
+  AdditionalColumnType_OFFSET = 4;
+  AdditionalColumnType_HEADER = 5;
+  AdditionalColumnType_FILENAME = 6;
+  AdditionalColumnType_NORMAL = 7;
+}
+
