@@ -48,6 +48,7 @@ use risingwave_rpc_client::{
     DEFAULT_BUFFER_SIZE,
 };
 use rw_futures_util::drop_either_future;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
 use tokio::task::spawn_blocking;
@@ -766,11 +767,13 @@ impl EmbeddedConnectorClient {
 
         let jvm = self.jvm;
         std::thread::spawn(move || {
-            let mut env = match jvm.attach_current_thread() {
+            let mut env = match jvm
+                .attach_current_thread()
+                .context("failed to attach current thread")
+            {
                 Ok(env) => env,
                 Err(e) => {
-                    let _ = response_tx
-                        .blocking_send(Err(anyhow!("failed to attach current thread: {:?}", e)));
+                    let _ = response_tx.blocking_send(Err(e));
                     return;
                 }
             };
@@ -789,7 +792,7 @@ impl EmbeddedConnectorClient {
                     tracing::info!("end of jni call {}::{}", class_name, method_name);
                 }
                 Err(e) => {
-                    tracing::error!("jni call error: {:?}", e);
+                    tracing::error!(error = %e.as_report(), "jni call error");
                 }
             };
         });

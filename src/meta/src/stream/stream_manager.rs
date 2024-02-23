@@ -24,18 +24,23 @@ use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
-use super::{Locations, RescheduleOptions, ScaleController, ScaleControllerRef, TableResizePolicy};
+use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
-use crate::model::{ActorId, TableFragments, TableParallelism};
+use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
+
+#[derive(Default)]
+pub struct CreateStreamingJobOption {
+    pub new_independent_compaction_group: bool,
+}
 
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
@@ -57,10 +62,6 @@ pub struct CreateStreamingJobContext {
     /// The locations of the existing actors, essentially the upstream mview actors to update.
     pub existing_locations: Locations,
 
-    /// The properties of the streaming job.
-    // TODO: directly store `StreamingJob` here.
-    pub table_properties: HashMap<String, String>,
-
     /// DDL definition.
     pub definition: String,
 
@@ -72,6 +73,8 @@ pub struct CreateStreamingJobContext {
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+
+    pub option: CreateStreamingJobOption,
 }
 
 impl CreateStreamingJobContext {
@@ -170,10 +173,6 @@ pub struct ReplaceTableContext {
 
     /// The locations of the existing actors, essentially the downstream chain actors to update.
     pub existing_locations: Locations,
-
-    /// The properties of the streaming job.
-    // TODO: directly store `StreamingJob here.
-    pub table_properties: HashMap<String, String>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -193,9 +192,7 @@ pub struct GlobalStreamManager {
 
     hummock_manager: HummockManagerRef,
 
-    pub reschedule_lock: RwLock<()>,
-
-    pub(crate) scale_controller: ScaleControllerRef,
+    pub scale_controller: ScaleControllerRef,
 
     pub stream_rpc_manager: StreamRpcManager,
 }
@@ -208,14 +205,8 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
         stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            stream_rpc_manager.clone(),
-            env.clone(),
-        ));
-
         Ok(Self {
             env,
             metadata_manager,
@@ -223,7 +214,6 @@ impl GlobalStreamManager {
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
-            reschedule_lock: RwLock::new(()),
             scale_controller,
             stream_rpc_manager,
         })
@@ -294,11 +284,7 @@ impl GlobalStreamManager {
                             .await
                         {
                             // try to cancel buffered creating command.
-                            if self
-                                .barrier_scheduler
-                                .try_cancel_scheduled_create(table_id)
-                                .await
-                            {
+                            if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
                                 tracing::debug!(
                                     "cancelling streaming job {table_id} in buffer queue."
                                 );
@@ -406,7 +392,6 @@ impl GlobalStreamManager {
         CreateStreamingJobContext {
             dispatchers,
             upstream_mview_actors,
-            table_properties,
             building_locations,
             existing_locations,
             definition,
@@ -415,6 +400,7 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
             replace_table_job_info,
+            option,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut replace_table_command = None;
@@ -426,7 +412,7 @@ impl GlobalStreamManager {
             .register_table_fragments(
                 mv_table_id,
                 internal_tables.keys().copied().collect(),
-                &table_properties,
+                option,
             )
             .await?;
         debug_assert_eq!(
@@ -444,10 +430,7 @@ impl GlobalStreamManager {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
 
-        if let Some((_, context, table_fragments)) = replace_table_job_info {
-            let MetadataManager::V1(mgr) = &self.metadata_manager else {
-                unimplemented!("support create sink into table in v2");
-            };
+        if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.build_actors(
                 &table_fragments,
                 &context.building_locations,
@@ -455,10 +438,19 @@ impl GlobalStreamManager {
             )
             .await?;
 
-            // Add table fragments to meta store with state: `State::Initial`.
-            mgr.fragment_manager
-                .start_create_table_fragments(table_fragments.clone())
-                .await?;
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    // Add table fragments to meta store with state: `State::Initial`.
+                    mgr.fragment_manager
+                        .start_create_table_fragments(table_fragments.clone())
+                        .await?
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                        .await?
+                }
+            }
 
             let dummy_table_id = table_fragments.table_id();
 
@@ -518,7 +510,6 @@ impl GlobalStreamManager {
             dispatchers,
             building_locations,
             existing_locations,
-            table_properties: _,
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
@@ -631,7 +622,7 @@ impl GlobalStreamManager {
             return vec![];
         }
 
-        let _reschedule_job_lock = self.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.reschedule_lock_read_guard().await;
         let (receivers, recovered_job_ids) = self.creating_job_info.cancel_jobs(table_ids).await;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
@@ -690,7 +681,7 @@ impl GlobalStreamManager {
         parallelism: TableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
-        let _reschedule_job_lock = self.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
         let worker_nodes = self
             .metadata_manager
@@ -788,7 +779,7 @@ mod tests {
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
-    use crate::stream::SourceManager;
+    use crate::stream::{ScaleController, SourceManager};
     use crate::MetaOpts;
 
     struct FakeFragmentState {
@@ -987,6 +978,12 @@ mod tests {
             let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
             let stream_rpc_manager = StreamRpcManager::new(env.clone());
+            let scale_controller = Arc::new(ScaleController::new(
+                &metadata_manager,
+                source_manager.clone(),
+                stream_rpc_manager.clone(),
+                env.clone(),
+            ));
 
             let barrier_manager = GlobalBarrierManager::new(
                 scheduled_barriers,
@@ -997,6 +994,7 @@ mod tests {
                 sink_manager,
                 meta_metrics.clone(),
                 stream_rpc_manager.clone(),
+                scale_controller.clone(),
             );
 
             let stream_manager = GlobalStreamManager::new(
@@ -1006,6 +1004,7 @@ mod tests {
                 source_manager.clone(),
                 hummock_manager,
                 stream_rpc_manager,
+                scale_controller.clone(),
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);

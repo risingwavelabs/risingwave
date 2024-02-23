@@ -12,28 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
-
-pub const PG_AUTH_MEMBERS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Int32, "roleid"),
-    (DataType::Int32, "member"),
-    (DataType::Int32, "grantor"),
-    (DataType::Boolean, "admin_option"),
-    (DataType::Boolean, "inherit_option"),
-    (DataType::Boolean, "set_option"),
-];
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_auth_members` shows the membership relations between roles. Any non-circular set of relationships is allowed.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-auth-members.html`]
-pub static PG_AUTH_MEMBERS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_auth_members",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: PG_AUTH_MEMBERS_COLUMNS,
-    sql: infer_dummy_view_sql(PG_AUTH_MEMBERS_COLUMNS),
-});
+#[system_catalog(view, "pg_catalog.pg_auth_members")]
+#[derive(Fields)]
+struct PgAuthMember {
+    oid: i32,
+    roleid: i32,
+    member: i32,
+    grantor: i32,
+    admin_option: bool,
+    inherit_option: bool,
+    set_option: bool,
+}

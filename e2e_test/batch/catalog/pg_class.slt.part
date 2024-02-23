@@ -1,23 +1,23 @@
 query ITIT
 SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 15;
 ----
-1 pg_type 1 v
-2 pg_namespace 1 v
-3 pg_cast 1 v
-4 pg_matviews 1 v
-5 pg_user 1 v
-6 pg_class 1 v
-7 pg_index 1 v
-8 pg_opclass 1 v
-9 pg_collation 1 v
-10 pg_am 1 v
-11 pg_operator 1 v
-12 pg_views 1 v
-13 pg_attribute 1 v
-14 pg_database 1 v
+1 columns 1 v
+2 tables 1 v
+3 views 1 v
+4 pg_am 1 v
+5 pg_attrdef 1 v
+6 pg_attribute 1 v
+7 pg_auth_members 1 v
+8 pg_cast 1 r
+9 pg_class 1 v
+10 pg_collation 1 v
+11 pg_constraint 1 v
+12 pg_conversion 1 v
+13 pg_database 1 v
+14 pg_depend 1 v
 15 pg_description 1 v
 
 query ITIT
 SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class WHERE oid = 'pg_namespace'::regclass;
 ----
-2 pg_namespace 1 v
+24 pg_namespace 1 v

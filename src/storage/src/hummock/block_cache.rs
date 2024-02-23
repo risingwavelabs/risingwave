@@ -34,9 +34,9 @@ const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
 type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
 
 enum BlockEntry {
-    Cache(CachedBlockEntry),
-    Owned(Box<Block>),
-    RefEntry(Arc<Block>),
+    Cache(#[allow(dead_code)] CachedBlockEntry),
+    Owned(#[allow(dead_code)] Box<Block>),
+    RefEntry(#[allow(dead_code)] Arc<Block>),
 }
 
 pub struct BlockHolder {

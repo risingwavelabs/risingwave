@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::BuiltinView;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The view `columns` contains information about all table columns (or view columns) in the
 /// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
@@ -25,46 +21,90 @@ use crate::catalog::system_catalog::BuiltinView;
 /// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
 ///
 /// In RisingWave, `columns` also contains all materialized views' columns.
-pub static INFORMATION_SCHEMA_COLUMNS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "columns",
-    schema: INFORMATION_SCHEMA_SCHEMA_NAME,
-    columns: &[
-        (DataType::Varchar, "table_catalog"),
-        (DataType::Varchar, "table_schema"),
-        (DataType::Varchar, "table_name"),
-        (DataType::Varchar, "column_name"),
-        (DataType::Varchar, "column_default"),
-        (DataType::Int32, "character_maximum_length"),
-        (DataType::Int32, "numeric_precision"),
-        (DataType::Int32, "numeric_scale"),
-        (DataType::Int32, "ordinal_position"),
-        (DataType::Varchar, "is_nullable"),
-        (DataType::Varchar, "collation_name"),
-        (DataType::Varchar, "udt_schema"),
-        (DataType::Varchar, "data_type"),
-        (DataType::Varchar, "udt_name"),
-    ],
-    sql: "SELECT CURRENT_DATABASE() AS table_catalog, \
-                s.name AS table_schema, \
-                r.name AS table_name, \
-                c.name AS column_name, \
-                NULL AS column_default, \
-                NULL::integer AS character_maximum_length, \
-                NULL::integer AS numeric_precision, \
-                NULL::integer AS numeric_scale, \
-                c.position AS ordinal_position, \
-                'YES' AS is_nullable, \
-                NULL AS collation_name, \
-                'pg_catalog' AS udt_schema, \
-                CASE \
-                    WHEN c.data_type = 'varchar' THEN 'character varying' \
-                    ELSE c.data_type \
-                END AS data_type, \
-                c.udt_type AS udt_name \
-            FROM rw_catalog.rw_columns c \
-            LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id \
-            JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id \
-            WHERE c.is_hidden = false\
-    "
-    .to_string(),
-});
+#[system_catalog(
+    view,
+    "information_schema.columns",
+    "SELECT CURRENT_DATABASE() AS table_catalog,
+        s.name AS table_schema,
+        r.name AS table_name,
+        c.name AS column_name,
+        NULL AS column_default,
+        NULL::integer AS character_maximum_length,
+        NULL::integer AS numeric_precision,
+        NULL::integer AS numeric_scale,
+        c.position AS ordinal_position,
+        'YES' AS is_nullable,
+        CASE
+            WHEN c.data_type = 'varchar' THEN 'character varying'
+            ELSE c.data_type
+        END AS data_type,
+        CURRENT_DATABASE() AS udt_catalog,
+        'pg_catalog' AS udt_schema,
+        c.udt_type AS udt_name,
+        NULL AS character_set_catalog,
+        NULL AS character_set_schema,
+        NULL AS character_set_name,
+        NULL AS collation_catalog,
+        NULL AS collation_schema,
+        NULL AS collation_name,
+        NULL AS domain_catalog,
+        NULL AS domain_schema,
+        NULL AS domain_name,
+        NULL AS scope_catalog,
+        NULL AS scope_schema,
+        NULL AS scope_name,
+        'NO' AS is_identity,
+        NULL AS identity_generation,
+        NULL AS identity_start,
+        NULL AS identity_increment,
+        NULL AS identity_maximum,
+        NULL AS identity_minimum,
+        NULL AS identity_cycle,
+        CASE
+            WHEN c.is_generated THEN 'ALWAYS'
+            ELSE 'NEVER'
+        END AS is_generated,
+        c.generation_expression
+    FROM rw_catalog.rw_columns c
+    LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id
+    JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id
+    WHERE c.is_hidden = false"
+)]
+#[derive(Fields)]
+struct Column {
+    table_catalog: String,
+    table_schema: String,
+    table_name: String,
+    column_name: String,
+    column_default: String,
+    character_maximum_length: i32,
+    numeric_precision: i32,
+    numeric_scale: i32,
+    ordinal_position: i32,
+    is_nullable: String,
+    data_type: String,
+    udt_catalog: String,
+    udt_schema: String,
+    udt_name: String,
+    character_set_catalog: String,
+    character_set_schema: String,
+    character_set_name: String,
+    collation_catalog: String,
+    collation_schema: String,
+    collation_name: String,
+    domain_catalog: String,
+    domain_schema: String,
+    domain_name: String,
+    scope_catalog: String,
+    scope_schema: String,
+    scope_name: String,
+    is_identity: String,
+    identity_generation: String,
+    identity_start: String,
+    identity_increment: String,
+    identity_maximum: String,
+    identity_minimum: String,
+    identity_cycle: String,
+    is_generated: String,
+    generation_expression: String,
+}

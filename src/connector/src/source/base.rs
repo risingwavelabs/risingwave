@@ -85,8 +85,8 @@ pub trait UnknownFields {
 
 impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
     fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
-        let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-        let res = serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))?;
+        let json_value = serde_json::to_value(props)?;
+        let res = serde_json::from_value::<P>(json_value)?;
 
         if !deny_unknown_fields || res.unknown_fields().is_empty() {
             Ok(res)
@@ -312,8 +312,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         };
         return Ok(SourceStruct::new(format, encode));
     }
-    let source_format = info.get_format().map_err(|e| anyhow!("{e:?}"))?;
-    let source_encode = info.get_row_encode().map_err(|e| anyhow!("{e:?}"))?;
+    let source_format = info.get_format()?;
+    let source_encode = info.get_row_encode()?;
     let (format, encode) = match (source_format, source_encode) {
         (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Protobuf) => {
@@ -329,9 +329,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
-        (PbFormatType::None, PbEncodeType::None) => {
-            (SourceFormat::None, SourceEncode::None)
-        }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
         (PbFormatType::Debezium, PbEncodeType::Avro) => {
             (SourceFormat::Debezium, SourceEncode::Avro)
         }

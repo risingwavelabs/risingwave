@@ -30,9 +30,6 @@ pub mod hummock {
             flag.bits()
         }
     }
-
-    pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
-    pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
 }
 
 pub mod log_store {

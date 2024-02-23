@@ -36,6 +36,7 @@ use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use thiserror_ext::AsReport;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -412,7 +413,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 LazyLock::new(LogSuppresser::default);
                             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::warn!(
-                                    %error,
+                                    error = %error.as_report(),
                                     split_id = self.row_meta.as_ref().map(|m| m.split_id),
                                     offset = self.row_meta.as_ref().map(|m| m.offset),
                                     column = desc.name,

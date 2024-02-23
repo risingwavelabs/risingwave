@@ -16,7 +16,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Result};
 
-#[proc_macro_derive(Fields, attributes(primary_key))]
+#[proc_macro_derive(Fields, attributes(primary_key, fields))]
 pub fn fields(tokens: proc_macro::TokenStream) -> proc_macro::TokenStream {
     inner(tokens.into()).into()
 }
@@ -46,6 +46,16 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
         ));
     };
 
+    let style = get_style(&input);
+    if let Some(style) = &style {
+        if !["Title Case", "TITLE CASE", "snake_case"].contains(&style.value().as_str()) {
+            return Err(syn::Error::new_spanned(
+                style,
+                "only `Title Case`, `TITLE CASE`, and `snake_case` are supported",
+            ));
+        }
+    }
+
     let fields_rw: Vec<TokenStream> = struct_
         .fields
         .iter()
@@ -54,6 +64,12 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
             // strip leading `r#`
             if name.starts_with("r#") {
                 name = name[2..].to_string();
+            }
+            // cast style
+            match style.as_ref().map_or(String::new(), |f| f.value()).as_str() {
+                "Title Case" => name = to_title_case(&name),
+                "TITLE CASE" => name = to_title_case(&name).to_uppercase(),
+                _ => {}
             }
             let ty = &field.ty;
             quote! {
@@ -130,6 +146,46 @@ fn get_primary_key(input: &syn::DeriveInput) -> Option<Vec<usize>> {
         }
     }
     None
+}
+
+/// Get name style from `#[fields(style = "xxx")]` attribute.
+fn get_style(input: &syn::DeriveInput) -> Option<syn::LitStr> {
+    let style = input.attrs.iter().find_map(|attr| match &attr.meta {
+        syn::Meta::List(list) if list.path.is_ident("fields") => {
+            let name_value: syn::MetaNameValue = syn::parse2(list.tokens.clone()).ok()?;
+            if name_value.path.is_ident("style") {
+                Some(name_value.value)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })?;
+    match style {
+        syn::Expr::Lit(lit) => match lit.lit {
+            syn::Lit::Str(s) => Some(s),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Convert `snake_case` to `Title Case`.
+fn to_title_case(s: &str) -> String {
+    let mut title = String::new();
+    let mut next_upper = true;
+    for c in s.chars() {
+        if c == '_' {
+            title.push(' ');
+            next_upper = true;
+        } else if next_upper {
+            title.push(c.to_uppercase().next().unwrap());
+            next_upper = false;
+        } else {
+            title.push(c);
+        }
+    }
+    title
 }
 
 #[cfg(test)]

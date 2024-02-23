@@ -60,13 +60,13 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Extract
             | expr_node::Type::DatePart
             | expr_node::Type::TumbleStart
-            | expr_node::Type::ToTimestamp
+            | expr_node::Type::SecToTimestamptz
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
             | expr_node::Type::MakeDate
             | expr_node::Type::MakeTime
             | expr_node::Type::MakeTimestamp
-            | expr_node::Type::ToTimestamp1
+            | expr_node::Type::CharToTimestamptz
             | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
@@ -250,6 +250,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgGetIndexdef
             | expr_node::Type::ColDescription
             | expr_node::Type::PgGetViewdef
+            | expr_node::Type::PgGetUserbyid
+            | expr_node::Type::PgIndexesSize
+            | expr_node::Type::PgRelationSize
             | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }
