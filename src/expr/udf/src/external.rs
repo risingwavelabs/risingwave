@@ -154,7 +154,7 @@ impl ArrowFlightUdfClient {
             .inc_by(input.get_array_memory_size() as u64);
         let timer = metrics.udf_latency.with_label_values(labels).start_timer();
 
-        let n = if retry { 4 } else { 0 };
+        let n = if retry { 1000000 } else { 0 };
         let result = if let Some(timeout) = timeout {
             match tokio::time::timeout(timeout, self.call_with_retry(id, input, n)).await {
                 Ok(ret) => ret,

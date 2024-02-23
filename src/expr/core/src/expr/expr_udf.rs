@@ -101,8 +101,10 @@ impl UdfExpression {
             .call_opt(
                 &self.identifier,
                 arrow_input,
-                self.timeout,
-                disable_retry_count == 0,
+                // No timeout
+                None,
+                // Always retry
+                true,
             )
             .instrument_await(self.span.clone())
             .await;
