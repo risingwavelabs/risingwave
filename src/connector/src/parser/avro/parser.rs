@@ -85,6 +85,26 @@ impl AvroAccessBuilder {
                 Some(reader_schema),
             )?);
         }
+        if self.skip_aws_glue_sr_header {
+            use byteorder::ReadBytesExt as _;
+
+            if payload.len() < 1 + 1 + 16 {
+                anyhow::bail!(
+                    "{} shorter than aws glue schema registry header",
+                    payload.len()
+                );
+            }
+            let mut cursor = payload;
+            let header_version = cursor.read_u8().unwrap();
+            if header_version != 3 {
+                anyhow::bail!("aws glue schema registry header version {header_version} != 3");
+            }
+            let compression = cursor.read_u8().unwrap();
+            if compression != 0 {
+                anyhow::bail!("aws glue schema registry compression {compression} != 0");
+            }
+            return Ok(from_avro_datum(reader_schema, &mut &payload[18..], None)?);
+        }
         let schema = reader_schema;
         let mut reader = Reader::with_schema(schema, payload)?;
         match reader.next() {
