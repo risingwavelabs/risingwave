@@ -2761,7 +2761,7 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut always_retry_on_network_error = None;
         for option in with_options {
-            if option.name.to_string().to_lowercase() == "always_retry_network_errors" {
+            if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
                 always_retry_on_network_error = Some(option.value == Value::Boolean(true));
             } else {
                 return Err(ParserError::ParserError(format!(
