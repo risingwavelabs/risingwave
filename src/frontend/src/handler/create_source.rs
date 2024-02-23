@@ -157,6 +157,7 @@ async fn extract_avro_table_schema(
             && !format_encode_options
                 .get("with_deprecated_file_header")
                 .is_some_and(|v| v == "true")
+            && !format_encode_options.get("skip_fixed_header").is_some()
         {
             bail_not_implemented!(issue = 12871, "avro without schema registry");
         }
