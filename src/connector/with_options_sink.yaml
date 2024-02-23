@@ -252,6 +252,9 @@ KafkaConfig:
     field_type: String
     comments: Client identifier
     required: false
+  - name: properties.enable.ssl.certificate.verification
+    field_type: bool
+    required: false
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -463,10 +466,12 @@ StarrocksConfig:
     field_type: String
     comments: The port to the MySQL server of StarRocks FE.
     required: true
+    alias: starrocks.query_port
   - name: starrocks.httpport
     field_type: String
     comments: The port to the HTTP server of StarRocks FE.
     required: true
+    alias: starrocks.http_port
   - name: starrocks.user
     field_type: String
     comments: The user name used to access the StarRocks database.

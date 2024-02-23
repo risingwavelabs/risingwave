@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use pulsar::{Pulsar, TokioExecutor};
+use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::topic::{parse_topic, Topic};
 use crate::source::pulsar::PulsarProperties;
@@ -45,7 +47,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     async fn new(
         properties: PulsarProperties,
         _context: SourceEnumeratorContextRef,
-    ) -> Result<PulsarSplitEnumerator> {
+    ) -> ConnectorResult<PulsarSplitEnumerator> {
         let pulsar = properties
             .common
             .build_client(&properties.oauth, &properties.aws_auth_props)
@@ -80,7 +82,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<PulsarSplit>> {
         let offset = self.start_offset.clone();
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));

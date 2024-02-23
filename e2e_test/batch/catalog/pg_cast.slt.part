@@ -82,8 +82,9 @@ SELECT * FROM pg_catalog.pg_cast;
 78 3802 701 e
 79 3802 1700 e
 80 3802 1043 a
-81 1301 701 e
-82 1301 1043 a
+81 20 20 e
+82 1301 701 e
+83 1301 1043 a
 
 query TT rowsort
 SELECT s.typname, t.typname

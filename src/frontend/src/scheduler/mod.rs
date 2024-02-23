@@ -66,6 +66,6 @@ impl ExecutionContext {
     }
 
     pub fn to_batch_task_context(&self) -> FrontendBatchTaskContext {
-        FrontendBatchTaskContext::new(self.session.env().clone(), self.session.auth_context())
+        FrontendBatchTaskContext::new(self.session.clone())
     }
 }
