@@ -48,15 +48,14 @@ drop function decimal_add;
 statement ok
 create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language python as $$
 import json
-
 def to_string(a, b, c, d, e, f, g, h, i, j):
-    return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + json.dumps(j);
+    return str(a) + str(b) + str(c) + str(d) + str(e) + str(f) + str(g) + str(h) + str(i) + json.dumps(j)
 $$;
 
 query T
 select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
 ----
-False1234.56.78.9abc'\x01\x02\x03'{"key": 1}
+False1234.56.78.9abcb'\x01\x02\x03'{"key": 1}
 
 statement ok
 drop function to_string;
@@ -106,7 +105,6 @@ class Ret:
         self.i = i
         self.j = j
         self.s = s
-
 def return_all(a, b, c, d, e, f, g, h, i, j, s):
     return Ret(a, b, c, d, e, f, g, h, i, j, s)
 $$;
@@ -158,7 +156,6 @@ class Ret:
     def __init__(self, word, length):
         self.word = word
         self.length = length
-
 def split(s):
     for word in s.split():
         yield Ret(word, len(word))
