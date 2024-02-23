@@ -2,7 +2,7 @@
 version: "3"
 services:
   starrocks-fe:
-    image: starrocks/fe-ubuntu:latest
+    image: starrocks/fe-ubuntu:3.2.3
     hostname: starrocks-fe
     container_name: starrocks-fe
     volumes:
@@ -13,8 +13,13 @@ services:
       - 8030:8030
       - 9020:9020
       - 9030:9030
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
   starrocks-be:
-    image: starrocks/be-ubuntu:latest
+    image: starrocks/be-ubuntu:3.2.3
     command:
       - /bin/bash
       - -c
