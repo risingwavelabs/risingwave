@@ -55,8 +55,8 @@ use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
-    StreamChunkWithState,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMessage, SourceMeta, SourceWithStateStream,
+    SplitId, StreamChunkWithState,
 };
 
 pub mod additional_columns;
@@ -515,6 +515,21 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
+#[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) {
+    #[for_await]
+    for batch in stream {
+        let mut batch = batch?;
+        let mut start = 0;
+        let end = batch.len();
+        while start < end {
+            let next = std::cmp::min(start + rate_limit as usize, end);
+            yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
+            start = next;
+        }
+    }
+}
+
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
@@ -534,7 +549,11 @@ impl<P: ByteStreamSourceParser> P {
             actor_id = source_info.actor_id,
             source_id = source_info.source_id.table_id()
         );
-
+        let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
+            Box::pin(ensure_largest_at_rate_limit(data_stream, *rate_limit))
+        } else {
+            data_stream
+        };
         into_chunk_stream(self, data_stream).instrument(span)
     }
 }
