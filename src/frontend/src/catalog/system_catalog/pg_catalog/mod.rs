@@ -36,6 +36,7 @@ mod pg_namespace;
 mod pg_opclass;
 mod pg_operator;
 mod pg_proc;
+mod pg_rewrite;
 mod pg_roles;
 mod pg_settings;
 mod pg_shadow;
