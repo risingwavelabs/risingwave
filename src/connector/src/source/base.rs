@@ -150,7 +150,7 @@ pub struct SourceEnumeratorContext {
     pub connector_client: Option<ConnectorClient>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
