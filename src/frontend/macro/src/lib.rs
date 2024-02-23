@@ -117,11 +117,15 @@ fn gen_sys_table(attr: Attr, item_fn: ItemFn) -> Result<TokenStream2> {
         #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
         #[no_mangle]    // to prevent duplicate schema.table name
         fn #gen_fn_name() -> crate::catalog::system_catalog::BuiltinCatalog {
+            const _: () = {
+                assert!(#struct_type::PRIMARY_KEY.is_some(), "primary key is required for system table");
+            };
+
             crate::catalog::system_catalog::BuiltinCatalog::Table(crate::catalog::system_catalog::BuiltinTable {
                 name: #table_name,
                 schema: #schema_name,
                 columns: #struct_type::fields(),
-                pk: #struct_type::primary_key(),
+                pk: #struct_type::PRIMARY_KEY.unwrap(),
                 function: |reader| std::boxed::Box::pin(async {
                     let rows = #user_fn_name(reader) #_await #handle_error;
                     let mut builder = #struct_type::data_chunk_builder(rows.len() + 1);
