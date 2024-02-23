@@ -43,6 +43,7 @@ mod pg_shdescription;
 mod pg_stat_activity;
 mod pg_tables;
 mod pg_tablespace;
+mod pg_trigger;
 mod pg_type;
 mod pg_user;
 mod pg_views;
