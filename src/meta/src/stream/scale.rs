@@ -538,56 +538,65 @@ impl ScaleController {
         let mut fragment_state = HashMap::new();
         let mut fragment_to_table = HashMap::new();
 
+        // We are reusing code for the metadata manager of both V1 and V2, which will be deprecated in the future.
+        fn fulfill_index_by_table_fragments_ref(
+            actor_map: &mut HashMap<u32, CustomActorInfo>,
+            fragment_map: &mut HashMap<FragmentId, CustomFragmentInfo>,
+            actor_status: &mut BTreeMap<ActorId, ActorStatus>,
+            fragment_state: &mut HashMap<FragmentId, State>,
+            fragment_to_table: &mut HashMap<FragmentId, TableId>,
+            table_fragments: &TableFragments,
+        ) {
+            fragment_state.extend(
+                table_fragments
+                    .fragment_ids()
+                    .map(|f| (f, table_fragments.state())),
+            );
+
+            for (fragment_id, fragment) in &table_fragments.fragments {
+                for actor in &fragment.actors {
+                    actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
+                }
+
+                fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
+            }
+
+            actor_status.extend(table_fragments.actor_status.clone());
+
+            fragment_to_table.extend(
+                table_fragments
+                    .fragment_ids()
+                    .map(|f| (f, table_fragments.table_id())),
+            );
+        }
+
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
-                for (table_id, table_fragments) in guard.table_fragments() {
-                    fragment_state.extend(
-                        table_fragments
-                            .fragment_ids()
-                            .map(|f| (f, table_fragments.state())),
+                for table_fragments in guard.table_fragments().values() {
+                    fulfill_index_by_table_fragments_ref(
+                        &mut actor_map,
+                        &mut fragment_map,
+                        &mut actor_status,
+                        &mut fragment_state,
+                        &mut fragment_to_table,
+                        table_fragments,
                     );
-
-                    for (fragment_id, fragment) in &table_fragments.fragments {
-                        for actor in &fragment.actors {
-                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
-                        }
-
-                        fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
-                    }
-
-                    actor_status.extend(table_fragments.actor_status.clone());
-
-                    fragment_to_table
-                        .extend(table_fragments.fragment_ids().map(|f| (f, *table_id)));
                 }
             }
             MetadataManager::V2(_) => {
                 let all_table_fragments = self.list_all_table_fragments().await?;
 
-                for table_fragments in all_table_fragments {
-                    fragment_state.extend(
-                        table_fragments
-                            .fragment_ids()
-                            .map(|f| (f, table_fragments.state())),
+                for table_fragments in &all_table_fragments {
+                    fulfill_index_by_table_fragments_ref(
+                        &mut actor_map,
+                        &mut fragment_map,
+                        &mut actor_status,
+                        &mut fragment_state,
+                        &mut fragment_to_table,
+                        table_fragments,
                     );
-
-                    fragment_to_table.extend(
-                        table_fragments
-                            .fragment_ids()
-                            .map(|f| (f, table_fragments.table_id())),
-                    );
-
-                    for (fragment_id, fragment) in &table_fragments.fragments {
-                        for actor in &fragment.actors {
-                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
-                        }
-
-                        fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
-                    }
-
-                    actor_status.extend(table_fragments.actor_status.clone());
                 }
             }
         };
@@ -2069,41 +2078,52 @@ impl ScaleController {
         let mut fragment_map = HashMap::new();
         let mut fragment_parallelism = HashMap::new();
 
+        // We are reusing code for the metadata manager of both V1 and V2, which will be deprecated in the future.
+        fn fulfill_index_by_table_fragments_ref(
+            actor_map: &mut HashMap<u32, CustomActorInfo>,
+            actor_status: &mut HashMap<ActorId, ActorStatus>,
+            fragment_map: &mut HashMap<FragmentId, CustomFragmentInfo>,
+            fragment_parallelism: &mut HashMap<FragmentId, TableParallelism>,
+            table_fragments: &TableFragments,
+        ) {
+            for (fragment_id, fragment) in &table_fragments.fragments {
+                for actor in &fragment.actors {
+                    actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
+                }
+
+                fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
+
+                fragment_parallelism.insert(*fragment_id, table_fragments.assigned_parallelism);
+            }
+
+            actor_status.extend(table_fragments.actor_status.clone());
+        }
+
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
                 for table_fragments in guard.table_fragments().values() {
-                    for (fragment_id, fragment) in &table_fragments.fragments {
-                        for actor in &fragment.actors {
-                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
-                        }
-
-                        fragment_map.insert(*fragment_id, CustomFragmentInfo::from(fragment));
-
-                        fragment_parallelism
-                            .insert(*fragment_id, table_fragments.assigned_parallelism);
-                    }
-
-                    actor_status.extend(table_fragments.actor_status.clone());
+                    fulfill_index_by_table_fragments_ref(
+                        &mut actor_map,
+                        &mut actor_status,
+                        &mut fragment_map,
+                        &mut fragment_parallelism,
+                        table_fragments,
+                    );
                 }
             }
             MetadataManager::V2(_) => {
                 let all_table_fragments = self.list_all_table_fragments().await?;
 
-                for table_fragments in all_table_fragments {
-                    for (fragment_id, fragment) in table_fragments.fragments {
-                        for actor in &fragment.actors {
-                            actor_map.insert(actor.actor_id, CustomActorInfo::from(actor));
-                        }
-
-                        fragment_map.insert(fragment_id, CustomFragmentInfo::from(&fragment));
-
-                        fragment_parallelism
-                            .insert(fragment_id, table_fragments.assigned_parallelism);
-                    }
-
-                    actor_status.extend(table_fragments.actor_status);
+                for table_fragments in &all_table_fragments {
+                    fulfill_index_by_table_fragments_ref(
+                        &mut actor_map,
+                        &mut actor_status,
+                        &mut fragment_map,
+                        &mut fragment_parallelism,
+                        table_fragments,
+                    );
                 }
             }
         };
