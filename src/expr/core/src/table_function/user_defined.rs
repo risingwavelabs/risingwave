@@ -221,7 +221,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             UdfImpl::JavaScript(rt)
         }
         "python" if udtf.body.is_some() => {
-            let mut rt = PythonRuntime::new()?;
+            let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
             let body = udtf.get_body()?;
             rt.add_function(
                 identifier,

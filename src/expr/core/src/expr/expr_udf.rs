@@ -205,7 +205,7 @@ impl Build for UserDefinedFunction {
                 UdfImpl::JavaScript(rt)
             }
             "python" if udf.body.is_some() => {
-                let mut rt = PythonRuntime::new()?;
+                let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
                 let body = udf.get_body()?;
                 rt.add_function(
                     identifier,

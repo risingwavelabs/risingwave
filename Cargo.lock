@@ -643,7 +643,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-python"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=273c8c5#273c8c50ddca10a8988691e8d95374f3af371548"
+source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=0479980#04799805f3b17a7feb55b94591967876b773e263"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -652,6 +652,7 @@ dependencies = [
  "arrow-schema 50.0.0",
  "lazy_static",
  "pyo3",
+ "pyo3-build-config",
 ]
 
 [[package]]
