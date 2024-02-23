@@ -295,7 +295,7 @@ impl SourceScanInfo {
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
                 let stream = build_opendal_fs_list_for_batch(lister);
 
-                let batch_res: Vec<_> = stream.take(CHUNK_SIZE).try_collect().await?;
+                let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res
                     .into_iter()
                     .map(SplitImpl::OpendalS3)
