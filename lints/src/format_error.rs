@@ -16,7 +16,7 @@ use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
     find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
 };
-use clippy_utils::ty::implements_trait;
+use clippy_utils::ty::{implements_trait, match_type};
 use clippy_utils::{
     is_in_cfg_test, is_in_test_function, is_trait_method, match_def_path, match_function_call,
 };
@@ -64,6 +64,7 @@ const TRACING_FIELD_DEBUG: [&str; 3] = ["tracing_core", "field", "debug"];
 const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
 const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
 const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
+const ANYHOW_ERROR: [&str; 2] = ["anyhow", "Error"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
@@ -143,7 +144,10 @@ fn check_fmt_arg_in_anyhow_error(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     check_fmt_arg_with_help(
         cx,
         arg_expr,
-        "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it",
+        (
+            "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it",
+            "consider removing the redundant wrapping of `anyhow::anyhow!(..)`",
+        ),
     );
 }
 
@@ -151,12 +155,16 @@ fn check_fmt_arg_in_anyhow_context(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     check_fmt_arg_with_help(
         cx,
         arg_expr,
-        "consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to \
+        (
+            "consider using `anyhow::Context::(with_)context` to \
         attach additional message to the error and make it an error source instead",
+            "consider using `.context(..)` to \
+        attach additional message to the error and make it an error source instead",
+        ),
     );
 }
 
-fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: &str) {
+fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: impl Help) {
     check_arg(cx, arg_expr, arg_expr.span, help);
 }
 
@@ -169,27 +177,56 @@ fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_spa
     );
 }
 
-fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: &str) {
+fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help) {
     let Some(error_trait_id) = cx.tcx.get_diagnostic_item(sym::Error) else {
         return;
     };
 
     let ty = cx.typeck_results().expr_ty(arg_expr).peel_refs();
 
-    if implements_trait(cx, ty, error_trait_id, &[]) {
-        if let Some(span) = core::iter::successors(Some(span), |s| s.parent_callsite())
-            .find(|s| s.can_be_used_for_suggestions())
-        {
-            // TODO: applicable suggestions
-            span_lint_and_help(
-                cx,
-                FORMAT_ERROR,
-                span,
-                "should not format error directly",
-                None,
-                help,
-            );
-        }
+    let help = if implements_trait(cx, ty, error_trait_id, &[]) {
+        help.normal_help()
+    } else if match_type(cx, ty, &ANYHOW_ERROR) {
+        help.anyhow_help()
+    } else {
+        return;
+    };
+
+    if let Some(span) = core::iter::successors(Some(span), |s| s.parent_callsite())
+        .find(|s| s.can_be_used_for_suggestions())
+    {
+        // TODO: applicable suggestions
+        span_lint_and_help(
+            cx,
+            FORMAT_ERROR,
+            span,
+            "should not format error directly",
+            None,
+            help,
+        );
+    }
+}
+
+trait Help {
+    fn normal_help(&self) -> &str;
+    fn anyhow_help(&self) -> &str {
+        self.normal_help()
+    }
+}
+
+impl Help for &str {
+    fn normal_help(&self) -> &str {
+        self
+    }
+}
+
+impl Help for (&str, &str) {
+    fn normal_help(&self) -> &str {
+        self.0
+    }
+
+    fn anyhow_help(&self) -> &str {
+        self.1
     }
 }
 
