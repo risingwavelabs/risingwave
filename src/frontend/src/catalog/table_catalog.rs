@@ -571,7 +571,6 @@ impl From<PbTable> for TableCatalog {
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
-            retention_seconds: tb.retention_seconds,
             dependent_relations: tb
                 .dependent_relations
                 .into_iter()
