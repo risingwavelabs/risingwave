@@ -27,9 +27,11 @@ use crate::utils::Condition;
 pub struct SimplifyFilterExpressionRule {}
 impl Rule for SimplifyFilterExpressionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &LogicalFilter = plan.as_logical_filter()?;
+        println!("plan: {:#?}", plan);
+        let filter: Option<&LogicalFilter> = plan.as_logical_filter();
+        println!("filter: {:#?}", filter);
 
-        println!("predicate: {:#?}", filter.predicate());
+        // println!("predicate: {:#?}", filter.predicate());
         todo!();
     }
 }
