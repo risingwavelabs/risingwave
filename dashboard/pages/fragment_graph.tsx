@@ -198,10 +198,6 @@ export default function Streaming() {
   // used to get the data source
   const [backPressureDataSourceAlgo, setBackPressureDataSourceAlgo] =
     useState("Embedded")
-  // used to set the back pressure choice list
-  const [backPressureAlgoOptions, setBackPressureAlgoOptions] = useState(
-    [] as BackPressureAlgo[]
-  )
 
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
@@ -236,14 +232,6 @@ export default function Streaming() {
     }
     return () => {}
   }, [relationId, relationList, setRelationId])
-
-  useEffect(() => {
-    if (backPressureDataSourceAlgo === "Prometheus") {
-      setBackPressureAlgoOptions(backPressureAlgos)
-    } else {
-      setBackPressureAlgoOptions([])
-    }
-  }, [backPressureDataSourceAlgo])
 
   // get back pressure rate without prometheus
   const [backPressuresMetricsWithoutPromtheus, setBackPressuresMetrics] =
@@ -480,7 +468,7 @@ export default function Streaming() {
               ))}
             </Select>
           </FormControl>
-          {backPressureAlgoOptions.length > 0 && (
+          {backPressureDataSourceAlgo === "Prometheus" && (
             <FormControl>
               <FormLabel>Back Pressure Algorithm</FormLabel>
               <Select
@@ -492,7 +480,7 @@ export default function Streaming() {
                 <option value="" disabled selected hidden>
                   Please select
                 </option>
-                {backPressureAlgoOptions.map((algo) => (
+                {backPressureAlgos.map((algo) => (
                   <option value={algo} key={algo}>
                     {algo}
                   </option>
