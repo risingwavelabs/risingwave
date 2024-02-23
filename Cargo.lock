@@ -686,19 +686,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-compat"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b48b4ff0c2026db683dea961cd8ea874737f56cffca86fa84415eaddc51c00d"
-dependencies = [
- "futures-core",
- "futures-io",
- "once_cell",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
 name = "async-compression"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6658,12 +6645,11 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.44.0"
+version = "0.44.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c32736a48ef08a5d2212864e2295c8e54f4d6b352b7f49aa0c29a12fc410ff66"
+checksum = "4af824652d4d2ffabf606d337a071677ae621b05622adf35df9562f69d9b4498"
 dependencies = [
  "anyhow",
- "async-compat",
  "async-trait",
  "backon",
  "base64 0.21.4",
@@ -6676,9 +6662,7 @@ dependencies = [
  "log",
  "md-5",
  "once_cell",
- "parking_lot 0.12.1",
  "percent-encoding",
- "pin-project",
  "prometheus",
  "quick-xml 0.30.0",
  "reqsign",
@@ -7516,6 +7500,7 @@ dependencies = [
  "postgres-protocol",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -9058,6 +9043,7 @@ dependencies = [
  "tracing-test",
  "url",
  "urlencoding",
+ "uuid",
  "walkdir",
  "with_options",
  "workspace-hack",

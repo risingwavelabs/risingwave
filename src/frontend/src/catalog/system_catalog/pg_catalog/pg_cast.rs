@@ -22,6 +22,7 @@ use crate::expr::cast_map_array;
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
 #[derive(Fields)]
 struct PgCast {
+    #[primary_key]
     oid: i32,
     castsource: i32,
     casttarget: i32,
