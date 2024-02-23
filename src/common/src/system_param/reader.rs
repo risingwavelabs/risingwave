@@ -169,9 +169,6 @@ where
     }
 
     fn oauth_jwks_url(&self) -> &str {
-        self.inner()
-            .oauth_jwks_url
-            .as_ref()
-            .unwrap_or(&default::OAUTH_JWKS_URL)
+        self.inner().oauth_jwks_url.as_ref().unwrap()
     }
 }

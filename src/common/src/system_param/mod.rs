@@ -73,23 +73,22 @@ impl_param_value!(String => &'a str);
 macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
-            // name                                     type    default value                                               mut?    doc
-            { barrier_interval_ms,                      u32,    Some(1000_u32),                                             true,   "The interval of periodic barrier.", },
-            { checkpoint_frequency,                     u64,    Some(1_u64),                                                true,   "There will be a checkpoint for every n barriers.", },
-            { sstable_size_mb,                          u32,    Some(256_u32),                                              false,  "Target size of the Sstable.", },
-            { parallel_compact_size_mb,                 u32,    Some(512_u32),                                              false,  "", },
-            { block_size_kb,                            u32,    Some(64_u32),                                               false,  "Size of each block in bytes in SST.", },
-            { bloom_false_positive,                     f64,    Some(0.001_f64),                                            false,  "False positive probability of bloom filter.", },
-            { state_store,                              String, None,                                                       false,  "", },
-            { data_directory,                           String, None,                                                       false,  "Remote directory for storing data and metadata objects.", },
-            { backup_storage_url,                       String, None,                                                       true,   "Remote storage url for storing snapshots.", },
-            { backup_storage_directory,                 String, None,                                                       true,   "Remote directory for storing snapshots.", },
-            { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                                true,   "Max number of concurrent creating streaming jobs.", },
-            { pause_on_next_bootstrap,                  bool,   Some(false),                                                true,   "Whether to pause all data sources on next bootstrap.", },
-            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),                  false,  "", },
-            { enable_tracing,                           bool,   Some(false),                                                true,   "Whether to enable distributed tracing.", },
-            // TODO: modify default value
-            { oauth_jwks_url,                           String, Some("https://auth-static.confluent.io/jwks".to_string()),  true,   "Url to get JSON Web Key Set(JWKS) for oauth authentication.", },
+            // name                                     type    default value                               mut?    doc
+            { barrier_interval_ms,                      u32,    Some(1000_u32),                             true,   "The interval of periodic barrier.", },
+            { checkpoint_frequency,                     u64,    Some(1_u64),                                true,   "There will be a checkpoint for every n barriers.", },
+            { sstable_size_mb,                          u32,    Some(256_u32),                              false,  "Target size of the Sstable.", },
+            { parallel_compact_size_mb,                 u32,    Some(512_u32),                              false,  "", },
+            { block_size_kb,                            u32,    Some(64_u32),                               false,  "Size of each block in bytes in SST.", },
+            { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  "False positive probability of bloom filter.", },
+            { state_store,                              String, None,                                       false,  "", },
+            { data_directory,                           String, None,                                       false,  "Remote directory for storing data and metadata objects.", },
+            { backup_storage_url,                       String, None,                                       true,   "Remote storage url for storing snapshots.", },
+            { backup_storage_directory,                 String, None,                                       true,   "Remote directory for storing snapshots.", },
+            { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
+            { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
+            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  "", },
+            { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
+            { oauth_jwks_url,                           String, None,                                       true,   "Url to get JSON Web Key Set(JWKS) for oauth authentication.", },
         }
     };
 }
