@@ -473,10 +473,13 @@ async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) 
     #[for_await]
     for batch in stream {
         let mut batch = batch?;
-        while batch.len() > rate_limit as usize {
-            yield batch.drain(..rate_limit as usize).collect();
+        let mut start = 0;
+        let end = batch.len();
+        while start < end {
+            let next = std::cmp::min(start + rate_limit as usize, end);
+            yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
+            start = next;
         }
-        yield batch;
     }
 }
 
