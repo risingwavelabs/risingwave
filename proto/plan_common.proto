@@ -218,12 +218,12 @@ message AdditionalColumn {
 }
 
 enum AdditionalColumnType {
-  AdditionalColumnType_UNSPECIFIED = 0;
-  AdditionalColumnType_KEY = 1;
-  AdditionalColumnType_TIMESTAMP = 2;
-  AdditionalColumnType_PARTITION = 3;
-  AdditionalColumnType_OFFSET = 4;
-  AdditionalColumnType_HEADER = 5;
-  AdditionalColumnType_FILENAME = 6;
-  AdditionalColumnType_NORMAL = 7;
+  ADDITIONAL_COLUMN_TYPE_UNSPECIFIED = 0;
+  ADDITIONAL_COLUMN_TYPE_KEY = 1;
+  ADDITIONAL_COLUMN_TYPE_TIMESTAMP = 2;
+  ADDITIONAL_COLUMN_TYPE_PARTITION = 3;
+  ADDITIONAL_COLUMN_TYPE_OFFSET = 4;
+  ADDITIONAL_COLUMN_TYPE_HEADER = 5;
+  ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
+  ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
 }
