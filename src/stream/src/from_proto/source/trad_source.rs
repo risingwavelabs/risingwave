@@ -75,17 +75,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 }
 
                 let mut source_columns = source.columns.clone();
-                // print format, row encode and column spec
-                tracing::info!(
-                    "source_id: {:?}, source_name: {}, format: {:?}, row_encode: {:?}, columns: {:?}",
-                    source_id,
-                    source_name,
-                    source_info.format(),
-                    source_info.row_encode(),
-                    source_columns.iter().map(|c| {let desc = c.column_desc.as_ref().unwrap();
-                    (desc.name.clone(), desc.get_column_type())}).collect::<Vec<_>>()
-                );
-
                 {
                     // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
                     // for upsert and (avro | protobuf) overwrite the `_rw_key` column's ColumnDesc.additional_column_type to Key
@@ -94,8 +83,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             || source_info.row_encode() == PbEncodeType::Protobuf
                             || source_info.row_encode() == PbEncodeType::Json)
                     {
-                        let _ = source_columns.iter_mut().map(|c| {
-                            let _ = c.column_desc.as_mut().map(|desc| {
+                        for c in &mut source_columns {
+                            if let Some(desc) = c.column_desc.as_mut() {
                                 let is_bytea = desc
                                     .get_column_type()
                                     .map(|col_type| col_type.type_name == PbTypeName::Bytea as i32)
@@ -117,8 +106,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                         desc.name
                                     );
                                 }
-                            });
-                        });
+                            }
+                        }
                     }
                 }
 
