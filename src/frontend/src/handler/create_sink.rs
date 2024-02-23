@@ -504,7 +504,7 @@ fn check_cycle_for_sink(
             if let Ok(table) = reader.get_table_by_id(table_id) {
                 visit_table(session, reader, sink_index, table.as_ref(), visited_tables)?
             } else {
-                bail!("table not found: {:?}", table_id);
+                bail!("streaming job not found: {:?}", table_id);
             }
         }
 
@@ -530,6 +530,14 @@ fn check_cycle_for_sink(
                 visit_sink(session, reader, sink_index, sink, visited_tables)?
             } else {
                 bail!("sink not found: {:?}", sink_id);
+            }
+        }
+
+        for table_id in &table.dependent_relations {
+            if let Ok(table) = reader.get_table_by_id(table_id) {
+                visit_table(session, reader, sink_index, table.as_ref(), visited_tables)?
+            } else {
+                bail!("streaming job not found: {:?}", table_id);
             }
         }
 

@@ -545,6 +545,7 @@ pub(crate) mod tests {
             id: table_id,
             associated_source_id: None,
             name: "test".to_string(),
+            dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
