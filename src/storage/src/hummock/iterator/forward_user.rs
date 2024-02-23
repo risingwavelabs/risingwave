@@ -78,7 +78,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             delete_range_iter,
             _version: version,
             is_current_pos_valid: false,
-            full_key_tracker: FullKeyTracker::new(FullKey::default()),
+            full_key_tracker: FullKeyTracker::with_config(FullKey::default(), true),
         }
     }
 
@@ -136,7 +136,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Reset
         self.is_current_pos_valid = false;
-        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
+        self.full_key_tracker = FullKeyTracker::with_config(FullKey::default(), true);
 
         // Handle range scan
         match &self.key_range.0 {
@@ -180,7 +180,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
         self.is_current_pos_valid = false;
-        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
+        self.full_key_tracker = FullKeyTracker::with_config(FullKey::default(), true);
 
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {

@@ -18,17 +18,16 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::actor::ActorStatus;
-use risingwave_meta_model_v2::fragment::DistributionType;
+use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
-    object_dependency, schema, sink, source, table, user, user_privilege, view, worker_property,
-    ActorId, DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, WorkerId,
+    object_dependency, schema, sink, source, table, user, user_privilege, view, ActorId,
+    DataTypeArray, DatabaseId, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, PrivilegeId,
+    SchemaId, SourceId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
-use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::PbFragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbFragmentTypeFlag, PbStreamNode, StreamSource};
@@ -613,40 +612,6 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
     }
 }
 
-// todo: deprecate parallel units and avoid this query.
-pub async fn get_parallel_unit_mapping<C>(db: &C) -> MetaResult<HashMap<u32, PbParallelUnit>>
-where
-    C: ConnectionTrait,
-{
-    let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
-        .select_only()
-        .columns([
-            worker_property::Column::WorkerId,
-            worker_property::Column::ParallelUnitIds,
-        ])
-        .into_tuple()
-        .all(db)
-        .await?;
-    let parallel_units_map = parallel_units
-        .into_iter()
-        .flat_map(|(worker_id, parallel_unit_ids)| {
-            parallel_unit_ids
-                .into_inner()
-                .into_iter()
-                .map(move |parallel_unit_id| {
-                    (
-                        parallel_unit_id as _,
-                        PbParallelUnit {
-                            id: parallel_unit_id as _,
-                            worker_node_id: worker_id as _,
-                        },
-                    )
-                })
-        })
-        .collect();
-    Ok(parallel_units_map)
-}
-
 pub async fn get_actor_dispatchers<C>(
     db: &C,
     actor_ids: Vec<ActorId>,
@@ -669,7 +634,7 @@ where
     Ok(actor_dispatchers_map)
 }
 
-/// `get_fragment_parallel_unit_mappings` returns the fragment vnode mappings of the given job.
+/// `get_fragment_mappings` returns the fragment vnode mappings of the given job.
 pub async fn get_fragment_mappings<C>(
     db: &C,
     job_id: ObjectId,
@@ -681,6 +646,35 @@ where
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
         .filter(fragment::Column::JobId.eq(job_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(fragment_mappings
+        .into_iter()
+        .map(|(fragment_id, mapping)| PbFragmentParallelUnitMapping {
+            fragment_id: fragment_id as _,
+            mapping: Some(mapping.into_inner()),
+        })
+        .collect())
+}
+
+/// `get_fragment_mappings_by_jobs` returns the fragment vnode mappings of the given job list.
+pub async fn get_fragment_mappings_by_jobs<C>(
+    db: &C,
+    job_ids: Vec<ObjectId>,
+) -> MetaResult<Vec<PbFragmentParallelUnitMapping>>
+where
+    C: ConnectionTrait,
+{
+    if job_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let fragment_mappings: Vec<(FragmentId, FragmentVnodeMapping)> = Fragment::find()
+        .select_only()
+        .columns([fragment::Column::FragmentId, fragment::Column::VnodeMapping])
+        .filter(fragment::Column::JobId.is_in(job_ids))
         .into_tuple()
         .all(db)
         .await?;
@@ -767,7 +761,7 @@ where
 
     let mut source_fragment_ids = HashMap::new();
     for (fragment_id, _, stream_node) in fragments {
-        if let Some(source) = find_stream_source(stream_node.inner_ref()) {
+        if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
             source_fragment_ids
                 .entry(source.source_id as SourceId)
                 .or_insert_with(BTreeSet::new)

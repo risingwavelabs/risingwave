@@ -57,7 +57,7 @@ use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
 use crate::model::{ActorId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
+use crate::stream::{ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -71,6 +71,7 @@ mod state;
 mod trace;
 
 pub use self::command::{Command, ReplaceTablePlan, Reschedule};
+pub use self::rpc::StreamRpcManager;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
@@ -148,6 +149,8 @@ pub struct GlobalBarrierManagerContext {
     sink_manager: SinkCoordinatorManager,
 
     metrics: Arc<MetaMetrics>,
+
+    stream_rpc_manager: StreamRpcManager,
 
     env: MetaSrvEnv,
 }
@@ -381,6 +384,8 @@ impl GlobalBarrierManager {
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
         metrics: Arc<MetaMetrics>,
+        stream_rpc_manager: StreamRpcManager,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
@@ -394,12 +399,6 @@ impl GlobalBarrierManager {
 
         let tracker = CreateMviewProgressTracker::new();
 
-        let scale_controller = Arc::new(ScaleController::new(
-            &metadata_manager,
-            source_manager.clone(),
-            env.clone(),
-        ));
-
         let context = GlobalBarrierManagerContext {
             status: Arc::new(Mutex::new(BarrierManagerStatus::Starting)),
             metadata_manager,
@@ -409,6 +408,7 @@ impl GlobalBarrierManager {
             sink_manager,
             metrics,
             tracker: Arc::new(Mutex::new(tracker)),
+            stream_rpc_manager,
             env: env.clone(),
         };
 
@@ -914,7 +914,7 @@ impl GlobalBarrierManagerContext {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self) -> InflightActorInfo {
+    async fn resolve_actor_info(&self) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_nodes = mgr
@@ -931,21 +931,13 @@ impl GlobalBarrierManagerContext {
                     .list_active_streaming_workers()
                     .await
                     .unwrap();
-                let pu_mappings = all_nodes
-                    .iter()
-                    .flat_map(|node| node.parallel_units.iter().map(|pu| (pu.id, pu.clone())))
-                    .collect();
-                let all_actor_infos = mgr
-                    .catalog_controller
-                    .load_all_actors(&pu_mappings)
-                    .await
-                    .unwrap();
+                let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
                 InflightActorInfo::resolve(all_nodes, all_actor_infos)
             }
         };
 
-        info
+        Ok(info)
     }
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {

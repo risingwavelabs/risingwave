@@ -361,7 +361,7 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Fragment::StreamNode).json().not_null())
+                    .col(ColumnDef::new(Fragment::StreamNode).binary().not_null())
                     .col(ColumnDef::new(Fragment::VnodeMapping).json().not_null())
                     .col(ColumnDef::new(Fragment::StateTableIds).json())
                     .col(ColumnDef::new(Fragment::UpstreamFragmentId).json())
@@ -390,6 +390,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Status).string().not_null())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
+                    .col(ColumnDef::new(Actor::WorkerId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .col(ColumnDef::new(Actor::ExprContext).json().not_null())
@@ -516,6 +517,14 @@ impl MigrationTrait for Migration {
                             .name("FK_source_connection_id")
                             .from(Source::Table, Source::ConnectionId)
                             .to(Connection::Table, Connection::ConnectionId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_optional_associated_table_id")
+                            .from(Source::Table, Source::OptionalAssociatedTableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -966,6 +975,7 @@ enum Actor {
     Status,
     Splits,
     ParallelUnitId,
+    WorkerId,
     UpstreamActorIds,
     VnodeBitmap,
     ExprContext,

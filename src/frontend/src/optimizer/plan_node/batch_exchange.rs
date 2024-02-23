@@ -30,6 +30,8 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order, Order
 pub struct BatchExchange {
     pub base: PlanBase<Batch>,
     input: PlanRef,
+    // sequential means each tasks of the exchange node will be executed sequentially.
+    // Currently, it is used to avoid spawn too many tasks for limit operator.
     sequential: bool,
 }
 
