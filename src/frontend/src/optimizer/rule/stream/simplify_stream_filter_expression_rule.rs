@@ -24,12 +24,18 @@ use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
-pub struct SimplifySteamFilterExpressionRule {}
-impl Rule for SimplifySteamFilterExpressionRule {
+pub struct SimplifyStreamFilterExpressionRule {}
+impl Rule for SimplifyStreamFilterExpressionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
 
         println!("predicate: {:#?}", filter.predicate());
         todo!();
+    }
+}
+
+impl SimplifyStreamFilterExpressionRule {
+    pub fn create() -> BoxedRule {
+        Box::new(SimplifyStreamFilterExpressionRule {})
     }
 }

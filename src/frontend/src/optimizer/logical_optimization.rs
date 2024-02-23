@@ -416,6 +416,14 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static SIMPLIFY_STREAM_FILTER_EXPRESSION: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Simplify Stream Filter Expression",
+        vec![SimplifyStreamFilterExpressionRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -623,6 +631,9 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
+
+        // Only for stream
+        plan = plan.optimize_by_rules(&SIMPLIFY_STREAM_FILTER_EXPRESSION);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

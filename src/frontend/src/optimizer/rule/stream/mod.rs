@@ -17,3 +17,4 @@ pub(crate) mod filter_with_now_to_join_rule;
 pub(crate) mod split_now_and_rule;
 pub(crate) mod split_now_or_rule;
 pub(crate) mod stream_project_merge_rule;
+pub(crate) mod simplify_stream_filter_expression_rule;
