@@ -123,6 +123,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 let source_ctrl_opts = SourceCtrlOpts {
                     chunk_size: params.env.config().developer.chunk_size,
+                    rate_limit: source.rate_limit.map(|x| x as _),
                 };
 
                 let source_column_ids: Vec<_> = source_columns
