@@ -227,4 +227,3 @@ enum AdditionalColumnType {
   AdditionalColumnType_FILENAME = 6;
   AdditionalColumnType_NORMAL = 7;
 }
-
