@@ -36,6 +36,7 @@ use crate::schema::schema_registry::{
 pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    skip_aws_glue_sr_header: bool,
     value: Option<Value>,
 }
 
@@ -55,7 +56,7 @@ impl AvroAccessBuilder {
             schema,
             key_schema,
             schema_resolver,
-            ..
+            skip_aws_glue_sr_header,
         } = config;
         Ok(Self {
             schema: match encoding_type {
@@ -63,6 +64,7 @@ impl AvroAccessBuilder {
                 EncodingType::Value => schema,
             },
             schema_resolver,
+            skip_aws_glue_sr_header,
             value: None,
         })
     }
@@ -102,6 +104,7 @@ pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    pub skip_aws_glue_sr_header: bool,
 }
 
 impl AvroParserConfig {
@@ -143,6 +146,7 @@ impl AvroParserConfig {
                     None
                 },
                 schema_resolver: Some(Arc::new(resolver)),
+                skip_aws_glue_sr_header: false,
             })
         } else {
             if enable_upsert {
@@ -156,6 +160,7 @@ impl AvroParserConfig {
                 schema: Arc::new(schema),
                 key_schema: None,
                 schema_resolver: None,
+                skip_aws_glue_sr_header: avro_config.skip_aws_glue_sr_header,
             })
         }
     }

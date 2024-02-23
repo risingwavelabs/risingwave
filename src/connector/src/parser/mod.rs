@@ -908,6 +908,7 @@ pub struct AvroProperties {
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub skip_aws_glue_sr_header: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1004,6 +1005,10 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    skip_aws_glue_sr_header: info
+                        .format_encode_options
+                        .get("skip_aws_glue_sr_header")
+                        .is_some_and(|v| v == "true"),
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
