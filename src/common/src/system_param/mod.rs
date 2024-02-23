@@ -377,6 +377,7 @@ macro_rules! impl_system_params_for_test {
             ret.state_store = Some("hummock+memory".to_string());
             ret.backup_storage_url = Some("memory".into());
             ret.backup_storage_directory = Some("backup".into());
+            ret.oauth_jwks_url = Some("https://auth-static.confluent.io/jwks".into());
             ret
         }
     };
