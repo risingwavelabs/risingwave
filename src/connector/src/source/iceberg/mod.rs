@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -134,7 +135,10 @@ impl SplitEnumerator for IcebergSplitEnumerator {
 }
 
 impl IcebergSplitEnumerator {
-    pub async fn list_splits_batch(&self) -> anyhow::Result<Vec<IcebergSplit>> {
+    pub async fn list_splits_batch(
+        &self,
+        batch_parallelism: usize,
+    ) -> anyhow::Result<Vec<IcebergSplit>> {
         let table = self.config.load_table().await?;
         let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
         let files = table
@@ -143,17 +147,17 @@ impl IcebergSplitEnumerator {
             .into_iter()
             .map(|f| f.file_path)
             .collect_vec();
-        let split_num = 12;
-        // evenly split the files into 12 splits
+        if batch_parallelism == 0 {
+            bail!("Batch parallelism is 0. Cannot split the iceberg files.")
+        }
+        let split_num = batch_parallelism;
+        // evenly split the files into splits based on the parallelism.
         let split_size = files.len() / split_num;
+        let remaining = files.len() % split_num;
         let mut splits = vec![];
         for i in 0..split_num {
             let start = i * split_size;
-            let end = if i == split_num - 1 {
-                files.len()
-            } else {
-                (i + 1) * split_size
-            };
+            let end = (i + 1) * split_size;
             let split = IcebergSplit {
                 split_id: i as i64,
                 snapshot_id,
@@ -161,7 +165,15 @@ impl IcebergSplitEnumerator {
             };
             splits.push(split);
         }
-        Ok(splits)
+        for i in 0..remaining {
+            splits[i]
+                .files
+                .push(files[split_num * split_size + i].clone());
+        }
+        Ok(splits
+            .into_iter()
+            .filter(|split| !split.files.is_empty())
+            .collect_vec())
     }
 }
 
