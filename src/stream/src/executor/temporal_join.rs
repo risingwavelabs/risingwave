@@ -401,7 +401,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    // Joined result without evaluating other conditions.
+                    // Joined result without evaluating non-lookup conditions.
                     let st1 = {
                         #[try_stream]
                         async {
@@ -470,7 +470,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     #[for_await]
                     for item in st1 {
                         let (chunk, row_matched) = item?;
-                        // check other join conditions
+                        // check non-lookup join conditions
                         if !row_matched.is_empty()
                             && let Some(ref cond) = self.condition
                         {
