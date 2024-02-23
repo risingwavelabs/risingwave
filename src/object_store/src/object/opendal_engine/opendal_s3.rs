@@ -31,28 +31,9 @@ impl OpendalObjectStore {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&bucket);
-
         // For AWS S3, there is no need to set an endpoint; for other S3 compatible object stores, it is necessary to set this field.
         if let Ok(endpoint_url) = std::env::var("RW_S3_ENDPOINT") {
             builder.endpoint(&endpoint_url);
-        }
-
-        if let Ok(region) = std::env::var("AWS_REGION") {
-            builder.region(&region);
-        } else {
-            tracing::error!("aws s3 region is not set, bucket {}", bucket);
-        }
-
-        if let Ok(access) = std::env::var("AWS_ACCESS_KEY_ID") {
-            builder.access_key_id(&access);
-        } else {
-            tracing::error!("access key id of aws s3 is not set, bucket {}", bucket);
-        }
-
-        if let Ok(secret) = std::env::var("AWS_SECRET_ACCESS_KEY") {
-            builder.secret_access_key(&secret);
-        } else {
-            tracing::error!("secret access key of aws s3 is not set, bucket {}", bucket);
         }
 
         if std::env::var("RW_IS_FORCE_PATH_STYLE").is_err() {
