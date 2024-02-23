@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
+use anyhow::Context as _;
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
 pub use canal::*;
@@ -1077,6 +1078,7 @@ pub struct AvroProperties {
     pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
     pub map_handling: Option<MapHandling>,
+    pub skip_fixed_header: Option<u8>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1184,6 +1186,12 @@ impl SpecificParserConfig {
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     map_handling: MapHandling::from_options(&info.format_encode_options)?,
+                    skip_fixed_header: info
+                        .format_encode_options
+                        .get("skip_fixed_header")
+                        .map(|v| v.parse::<u8>())
+                        .transpose()
+                        .context("failed to parse skip_fixed_header as u8")?,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {

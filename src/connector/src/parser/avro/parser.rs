@@ -38,12 +38,13 @@ pub struct AvroAccessBuilder {
     schema: Arc<ResolvedAvroSchema>,
     /// Refer to [`AvroParserConfig::writer_schema_cache`].
     pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
+    skip_fixed_header: Option<u8>,
     value: Option<Value>,
 }
 
 impl AccessBuilder for AvroAccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
-        self.value = self.parse_avro_value(&payload).await?;
+        self.value = Some(self.parse_avro_value(&payload).await?);
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
             AvroParseOptions::create(&self.schema.resolved_schema),
@@ -57,7 +58,8 @@ impl AvroAccessBuilder {
             schema,
             key_schema,
             writer_schema_cache,
-            ..
+            skip_fixed_header,
+            map_handling: _,
         } = config;
         Ok(Self {
             schema: match encoding_type {
@@ -65,30 +67,42 @@ impl AvroAccessBuilder {
                 EncodingType::Value => schema,
             },
             writer_schema_cache,
+            skip_fixed_header,
             value: None,
         })
     }
 
     /// Note: we should use unresolved schema to parsing bytes into avro value.
     /// Otherwise it's an invalid schema and parsing will fail. (Avro error: Two named schema defined for same fullname)
-    async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
+    async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Value> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
         if let Some(resolver) = &self.writer_schema_cache {
             let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
             let writer_schema = resolver.get_by_id(schema_id).await?;
-            Ok(Some(from_avro_datum(
+            return Ok(from_avro_datum(
                 writer_schema.as_ref(),
                 &mut raw_payload,
                 Some(&self.schema.original_schema),
-            )?))
-        } else {
-            let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
-            match reader.next() {
-                Some(Ok(v)) => Ok(Some(v)),
-                Some(Err(e)) => Err(e)?,
-                None => bail!("avro parse unexpected eof"),
+            )?);
+        }
+        if let Some(header_len) = self.skip_fixed_header {
+            let len = header_len.into();
+            if payload.len() < len {
+                bail!("{} shorter than header to skip {}", payload.len(), len);
             }
+
+            return Ok(from_avro_datum(
+                &self.schema.original_schema,
+                &mut &payload[len..],
+                None,
+            )?);
+        }
+        let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
+        match reader.next() {
+            Some(Ok(v)) => Ok(v),
+            Some(Err(e)) => Err(e)?,
+            None => bail!("avro parse unexpected eof"),
         }
     }
 }
@@ -102,6 +116,7 @@ pub struct AvroParserConfig {
     pub writer_schema_cache: Option<Arc<ConfluentSchemaCache>>,
 
     pub map_handling: Option<MapHandling>,
+    pub skip_fixed_header: Option<u8>,
 }
 
 impl AvroParserConfig {
@@ -117,6 +132,7 @@ impl AvroParserConfig {
             key_record_name,
             name_strategy,
             map_handling,
+            skip_fixed_header,
         } = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
         let url = handle_sr_list(schema_location.as_str())?;
         if use_schema_registry {
@@ -157,6 +173,7 @@ impl AvroParserConfig {
                 },
                 writer_schema_cache: Some(Arc::new(resolver)),
                 map_handling,
+                skip_fixed_header: None,
             })
         } else {
             if enable_upsert {
@@ -171,6 +188,7 @@ impl AvroParserConfig {
                 key_schema: None,
                 writer_schema_cache: None,
                 map_handling,
+                skip_fixed_header,
             })
         }
     }
