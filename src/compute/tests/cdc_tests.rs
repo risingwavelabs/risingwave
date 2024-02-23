@@ -232,7 +232,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.
-    let materialize_table_id = TableId::new(5678); // TODO()
+    let materialize_table_id = TableId::new(5678);
     let mut materialize = MaterializeExecutor::for_test(
         cdc_backfill,
         memory_state_store.clone(),

@@ -430,11 +430,9 @@ impl<S: StateStore, SD: ValueRowSerde> Execute for MaterializeExecutor<S, SD> {
     }
 }
 
-// TODO()
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
-            // .field("info", &self.info)
             .field("arrange_key_indices", &self.arrange_key_indices)
             .finish()
     }

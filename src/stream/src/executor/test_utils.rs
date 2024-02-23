@@ -103,13 +103,9 @@ impl MessageSender {
     }
 }
 
-// TODO()
 impl std::fmt::Debug for MockSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockSource")
-            // .field("schema", &self.info.schema)
-            // .field("pk_indices", &self.info.pk_indices)
-            .finish()
+        f.debug_struct("MockSource").finish()
     }
 }
 

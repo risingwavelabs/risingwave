@@ -49,13 +49,9 @@ pub struct ReceiverExecutor {
     metrics: Arc<StreamingMetrics>,
 }
 
-// TODO()
 impl std::fmt::Debug for ReceiverExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReceiverExecutor")
-            // .field("schema", &self.info.schema)
-            // .field("pk_indices", &self.info.pk_indices)
-            .finish()
+        f.debug_struct("ReceiverExecutor").finish()
     }
 }
 

@@ -195,14 +195,12 @@ impl<S: StateStore> Execute for FsListExecutor<S> {
     }
 }
 
-// TODO()
 impl<S: StateStore> Debug for FsListExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("FsListExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                // .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsListExecutor").finish()

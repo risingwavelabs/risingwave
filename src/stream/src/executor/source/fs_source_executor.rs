@@ -482,13 +482,11 @@ impl<S: StateStore> Execute for FsSourceExecutor<S> {
     }
 }
 
-// TODO()
 impl<S: StateStore> Debug for FsSourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
-            // .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }

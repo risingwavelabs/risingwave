@@ -101,8 +101,6 @@ use crate::task::ExecutorParams;
 trait ExecutorBuilder {
     type Node;
 
-    // TODO(): rename
-    // TODO(): async trait
     /// Create a boxed [`Execute`] from [`StreamNode`].
     fn new_boxed_executor(
         params: ExecutorParams,

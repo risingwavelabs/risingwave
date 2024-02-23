@@ -31,15 +31,11 @@ pub struct LookupUnionExecutor {
     order: Vec<usize>,
 }
 
-// TODO()
-// impl std::fmt::Debug for LookupUnionExecutor {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("LookupUnionExecutor")
-//             .field("schema", &self.info.schema)
-//             .field("pk_indices", &self.info.pk_indices)
-//             .finish()
-//     }
-// }
+impl std::fmt::Debug for LookupUnionExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LookupUnionExecutor").finish()
+    }
+}
 
 impl LookupUnionExecutor {
     pub fn new(inputs: Vec<Executor>, order: Vec<u32>) -> Self {
