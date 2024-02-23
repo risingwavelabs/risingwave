@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
 pub use canal::*;
@@ -877,6 +877,7 @@ pub struct AvroProperties {
     pub record_name: Option<String>,
     pub key_record_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub skip_fixed_header: Option<u8>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -970,6 +971,12 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
+                    skip_fixed_header: info
+                        .format_encode_options
+                        .get("skip_fixed_header")
+                        .map(|v| v.parse::<u8>())
+                        .transpose()
+                        .context("failed to parse skip_fixed_header as u8")?,
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
