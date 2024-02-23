@@ -93,7 +93,7 @@ pub use stream::filter_with_now_to_join_rule::*;
 pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
 pub use stream::stream_project_merge_rule::*;
-pub use stream::simplify_stream_filter_expression_rule::*;
+pub use stream::simplify_filter_expression_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
 mod union_input_values_merge_rule;
@@ -205,7 +205,7 @@ macro_rules! for_all_rules {
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
             , { StreamProjectMergeRule }
-            , { SimplifyStreamFilterExpressionRule }
+            , { SimplifyFilterExpressionRule }
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
             , { PullUpHopRule }

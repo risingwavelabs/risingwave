@@ -24,8 +24,8 @@ use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
-pub struct SimplifyStreamFilterExpressionRule {}
-impl Rule for SimplifyStreamFilterExpressionRule {
+pub struct SimplifyFilterExpressionRule {}
+impl Rule for SimplifyFilterExpressionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
 
@@ -34,8 +34,8 @@ impl Rule for SimplifyStreamFilterExpressionRule {
     }
 }
 
-impl SimplifyStreamFilterExpressionRule {
+impl SimplifyFilterExpressionRule {
     pub fn create() -> BoxedRule {
-        Box::new(SimplifyStreamFilterExpressionRule {})
+        Box::new(SimplifyFilterExpressionRule {})
     }
 }

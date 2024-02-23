@@ -416,10 +416,10 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
-static SIMPLIFY_STREAM_FILTER_EXPRESSION: LazyLock<OptimizationStage> = LazyLock::new(|| {
+static SIMPLIFY_FILTER_EXPRESSION: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Simplify Stream Filter Expression",
-        vec![SimplifyStreamFilterExpressionRule::create()],
+        "Simplify Filter Expression",
+        vec![SimplifyFilterExpressionRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -632,8 +632,7 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
-        // Only for stream
-        plan = plan.optimize_by_rules(&SIMPLIFY_STREAM_FILTER_EXPRESSION);
+        plan = plan.optimize_by_rules(&SIMPLIFY_FILTER_EXPRESSION);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -730,6 +729,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
+
+        plan = plan.optimize_by_rules(&SIMPLIFY_FILTER_EXPRESSION);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
