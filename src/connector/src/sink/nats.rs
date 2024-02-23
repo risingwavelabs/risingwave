@@ -107,15 +107,12 @@ impl Sink for NatsSink {
                 "Nats sink only support append-only mode"
             )));
         }
-        match self.config.common.build_client().await {
-            Ok(_client) => {}
-            Err(error) => {
-                return Err(SinkError::Nats(anyhow!(
-                    "validate nats sink error: {:?}",
-                    error
-                )));
-            }
-        }
+        let _client = self
+            .config
+            .common
+            .build_client()
+            .await
+            .context("validate nats sink error")?;
         Ok(())
     }
 
@@ -134,7 +131,7 @@ impl NatsSinkWriter {
             .common
             .build_context()
             .await
-            .map_err(|e| SinkError::Nats(anyhow!("nats sink error: {:?}", e)))?;
+            .map_err(|e| SinkError::Nats(anyhow!(e)))?;
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,

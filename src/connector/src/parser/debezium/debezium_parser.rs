@@ -16,6 +16,7 @@ use risingwave_common::bail;
 
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
+use crate::error::ConnectorResult;
 use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -37,7 +38,7 @@ pub struct DebeziumParser {
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
-) -> anyhow::Result<AccessBuilderImpl> {
+) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Avro(_) => {
             let config = DebeziumAvroParserConfig::new(config).await?;
@@ -60,7 +61,7 @@ impl DebeziumParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let (key_config, key_type) = extract_key_config!(props);
         let key_builder = build_accessor_builder(key_config, key_type).await?;
         let payload_builder =
@@ -73,7 +74,7 @@ impl DebeziumParser {
         })
     }
 
-    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> anyhow::Result<Self> {
+    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
         let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
@@ -89,7 +90,7 @@ impl DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         // tombetone messages are handled implicitly by these accessors
         let key_accessor = match key {
             None => None,
@@ -137,7 +138,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -146,7 +147,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }
