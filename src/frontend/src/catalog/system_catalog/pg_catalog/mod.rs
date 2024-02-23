@@ -36,6 +36,7 @@ mod pg_matviews;
 mod pg_namespace;
 mod pg_opclass;
 mod pg_operator;
+mod pg_partitioned_table;
 mod pg_proc;
 mod pg_rewrite;
 mod pg_roles;

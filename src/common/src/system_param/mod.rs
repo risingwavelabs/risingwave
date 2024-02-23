@@ -340,7 +340,7 @@ macro_rules! impl_set_system_param {
                 )*
                 _ => {
                     Err(format!(
-                        "unrecognized system param {:?}",
+                        "unrecognized system parameter {:?}",
                         key
                     ))
                 }

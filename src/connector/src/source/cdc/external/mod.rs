@@ -407,7 +407,7 @@ impl MySqlExternalTableReader {
                         bail!("primary key {} cannot be null", pk);
                     }
                 })
-                .try_collect()?;
+                .try_collect::<_, _, ConnectorError>()?;
 
             let rs_stream = sql
                 .with(Params::from(params))

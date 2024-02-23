@@ -141,6 +141,7 @@ impl TableCatalogBuilder {
             id: TableId::placeholder(),
             associated_source_id: None,
             name: String::new(),
+            dependent_relations: vec![],
             columns: self.columns.clone(),
             pk: self.pk,
             stream_key: vec![],
