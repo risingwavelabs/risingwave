@@ -9195,6 +9195,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "chrono",
+ "chrono-tz",
  "criterion",
  "expect-test",
  "fancy-regex",

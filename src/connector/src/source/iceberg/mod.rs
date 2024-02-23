@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
@@ -71,7 +72,7 @@ impl SplitMetaData for IcebergSplit {
         unimplemented!()
     }
 
-    fn restore_from_json(_value: JsonbVal) -> anyhow::Result<Self> {
+    fn restore_from_json(_value: JsonbVal) -> ConnectorResult<Self> {
         unimplemented!()
     }
 
@@ -79,7 +80,7 @@ impl SplitMetaData for IcebergSplit {
         unimplemented!()
     }
 
-    fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
         unimplemented!()
     }
 }
@@ -95,11 +96,11 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     async fn new(
         _properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {})
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
         Ok(vec![])
     }
 }
@@ -118,7 +119,7 @@ impl SplitReader for IcebergFileReader {
         _parser_config: ParserConfig,
         _source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         unimplemented!()
     }
 

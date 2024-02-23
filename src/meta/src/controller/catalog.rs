@@ -845,7 +845,7 @@ impl CatalogController {
             let ret = src_manager.register_source(&pb_source).await;
             if let Err(e) = ret {
                 txn.rollback().await?;
-                return Err(e.into());
+                return Err(e);
             }
         }
         txn.commit().await?;

@@ -14,11 +14,12 @@
 
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
@@ -29,6 +30,7 @@ use risingwave_pb::connector_service::{
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
@@ -66,7 +68,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         assert_eq!(splits.len(), 1);
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
@@ -117,10 +119,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             let (mut env, get_event_stream_request_bytes) = match result {
                 Ok(inner) => inner,
                 Err(e) => {
-                    let _ = tx.blocking_send(Err(anyhow!(
-                        "err before calling runJniDbzSourceThread: {:?}",
-                        e
-                    )));
+                    let _ = tx
+                        .blocking_send(Err(e.context("err before calling runJniDbzSourceThread")));
                     return;
                 }
             };
@@ -154,7 +154,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
             if !inited {
-                return Err(anyhow!("failed to start cdc connector"));
+                bail!("failed to start cdc connector");
             }
         }
         tracing::info!(?source_id, "cdc connector started");
@@ -196,7 +196,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 }
 
 impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
         let source_type = T::source_type();
         let mut rx = self.rx;
@@ -225,6 +225,6 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
             }
         }
 
-        Err(anyhow!("all senders are dropped"))?;
+        bail!("all senders are dropped");
     }
 }

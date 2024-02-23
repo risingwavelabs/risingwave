@@ -16,20 +16,23 @@ use std::sync::LazyLock;
 
 use apache_avro::schema::{DecimalSchema, RecordSchema, Schema};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{DataType, Decimal};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
-pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<ColumnDesc>> {
+use crate::error::ConnectorResult;
+
+pub fn avro_schema_to_column_descs(schema: &Schema) -> ConnectorResult<Vec<ColumnDesc>> {
     if let Schema::Record(RecordSchema { fields, .. }) = schema {
         let mut index = 0;
         let fields = fields
             .iter()
             .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<ConnectorResult<Vec<_>>>()?;
         Ok(fields)
     } else {
-        anyhow::bail!("schema invalid, record type required at top level of the schema.");
+        bail!("schema invalid, record type required at top level of the schema.");
     }
 }
 
@@ -40,7 +43,7 @@ fn avro_field_to_column_desc(
     name: &str,
     schema: &Schema,
     index: &mut i32,
-) -> anyhow::Result<ColumnDesc> {
+) -> ConnectorResult<ColumnDesc> {
     let data_type = avro_type_mapping(schema)?;
     match schema {
         Schema::Record(RecordSchema {
@@ -51,7 +54,7 @@ fn avro_field_to_column_desc(
             let vec_column = fields
                 .iter()
                 .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index))
-                .collect::<anyhow::Result<Vec<_>>>()?;
+                .collect::<ConnectorResult<Vec<_>>>()?;
             *index += 1;
             Ok(ColumnDesc {
                 column_type: Some(data_type.to_protobuf()),
@@ -79,7 +82,7 @@ fn avro_field_to_column_desc(
     }
 }
 
-fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
+fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
     let data_type = match schema {
         Schema::String => DataType::Varchar,
         Schema::Int => DataType::Int32,
@@ -122,7 +125,7 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
             let struct_fields = fields
                 .iter()
                 .map(|f| avro_type_mapping(&f.schema))
-                .collect::<anyhow::Result<Vec<_>>>()?;
+                .collect::<ConnectorResult<Vec<_>>>()?;
             let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
             DataType::new_struct(struct_fields, struct_names)
         }
@@ -147,18 +150,10 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
             {
                 DataType::Decimal
             } else {
-                return Err(anyhow::format_err!(
-                    "unsupported type in Avro: {:?}",
-                    schema
-                ));
+                bail!("unsupported type in Avro: {:?}", schema);
             }
         }
-        _ => {
-            return Err(anyhow::format_err!(
-                "unsupported type in Avro: {:?}",
-                schema
-            ));
-        }
+        _ => bail!("unsupported type in Avro: {:?}", schema),
     };
 
     Ok(data_type)
