@@ -30,6 +30,7 @@ impl Rule for SimplifyFilterExpressionRule {
         println!("plan: {:#?}", plan);
         let filter: Option<&LogicalFilter> = plan.as_logical_filter();
         println!("filter: {:#?}", filter);
+        let filter: &LogicalFilter = filter?;
 
         // println!("predicate: {:#?}", filter.predicate());
         todo!();
