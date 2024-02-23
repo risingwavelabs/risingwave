@@ -62,6 +62,7 @@ use risingwave_sqlparser::ast::{
     ProtobufSchema, SourceWatermark,
 };
 use risingwave_sqlparser::parser::IncludeOption;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -1081,7 +1082,7 @@ pub(super) async fn check_source_schema(
     } else if connector == ICEBERG_CONNECTOR {
         Ok(check_iceberg_source(props, columns)
             .await
-            .map_err(|err| ProtocolError(err.to_string()))?)
+            .map_err(|err| ProtocolError(err.to_report_string()))?)
     } else {
         Ok(())
     }
