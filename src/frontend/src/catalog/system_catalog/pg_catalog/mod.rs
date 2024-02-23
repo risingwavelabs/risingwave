@@ -30,6 +30,7 @@ mod pg_index;
 mod pg_indexes;
 mod pg_inherits;
 mod pg_keywords;
+mod pg_language;
 mod pg_locks;
 mod pg_matviews;
 mod pg_namespace;
