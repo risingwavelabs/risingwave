@@ -74,6 +74,8 @@ pub struct TableCatalog {
 
     pub name: String,
 
+    pub dependent_relations: Vec<TableId>,
+
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
@@ -573,6 +575,11 @@ impl From<PbTable> for TableCatalog {
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
             retention_seconds: tb.retention_seconds,
+            dependent_relations: tb
+                .dependent_relations
+                .into_iter()
+                .map(TableId::from)
+                .collect_vec(),
         }
     }
 }
@@ -724,6 +731,7 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
+                dependent_relations: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
