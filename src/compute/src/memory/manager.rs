@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
 use super::controller::LruWatermarkController;

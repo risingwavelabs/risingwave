@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use risingwave_common::error::{BoxedError, NotImplemented};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
+use risingwave_dml::error::DmlError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
@@ -87,11 +88,11 @@ pub enum ErrorKind {
         BoxedError,
     ),
 
-    #[error("Dml error: {0}")]
+    #[error(transparent)]
     DmlError(
-        #[source]
+        #[from]
         #[backtrace]
-        BoxedError,
+        DmlError,
     ),
 
     #[error(transparent)]

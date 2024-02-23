@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, group-id: {:?}, target level: {:?}, target sub level: {:?}",
+        "Compaction task id: {:?}, group-id: {:?}, task type: {:?}, target level: {:?}, target sub level: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
+        compact_task.task_type(),
         compact_task.target_level,
         compact_task.target_sub_level_id
     )
@@ -163,7 +164,7 @@ pub fn estimate_memory_for_compact_task(
     // to the specified block and build the iterator. Since this operation is concurrent, the memory
     // usage will need to take into account the size of the SstableMeta.
     // The common size of SstableMeta in tests is no more than 1m (mainly from xor filters).
-    let mut max_meta_ratio = 0;
+    let mut task_max_sst_meta_ratio = 0;
 
     // The memory usage of the SstableStreamIterator comes from SstableInfo with some state
     // information (use ESTIMATED_META_SIZE to estimate it), the BlockStream being read (one block),
@@ -173,24 +174,27 @@ pub fn estimate_memory_for_compact_task(
     // input
     for level in &task.input_ssts {
         if level.level_type() == LevelType::Nonoverlapping {
-            let mut meta_size = 0;
+            let mut cur_level_max_sst_meta_size = 0;
             for sst in &level.table_infos {
-                meta_size = std::cmp::max(meta_size, sst.file_size - sst.meta_offset);
-                max_meta_ratio = std::cmp::max(max_meta_ratio, meta_size * 100 / sst.file_size);
+                let meta_size = sst.file_size - sst.meta_offset;
+                task_max_sst_meta_ratio =
+                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
+                cur_level_max_sst_meta_size = std::cmp::max(meta_size, cur_level_max_sst_meta_size);
             }
-            result += max_input_stream_estimated_memory + meta_size;
+            result += max_input_stream_estimated_memory + cur_level_max_sst_meta_size;
         } else {
             for sst in &level.table_infos {
                 let meta_size = sst.file_size - sst.meta_offset;
                 result += max_input_stream_estimated_memory + meta_size;
-                max_meta_ratio = std::cmp::max(max_meta_ratio, meta_size * 100 / sst.file_size);
+                task_max_sst_meta_ratio =
+                    std::cmp::max(task_max_sst_meta_ratio, meta_size * 100 / sst.file_size);
             }
         }
     }
 
     // output
     // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
-    let estimated_meta_size = sst_capacity * max_meta_ratio / 100;
+    let estimated_meta_size = sst_capacity * task_max_sst_meta_ratio / 100;
     if support_streaming_upload {
         result += estimated_meta_size + 2 * block_size
     } else {

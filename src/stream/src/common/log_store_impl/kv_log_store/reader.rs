@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -168,7 +168,8 @@ impl<S: StateStore> KvLogStoreReader<S> {
     ) -> LogStoreResult<Option<(ChunkId, StreamChunk, u64)>> {
         if let Some(future) = self.read_flushed_chunk_future.as_mut() {
             let result = future.await;
-            self.read_flushed_chunk_future
+            let _fut = self
+                .read_flushed_chunk_future
                 .take()
                 .expect("future not None");
             Ok(Some(result?))
@@ -186,11 +187,14 @@ impl<S: StateStore> KvLogStoreReader<S> {
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
-            Included(self.serde.serialize_epoch(last_persisted_epoch + 1))
+            Included(
+                self.serde
+                    .serialize_pk_epoch_prefix(last_persisted_epoch + 1),
+            )
         } else {
             Unbounded
         };
-        let range_end = self.serde.serialize_epoch(
+        let range_end = self.serde.serialize_pk_epoch_prefix(
             self.first_write_epoch
                 .expect("should have set first write epoch"),
         );

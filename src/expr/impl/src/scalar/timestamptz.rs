@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ pub fn time_zone_err(inner_err: String) -> ExprError {
     }
 }
 
-#[function("to_timestamp(float8) -> timestamptz")]
+#[function("sec_to_timestamptz(float8) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
     // TODO(#4515): handle +/- infinity
     let micros = (elem.0 * 1e6)

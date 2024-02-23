@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -102,9 +102,6 @@ impl<S: StateStore> NowExecutor<S> {
                     last_timestamp = state_row.and_then(|row| row[0].clone());
                     paused = barrier.is_pause_on_startup();
                     initialized = true;
-                } else if paused {
-                    // Assert that no data is updated.
-                    state_table.commit_no_data_expected(barrier.epoch);
                 } else {
                     state_table.commit(barrier.epoch).await?;
                 }

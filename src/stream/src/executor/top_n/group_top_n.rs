@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -396,7 +396,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (0, 2),
@@ -498,7 +498,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (1, 2),
@@ -593,7 +593,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 info,
                 storage_key(),
                 (0, 2),

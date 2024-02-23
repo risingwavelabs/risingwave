@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,7 +87,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store().txn($trx).await?;
+                $manager.env.meta_store_checked().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -120,7 +120,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -190,14 +189,16 @@ impl CatalogManager {
             .tree_ref()
             .iter()
             .filter(|(_, source)| {
-                if let Some(source_info) = &source.info && source_info.format_encode_options.is_empty() {
+                if let Some(source_info) = &source.info
+                    && source_info.format_encode_options.is_empty()
+                {
                     true
                 } else {
                     false
                 }
-        })
-        .map(|t| t.1.clone())
-        .collect_vec();
+            })
+            .map(|t| t.1.clone())
+            .collect_vec();
         for mut source in legacy_sources {
             let connector = source
                 .with_properties
@@ -638,6 +639,7 @@ impl CatalogManager {
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;
 
+        tracing::debug!("create function: {:?}", function);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
         functions.insert(function.id, function.clone());
         commit_meta!(self, functions)?;
@@ -874,8 +876,8 @@ impl CatalogManager {
                     let fragment: TableFragments = fragment;
                     // 3. For those in initial state (i.e. not running / created),
                     // we should purge them.
-                    if fragment.state() == State::Initial {
-                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                    if fragment.is_initial() {
+                        tracing::debug!("cleaning table_id with initial state: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
@@ -1747,7 +1749,9 @@ impl CatalogManager {
         }
 
         for sink in database_mgr.sinks.values() {
-            if sink.dependent_relations.contains(&relation_id) {
+            if sink.dependent_relations.contains(&relation_id)
+                || sink.target_table == Some(relation_id)
+            {
                 let mut sink = sink.clone();
                 sink.definition = alter_relation_rename_refs(&sink.definition, from, to);
                 to_update_sinks.push(sink);
@@ -3017,7 +3021,7 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+        if let Some(table_col_index_mapping) = table_col_index_mapping {
             let expr_rewriter = ReplaceTableExprRewriter {
                 table_col_index_mapping,
             };
@@ -3173,6 +3177,18 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|table| table.table_type == table_type as i32)
+            .cloned()
+            .collect_vec()
+    }
+
     /// Lists table catalogs for mviews, without their internal tables.
     pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.core
@@ -3213,6 +3229,14 @@ impl CatalogManager {
 
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
+    }
+
+    pub async fn list_sinks(&self) -> Vec<Sink> {
+        self.core.lock().await.database.list_sinks()
+    }
+
+    pub async fn list_views(&self) -> Vec<View> {
+        self.core.lock().await.database.list_views()
     }
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
@@ -3375,7 +3399,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store()).await?;
+                default_user.insert(self.env.meta_store_checked()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::VacuumTask;
+use thiserror_ext::AsReport;
 
 use super::CompactorManagerRef;
 use crate::backup_restore::BackupManagerRef;
@@ -148,9 +149,9 @@ impl VacuumManager {
                 }
                 Err(err) => {
                     tracing::warn!(
-                        "Failed to send vacuum task to worker {}: {:#?}",
+                        error = %err.as_report(),
+                        "Failed to send vacuum task to worker {}",
                         compactor.context_id(),
-                        err
                     );
                     self.compactor_manager
                         .remove_compactor(compactor.context_id());

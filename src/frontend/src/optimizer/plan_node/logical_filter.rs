@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::generic::GenericPlanRef;
@@ -24,6 +23,7 @@ use super::{
     generic, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::expr::{
     assert_input_ref, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
 };

@@ -38,6 +38,11 @@
             <groupId>com.risingwave</groupId>
             <artifactId>connector-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+
 
         <dependency>
             <groupId>com.google.code.gson</groupId>
@@ -75,16 +80,6 @@
         <dependency>
             <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-iceberg</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-deltalake</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>

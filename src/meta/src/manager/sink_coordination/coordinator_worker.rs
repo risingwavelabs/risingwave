@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ use risingwave_pb::connector_service::coordinate_response::{
 use risingwave_pb::connector_service::{
     coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, SinkMetadata,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tonic::Status;
 use tracing::{error, warn};
@@ -62,8 +63,9 @@ impl CoordinatorWorker {
             Ok(sink) => sink,
             Err(e) => {
                 error!(
-                    "unable to build sink with param {:?}: {:?}",
-                    first_writer_request.param, e
+                    error = %e.as_report(),
+                    "unable to build sink with param {:?}",
+                    first_writer_request.param
                 );
                 send_await_with_err_check!(
                     first_writer_request.response_tx,
@@ -77,8 +79,9 @@ impl CoordinatorWorker {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(
-                        "unable to build coordinator with param {:?}: {:?}",
-                        first_writer_request.param, e
+                        error = %e.as_report(),
+                        "unable to build coordinator with param {:?}",
+                        first_writer_request.param
                     );
                     send_await_with_err_check!(
                         first_writer_request.response_tx,
@@ -149,10 +152,9 @@ impl CoordinatorWorker {
             Either::Right((Some(Ok(None)), _)) => Err(anyhow!(
                 "one sink writer stream reaches the end before initialize"
             )),
-            Either::Right((Some(Err(e)), _)) => Err(anyhow!(
-                "unable to poll from one sink writer stream: {:?}",
-                e
-            )),
+            Either::Right((Some(Err(e)), _)) => {
+                Err(anyhow!(e).context("unable to poll from one sink writer stream"))
+            }
             Either::Right((None, _)) => unreachable!("request_streams must not be empty"),
         }
     }
@@ -265,10 +267,8 @@ impl CoordinatorWorker {
                         ));
                     }
                     Err(e) => {
-                        return Err(anyhow!(
-                            "failed to poll from one of the writer request streams: {:?}",
-                            e
-                        ));
+                        return Err(anyhow!(e)
+                            .context("failed to poll from one of the writer request streams"));
                     }
                 },
                 Either::Right((None, _)) => {
@@ -285,17 +285,16 @@ impl CoordinatorWorker {
     async fn start_coordination(&mut self, mut coordinator: impl SinkCommitCoordinator) {
         let result: Result<(), ()> = try {
             coordinator.init().await.map_err(|e| {
-                error!("failed to initialize coordinator: {:?}", e);
+                error!(error = %e.as_report(), "failed to initialize coordinator");
             })?;
             loop {
                 let (epoch, metadata_list) = self.collect_all_metadata().await.map_err(|e| {
-                    error!("failed to collect all metadata: {:?}", e);
+                    error!(error = %e.as_report(), "failed to collect all metadata");
                 })?;
                 // TODO: measure commit time
-                coordinator
-                    .commit(epoch, metadata_list)
-                    .await
-                    .map_err(|e| error!("failed to commit metadata of epoch {}: {:?}", epoch, e))?;
+                coordinator.commit(epoch, metadata_list).await.map_err(
+                    |e| error!(epoch, error = %e.as_report(), "failed to commit metadata of epoch"),
+                )?;
 
                 self.send_to_all_sink_writers(|| {
                     Ok(CoordinateResponse {

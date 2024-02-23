@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,24 +15,14 @@
 use std::iter;
 use std::path::Path;
 
+use anyhow::Context;
 use itertools::Itertools;
 use protobuf_native::compiler::{
     SimpleErrorCollector, SourceTreeDescriptorDatabase, VirtualSourceTree,
 };
 use protobuf_native::MessageLite;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
-use url::Url;
 
-use crate::parser::util::download_from_http;
 use crate::schema::schema_registry::Client;
-
-const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
-
-pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec<u8>> {
-    let schema_bytes = download_from_http(location).await?;
-    Ok(schema_bytes.to_vec())
-}
 
 macro_rules! embed_wkts {
     [$( $path:literal ),+ $(,)?] => {
@@ -64,9 +54,11 @@ const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
 pub(super) async fn compile_file_descriptor_from_schema_registry(
     subject_name: &str,
     client: &Client,
-) -> Result<Vec<u8>> {
-    let (primary_subject, dependency_subjects) =
-        client.get_subject_and_references(subject_name).await?;
+) -> anyhow::Result<Vec<u8>> {
+    let (primary_subject, dependency_subjects) = client
+        .get_subject_and_references(subject_name)
+        .await
+        .with_context(|| format!("failed to resolve subject `{subject_name}`"))?;
 
     // Compile .proto files into a file descriptor set.
     let mut source_tree = VirtualSourceTree::new();
@@ -90,12 +82,13 @@ pub(super) async fn compile_file_descriptor_from_schema_registry(
         db.as_mut()
             .build_file_descriptor_set(&[Path::new(&primary_subject.name)])
     }
-    .map_err(|_| {
-        RwError::from(ProtocolError(format!(
+    .with_context(|| {
+        format!(
             "build_file_descriptor_set failed. Errors:\n{}",
             error_collector.as_mut().join("\n")
-        )))
+        )
     })?;
-    fds.serialize()
-        .map_err(|_| RwError::from(InternalError("serialize descriptor set failed".to_owned())))
+
+    let serialized = fds.serialize().context("serialize descriptor set failed")?;
+    Ok(serialized)
 }

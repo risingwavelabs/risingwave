@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,13 +46,20 @@ pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
     (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
 }
 
-impl<PlanRef> Join<PlanRef> {
+impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.on = self.on.clone().rewrite_expr(r);
     }
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.on.visit_expr(v);
+    }
+
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+        eq_predicate.eq_indexes()
     }
 
     pub fn new(
@@ -107,8 +114,7 @@ impl<I: stream::StreamPlanRef> Join<I> {
         pk_indices.extend(deduped_input_pk_indices.clone());
 
         // Build internal table
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
@@ -119,8 +125,7 @@ impl<I: stream::StreamPlanRef> Join<I> {
         });
 
         // Build degree table.
-        let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+        let mut degree_table_catalog_builder = TableCatalogBuilder::default();
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
@@ -169,10 +174,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let left_len = self.left.schema().len();
-        let right_len = self.right.schema().len();
-        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
-
+        let eq_indexes = self.eq_indexes();
         let left_pk = self.left.stream_key()?;
         let right_pk = self.right.stream_key()?;
         let l2i = self.l2i_col_mapping();
@@ -197,7 +199,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
         let either_or_both = self.add_which_join_key_to_pk();
 
-        for (lk, rk) in eq_predicate.eq_indexes() {
+        for (lk, rk) in eq_indexes {
             match either_or_both {
                 EitherOrBoth::Left(_) => {
                     // Remove right-side join-key column it from pk_indices.

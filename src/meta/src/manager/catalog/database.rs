@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -83,15 +83,15 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store()).await?;
-        let schemas = Schema::list(env.meta_store()).await?;
-        let sources = Source::list(env.meta_store()).await?;
-        let sinks = Sink::list(env.meta_store()).await?;
-        let tables = Table::list(env.meta_store()).await?;
-        let indexes = Index::list(env.meta_store()).await?;
-        let views = View::list(env.meta_store()).await?;
-        let functions = Function::list(env.meta_store()).await?;
-        let connections = Connection::list(env.meta_store()).await?;
+        let databases = Database::list(env.meta_store_checked()).await?;
+        let schemas = Schema::list(env.meta_store_checked()).await?;
+        let sources = Source::list(env.meta_store_checked()).await?;
+        let sinks = Sink::list(env.meta_store_checked()).await?;
+        let tables = Table::list(env.meta_store_checked()).await?;
+        let indexes = Index::list(env.meta_store_checked()).await?;
+        let views = View::list(env.meta_store_checked()).await?;
+        let functions = Function::list(env.meta_store_checked()).await?;
+        let connections = Connection::list(env.meta_store_checked()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -301,7 +301,7 @@ impl DatabaseManager {
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
+            .map(|(id, table)| (*id, TableOption::new(table.retention_seconds)))
             .collect()
     }
 
@@ -327,6 +327,14 @@ impl DatabaseManager {
 
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
+    }
+
+    pub fn list_sinks(&self) -> Vec<Sink> {
+        self.sinks.values().cloned().collect_vec()
+    }
+
+    pub fn list_views(&self) -> Vec<View> {
+        self.views.values().cloned().collect_vec()
     }
 
     pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
@@ -436,7 +444,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {

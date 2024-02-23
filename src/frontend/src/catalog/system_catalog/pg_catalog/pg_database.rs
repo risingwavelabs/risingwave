@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::Into;
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::BuiltinView;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_database` stores database.
 ///
@@ -36,32 +31,32 @@ use crate::catalog::system_catalog::BuiltinView;
 /// ```
 ///
 /// Ref: [`pg_database`](https://www.postgresql.org/docs/current/catalog-pg-database.html)
-pub static PG_DATABASE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_database",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "oid"),
-        (DataType::Varchar, "datname"),
-        (DataType::Int32, "datdba"),
-        (DataType::Int32, "encoding"),
-        (DataType::Varchar, "datcollate"),
-        (DataType::Varchar, "datctype"),
-        (DataType::Boolean, "datistemplate"),
-        (DataType::Boolean, "datallowconn"),
-        (DataType::Int32, "datconnlimit"),
-        (DataType::Int32, "dattablespace"),
-        (DataType::Varchar, "datacl"),
-    ],
-    sql: "SELECT id AS oid, \
-                 name AS datname, \
-                 owner AS datdba, \
-                 6 AS encoding, \
-                 'C' AS datcollate, \
-                 'C' AS datctype, \
-                 false AS datistemplate, \
-                 true AS datallowconn, \
-                 -1 AS datconnlimit, \
-                 1663 AS dattablespace, \
-                 acl AS datacl FROM rw_catalog.rw_databases"
-        .into(),
-});
+#[system_catalog(
+    view,
+    "pg_catalog.pg_database",
+    "SELECT id AS oid,
+        name AS datname,
+        owner AS datdba,
+        6 AS encoding,
+        'C' AS datcollate,
+        'C' AS datctype,
+        false AS datistemplate,
+        true AS datallowconn,
+        -1 AS datconnlimit,
+        1663 AS dattablespace,
+        acl AS datacl FROM rw_catalog.rw_databases"
+)]
+#[derive(Fields)]
+struct PgDatabase {
+    oid: i32,
+    datname: String,
+    datdba: i32,
+    encoding: i32,
+    datcollate: String,
+    datctype: String,
+    datistemplate: bool,
+    datallowconn: bool,
+    datconnlimit: i32,
+    dattablespace: i32,
+    datacl: String,
+}

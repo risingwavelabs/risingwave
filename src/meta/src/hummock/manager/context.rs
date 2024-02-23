@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,12 +26,12 @@ use risingwave_pb::hummock::ValidationTask;
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{
-    commit_multi_var, read_lock, start_measure_real_process_timer, write_lock,
+    commit_multi_var, create_trx_wrapper, read_lock, start_measure_real_process_timer, write_lock,
 };
 use crate::hummock::HummockManager;
 use crate::manager::META_NODE_ID;
-use crate::model::{BTreeMapTransaction, ValTransaction};
-use crate::storage::Transaction;
+use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
+use crate::storage::MetaStore;
 
 impl HummockManager {
     /// Release resources pinned by these contexts, including:
@@ -51,16 +51,23 @@ impl HummockManager {
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning.pinned_snapshots);
+        let mut pinned_versions = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.pinned_versions,)
+        );
+        let mut pinned_snapshots = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.pinned_snapshots,)
+        );
         for context_id in context_ids.as_ref() {
             pinned_versions.remove(*context_id);
             pinned_snapshots.remove(*context_id);
         }
         commit_multi_var!(
-            self,
-            None,
-            Transaction::default(),
+            self.env.meta_store(),
+            self.sql_meta_store(),
             pinned_versions,
             pinned_snapshots
         )?;
@@ -75,11 +82,13 @@ impl HummockManager {
     }
 
     /// Checks whether `context_id` is valid.
-    pub async fn check_context(&self, context_id: HummockContextId) -> bool {
-        self.cluster_manager
+    pub async fn check_context(&self, context_id: HummockContextId) -> Result<bool> {
+        Ok(self
+            .metadata_manager()
             .get_worker_by_id(context_id)
             .await
-            .is_some()
+            .map_err(|err| Error::MetaStore(err.into()))?
+            .is_some())
     }
 
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
@@ -103,7 +112,7 @@ impl HummockManager {
 
         let mut invalid_context_ids = vec![];
         for active_context_id in &active_context_ids {
-            if !self.check_context(*active_context_id).await {
+            if !self.check_context(*active_context_id).await? {
                 invalid_context_ids.push(*active_context_id);
             }
         }
@@ -116,7 +125,7 @@ impl HummockManager {
     pub async fn commit_epoch_sanity_check(
         &self,
         epoch: HummockEpoch,
-        sstables: &Vec<ExtendedSstableInfo>,
+        sstables: &[ExtendedSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
@@ -129,7 +138,7 @@ impl HummockManager {
                     continue;
                 }
             }
-            if !self.check_context(*context_id).await {
+            if !self.check_context(*context_id).await? {
                 return Err(Error::InvalidSst(*sst_id));
             }
         }

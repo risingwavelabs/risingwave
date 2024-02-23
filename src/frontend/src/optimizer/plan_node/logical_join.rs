@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
 
@@ -29,6 +28,7 @@ use super::{
     generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DynamicFilter;
@@ -149,6 +149,11 @@ impl LogicalJoin {
     /// Get the join type of the logical join.
     pub fn join_type(&self) -> JoinType {
         self.core.join_type
+    }
+
+    /// Get the eq join key of the logical join.
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        self.core.eq_indexes()
     }
 
     /// Get the output indices of the logical join.
@@ -1049,9 +1054,8 @@ impl LogicalJoin {
         let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
 
-        let left = if dist_key_in_order_key_pos.is_empty() {
-            self.left()
-                .to_stream_with_dist_required(&RequiredDist::single(), ctx)?
+        let required_dist = if dist_key_in_order_key_pos.is_empty() {
+            RequiredDist::single()
         } else {
             let left_eq_indexes = predicate.left_eq_indexes();
             let left_dist_key = dist_key_in_order_key_pos
@@ -1059,11 +1063,12 @@ impl LogicalJoin {
                 .map(|pos| left_eq_indexes[*pos])
                 .collect_vec();
 
-            self.left().to_stream_with_dist_required(
-                &RequiredDist::shard_by_key(self.left().schema().len(), &left_dist_key),
-                ctx,
-            )?
+            RequiredDist::hash_shard(&left_dist_key)
         };
+
+        let left = self.left().to_stream(ctx)?;
+        // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
+        let left = required_dist.enforce(left, &Order::any());
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(

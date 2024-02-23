@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
@@ -25,6 +24,7 @@ use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
 use crate::binder::Binder;
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
 

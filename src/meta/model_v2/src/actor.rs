@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use sea_orm::entity::prelude::*;
 
-use crate::{ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap};
+use crate::{
+    ActorId, ActorUpstreamActors, ConnectorSplits, ExprContext, FragmentId, VnodeBitmap, WorkerId,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -54,6 +56,7 @@ pub struct Model {
     pub status: ActorStatus,
     pub splits: Option<ConnectorSplits>,
     pub parallel_unit_id: i32,
+    pub worker_id: WorkerId,
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context: ExprContext,

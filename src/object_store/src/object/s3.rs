@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
+use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
@@ -35,6 +36,7 @@ use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use aws_smithy_runtime_api::client::http::HttpClient;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::body::SdkBody;
+use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::RetryConfig;
 use either::Either;
 use fail::fail_point;
@@ -42,9 +44,10 @@ use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::Body;
 use itertools::Itertools;
-use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::config::{ObjectStoreConfig, S3ObjectStoreConfig};
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -59,6 +62,8 @@ type PartId = i32;
 
 /// MinIO and S3 share the same minimum part ID and part size.
 const MIN_PART_ID: PartId = 1;
+// TODO: we should do some benchmark to determine the proper part size for MinIO
+const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 /// The minimum number of bytes that is buffered before they are uploaded as a part.
 /// Its value must be greater than the minimum part size of 5MiB.
 ///
@@ -277,7 +282,7 @@ impl StreamingUploader for S3StreamingUploader {
                 Ok(())
             }
         } else if let Err(e) = self.flush_multipart_and_complete().await {
-            tracing::warn!("Failed to upload object {}: {:?}", self.key, e);
+            tracing::warn!(key = self.key, error = %e.as_report(), "Failed to upload object");
             self.abort_multipart_upload().await?;
             Err(e)
         } else {
@@ -381,7 +386,7 @@ impl ObjectStore for S3ObjectStore {
                     }
                 }
             },
-            Self::should_retry,
+            RetryCondition::new(&self.config.s3),
         )
         .await?;
 
@@ -453,7 +458,7 @@ impl ObjectStore for S3ObjectStore {
                     }
                 }
             },
-            Self::should_retry,
+            RetryCondition::new(&self.config.s3),
         )
         .await?;
         let reader = FuturesStreamCompatByteStream::new(resp.body);
@@ -624,6 +629,60 @@ impl S3ObjectStore {
         }
     }
 
+    /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
+    pub async fn with_minio(
+        server: &str,
+        metrics: Arc<ObjectStoreMetrics>,
+        s3_object_store_config: ObjectStoreConfig,
+    ) -> Self {
+        let server = server.strip_prefix("minio://").unwrap();
+        let (access_key_id, rest) = server.split_once(':').unwrap();
+        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+            rest = rest_stripped;
+            "https://"
+        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+            rest = rest_stripped;
+            "http://"
+        } else {
+            "http://"
+        };
+        let (address, bucket) = rest.split_once('/').unwrap();
+
+        #[cfg(madsim)]
+        let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
+            Credentials::from_keys(access_key_id, secret_access_key, None),
+        );
+        #[cfg(not(madsim))]
+        let builder = aws_sdk_s3::config::Builder::from(
+            &aws_config::ConfigLoader::default()
+                // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
+                .credentials_provider(Credentials::from_keys(
+                    access_key_id,
+                    secret_access_key,
+                    None,
+                ))
+                .load()
+                .await,
+        )
+        .force_path_style(true)
+        .http_client(Self::new_http_client(&s3_object_store_config))
+        .behavior_version_latest();
+        let config = builder
+            .region(Region::new("custom"))
+            .endpoint_url(format!("{}{}", endpoint_prefix, address))
+            .build();
+        let client = Client::from_conf(config);
+
+        Self {
+            client,
+            bucket: bucket.to_string(),
+            part_size: MINIO_PART_SIZE,
+            metrics,
+            config: s3_object_store_config,
+        }
+    }
+
     fn get_object_prefix(obj_id: u64) -> String {
         let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES;
         let mut obj_prefix = prefix.to_string();
@@ -760,32 +819,6 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn should_retry(
-        err: &Either<
-            SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
-            ByteStreamError,
-        >,
-    ) -> bool {
-        match err {
-            Either::Left(err) => {
-                if let SdkError::DispatchFailure(e) = err {
-                    if e.is_timeout() {
-                        tracing::warn!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
-                        return true;
-                    }
-                }
-            }
-            Either::Right(_) => {
-                // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
-                // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
-                return true;
-            }
-        }
-
-        false
-    }
-
-    #[inline(always)]
     fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(self.config.s3.object_store_req_retry_interval_ms)
             .max_delay(Duration::from_millis(
@@ -795,6 +828,7 @@ impl S3ObjectStore {
             .map(jitter)
     }
 }
+
 struct S3ObjectIter {
     buffer: VecDeque<ObjectMetadata>,
     client: Client,
@@ -888,24 +922,76 @@ impl Stream for S3ObjectIter {
     }
 }
 
-impl
-    From<
-        Either<
-            SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
-            ByteStreamError,
-        >,
-    > for ObjectError
-{
-    fn from(
-        e: Either<
-            SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
-            ByteStreamError,
-        >,
-    ) -> Self {
+type RetryError = Either<
+    SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+    ByteStreamError,
+>;
+
+impl From<RetryError> for ObjectError {
+    fn from(e: RetryError) -> Self {
         match e {
             Either::Left(e) => e.into(),
             Either::Right(e) => e.into(),
         }
+    }
+}
+
+struct RetryCondition {
+    retry_unknown_service_error: bool,
+    retryable_service_error_codes: Vec<String>,
+}
+
+impl RetryCondition {
+    fn new(config: &S3ObjectStoreConfig) -> Self {
+        Self {
+            retry_unknown_service_error: config.developer.object_store_retry_unknown_service_error
+                || config.retry_unknown_service_error,
+            retryable_service_error_codes: config
+                .developer
+                .object_store_retryable_service_error_codes
+                .clone(),
+        }
+    }
+}
+
+impl tokio_retry::Condition<RetryError> for RetryCondition {
+    fn should_retry(&mut self, err: &RetryError) -> bool {
+        match err {
+            Either::Left(err) => match err {
+                SdkError::DispatchFailure(e) => {
+                    if e.is_timeout() {
+                        tracing::warn!(target: "http_timeout_retry", "{e:?} occurs, retry S3 get_object request.");
+                        return true;
+                    }
+                }
+                SdkError::ServiceError(e) => match e.err().code() {
+                    None => {
+                        if self.retry_unknown_service_error {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                    }
+                    Some(code) => {
+                        if self
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                    }
+                },
+                _ => {}
+            },
+            Either::Right(_) => {
+                // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
+                // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
+                return true;
+            }
+        }
+
+        false
     }
 }
 

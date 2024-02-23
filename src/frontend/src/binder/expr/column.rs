@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 impl Binder {
@@ -36,6 +36,30 @@ impl Binder {
                 )
             }
         };
+
+        // Special check for sql udf
+        // Note: The check in `bind_column` is to inline the identifiers,
+        // which, in the context of sql udf, will NOT be perceived as normal
+        // columns, but the actual named input parameters.
+        // Thus, we need to figure out if the current "column name" corresponds
+        // to the name of the defined sql udf parameters stored in `udf_context`.
+        // If so, we will treat this bind as an special bind, the actual expression
+        // stored in `udf_context` will then be bound instead of binding the non-existing column.
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&column_name) {
+                return Ok(expr.clone());
+            } else {
+                // The reason that we directly return error here,
+                // is because during a valid sql udf binding,
+                // there will not exist any column identifiers
+                // And invalid cases should already be caught
+                // during semantic check phase
+                return Err(ErrorCode::BindError(format!(
+                    "failed to find named parameter {column_name}"
+                ))
+                .into());
+            }
+        }
 
         match self
             .context

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use tokio::time::sleep;
 
 use crate::sink::utils::{
@@ -44,6 +45,32 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
     assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+
+    let internal_tables = session.run("show internal tables").await?;
+
+    let table_name_prefix = "__internal_test_sink_";
+
+    let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
+        internal_tables
+            .split("\n")
+            .filter(|line| {
+                line.contains(table_name_prefix)
+                    && line
+                        .strip_prefix(table_name_prefix)
+                        .unwrap()
+                        .contains("sink")
+            })
+            .collect_vec(),
+    )
+    .unwrap()[0]
+        .to_string();
+
+    let result = session
+        .run(format!(
+            "select * from {} limit 10",
+            sink_internal_table_name
+        ))
+        .await?;
 
     test_sink
         .store

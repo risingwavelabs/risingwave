@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -43,7 +44,7 @@ impl SinkId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         SinkId {
-            sink_id: u32::MAX - 1,
+            sink_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -133,7 +134,6 @@ pub enum SinkEncode {
     Protobuf,
     Avro,
     Template,
-    Native,
 }
 
 impl SinkFormatDesc {
@@ -180,7 +180,6 @@ impl SinkFormatDesc {
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
-            SinkEncode::Native => E::Native,
         };
         let options = self
             .options
@@ -206,7 +205,12 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             F::Plain => SinkFormat::AppendOnly,
             F::Upsert => SinkFormat::Upsert,
             F::Debezium => SinkFormat::Debezium,
-            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+            f @ (F::Unspecified
+            | F::Native
+            | F::DebeziumMongo
+            | F::Maxwell
+            | F::Canal
+            | F::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
@@ -218,8 +222,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            E::Native => SinkEncode::Native,
-            e @ (E::Unspecified | E::Csv | E::Bytes) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
@@ -301,6 +304,9 @@ pub struct SinkCatalog {
     pub sink_from_name: String,
 
     pub target_table: Option<TableId>,
+
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl SinkCatalog {
@@ -339,6 +345,8 @@ impl SinkCatalog {
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
         }
     }
 
@@ -428,6 +436,8 @@ impl From<PbSink> for SinkCatalog {
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
             target_table: pb.target_table.map(TableId::new),
+            initialized_at_cluster_version: pb.initialized_at_cluster_version,
+            created_at_cluster_version: pb.created_at_cluster_version,
         }
     }
 }

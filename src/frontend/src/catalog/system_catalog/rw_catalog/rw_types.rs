@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
 use risingwave_common::for_all_base_types;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
+
+/// `rw_types` stores all supported types in the database.
+#[derive(Fields)]
+struct RwType {
+    #[primary_key]
+    id: i32,
+    name: String,
+    input_oid: String,
+    typelem: i32,
+    typarray: i32,
+}
+
+#[system_catalog(table, "rw_catalog.rw_types")]
+fn read_rw_types(_: &SysCatalogReaderImpl) -> Result<Vec<RwType>> {
+    let mut rows = vec![];
+    for (id, name, input_oid, typelem, typarray) in RW_TYPE_DATA {
+        rows.push(RwType {
+            id: *id,
+            name: name.to_string(),
+            input_oid: input_oid.to_string(),
+            typelem: *typelem,
+            typarray: *typarray,
+        });
+    }
+    Ok(rows)
+}
 
 macro_rules! impl_pg_type_data {
     ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
@@ -40,35 +62,4 @@ macro_rules! impl_pg_type_data {
         ]
     }
 }
-pub const RW_TYPE_DATA: &[(i32, &str, &str, i32, i32)] = for_all_base_types! { impl_pg_type_data };
-
-/// `rw_types` stores all supported types in the database.
-pub static RW_TYPES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
-    name: "rw_types",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "name"),
-        (DataType::Varchar, "input_oid"),
-        (DataType::Int32, "typelem"),
-        (DataType::Int32, "typarray"),
-    ],
-    pk: &[0],
-});
-
-impl SysCatalogReaderImpl {
-    pub fn read_rw_types(&self) -> Result<Vec<OwnedRow>> {
-        Ok(RW_TYPE_DATA
-            .iter()
-            .map(|(id, name, input, typelem, typarray)| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(*id)),
-                    Some(ScalarImpl::Utf8(name.to_string().into())),
-                    Some(ScalarImpl::Utf8(input.to_string().into())),
-                    Some(ScalarImpl::Int32(*typelem)),
-                    Some(ScalarImpl::Int32(*typarray)),
-                ])
-            })
-            .collect_vec())
-    }
-}
+const RW_TYPE_DATA: &[(i32, &str, &str, i32, i32)] = for_all_base_types! { impl_pg_type_data };

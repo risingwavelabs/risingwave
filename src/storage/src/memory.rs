@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -575,8 +575,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -636,7 +635,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         unimplemented!("recovery not supported")
     }
 
@@ -747,7 +746,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         state_store
             .ingest_batch(
@@ -767,7 +765,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         assert_eq!(
             state_store

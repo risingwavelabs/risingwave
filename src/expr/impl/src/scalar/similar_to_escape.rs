@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_expr::{function, ExprError, Result};
 
 // escape `similar-to` pattern to POSIX regex pattern
 // Adapted from:
-// https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/adt/regexp.c#L768
+// https://github.com/postgres/postgres/blob/db4f21e4a34b1d5a3f7123e28e77f575d1a971ea/src/backend/utils/adt/regexp.c#L768
 fn similar_escape_internal(
     pat: &str,
     esc_text: Option<char>,
@@ -58,7 +58,7 @@ fn similar_escape_internal(
 
                 afterescape = false;
             }
-            c if esc_text.is_some() && c == esc_text.unwrap() => {
+            c if esc_text.is_some_and(|t| t == c) => {
                 afterescape = true;
             }
             c if incharclass => {
@@ -220,5 +220,29 @@ mod tests {
         let mut writer = String::new();
         let res = similar_to_escape_with_escape_text(pat, "💅💅", &mut writer);
         assert!(res.is_err())
+    }
+
+    #[test]
+    fn test_escape_with_escape_disabled() {
+        let cases = vec![
+            ("", "^(?:)$"),
+            ("_bcd%", "^(?:.bcd.*)$"),
+            ("bcd%", "^(?:bcd.*)$"),
+            (r#"_bcd\%"#, r#"^(?:.bcd\\.*)$"#),
+            ("bcd[]ee", "^(?:bcd[]ee)$"),
+            (r#"bcd[]ee"""#, r#"^(?:bcd[]ee"")$"#),
+            (r#"bcd[]"ee""#, r#"^(?:bcd[]"ee")$"#),
+            ("bcd[pp]ee", "^(?:bcd[pp]ee)$"),
+            ("bcd[pp_%.]ee", "^(?:bcd[pp_%.]ee)$"),
+            ("bcd[pp_%.]ee_%.", r#"^(?:bcd[pp_%.]ee..*\.)$"#),
+            ("bcd[pp_%.](ee_%.)", r#"^(?:bcd[pp_%.](?:ee..*\.))$"#),
+            (r#"%\"o_b\"%"#, r#"^(?:.*\\"o.b\\".*)$"#),
+        ];
+
+        for (pat, escaped) in cases {
+            let mut writer = String::new();
+            similar_to_escape_with_escape_text(pat, "", &mut writer).ok();
+            assert_eq!(writer, escaped);
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,6 @@ use risingwave_connector::sink::SinkError;
 use risingwave_connector::source::test_source::{
     registry_test_source, BoxSource, TestSourceRegistryGuard, TestSourceSplit,
 };
-use risingwave_connector::source::StreamChunkWithState;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::time::sleep;
 
@@ -230,20 +229,30 @@ impl SimulationTestSink {
     }
 }
 
-pub fn build_stream_chunk(row_iter: impl Iterator<Item = (i32, String)>) -> StreamChunk {
+pub fn build_stream_chunk(
+    row_iter: impl Iterator<Item = (i32, String, String, String)>,
+) -> StreamChunk {
     static ROW_ID_GEN: LazyLock<Arc<AtomicI64>> = LazyLock::new(|| Arc::new(AtomicI64::new(0)));
 
     let mut builder = DataChunkBuilder::new(
-        vec![DataType::Int32, DataType::Varchar, DataType::Serial],
+        vec![
+            DataType::Int32,
+            DataType::Varchar,
+            DataType::Serial,
+            DataType::Varchar,
+            DataType::Varchar,
+        ],
         100000,
     );
-    for (id, name) in row_iter {
+    for (id, name, split_id, offset) in row_iter {
         let row_id = ROW_ID_GEN.fetch_add(1, Relaxed);
         std::assert!(builder
             .append_one_row([
                 Some(ScalarImpl::Int32(id)),
                 Some(ScalarImpl::Utf8(name.into())),
                 Some(ScalarImpl::Serial(Serial::from(row_id))),
+                Some(ScalarImpl::Utf8(split_id.into())),
+                Some(ScalarImpl::Utf8(offset.into())),
             ])
             .is_none());
     }
@@ -297,20 +306,19 @@ impl SimulationTestSource {
                         split.offset.parse::<usize>().unwrap() + 1
                     };
 
-                    let mut stream: BoxStream<'static, StreamChunkWithState> = empty().boxed();
+                    let mut stream: BoxStream<'static, StreamChunk> = empty().boxed();
 
                     while offset < id_list.len() {
                         let mut chunks = Vec::new();
                         while offset < id_list.len() && chunks.len() < pause_interval {
                             let id = id_list[offset];
-                            let chunk = build_stream_chunk(once((id, simple_name_of_id(id))));
-                            let mut split_offset = HashMap::new();
-                            split_offset.insert(split.id.clone(), offset.to_string());
-                            let chunk_with_state = StreamChunkWithState {
-                                chunk,
-                                split_offset_mapping: Some(split_offset),
-                            };
-                            chunks.push(chunk_with_state);
+                            let chunk = build_stream_chunk(once((
+                                id,
+                                simple_name_of_id(id),
+                                split.id.to_string(),
+                                offset.to_string(),
+                            )));
+                            chunks.push(chunk);
 
                             offset += 1;
                         }
@@ -332,7 +340,7 @@ impl SimulationTestSource {
                     }
 
                     stream
-                        .chain(async { pending::<StreamChunkWithState>().await }.into_stream())
+                        .chain(async { pending::<StreamChunk>().await }.into_stream())
                         .map(|chunk| Ok(chunk))
                         .boxed()
                 }))
@@ -363,8 +371,7 @@ pub async fn start_sink_test_cluster() -> Result<Cluster> {
         meta_nodes: 1,
         compactor_nodes: 1,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     })
     .await
 }

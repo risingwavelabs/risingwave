@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::error::Result;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
+use crate::error::Result;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::{UserId, UserInfoVersion};
 

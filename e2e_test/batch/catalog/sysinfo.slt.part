@@ -50,7 +50,7 @@ CREATE INDEX tab_idx ON tab(a, (b + c + (1 + 1))) INCLUDE(d) CREATE INDEX tab_id
 query T
 select pg_get_indexdef('tab_idx'::regclass, 1, true), pg_get_indexdef('tab_idx'::regclass, 2, true);
 ----
-a ((b + c) + (1:Int32 + 1:Int32))
+a ((b + c) + 2:Int32)
 
 query T
 select pg_get_indexdef('tab_idx'::regclass, 3, true);
@@ -61,6 +61,23 @@ query T
 select pg_get_indexdef('tab_idx'::regclass, -1, true), pg_get_indexdef('tab_idx'::regclass, 4, true);
 ----
 (empty) (empty)
+
+statement ok
+create materialized view tab_mv as select a.c ac, b.c bc from tab as a join tab as b on a.a = b.b;
+
+query T
+select pg_get_viewdef('tab_mv'::regclass);
+----
+SELECT a.c AS ac, b.c AS bc FROM tab AS a JOIN tab AS b ON a.a = b.b
+
+query error Invalid parameter oid: view or materialized view does not exist:
+select pg_get_viewdef('tab'::regclass);
+
+query error Invalid parameter name: class not found: tab_null
+select pg_get_viewdef('tab_null'::regclass);
+
+statement ok
+drop materialized view tab_mv;
 
 statement ok
 drop index tab_idx;

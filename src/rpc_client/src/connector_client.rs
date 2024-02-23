@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::TryStreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
@@ -30,6 +30,7 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
+use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
@@ -150,8 +151,9 @@ impl ConnectorClient {
                 Ok(client) => Some(client),
                 Err(e) => {
                     error!(
-                        "invalid connector endpoint {:?}: {:?}",
-                        connector_endpoint, e
+                        endpoint = connector_endpoint,
+                        error = %e.as_report(),
+                        "invalid connector endpoint",
                     );
                     None
                 }
@@ -162,12 +164,7 @@ impl ConnectorClient {
     #[allow(clippy::unused_async)]
     pub async fn new(connector_endpoint: &String) -> Result<Self> {
         let endpoint = Endpoint::from_shared(format!("http://{}", connector_endpoint))
-            .map_err(|e| {
-                RpcError::Internal(anyhow!(format!(
-                    "invalid connector endpoint `{}`: {:?}",
-                    &connector_endpoint, e
-                )))
-            })?
+            .with_context(|| format!("invalid connector endpoint `{}`", connector_endpoint))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5));
@@ -265,14 +262,16 @@ impl ConnectorClient {
 
     pub async fn start_sink_writer_stream(
         &self,
-        sink_param: SinkParam,
+        payload_schema: Option<TableSchema>,
+        sink_proto: PbSinkParam,
         sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    sink_param: Some(sink_param),
+                    payload_schema,
+                    sink_param: Some(sink_proto),
                     format: sink_payload_format as i32,
                 })),
             },

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::nats::NatsProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,
 };
 
 pub struct NatsSplitReader {
@@ -93,7 +93,7 @@ impl SplitReader for NatsSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)

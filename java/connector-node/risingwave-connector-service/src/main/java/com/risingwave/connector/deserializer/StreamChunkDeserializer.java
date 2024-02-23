@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -110,13 +110,21 @@ public class StreamChunkDeserializer implements Deserializer {
                             };
                     break;
                 case TIMESTAMP:
-                case TIMESTAMPTZ:
                     ret[i] =
                             row -> {
                                 if (row.isNull(index)) {
                                     return null;
                                 }
                                 return row.getTimestamp(index);
+                            };
+                    break;
+                case TIMESTAMPTZ:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getTimestamptz(index);
                             };
                     break;
                 case TIME:

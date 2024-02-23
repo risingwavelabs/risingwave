@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
@@ -436,7 +437,7 @@ impl ClickHouseSinkWriter {
                 .next()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?
+                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?
         } else {
             0_u8
         };
@@ -455,7 +456,7 @@ impl ClickHouseSinkWriter {
                 .first()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?;
+                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?;
 
             if length > 38 {
                 return Err(SinkError::ClickHouse(
@@ -467,7 +468,7 @@ impl ClickHouseSinkWriter {
                 .last()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?;
+                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?;
             (length, scale)
         } else {
             (0_u8, 0_u8)

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -577,8 +577,8 @@ impl WatermarkAnalyzer {
                 },
                 _ => unreachable!(),
             },
-            ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
-            ExprType::ToTimestamp1 => WatermarkDerivation::None,
+            ExprType::SecToTimestamptz => self.visit_unary_op(func_call.inputs()),
+            ExprType::CharToTimestamptz => WatermarkDerivation::None,
             ExprType::Cast => {
                 // TODO: need more derivation
                 WatermarkDerivation::None

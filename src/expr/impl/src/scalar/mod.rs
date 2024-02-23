@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ mod jsonb_object;
 mod jsonb_path;
 mod length;
 mod lower;
-mod make_timestamptz;
+mod make_time;
 mod md5;
 mod overlay;
 mod position;
@@ -78,6 +78,8 @@ mod to_char;
 mod to_jsonb;
 mod vnode;
 pub use to_jsonb::*;
+mod encrypt;
+mod external;
 mod to_timestamp;
 mod translate;
 mod trigonometric;

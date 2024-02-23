@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use std::sync::Arc;
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -104,7 +103,7 @@ fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
     array
 }
 
-fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
+fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum>>> {
     let serde = OrderedRowSerde::new(
         c.schema.to_vec(),
         vec![OrderType::descending(); c.schema.len()],
@@ -146,7 +145,7 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     Ok(res)
 }
 
-fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
+fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum>>> {
     let table_columns = c
         .column_ids
         .iter()
@@ -195,7 +194,7 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     Ok(res)
 }
 
-fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
+fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum>>> {
     let table_columns = c
         .column_ids
         .iter()

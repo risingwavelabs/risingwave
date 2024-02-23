@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Ok, Result};
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
-use risingwave_common::error::RwError;
+use risingwave_common::array::StreamChunk;
 use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader, StreamChunkWithState,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    SplitReader,
 };
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -50,7 +50,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let connector = Src::new_enumerator(properties)?;
         let opendal_reader = OpendalReader {
             connector,
@@ -61,17 +61,19 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         self.into_chunk_stream()
     }
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
+            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
             let source_id = self.source_ctx.source_info.source_id.to_string();
+            let source_name = self.source_ctx.source_info.source_name.to_string();
             let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
@@ -81,10 +83,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-            let msg_stream = if matches!(
-                parser,
-                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-            ) {
+            let msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
                 parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
                 parser.into_stream(data_stream)
@@ -95,8 +94,14 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 self.source_ctx
                     .metrics
                     .partition_input_count
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
-                    .inc_by(msg.chunk.cardinality() as u64);
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
+                    .inc_by(msg.cardinality() as u64);
                 yield msg;
             }
         }
@@ -109,7 +114,9 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
+        let fragment_id = source_ctx.source_info.fragment_id.to_string();
         let source_id = source_ctx.source_info.source_id.to_string();
+        let source_name = source_ctx.source_info.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -147,7 +154,13 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 source_ctx
                     .metrics
                     .partition_input_bytes
-                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .with_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ])
                     .inc_by(batch_size as u64);
                 let yield_batch = std::mem::take(&mut batch);
                 batch_size = 0;
@@ -158,7 +171,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             source_ctx
                 .metrics
                 .partition_input_bytes
-                .with_label_values(&[&actor_id, &source_id, &split_id])
+                .with_label_values(&[&actor_id, &source_id, &split_id, &source_name, &fragment_id])
                 .inc_by(batch_size as u64);
             yield batch;
         }

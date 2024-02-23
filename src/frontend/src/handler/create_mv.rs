@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@ use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamScanType;
@@ -27,6 +25,8 @@ use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_valid_column_name;
+use crate::error::ErrorCode::ProtocolError;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -86,6 +86,10 @@ pub fn gen_create_mv_plan(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
+    if session.config().create_compaction_group_for_mv() {
+        context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
+    }
+
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
@@ -119,12 +123,7 @@ pub fn gen_create_mv_plan(
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().create_compaction_group_for_mv() {
-        table.properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
-    }
+
     let plan: PlanRef = materialize.into();
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
@@ -200,7 +199,7 @@ It only indicates the physical clustering of the data, which may improve the per
         }
         let can_run_in_background = plan_has_backfill_leaf_nodes(&plan);
         let context = plan.plan_base().ctx().clone();
-        let mut graph = build_graph(plan);
+        let mut graph = build_graph(plan)?;
         graph.parallelism =
             session
                 .config()

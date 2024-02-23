@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,6 +140,10 @@ pub struct MinioConfig {
     pub hummock_bucket: String,
 
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+
+    // For rate limiting minio in a test environment.
+    pub api_requests_max: usize,
+    pub api_requests_deadline: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

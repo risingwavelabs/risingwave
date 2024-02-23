@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSIO
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::PbLevel;
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
@@ -274,8 +275,8 @@ pub(crate) async fn start_pinned_version_worker(
                     Err(err) => {
                         let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                         tracing::warn!(
-                            "Failed to unpin version {:?}. Will retry after about {} milliseconds",
-                            err,
+                            error = %err.as_report(),
+                            "Failed to unpin version. Will retry after about {} milliseconds",
                             retry_after.as_millis()
                         );
                         tokio::time::sleep(retry_after).await;

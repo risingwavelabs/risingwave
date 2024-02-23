@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.risingwave</groupId>
@@ -52,6 +52,7 @@
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-test</module>
         <module>connector-node/risingwave-connector-service</module>
+        <module>connector-node/risingwave-source-test</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
         <module>connector-node/risingwave-sink-mock-flink</module>
@@ -68,19 +69,21 @@
         <grpc.version>1.53.0</grpc.version>
         <gson.version>2.10</gson.version>
         <module.version>0.1.0-SNAPSHOT</module.version>
-        <spotless.version>2.27.1</spotless.version>
+        <spotless.version>2.43.0</spotless.version>
         <log4j.version>2.20.0</log4j.version>
         <slf4j.version>2.0.9</slf4j.version>
         <commons.cli.version>1.5.0</commons.cli.version>
         <commons.io.version>2.11.0</commons.io.version>
         <commons.text.version>1.10.0</commons.text.version>
-        <debezium.version>1.9.7.Final</debezium.version>
+        <commons.lang3.version>3.12.0</commons.lang3.version>
+        <debezium.version>2.4.2.Final</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
         <elasticsearch.version>7.17.14</elasticsearch.version>
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
+        <testcontainers.version>1.17.6</testcontainers.version>
     </properties>
 
     <dependencyManagement>
@@ -119,6 +122,11 @@
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
                 <version>${commons.io.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons.lang3.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
@@ -302,6 +310,16 @@
                 <version>${gson.version}</version>
             </dependency>
             <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.0.0-jre</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.httpcomponents</groupId>
+                <artifactId>httpclient</artifactId>
+                <version>4.5.10</version>
+            </dependency>
+            <dependency>
                 <groupId>io.prometheus</groupId>
                 <artifactId>simpleclient_httpserver</artifactId>
                 <version>0.5.0</version>
@@ -310,6 +328,24 @@
                 <groupId>org.apache.spark</groupId>
                 <artifactId>spark-sql_2.12</artifactId>
                 <version>${spark_sql.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>mysql</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>${testcontainers.version}</version>
                 <scope>test</scope>
             </dependency>
         </dependencies>
@@ -355,11 +391,11 @@
                 <configuration>
                     <java>
                         <googleJavaFormat>
-                            <version>1.7</version>
+                            <version>1.20.0</version>
                             <style>AOSP</style>
                         </googleJavaFormat>
 
-                        <removeUnusedImports />
+                        <removeUnusedImports/>
                     </java>
                 </configuration>
                 <executions>

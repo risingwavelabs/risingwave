@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,25 +34,19 @@ fn string_to_array_inner<'a>(s: &'a str, sep: Option<&'a str>) -> impl Iterator<
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
 #[function("string_to_array(varchar, varchar) -> varchar[]")]
-pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> Option<ListValue> {
-    Some(ListValue::new(
-        string_to_array_inner(s?, sep).collect::<Utf8Array>().into(),
-    ))
+pub fn string_to_array2(s: &str, sep: Option<&str>) -> ListValue {
+    ListValue::new(string_to_array_inner(s, sep).collect::<Utf8Array>().into())
 }
 
 #[function("string_to_array(varchar, varchar, varchar) -> varchar[]")]
-pub fn string_to_array3(
-    s: Option<&str>,
-    sep: Option<&str>,
-    null: Option<&str>,
-) -> Option<ListValue> {
+pub fn string_to_array3(s: &str, sep: Option<&str>, null: Option<&str>) -> ListValue {
     let Some(null) = null else {
         return string_to_array2(s, sep);
     };
-    Some(ListValue::new(
-        string_to_array_inner(s?, sep)
+    ListValue::new(
+        string_to_array_inner(s, sep)
             .map(|x| if x == null { None } else { Some(x) })
             .collect::<Utf8Array>()
             .into(),
-    ))
+    )
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use futures::future::{select, Either};
 use futures::TryFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::drop_either_future;
+use rw_futures_util::drop_either_future;
 
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::SinkFormatter;

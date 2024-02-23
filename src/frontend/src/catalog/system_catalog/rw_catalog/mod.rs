@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ mod rw_databases;
 mod rw_ddl_progress;
 mod rw_description;
 mod rw_event_logs;
+mod rw_fragment_parallelism;
 mod rw_fragments;
 mod rw_functions;
 mod rw_hummock_branched_objects;
@@ -40,6 +41,7 @@ mod rw_relations;
 mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
+mod rw_streaming_parallelism;
 mod rw_system_tables;
 mod rw_table_fragments;
 mod rw_table_stats;
@@ -49,41 +51,3 @@ mod rw_user_secrets;
 mod rw_users;
 mod rw_views;
 mod rw_worker_nodes;
-
-pub use rw_actors::*;
-pub use rw_columns::*;
-pub use rw_connections::*;
-pub use rw_databases::*;
-pub use rw_ddl_progress::*;
-pub use rw_description::*;
-pub use rw_event_logs::*;
-pub use rw_fragments::*;
-pub use rw_functions::*;
-pub use rw_hummock_branched_objects::*;
-pub use rw_hummock_compact_task_assignment::*;
-pub use rw_hummock_compact_task_progress::*;
-pub use rw_hummock_compaction_group_configs::*;
-pub use rw_hummock_meta_configs::*;
-pub use rw_hummock_pinned_snapshots::*;
-pub use rw_hummock_pinned_versions::*;
-pub use rw_hummock_version::*;
-pub use rw_hummock_version_deltas::*;
-pub use rw_indexes::*;
-pub use rw_internal_tables::*;
-pub use rw_materialized_views::*;
-pub use rw_meta_snapshot::*;
-pub use rw_parallel_units::*;
-pub use rw_relation_info::*;
-pub use rw_relations::*;
-pub use rw_schemas::*;
-pub use rw_sinks::*;
-pub use rw_sources::*;
-pub use rw_system_tables::*;
-pub use rw_table_fragments::*;
-pub use rw_table_stats::*;
-pub use rw_tables::*;
-pub use rw_types::*;
-pub use rw_user_secrets::*;
-pub use rw_users::*;
-pub use rw_views::*;
-pub use rw_worker_nodes::*;

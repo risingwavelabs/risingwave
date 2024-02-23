@@ -229,7 +229,7 @@ DROP SCHEMA schema1;
 statement ok
 DROP SINK sink1;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 DROP VIEW v5;
 
 statement ok

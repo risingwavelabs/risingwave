@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -139,21 +139,17 @@ impl ArrowFlightUdfClient {
     }
 
     async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
-        let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
-        // TODO: support no output
-        let head = output_stream
-            .next()
-            .await
-            .ok_or_else(Error::no_returned)??;
-        let remaining = output_stream.try_collect::<Vec<_>>().await?;
-        if remaining.is_empty() {
-            Ok(head)
-        } else {
-            Ok(arrow_select::concat::concat_batches(
-                &head.schema(),
-                std::iter::once(&head).chain(remaining.iter()),
-            )?)
+        let mut output_stream = self
+            .call_stream_internal(id, stream::once(async { input }))
+            .await?;
+        let mut batches = vec![];
+        while let Some(batch) = output_stream.next().await {
+            batches.push(batch?);
         }
+        Ok(arrow_select::concat::concat_batches(
+            output_stream.schema().ok_or_else(Error::no_returned)?,
+            batches.iter(),
+        )?)
     }
 
     /// Call a function, retry up to 5 times / 3s if connection is broken.
@@ -179,6 +175,17 @@ impl ArrowFlightUdfClient {
         id: &str,
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
+        Ok(self
+            .call_stream_internal(id, inputs)
+            .await?
+            .map_err(|e| e.into()))
+    }
+
+    async fn call_stream_internal(
+        &self,
+        id: &str,
+        inputs: impl Stream<Item = RecordBatch> + Send + 'static,
+    ) -> Result<FlightRecordBatchStream> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
         let flight_data_stream =
             FlightDataEncoderBuilder::new()
@@ -194,11 +201,10 @@ impl ArrowFlightUdfClient {
 
         // decode response
         let stream = response.into_inner();
-        let record_batch_stream = FlightRecordBatchStream::new_from_flight_data(
+        Ok(FlightRecordBatchStream::new_from_flight_data(
             // convert tonic::Status to FlightError
             stream.map_err(|e| e.into()),
-        );
-        Ok(record_batch_stream.map_err(|e| e.into()))
+        ))
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,15 +17,14 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_connector::source::filesystem::FsPageItem;
-use risingwave_connector::source::{BoxTryStream, SourceCtrlOpts};
+use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_connector::ConnectorParams;
-use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -89,13 +88,12 @@ impl<S: StateStore> FsListExecutor<S> {
     fn build_chunked_paginate_stream(
         &self,
         source_desc: &SourceDesc,
-    ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
-        let stream: std::pin::Pin<
-            Box<dyn Stream<Item = Result<FsPageItem, risingwave_common::error::RwError>> + Send>,
-        > = source_desc
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<StreamChunk>>> {
+        let stream = source_desc
             .source
             .get_source_list()
-            .map_err(StreamExecutorError::connector_error)?;
+            .map_err(StreamExecutorError::connector_error)?
+            .map_err(StreamExecutorError::connector_error);
 
         // Group FsPageItem stream into chunks of size 1024.
         let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
@@ -120,7 +118,7 @@ impl<S: StateStore> FsListExecutor<S> {
             ))
         });
 
-        Ok(chunked_stream.boxed())
+        Ok(chunked_stream)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::{Index as MigrationIndex, Table as MigrationTable, *};
 
+use crate::{assert_not_has_tables, drop_tables};
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -7,38 +9,30 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // 1. check if the table exists.
-        assert!(!manager.has_table(Cluster::Table.to_string()).await?);
-        assert!(!manager.has_table(Worker::Table.to_string()).await?);
-        assert!(!manager.has_table(WorkerProperty::Table.to_string()).await?);
-        assert!(!manager.has_table(User::Table.to_string()).await?);
-        assert!(!manager.has_table(UserPrivilege::Table.to_string()).await?);
-        assert!(!manager.has_table(Database::Table.to_string()).await?);
-        assert!(!manager.has_table(Schema::Table.to_string()).await?);
-        assert!(!manager.has_table(StreamingJob::Table.to_string()).await?);
-        assert!(!manager.has_table(Fragment::Table.to_string()).await?);
-        assert!(!manager.has_table(Actor::Table.to_string()).await?);
-        assert!(
-            !manager
-                .has_table(ActorDispatcher::Table.to_string())
-                .await?
-        );
-        assert!(!manager.has_table(Table::Table.to_string()).await?);
-        assert!(!manager.has_table(Source::Table.to_string()).await?);
-        assert!(!manager.has_table(Sink::Table.to_string()).await?);
-        assert!(!manager.has_table(Connection::Table.to_string()).await?);
-        assert!(!manager.has_table(View::Table.to_string()).await?);
-        assert!(!manager.has_table(Index::Table.to_string()).await?);
-        assert!(!manager.has_table(Function::Table.to_string()).await?);
-        assert!(!manager.has_table(Object::Table.to_string()).await?);
-        assert!(
-            !manager
-                .has_table(ObjectDependency::Table.to_string())
-                .await?
-        );
-        assert!(
-            !manager
-                .has_table(SystemParameter::Table.to_string())
-                .await?
+        assert_not_has_tables!(
+            manager,
+            Cluster,
+            Worker,
+            WorkerProperty,
+            User,
+            UserPrivilege,
+            Database,
+            Schema,
+            StreamingJob,
+            Fragment,
+            Actor,
+            ActorDispatcher,
+            Table,
+            Source,
+            Sink,
+            Connection,
+            View,
+            Index,
+            Function,
+            Object,
+            ObjectDependency,
+            SystemParameter,
+            CatalogVersion
         );
 
         // 2. create tables.
@@ -165,6 +159,8 @@ impl MigrationTrait for Migration {
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
+                    .col(ColumnDef::new(Object::InitializedAtClusterVersion).string())
+                    .col(ColumnDef::new(Object::CreatedAtClusterVersion).string())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_object_owner_id")
@@ -332,6 +328,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(StreamingJob::JobStatus).string().not_null())
                     .col(ColumnDef::new(StreamingJob::CreateType).string().not_null())
                     .col(ColumnDef::new(StreamingJob::Timezone).string())
+                    .col(ColumnDef::new(StreamingJob::Parallelism).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_streaming_job_object_id")
@@ -364,7 +361,7 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Fragment::StreamNode).json().not_null())
+                    .col(ColumnDef::new(Fragment::StreamNode).binary().not_null())
                     .col(ColumnDef::new(Fragment::VnodeMapping).json().not_null())
                     .col(ColumnDef::new(Fragment::StateTableIds).json())
                     .col(ColumnDef::new(Fragment::UpstreamFragmentId).json())
@@ -393,6 +390,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Status).string().not_null())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
+                    .col(ColumnDef::new(Actor::WorkerId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .col(ColumnDef::new(Actor::ExprContext).json().not_null())
@@ -521,6 +519,14 @@ impl MigrationTrait for Migration {
                             .to(Connection::Table, Connection::ConnectionId)
                             .to_owned(),
                     )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_optional_associated_table_id")
+                            .from(Source::Table, Source::OptionalAssociatedTableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -538,7 +544,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::DistributionKey).json().not_null())
                     .col(ColumnDef::new(Table::StreamKey).json().not_null())
                     .col(ColumnDef::new(Table::AppendOnly).boolean().not_null())
-                    .col(ColumnDef::new(Table::Properties).json().not_null())
                     .col(ColumnDef::new(Table::FragmentId).integer())
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
@@ -565,6 +570,8 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json())
+                    .col(ColumnDef::new(Table::RetentionSeconds).integer())
+                    .col(ColumnDef::new(Table::IncomingSinks).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
@@ -622,6 +629,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFormatDesc).json())
+                    .col(ColumnDef::new(Sink::TargetTable).integer())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_sink_object_id")
@@ -635,6 +643,13 @@ impl MigrationTrait for Migration {
                             .name("FK_sink_connection_id")
                             .from(Sink::Table, Sink::ConnectionId)
                             .to(Connection::Table, Connection::ConnectionId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_target_table_id")
+                            .from(Sink::Table, Sink::TargetTable)
+                            .to(Table::Table, Table::TableId)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -669,7 +684,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Index::IndexTableId).integer().not_null())
                     .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
                     .col(ColumnDef::new(Index::IndexItems).json().not_null())
-                    .col(ColumnDef::new(Index::OriginalColumns).json().not_null())
+                    .col(ColumnDef::new(Index::IndexColumnsLen).integer().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_index_object_id")
@@ -701,11 +716,13 @@ impl MigrationTrait for Migration {
                     .table(Function::Table)
                     .col(ColumnDef::new(Function::FunctionId).integer().primary_key())
                     .col(ColumnDef::new(Function::Name).string().not_null())
+                    .col(ColumnDef::new(Function::ArgNames).json().not_null())
                     .col(ColumnDef::new(Function::ArgTypes).json().not_null())
                     .col(ColumnDef::new(Function::ReturnType).json().not_null())
                     .col(ColumnDef::new(Function::Language).string().not_null())
-                    .col(ColumnDef::new(Function::Link).string().not_null())
-                    .col(ColumnDef::new(Function::Identifier).string().not_null())
+                    .col(ColumnDef::new(Function::Link).string())
+                    .col(ColumnDef::new(Function::Identifier).string())
+                    .col(ColumnDef::new(Function::Body).string())
                     .col(ColumnDef::new(Function::Kind).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -735,6 +752,24 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(SystemParameter::Description).string())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                crate::Table::create()
+                    .table(CatalogVersion::Table)
+                    .col(
+                        ColumnDef::new(CatalogVersion::Name)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(CatalogVersion::Version)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -832,22 +867,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        macro_rules! drop_tables {
-            ($manager:expr, $( $table:ident ),+) => {
-                $(
-                    $manager
-                        .drop_table(
-                            MigrationTable::drop()
-                                .table($table::Table)
-                                .if_exists()
-                                .cascade()
-                                .to_owned(),
-                        )
-                        .await?;
-                )+
-            };
-        }
-
         // drop tables cascade.
         drop_tables!(
             manager,
@@ -871,7 +890,8 @@ impl MigrationTrait for Migration {
             Function,
             Object,
             ObjectDependency,
-            SystemParameter
+            SystemParameter,
+            CatalogVersion
         );
         Ok(())
     }
@@ -964,6 +984,7 @@ enum Actor {
     Status,
     Splits,
     ParallelUnitId,
+    WorkerId,
     UpstreamActorIds,
     VnodeBitmap,
     ExprContext,
@@ -990,6 +1011,7 @@ enum StreamingJob {
     JobStatus,
     Timezone,
     CreateType,
+    Parallelism,
 }
 
 #[derive(DeriveIden)]
@@ -1006,7 +1028,6 @@ enum Table {
     DistributionKey,
     StreamKey,
     AppendOnly,
-    Properties,
     FragmentId,
     VnodeColIndex,
     RowIdIndex,
@@ -1021,6 +1042,8 @@ enum Table {
     CleanedByWatermark,
     Description,
     Version,
+    RetentionSeconds,
+    IncomingSinks,
 }
 
 #[derive(DeriveIden)]
@@ -1056,6 +1079,7 @@ enum Sink {
     DbName,
     SinkFromName,
     SinkFormatDesc,
+    TargetTable,
 }
 
 #[derive(DeriveIden)]
@@ -1084,7 +1108,7 @@ enum Index {
     IndexTableId,
     PrimaryTableId,
     IndexItems,
-    OriginalColumns,
+    IndexColumnsLen,
 }
 
 #[derive(DeriveIden)]
@@ -1092,11 +1116,13 @@ enum Function {
     Table,
     FunctionId,
     Name,
+    ArgNames,
     ArgTypes,
     ReturnType,
     Language,
     Link,
     Identifier,
+    Body,
     Kind,
 }
 
@@ -1110,6 +1136,8 @@ enum Object {
     DatabaseId,
     InitializedAt,
     CreatedAt,
+    InitializedAtClusterVersion,
+    CreatedAtClusterVersion,
 }
 
 #[derive(DeriveIden)]
@@ -1127,4 +1155,11 @@ enum SystemParameter {
     Value,
     IsMutable,
     Description,
+}
+
+#[derive(DeriveIden)]
+enum CatalogVersion {
+    Table,
+    Name,
+    Version,
 }

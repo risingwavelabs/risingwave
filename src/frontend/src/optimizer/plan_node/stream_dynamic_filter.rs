@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,8 +47,12 @@ impl StreamDynamicFilter {
         // is a `StreamNow`. It will be generalized to more cases
         // by introducing monotonically increasing property of the node in https://github.com/risingwavelabs/risingwave/pull/13984.
         let right_monotonically_increasing = {
-            if let Some(e) = core.right().as_stream_exchange() && *e.distribution() == Distribution::Broadcast {
-                if let Some(proj) = e.input().as_stream_project() {
+            if let Some(e) = core.right().as_stream_exchange()
+                && *e.distribution() == Distribution::Broadcast
+            {
+                if e.input().as_stream_now().is_some() {
+                    true
+                } else if let Some(proj) = e.input().as_stream_project() {
                     proj.input().as_stream_now().is_some()
                 } else {
                     false

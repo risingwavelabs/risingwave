@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,6 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
@@ -50,13 +48,10 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let schema = self.schema_resolver.get(schema_id).await?;
-        self.value = Some(
-            from_avro_datum(schema.as_ref(), &mut raw_payload, None)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-        );
+        self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
         self.key_schema = match self.encoding_type {
             EncodingType::Key => Some(schema),
             EncodingType::Value => None,
@@ -72,19 +67,19 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
 }
 
 impl DebeziumAvroAccessBuilder {
-    pub fn new(config: DebeziumAvroParserConfig, encoding_type: EncodingType) -> Result<Self> {
+    pub fn new(
+        config: DebeziumAvroParserConfig,
+        encoding_type: EncodingType,
+    ) -> anyhow::Result<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
             schema_resolver,
             ..
         } = config;
 
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)?;
         // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver
-            .to_resolved(&outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let schema = resolver.to_resolved(&outer_schema)?;
         Ok(Self {
             schema,
             schema_resolver,
@@ -104,7 +99,7 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(encoding_config: EncodingProperties) -> Result<Self> {
+    pub async fn new(encoding_config: EncodingProperties) -> anyhow::Result<Self> {
         let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
@@ -151,6 +146,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
@@ -257,6 +253,64 @@ mod tests {
     }
 
     #[test]
+    fn test_ref_avro_type() {
+        let test_schema_str = r#"{
+    "type": "record",
+    "name": "Key",
+    "namespace": "dbserver1.inventory.customers",
+    "fields": [{
+        "name": "id",
+        "type": "int"
+    },
+    {
+      "name": "unconstrained_decimal",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "VariableScaleDecimal",
+          "namespace": "io.debezium.data",
+          "fields": [
+            {
+              "name": "scale",
+              "type": "int"
+            },
+            {
+              "name": "value",
+              "type": "bytes"
+            }
+          ],
+          "connect.doc": "Variable scaled decimal",
+          "connect.name": "io.debezium.data.VariableScaleDecimal",
+          "connect.version": 1
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "unconstrained_numeric",
+      "type": [
+        "null",
+        "io.debezium.data.VariableScaleDecimal"
+      ],
+      "default": null
+    }
+    ],
+    "connect.name": "dbserver1.inventory.customers.Key"
+}
+"#;
+        let schema = Schema::parse_str(test_schema_str).unwrap();
+        let columns = avro_schema_to_column_descs(&schema).unwrap();
+        for col in &columns {
+            let dtype = col.column_type.as_ref().unwrap();
+            println!("name = {}, type = {:?}", col.name, dtype.type_name);
+            if col.name.contains("unconstrained") {
+                assert_eq!(dtype.type_name, TypeName::Decimal as i32);
+            }
+        }
+    }
+
+    #[test]
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
@@ -294,7 +348,7 @@ mod tests {
 
     #[ignore]
     #[tokio::test]
-    async fn test_debezium_avro_parser() -> Result<()> {
+    async fn test_debezium_avro_parser() -> anyhow::Result<()> {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));

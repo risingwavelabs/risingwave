@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,9 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column: AdditionalColumn {
+                                column_type: None,
+                            },
                             version: Pr13707,
                         },
                         ColumnDesc {
@@ -106,7 +108,9 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column: AdditionalColumn {
+                                column_type: None,
+                            },
                             version: Pr13707,
                         },
                     ],
@@ -137,7 +141,9 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column: AdditionalColumn {
+                                column_type: None,
+                            },
                             version: Pr13707,
                         },
                         ColumnDesc {
@@ -148,7 +154,9 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_column_type: Normal,
+                            additional_column: AdditionalColumn {
+                                column_type: None,
+                            },
                             version: Pr13707,
                         },
                     ],

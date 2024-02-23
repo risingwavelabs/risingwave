@@ -96,7 +96,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 17
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
@@ -292,6 +292,75 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end redis sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-redis-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-redis-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "set vm_max_map_count_2000000"
+    key: "set-vm_max_map_count"
+    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-doris-sink-tests?(,|$$)/
+    command: "sudo sysctl -w vm.max_map_count=2000000"
+    depends_on:
+      - "build"
+      - "build-other"
+
+  - label: "end-to-end doris sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-doris-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-doris-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "set-vm_max_map_count"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-doris-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end starrocks sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-starrocks-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-starrocks-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end cassandra sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,) e2e-cassandra-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "e2e java-binding test"
     if: build.pull_request.labels includes "ci/run-java-binding-tests" || build.env("CI_STEPS") =~ /(^|,)java-binding-tests?(,|$$)/
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
@@ -347,6 +416,31 @@ steps:
 
   - label: "check"
     command: "ci/scripts/check.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-check"
+      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+    plugins:
+      - gencer/cache#v2.4.10:
+          id: cache
+          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          restore-keys:
+            - "v1-cache-{{ id }}-{{ runner.os }}-"
+            - "v1-cache-{{ id }}-"
+          backend: s3
+          s3:
+            bucket: ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".cargo/advisory-db"
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "check dylint"
+    command: "ci/scripts/check-dylint.sh"
     if: |
       !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-check"
@@ -438,10 +532,11 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      # Only upload zipped files, otherwise the logs is too much.
+      - ./ci/plugins/upload-failure-logs-zipped
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
-      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     cancel_on_build_failing: true
     retry: *auto-retry
@@ -575,7 +670,7 @@ steps:
     timeout_in_minutes: 40
 
   - label: "Backfill tests"
-    command: "ci/scripts/backfill-test.sh -p ci-dev"
+    command: "BUILDKITE=${BUILDKITE:-} ci/scripts/backfill-test.sh -p ci-dev"
     if: build.pull_request.labels includes "ci/run-backfill-tests" || build.env("CI_STEPS") =~ /(^|,)backfill-tests?(,|$$)/
     depends_on:
       - "build"

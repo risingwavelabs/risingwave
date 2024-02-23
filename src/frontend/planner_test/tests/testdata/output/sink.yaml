@@ -25,6 +25,109 @@
     StreamSink { type: upsert, columns: [v1, v2, v3, v5], pk: [t1.v1, t1.v2] }
     └─StreamExchange { dist: HashShard(t1.v3, t1.v5) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5] }
+- id: create_upsert_jdbc_sink_with_downstream_pk1
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain (distsql, verbose) create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v1,v2',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  explain_output: |+
+    Fragment 0
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    ├── tables: [ Sink: 0 ]
+    ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5, t1.v4 ]
+    ├── stream key: [ t1.v3, t1.v4 ]
+    └── StreamExchange Hash([0, 1]) from 1
+        ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5, t1.v4 ]
+        └── stream key: [ t1.v3, t1.v4 ]
+
+    Fragment 1
+    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5, t1.v4], pk: [t1.v3, t1.v4], dist: UpstreamHashShard(t1.v3, t1.v4) }
+    ├── tables: [ StreamScan: 1 ]
+    ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5, t1.v4 ]
+    ├── stream key: [ t1.v3, t1.v4 ]
+    ├── Upstream { output: [ v1, v2, v3, v5, v4 ], stream key: [] }
+    └── BatchPlanNode { output: [ v1, v2, v3, v5, v4 ], stream key: [] }
+
+    Table 0
+    ├── columns:
+    │   ┌── kv_log_store_epoch: bigint
+    │   ├── kv_log_store_seq_id: integer
+    │   ├── kv_log_store_vnode: smallint
+    │   ├── kv_log_store_row_op: smallint
+    │   ├── v1: integer
+    │   ├── v2: double precision
+    │   ├── v3: character varying
+    │   ├── v5: numeric
+    │   └── t1.v4: bigint
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
+    ├── distribution key: [ 4, 5 ]
+    ├── read pk prefix len hint: 3
+    └── vnode column idx: 2
+
+    Table 1
+    ├── columns: [ vnode: smallint, v3: character varying, v4: bigint, t1_backfill_finished: boolean, t1_row_count: bigint ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+- id: create_upsert_jdbc_sink_with_downstream_pk2
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v1,v2));
+    explain (distsql, verbose) create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v3, v5',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  explain_output: |+
+    Fragment 0
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5], pk: [t1.v1, t1.v2] }
+    ├── tables: [ Sink: 0 ]
+    ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5 ]
+    ├── stream key: [ t1.v1, t1.v2 ]
+    └── StreamExchange Hash([2, 3]) from 1
+        ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5 ]
+        └── stream key: [ t1.v1, t1.v2 ]
+
+    Fragment 1
+    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5], pk: [t1.v1, t1.v2], dist: UpstreamHashShard(t1.v1, t1.v2) }
+    ├── tables: [ StreamScan: 1 ]
+    ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5 ]
+    ├── stream key: [ t1.v1, t1.v2 ]
+    ├── Upstream { output: [ v1, v2, v3, v5 ], stream key: [] }
+    └── BatchPlanNode { output: [ v1, v2, v3, v5 ], stream key: [] }
+
+    Table 0
+    ├── columns:
+    │   ┌── kv_log_store_epoch: bigint
+    │   ├── kv_log_store_seq_id: integer
+    │   ├── kv_log_store_vnode: smallint
+    │   ├── kv_log_store_row_op: smallint
+    │   ├── v1: integer
+    │   ├── v2: double precision
+    │   ├── v3: character varying
+    │   └── v5: numeric
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+    ├── distribution key: [ 6, 7 ]
+    ├── read pk prefix len hint: 3
+    └── vnode column idx: 2
+
+    Table 1
+    ├── columns: [ vnode: smallint, v1: integer, v2: double precision, t1_backfill_finished: boolean, t1_row_count: bigint ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
 - id: create_appendonly_jdbc_sink
   sql: |
     create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v1,v2));
@@ -73,3 +176,83 @@
     StreamSink { type: upsert, columns: [a, b, t2._row_id(hidden)], pk: [t2._row_id] }
     └─StreamEowcSort { sort_column: t2.b }
       └─StreamTableScan { table: t2, columns: [a, b, _row_id] }
+- id: create_mock_iceberg_sink_append_only_with_sparse_partition
+  sql: |
+    create table t1 (v1 int, v2 bigint, v3 varchar, v4 time);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'append-only',
+      force_append_only = 'true',
+      catalog.type = 'mock',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin'
+    );
+  explain_output: |
+    StreamSink { type: append-only, columns: [v1, v2, v3, v4, t1._row_id(hidden)] }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Int32) as $expr1] }
+        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+- id: create_mock_iceberg_sink_append_only_with_range_partition
+  sql: |
+    create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'append-only',
+      force_append_only = 'true',
+      catalog.type = 'mock',
+      database.name = 'demo_db',
+      table.name = 'range_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin'
+    );
+  explain_output: |
+    StreamSink { type: append-only, columns: [v1, v2, v3, v4, t1._row_id(hidden)] }
+    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+- id: create_mock_iceberg_sink_upsert_with_sparse_partition
+  sql: |
+    create table t1 (v1 int, v2 bigint, v3 varchar, v4 time);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      primary_key = 'v1'
+    );
+  explain_output: |
+    StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], pk: [t1._row_id] }
+    └─StreamExchange { dist: HashShard($expr1) }
+      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Int32) as $expr1] }
+        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+- id: create_mock_iceberg_sink_upsert_with_range_partition
+  sql: |
+    create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      database.name = 'demo_db',
+      table.name = 'range_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      primary_key = 'v1'
+    );
+  explain_output: |
+    StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], pk: [t1._row_id] }
+    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }

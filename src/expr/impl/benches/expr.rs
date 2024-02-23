@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -304,7 +304,7 @@ fn bench_expr(c: &mut Criterion) {
         }
         if [
             "date_trunc(character varying, timestamp with time zone) -> timestamp with time zone",
-            "to_timestamp1(character varying, character varying) -> timestamp with time zone",
+            "char_to_timestamptz(character varying, character varying) -> timestamp with time zone",
             "to_char(timestamp with time zone, character varying) -> character varying",
         ]
         .contains(&format!("{sig:?}").as_str())
@@ -321,12 +321,12 @@ fn bench_expr(c: &mut Criterion) {
         for (i, t) in sig.inputs_type.iter().enumerate() {
             use DataType::*;
             let idx = match (sig.name.as_scalar(), i) {
-                (PbType::ToTimestamp1, 0) => TIMESTAMP_FORMATTED_STRING,
-                (PbType::ToChar | PbType::ToTimestamp1, 1) => {
+                (PbType::CharToTimestamptz, 0) => TIMESTAMP_FORMATTED_STRING,
+                (PbType::ToChar | PbType::CharToTimestamptz, 1) => {
                     children.push(string_literal("YYYY/MM/DD HH:MM:SS"));
                     continue;
                 }
-                (PbType::ToChar | PbType::ToTimestamp1, 2) => {
+                (PbType::ToChar | PbType::CharToTimestamptz, 2) => {
                     children.push(string_literal("Australia/Sydney"));
                     continue;
                 }

@@ -1,3 +1,47 @@
+statement error
+create source s;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  sql parser error: Expected description of the format, found: ; at line:1, column:17
+Near "create source s"
+
+
+statement error missing WITH clause
+create source s FORMAT PLAIN ENCODE JSON;
+
+statement error missing field 'connector'
+create source s WITH(unknown_field='1') FORMAT PLAIN ENCODE JSON;
+
+statement error connector "1" is not supported
+create source s WITH(unknown_field='1', connector='1') FORMAT PLAIN ENCODE JSON;
+
+statement error Schema definition is required, either from SQL or schema registry.
+create source s WITH(unknown_field='1', connector='kafka') FORMAT PLAIN ENCODE JSON;
+
+statement error
+create source s(x int) WITH(unknown_field='1', connector='kafka') FORMAT PLAIN ENCODE JSON;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to create source worker
+  3: missing field `properties.bootstrap.server`
+
+
+statement error
+create source s(x int) WITH(unknown_field='1', connector='kafka', properties.bootstrap.server='2', topic='3') FORMAT PLAIN ENCODE JSON;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to create source worker
+  3: Unknown fields in the WITH clause: {"unknown_field": "1"}
+
+
 statement error topic invalid_topic not found
 create source s (
   column1 varchar
@@ -51,7 +95,7 @@ statement ok
 drop source upsert_source;
 
 # Will fail at the parser phase.
-statement error
+statement error expected.*after ROW FORMAT
 create source invalid_format with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
@@ -90,7 +134,7 @@ create source s (
 statement ok
 create materialized view mv_1 as select * from s
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 drop source s
 
 statement ok

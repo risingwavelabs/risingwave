@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use either::Either;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::query_log::*;
+use risingwave_common::util::tracing::layer::set_toggle_otel_layer_fn;
 use thiserror_ext::AsReport;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
@@ -27,10 +28,10 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{filter, EnvFilter};
+use tracing_subscriber::{filter, reload, EnvFilter};
 
 pub struct LoggerSettings {
-    /// The name of the service.
+    /// The name of the service. Used to identify the service in distributed tracing.
     name: String,
     /// Enable tokio console output.
     enable_tokio_console: bool,
@@ -44,6 +45,8 @@ pub struct LoggerSettings {
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
     /// Override the default level.
     default_level: Option<tracing::metadata::LevelFilter>,
+    /// The endpoint of the tracing collector in OTLP gRPC protocol.
+    tracing_endpoint: Option<String>,
 }
 
 impl Default for LoggerSettings {
@@ -53,6 +56,26 @@ impl Default for LoggerSettings {
 }
 
 impl LoggerSettings {
+    /// Create a new logger settings from the given command-line options.
+    ///
+    /// If env var `RW_TRACING_ENDPOINT` is not set, the meta address will be used
+    /// as the default tracing endpoint, which means that the embedded tracing
+    /// collector will be used.
+    pub fn from_opts<O: risingwave_common::opts::Opts>(opts: &O) -> Self {
+        let mut settings = Self::new(O::name());
+        if settings.tracing_endpoint.is_none() // no explicit endpoint
+            && let Some(addr) = opts.meta_addr().exactly_one()
+        // meta address is valid
+        {
+            // Use embedded collector in the meta service.
+            // TODO: when there's multiple meta nodes for high availability, we may send
+            // to a wrong node here.
+            settings.tracing_endpoint = Some(addr.to_string());
+        }
+        settings
+    }
+
+    /// Create a new logger settings with the given service name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -62,6 +85,7 @@ impl LoggerSettings {
             with_thread_name: false,
             targets: vec![],
             default_level: None,
+            tracing_endpoint: std::env::var("RW_TRACING_ENDPOINT").ok(),
         }
     }
 
@@ -98,6 +122,17 @@ impl LoggerSettings {
         self.default_level = Some(level.into());
         self
     }
+
+    /// Overrides the tracing endpoint.
+    pub fn with_tracing_endpoint(mut self, endpoint: impl Into<String>) -> Self {
+        self.tracing_endpoint = Some(endpoint.into());
+        self
+    }
+}
+
+/// Create a filter that disables all events or spans.
+fn disabled_filter() -> filter::Targets {
+    filter::Targets::new()
 }
 
 /// Init logger for RisingWave binaries.
@@ -158,6 +193,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Other RisingWave crates like `stream` and `storage` will follow the default level.
         filter = filter
             .with_target("risingwave_sqlparser", Level::INFO)
+            .with_target("risingwave_connector_node", Level::INFO)
             .with_target("pgwire", Level::INFO)
             .with_target(PGWIRE_QUERY_LOG, Level::OFF)
             // debug-purposed events are disabled unless `RUST_LOG` overrides
@@ -166,10 +202,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure levels for external crates.
         filter = filter
             .with_target("foyer", Level::WARN)
-            .with_target("aws_sdk_ec2", Level::INFO)
-            .with_target("aws_sdk_s3", Level::INFO)
+            .with_target("aws", Level::INFO)
             .with_target("aws_config", Level::WARN)
-            // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("aws_credential_types::cache::lazy_caching", Level::WARN)
             .with_target("hyper", Level::WARN)
@@ -179,7 +213,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
             .with_target("reqwest", Level::WARN)
-            .with_target("sled", Level::INFO);
+            .with_target("sled", Level::INFO)
+            .with_target("cranelift", Level::INFO)
+            .with_target("wasmtime", Level::INFO)
+            .with_target("sqlx", Level::WARN)
+            // Expose hyper connection socket addr log.
+            .with_target("hyper::client::connect::http", Level::DEBUG);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {
@@ -350,11 +389,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Tracing layer
     #[cfg(not(madsim))]
-    if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
-        println!("tracing enabled, exported to `{endpoint}`");
+    if let Some(endpoint) = settings.tracing_endpoint {
+        println!("opentelemetry tracing will be exported to `{endpoint}` if enabled");
 
-        use opentelemetry::{sdk, KeyValue};
+        use opentelemetry::KeyValue;
         use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_sdk as sdk;
         use opentelemetry_semantic_conventions::resource;
 
         let id = format!(
@@ -396,13 +436,41 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
                     KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                 ])))
-                .install_batch(opentelemetry::runtime::Tokio)
+                .install_batch(sdk::runtime::Tokio)
                 .unwrap()
         };
 
+        // Disable by filtering out all events or spans by default.
+        //
+        // It'll be enabled with `toggle_otel_layer` based on the system parameter `enable_tracing` later.
+        let (reload_filter, reload_handle) = reload::Layer::new(disabled_filter());
+
+        set_toggle_otel_layer_fn(move |enabled: bool| {
+            let result = reload_handle.modify(|f| {
+                *f = if enabled {
+                    default_filter.clone()
+                } else {
+                    disabled_filter()
+                }
+            });
+
+            match result {
+                Ok(_) => tracing::info!(
+                    "opentelemetry tracing {}",
+                    if enabled { "enabled" } else { "disabled" },
+                ),
+
+                Err(error) => tracing::error!(
+                    error = %error.as_report(),
+                    "failed to {} opentelemetry tracing",
+                    if enabled { "enable" } else { "disable" },
+                ),
+            }
+        });
+
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)
-            .with_filter(default_filter);
+            .with_filter(reload_filter);
 
         layers.push(layer.boxed());
     }

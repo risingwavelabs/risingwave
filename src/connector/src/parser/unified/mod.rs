@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
+use thiserror_ext::Macro;
 
 use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
@@ -86,7 +87,8 @@ where
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Macro)]
+#[thiserror_ext(macro(mangle))]
 pub enum AccessError {
     #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
@@ -98,10 +100,8 @@ pub enum AccessError {
     },
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
-    #[error(transparent)]
-    Other(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+
+    /// Errors that are not categorized into variants above.
+    #[error("{message}")]
+    Uncategorized { message: String },
 }

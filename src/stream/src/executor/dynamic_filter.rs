@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -453,7 +453,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     if last_committed_epoch_row != current_epoch_row {
                         // Only write the RHS value if this actor is in charge of vnode 0 on LHS
                         // Otherwise, we only actively replicate the changes.
-                        if self.left_table.vnode_bitmap().is_set(0) {
+                        if self.left_table.vnodes().is_set(0) {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
                             if let Some(old_row) = last_committed_epoch_row.take() {
@@ -462,17 +462,13 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row);
                             }
-                            self.right_table.commit(barrier.epoch).await?;
-                        } else {
-                            self.right_table.commit_no_data_expected(barrier.epoch);
                         }
                         // Update the last committed row since it has changed
                         last_committed_epoch_row = current_epoch_row.clone();
-                    } else {
-                        self.right_table.commit_no_data_expected(barrier.epoch);
                     }
 
                     self.left_table.commit(barrier.epoch).await?;
+                    self.right_table.commit(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
@@ -576,7 +572,7 @@ mod tests {
         };
 
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             info,
             Box::new(source_l),
             Box::new(source_r),

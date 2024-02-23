@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@ pub struct BarrierInfo {
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
 pub(crate) struct Notifier {
-    /// Get notified when scheduled barrier is injected to compute nodes.
-    pub injected: Option<oneshot::Sender<BarrierInfo>>,
+    /// Get notified when scheduled barrier has started to be handled.
+    pub started: Option<oneshot::Sender<BarrierInfo>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
@@ -43,8 +43,8 @@ pub(crate) struct Notifier {
 
 impl Notifier {
     /// Notify when we have injected a barrier to compute nodes.
-    pub fn notify_injected(&mut self, info: BarrierInfo) {
-        if let Some(tx) = self.injected.take() {
+    pub fn notify_started(&mut self, info: BarrierInfo) {
+        if let Some(tx) = self.started.take() {
             tx.send(info).ok();
         }
     }

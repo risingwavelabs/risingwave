@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,17 +18,21 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::Fields;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
+use crate::error::{ErrorCode, Result};
 use crate::handler::cancel_job::handle_cancel;
 use crate::handler::kill_process::handle_kill;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
@@ -36,9 +40,11 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_owner;
+mod alter_parallelism;
 mod alter_rename;
 mod alter_set_schema;
 mod alter_source_column;
+mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
@@ -52,11 +58,12 @@ pub mod create_mv;
 pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
+pub mod create_sql_function;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
-mod describe;
+pub mod describe;
 mod drop_connection;
 mod drop_database;
 pub mod drop_function;
@@ -75,7 +82,7 @@ pub mod handle_privilege;
 mod kill_process;
 pub mod privilege;
 pub mod query;
-mod show;
+pub mod show;
 mod transaction;
 pub mod util;
 pub mod variable;
@@ -86,6 +93,42 @@ pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
 
 /// The [`PgResponse`] used by RisingWave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
+
+#[easy_ext::ext(RwPgResponseBuilderExt)]
+impl RwPgResponseBuilder {
+    /// Append rows to the response.
+    pub fn rows<T: Fields>(self, rows: impl IntoIterator<Item = T>) -> Self {
+        let fields = T::fields();
+        self.values(
+            rows.into_iter()
+                .map(|row| {
+                    Row::new(
+                        row.into_owned_row()
+                            .into_iter()
+                            .zip_eq_fast(&fields)
+                            .map(|(datum, (_, ty))| {
+                                datum.map(|scalar| {
+                                    scalar.as_scalar_ref_impl().text_format(ty).into()
+                                })
+                            })
+                            .collect(),
+                    )
+                })
+                .collect_vec()
+                .into(),
+            fields_to_descriptors(fields),
+        )
+    }
+}
+
+pub fn fields_to_descriptors(
+    fields: Vec<(&str, risingwave_common::types::DataType)>,
+) -> Vec<PgFieldDescriptor> {
+    fields
+        .iter()
+        .map(|(name, ty)| PgFieldDescriptor::new(name.to_string(), ty.to_oid(), ty.type_len()))
+        .collect()
+}
 
 pub enum PgResponseStream {
     LocalQuery(DataChunkToRowSetAdapter<LocalQueryStream>),
@@ -204,20 +247,44 @@ pub async fn handle(
             returns,
             params,
         } => {
-            create_function::handle_create_function(
-                handler_args,
-                or_replace,
-                temporary,
-                name,
-                args,
-                returns,
-                params,
-            )
-            .await
+            // For general udf, `language` clause could be ignored
+            // refer: https://github.com/risingwavelabs/risingwave/pull/10608
+            if params.language.is_none()
+                || !params
+                    .language
+                    .as_ref()
+                    .unwrap()
+                    .real_value()
+                    .eq_ignore_ascii_case("sql")
+            {
+                // User defined function with external source (e.g., language [ python / java ])
+                create_function::handle_create_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            } else {
+                create_sql_function::handle_create_sql_function(
+                    handler_args,
+                    or_replace,
+                    temporary,
+                    name,
+                    args,
+                    returns,
+                    params,
+                )
+                .await
+            }
         }
         Statement::CreateTable {
             name,
             columns,
+            wildcard_idx,
             constraints,
             query,
             with_options: _, // It is put in OptimizerContext
@@ -253,6 +320,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 if_not_exists,
                 source_schema,
@@ -500,6 +568,23 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
+            operation:
+                AlterTableOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_TABLE,
+                deferred,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
             operation: AlterTableOperation::SetSchema { new_schema_name },
         } => {
             alter_set_schema::handle_alter_set_schema(
@@ -515,6 +600,23 @@ pub async fn handle(
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
         } => alter_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterIndex {
+            name,
+            operation:
+                AlterIndexOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_INDEX,
+                deferred,
+            )
+            .await
+        }
         Statement::AlterView {
             materialized,
             name,
@@ -531,6 +633,24 @@ pub async fn handle(
             } else {
                 alter_rename::handle_rename_view(handler_args, name, view_name).await
             }
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation:
+                AlterViewOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } if materialized => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_MATERIALIZED_VIEW,
+                deferred,
+            )
+            .await
         }
         Statement::AlterView {
             materialized,
@@ -584,6 +704,7 @@ pub async fn handle(
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_rename::handle_rename_sink(handler_args, name, sink_name).await,
+
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::ChangeOwner { new_owner_name },
@@ -606,6 +727,23 @@ pub async fn handle(
                 new_schema_name,
                 StatementType::ALTER_SINK,
                 None,
+            )
+            .await
+        }
+        Statement::AlterSink {
+            name,
+            operation:
+                AlterSinkOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_SINK,
+                deferred,
             )
             .await
         }
@@ -641,6 +779,13 @@ pub async fn handle(
                 None,
             )
             .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::FormatEncode { connector_schema },
+        } => {
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+                .await
         }
         Statement::AlterFunction {
             name,

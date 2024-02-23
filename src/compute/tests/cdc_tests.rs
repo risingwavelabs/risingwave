@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,11 +30,12 @@ use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Op, StreamChunk, 
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
-use risingwave_connector::source::external::{
+use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
+use risingwave_connector::source::cdc::external::{
     DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
 };
-use risingwave_connector::source::{MockExternalTableReader, SplitImpl};
+use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
+use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -163,7 +164,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let pk_indices = vec![0];
 
     let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-    let _actor_ctx = ActorContext::create(0x3a3a3a);
+    let _actor_ctx = ActorContext::for_test(0x3a3a3a);
 
     // mock upstream offset (start from "1.binlog, pos=0") for ingested chunks
     let mock_offset_executor =
@@ -229,7 +230,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         identity: "CdcBackfillExecutor".to_string(),
     };
     let cdc_backfill = CdcBackfillExecutor::new(
-        ActorContext::create(actor_id),
+        ActorContext::for_test(actor_id),
         info,
         external_table,
         Box::new(mock_offset_executor),
@@ -238,6 +239,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         Arc::new(StreamingMetrics::unused()),
         state_table,
         4, // 4 rows in a snapshot chunk
+        false,
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.

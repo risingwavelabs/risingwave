@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,15 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
@@ -42,7 +43,7 @@ impl Planner {
             Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
-            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_unordered_subplan()),
             Relation::Join(join) => self.plan_join(*join),
             Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
@@ -85,7 +86,12 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx())?.into())
+        Ok(LogicalSource::with_catalog(
+            Rc::new(source.catalog),
+            SourceNodeKind::CreateMViewOrBatch,
+            self.ctx(),
+        )?
+        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

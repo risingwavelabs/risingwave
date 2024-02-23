@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
+use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
@@ -53,7 +54,7 @@ static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
         Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
         _ => {
             if cfg!(debug_assertions) {
-                usize::MAX
+                65536
             } else {
                 1024
             }
@@ -346,15 +347,16 @@ where
                         self.ready_for_query().ok()?;
                     }
 
-                    PsqlError::Panic(_) => {
+                    PsqlError::IdleInTxnTimeout | PsqlError::Panic(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .ok()?;
                         let _ = self.stream.flush().await;
 
-                        // Catching the panic during message processing may leave the session in an
+                        // 1. Catching the panic during message processing may leave the session in an
                         // inconsistent state. We forcefully close the connection (then end the
                         // session) here for safety.
+                        // 2. Idle in transaction timeout should also close the connection.
                         return None;
                     }
 
@@ -549,6 +551,7 @@ where
         record_sql_in_span(&sql);
         let session = self.session.clone().unwrap();
 
+        session.check_idle_in_transaction_timeout()?;
         let _exec_context_guard = session.init_exec_context(sql.clone());
         self.inner_process_query_msg(sql.clone(), session.clone())
             .await
@@ -561,7 +564,9 @@ where
     ) -> PsqlResult<()> {
         // Parse sql.
         let stmts = Parser::parse_sql(&sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+            .inspect_err(
+                |e| tracing::error!(sql = &*sql, error = %e.as_report(), "failed to parse sql"),
+            )
             .map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
@@ -584,6 +589,7 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         let session = session.clone();
+
         // execute query
         let res = session
             .clone()
@@ -680,7 +686,9 @@ where
 
         let stmt = {
             let stmts = Parser::parse_sql(sql)
-                .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+                .inspect_err(
+                    |e| tracing::error!(sql, error = %e.as_report(), "failed to parse sql"),
+                )
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
 
             if stmts.len() > 1 {
@@ -791,6 +799,7 @@ where
             let sql: Arc<str> = Arc::from(format!("{}", portal));
             record_sql_in_span(&sql);
 
+            session.check_idle_in_transaction_timeout()?;
             let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
 
@@ -973,13 +982,13 @@ where
 
     fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ClientEncoding("UTF8"),
+            BeParameterStatusMessage::ClientEncoding(SERVER_ENCODING),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::StandardConformingString("on"),
+            BeParameterStatusMessage::StandardConformingString(STANDARD_CONFORMING_STRINGS),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("9.5.0"),
+            BeParameterStatusMessage::ServerVersion(PG_VERSION),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(
@@ -1034,7 +1043,7 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            tracing::warn!("Unable to set up an ssl connection, reason: {}", e);
+            tracing::warn!(error = %e.as_report(), "Unable to set up an ssl connection");
             let _ = stream.shutdown().await;
             return Err(e.into());
         }
@@ -1076,7 +1085,7 @@ where
             Conn::Unencrypted(s) => s.write_no_flush(message),
             Conn::Ssl(s) => s.write_no_flush(message),
         }
-        .inspect_err(|error| tracing::error!(%error, "flush error"))
+        .inspect_err(|error| tracing::error!(error = %error.as_report(), "flush error"))
     }
 
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
@@ -1091,7 +1100,7 @@ where
             Conn::Unencrypted(s) => s.flush().await,
             Conn::Ssl(s) => s.flush().await,
         }
-        .inspect_err(|error| tracing::error!(%error, "flush error"))
+        .inspect_err(|error| tracing::error!(error = %error.as_report(), "flush error"))
     }
 
     async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {
@@ -1139,8 +1148,9 @@ pub mod truncated_fmt {
             }
 
             if self.remaining < s.len() {
-                self.f.write_str(&s[0..self.remaining])?;
-                self.remaining = 0;
+                let actual = s.floor_char_boundary(self.remaining);
+                self.f.write_str(&s[0..actual])?;
+                self.remaining -= actual;
                 self.f.write_str("...(truncated)")?;
                 self.finished = true; // so that ...(truncated) is printed exactly once
             } else {
@@ -1178,6 +1188,19 @@ pub mod truncated_fmt {
                 f,
             }
             .write_fmt(format_args!("{}", self.0))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_trunc_utf8() {
+            assert_eq!(
+                format!("{}", TruncatedFmt(&"select '🌊';", 10)),
+                "select '...(truncated)",
+            );
         }
     }
 }

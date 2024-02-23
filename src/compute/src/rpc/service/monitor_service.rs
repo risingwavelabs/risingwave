@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,33 +15,35 @@
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::config::ServerConfig;
+use prometheus::core::Collector;
+use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
+    GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
-    stream_mgr: Arc<LocalStreamManager>,
+    stream_mgr: LocalStreamManager,
     grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
     server_config: ServerConfig,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
-        stream_mgr: Arc<LocalStreamManager>,
+        stream_mgr: LocalStreamManager,
         grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
         server_config: ServerConfig,
     ) -> Self {
@@ -65,7 +67,6 @@ impl MonitorService for MonitorServiceImpl {
         let actor_traces = self
             .stream_mgr
             .get_actor_traces()
-            .await
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect();
@@ -229,6 +230,39 @@ impl MonitorService for MonitorServiceImpl {
 
         let file = fs::read(Path::new(&collapsed_path_str))?;
         Ok(Response::new(AnalyzeHeapResponse { result: file }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn get_back_pressure(
+        &self,
+        _request: Request<GetBackPressureRequest>,
+    ) -> Result<Response<GetBackPressureResponse>, Status> {
+        let metric_family = global_streaming_metrics(MetricLevel::Info)
+            .actor_output_buffer_blocking_duration_ns
+            .collect();
+        let metrics = metric_family.get(0).unwrap().get_metric();
+        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
+        for label_pairs in metrics {
+            let mut back_pressure_info = BackPressureInfo::default();
+            for label_pair in label_pairs.get_label() {
+                if label_pair.get_name() == "actor_id" {
+                    back_pressure_info.actor_id = label_pair.get_value().parse::<u32>().unwrap();
+                }
+                if label_pair.get_name() == "fragment_id" {
+                    back_pressure_info.fragment_id = label_pair.get_value().parse::<u32>().unwrap();
+                }
+                if label_pair.get_name() == "downstream_fragment_id" {
+                    back_pressure_info.downstream_fragment_id =
+                        label_pair.get_value().parse::<u32>().unwrap();
+                }
+            }
+            back_pressure_info.value = label_pairs.get_counter().get_value();
+            back_pressure_infos.push(back_pressure_info);
+        }
+
+        Ok(Response::new(GetBackPressureResponse {
+            back_pressure_infos,
+        }))
     }
 }
 

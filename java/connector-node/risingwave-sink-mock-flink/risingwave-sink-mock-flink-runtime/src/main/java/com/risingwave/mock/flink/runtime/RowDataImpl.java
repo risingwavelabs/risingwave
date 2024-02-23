@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ package com.risingwave.mock.flink.runtime;
 
 import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
-import java.sql.Date;
-import java.sql.Timestamp;
-import java.time.temporal.ChronoField;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
 import org.apache.flink.table.data.*;
@@ -89,10 +90,15 @@ public class RowDataImpl implements RowData {
 
     @Override
     public int getInt(int i) {
-        if (sinkRow.get(i) instanceof Date) {
-            return (int) ((Date) sinkRow.get(i)).toLocalDate().getLong(ChronoField.EPOCH_DAY);
+        Object value = sinkRow.get(i);
+        if (value instanceof LocalDate) {
+            return (int) ((LocalDate) value).toEpochDay();
+        } else if (value instanceof LocalTime) {
+            // number of milliseconds of the day
+            return (int) (((LocalTime) value).toNanoOfDay() / 1_000_000L);
+        } else {
+            return (int) value;
         }
-        return (int) sinkRow.get(i);
     }
 
     @Override
@@ -122,7 +128,14 @@ public class RowDataImpl implements RowData {
 
     @Override
     public TimestampData getTimestamp(int i, int i1) {
-        return TimestampData.fromInstant(((Timestamp) sinkRow.get(i)).toInstant());
+        Object value = sinkRow.get(i);
+        if (value instanceof LocalDateTime) {
+            return TimestampData.fromLocalDateTime((LocalDateTime) value);
+        } else if (value instanceof OffsetDateTime) {
+            return TimestampData.fromInstant(((OffsetDateTime) value).toInstant());
+        } else {
+            throw Status.INTERNAL.withDescription("unreachable").asRuntimeException();
+        }
     }
 
     @Override

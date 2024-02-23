@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
 
@@ -59,9 +58,3 @@ pub enum ErrorKind {
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
-
-impl From<StorageError> for RwError {
-    fn from(s: StorageError) -> Self {
-        ErrorCode::StorageError(Box::new(s)).into()
-    }
-}

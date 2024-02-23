@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, JsonbVal};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {

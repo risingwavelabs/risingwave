@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 mod arrow_default;
 mod arrow_deltalake;
+mod arrow_iceberg;
 
 pub use arrow_default::to_record_batch_with_schema;
 pub use arrow_deltalake::to_deltalake_record_batch_with_schema;
+pub use arrow_iceberg::to_iceberg_record_batch_with_schema;

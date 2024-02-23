@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -29,12 +28,14 @@ use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, create_connection_request, PbReplaceTablePlan,
     PbTableJobType, ReplaceTablePlan,
 };
+use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
 use super::{DatabaseId, TableId};
+use crate::error::Result;
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -175,6 +176,15 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
 
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()>;
+
+    async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()>;
+
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -191,7 +201,7 @@ pub struct CatalogWriterImpl {
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_string(),
@@ -208,7 +218,7 @@ impl CatalogWriter for CatalogWriterImpl {
         schema_name: &str,
         owner: UserId,
     ) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_schema(PbSchema {
                 id: 0,
@@ -227,7 +237,7 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_materialized_view(table, graph)
             .await?;
@@ -238,7 +248,7 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
-        let (_, version) = self.meta_client.create_view(view).await?;
+        let version = self.meta_client.create_view(view).await?;
         self.wait_version(version).await
     }
 
@@ -248,7 +258,7 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_index(index, table, graph).await?;
+        let version = self.meta_client.create_index(index, table, graph).await?;
         self.wait_version(version).await
     }
 
@@ -259,7 +269,7 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         job_type: PbTableJobType,
     ) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_table(source, table, graph, job_type)
             .await?;
@@ -286,7 +296,7 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
-        let (_id, version) = self.meta_client.create_source(source).await?;
+        let version = self.meta_client.create_source(source).await?;
         self.wait_version(version).await
     }
 
@@ -295,7 +305,7 @@ impl CatalogWriter for CatalogWriterImpl {
         source: PbSource,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_id, version) = self
+        let version = self
             .meta_client
             .create_source_with_graph(source, graph)
             .await?;
@@ -308,7 +318,7 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
     ) -> Result<()> {
-        let (_id, version) = self
+        let version = self
             .meta_client
             .create_sink(sink, graph, affected_table_change)
             .await?;
@@ -316,7 +326,7 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_function(&self, function: PbFunction) -> Result<()> {
-        let (_, version) = self.meta_client.create_function(function).await?;
+        let version = self.meta_client.create_function(function).await?;
         self.wait_version(version).await
     }
 
@@ -328,7 +338,7 @@ impl CatalogWriter for CatalogWriterImpl {
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
-        let (_, version) = self
+        let version = self
             .meta_client
             .create_connection(
                 connection_name,
@@ -489,6 +499,25 @@ impl CatalogWriter for CatalogWriterImpl {
             .alter_set_schema(object, new_schema_id)
             .await?;
         self.wait_version(version).await
+    }
+
+    async fn alter_source_with_sr(&self, source: PbSource) -> Result<()> {
+        let version = self.meta_client.alter_source_with_sr(source).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_parallelism(
+        &self,
+        table_id: u32,
+        parallelism: PbTableParallelism,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_parallelism(table_id, parallelism, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
     }
 }
 

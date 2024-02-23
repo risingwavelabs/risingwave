@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -463,11 +463,9 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
-    use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::catalog::{
         ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SUPER_USER_ID,
     };
-    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::worker_node::Property;
@@ -494,7 +492,7 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
-    use crate::{TableCatalog, WithOptions};
+    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -545,6 +543,7 @@ pub(crate) mod tests {
             id: table_id,
             associated_source_id: None,
             name: "test".to_string(),
+            dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::new_atomic(DataType::Int32, "a", 0),
@@ -565,14 +564,7 @@ pub(crate) mod tests {
             distribution_key: vec![],
             append_only: false,
             owner: DEFAULT_SUPER_USER_ID,
-            properties: WithOptions::new(
-                [(
-                    PROPERTIES_RETENTION_SECOND_KEY.into(),
-                    TABLE_OPTION_DUMMY_RETENTION_SECOND.to_string(),
-                )]
-                .into_iter()
-                .collect(),
-            ),
+            retention_seconds: None,
             fragment_id: 0,        // FIXME
             dml_fragment_id: None, // FIXME
             vnode_col_index: None,
@@ -591,6 +583,8 @@ pub(crate) mod tests {
             create_type: CreateType::Foreground,
             description: None,
             incoming_sinks: vec![],
+            initialized_at_cluster_version: None,
+            created_at_cluster_version: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

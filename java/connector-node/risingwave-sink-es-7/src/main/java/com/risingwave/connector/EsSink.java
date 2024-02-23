@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,18 +16,14 @@ package com.risingwave.connector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -47,6 +43,7 @@ import org.elasticsearch.client.RestHighLevelClientBuilder;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,20 +64,12 @@ public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
 
-    private static final TimeZone UTCTimeZone = TimeZone.getTimeZone("UTC");
-    private final SimpleDateFormat tDfm;
-    private final SimpleDateFormat tsDfm;
-    private final SimpleDateFormat tstzDfm;
-
     private final EsSinkConfig config;
     private BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
 
     // Used to handle the return message of ES and throw errors
     private final RequestTracker requestTracker;
-
-    // For bulk listener
-    private final List<Integer> primaryKeyIndexes;
 
     class RequestTracker {
         // Used to save the return results of es asynchronous writes. The capacity is Integer.Max
@@ -196,15 +185,6 @@ public class EsSink extends SinkWriterBase {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
         this.bulkProcessor = createBulkProcessor(this.requestTracker);
-
-        primaryKeyIndexes = new ArrayList<Integer>();
-        for (String primaryKey : tableSchema.getPrimaryKeys()) {
-            primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
-        }
-
-        tDfm = createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
-        tsDfm = createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
-        tstzDfm = createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
     }
 
     private static RestClientBuilder configureRestClientBuilder(
@@ -268,7 +248,7 @@ public class EsSink extends SinkWriterBase {
         /** This method is called just before bulk is executed. */
         @Override
         public void beforeBulk(long executionId, BulkRequest request) {
-            LOG.info("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
         }
 
         /** This method is called after bulk execution. */
@@ -282,7 +262,7 @@ public class EsSink extends SinkWriterBase {
                 this.requestTracker.addErrResult(errMessage);
             } else {
                 this.requestTracker.addOkResult(request.numberOfActions());
-                LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+                LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
             }
         }
 
@@ -297,117 +277,21 @@ public class EsSink extends SinkWriterBase {
         }
     }
 
-    /**
-     * The api accepts doc in map form.
-     *
-     * @param row
-     * @return Map from Field name to Value
-     * @throws JsonProcessingException
-     * @throws JsonMappingException
-     */
-    private Map<String, Object> buildDoc(SinkRow row)
-            throws JsonMappingException, JsonProcessingException {
-        Map<String, Object> doc = new HashMap();
-        var tableSchema = getTableSchema();
-        var columnDescs = tableSchema.getColumnDescs();
-        for (int i = 0; i < row.size(); i++) {
-            var type = columnDescs.get(i).getDataType().getTypeName();
-            Object col = row.get(i);
-            switch (type) {
-                    // es client doesn't natively support java.sql.Timestamp/Time/Date
-                    // so we need to convert Date/Time/Timestamp type into a string as suggested in
-                    // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
-                case DATE:
-                    col = col.toString();
-                    break;
-                    // construct java.sql.Time/Timestamp with milliseconds time value.
-                    // it will use system timezone by default, so we have to set timezone manually
-                case TIME:
-                    col = tDfm.format(col);
-                    break;
-                case TIMESTAMP:
-                    col = tsDfm.format(col);
-                    break;
-                case TIMESTAMPTZ:
-                    col = tstzDfm.format(col);
-                    break;
-                case JSONB:
-                    ObjectMapper mapper = new ObjectMapper();
-                    JsonNode jsonNode = mapper.readTree((String) col);
-                    col = convertJsonNode(jsonNode);
-                    break;
-                default:
-                    break;
-            }
-
-            doc.put(getTableSchema().getColumnDesc(i).getName(), col);
-        }
-        return doc;
-    }
-
-    private static Object convertJsonNode(JsonNode jsonNode) {
-        if (jsonNode.isObject()) {
-            Map<String, Object> resultMap = new HashMap<>();
-            jsonNode.fields()
-                    .forEachRemaining(
-                            entry -> {
-                                resultMap.put(entry.getKey(), convertJsonNode(entry.getValue()));
-                            });
-            return resultMap;
-        } else if (jsonNode.isArray()) {
-            List<Object> resultList = new ArrayList<>();
-            jsonNode.elements()
-                    .forEachRemaining(
-                            element -> {
-                                resultList.add(convertJsonNode(element));
-                            });
-            return resultList;
-        } else if (jsonNode.isNumber()) {
-            return jsonNode.numberValue();
-        } else if (jsonNode.isTextual()) {
-            return jsonNode.textValue();
-        } else if (jsonNode.isBoolean()) {
-            return jsonNode.booleanValue();
-        } else if (jsonNode.isNull()) {
-            return null;
-        } else {
-            throw new IllegalArgumentException("Unsupported JSON type");
-        }
-    }
-
-    /**
-     * use primary keys as id concatenated by a specific delimiter.
-     *
-     * @param row
-     * @return
-     */
-    private String buildId(SinkRow row) {
-        String id;
-        if (primaryKeyIndexes.isEmpty()) {
-            id = row.get(0).toString();
-        } else {
-            List<String> keys =
-                    primaryKeyIndexes.stream()
-                            .map(index -> row.get(primaryKeyIndexes.get(index)).toString())
-                            .collect(Collectors.toList());
-            id = String.join(config.getDelimiter(), keys);
-        }
-        return id;
-    }
-
     private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        Map<String, Object> doc = buildDoc(row);
-        final String key = buildId(row);
+        final String key = (String) row.get(0);
+        String doc = (String) row.get(1);
 
         UpdateRequest updateRequest =
-                new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
+                new UpdateRequest(config.getIndex(), "_doc", key).doc(doc, XContentType.JSON);
+        updateRequest.docAsUpsert(true);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(updateRequest);
     }
 
-    private void processDelete(SinkRow row) {
-        final String key = buildId(row);
-        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
+    private void processDelete(SinkRow row) throws JsonMappingException, JsonProcessingException {
+        final String key = (String) row.get(0);
+
+        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
         this.requestTracker.addWriteTask();
         bulkProcessor.add(deleteRequest);
     }
@@ -467,11 +351,5 @@ public class EsSink extends SinkWriterBase {
 
     public RestHighLevelClient getClient() {
         return client;
-    }
-
-    private final SimpleDateFormat createSimpleDateFormat(String pattern, TimeZone timeZone) {
-        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
-        sdf.setTimeZone(timeZone);
-        return sdf;
     }
 }

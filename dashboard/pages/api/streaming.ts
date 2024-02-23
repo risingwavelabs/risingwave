@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,11 @@ import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import api from "./api"
 
 export async function getActors(): Promise<ActorLocation[]> {
-  return (await api.get("/api/actors")).map(ActorLocation.fromJSON)
+  return (await api.get("/actors")).map(ActorLocation.fromJSON)
 }
 
 export async function getFragments(): Promise<TableFragments[]> {
-  let fragmentList: TableFragments[] = (await api.get("/api/fragments2")).map(
+  let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
     TableFragments.fromJSON
   )
   fragmentList = sortBy(fragmentList, (x) => x.tableId)
@@ -45,8 +45,26 @@ export interface StreamingJob extends Relation {
   dependentRelations: number[]
 }
 
+export function relationType(x: Relation) {
+  if ((x as Table).tableType !== undefined) {
+    return (x as Table).tableType
+  } else if ((x as Sink).sinkFromName !== undefined) {
+    return "SINK"
+  } else if ((x as Source).info !== undefined) {
+    return "SOURCE"
+  } else {
+    return "UNKNOWN"
+  }
+}
+export type RelationType = ReturnType<typeof relationType>
+
+export function relationTypeTitleCase(x: Relation) {
+  return _.startCase(_.toLower(relationType(x)))
+}
+
 export function relationIsStreamingJob(x: Relation): x is StreamingJob {
-  return (x as StreamingJob).dependentRelations !== undefined
+  const type = relationType(x)
+  return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {
@@ -75,7 +93,7 @@ export async function getRelations() {
 async function getTableCatalogsInner(
   path: "tables" | "materialized_views" | "indexes" | "internal_tables"
 ) {
-  let list: Table[] = (await api.get(`/api/${path}`)).map(Table.fromJSON)
+  let list: Table[] = (await api.get(`/${path}`)).map(Table.fromJSON)
   list = sortBy(list, (x) => x.id)
   return list
 }
@@ -97,21 +115,19 @@ export async function getInternalTables() {
 }
 
 export async function getSinks() {
-  let sinkList: Sink[] = (await api.get("/api/sinks")).map(Sink.fromJSON)
+  let sinkList: Sink[] = (await api.get("/sinks")).map(Sink.fromJSON)
   sinkList = sortBy(sinkList, (x) => x.id)
   return sinkList
 }
 
 export async function getSources() {
-  let sourceList: Source[] = (await api.get("/api/sources")).map(
-    Source.fromJSON
-  )
+  let sourceList: Source[] = (await api.get("/sources")).map(Source.fromJSON)
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }
 
 export async function getViews() {
-  let views: View[] = (await api.get("/api/views")).map(View.fromJSON)
+  let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
 }
