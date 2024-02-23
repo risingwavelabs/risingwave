@@ -84,11 +84,9 @@ impl Notifier {
     /// Notify when we failed to collect or finish a barrier. This function consumes `self`.
     pub fn notify_failed(self, err: MetaError) {
         if let Some(tx) = self.collected {
-            tracing::warn!("notify failed: {}", err);
             tx.send(Err(err.clone())).ok();
         }
         if let Some(tx) = self.finished {
-            tracing::warn!("notify finished: {}", err);
             tx.send(Err(err)).ok();
         }
     }
