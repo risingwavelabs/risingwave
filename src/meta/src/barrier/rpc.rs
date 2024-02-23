@@ -19,7 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
-use futures::FutureExt;
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::ActorId;
@@ -32,6 +33,7 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
+use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -40,6 +42,47 @@ use super::command::CommandContext;
 use super::{BarrierCollectResult, GlobalBarrierManagerContext};
 use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::MetaResult;
+
+pub(super) struct BarrierRpcManager {
+    context: GlobalBarrierManagerContext,
+
+    /// Futures that await on the completion of barrier.
+    injected_in_progress_barrier: FuturesUnordered<BarrierCollectFuture>,
+
+    prev_injecting_barrier: Option<oneshot::Receiver<()>>,
+}
+
+impl BarrierRpcManager {
+    pub(super) fn new(context: GlobalBarrierManagerContext) -> Self {
+        Self {
+            context,
+            injected_in_progress_barrier: FuturesUnordered::new(),
+            prev_injecting_barrier: None,
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.injected_in_progress_barrier = FuturesUnordered::new();
+        self.prev_injecting_barrier = None;
+    }
+
+    pub(super) fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
+        // this is to notify that the barrier has been injected so that the next
+        // barrier can be injected to avoid out of order barrier injection.
+        // TODO: can be removed when bidi-stream control in implemented.
+        let (inject_tx, inject_rx) = oneshot::channel();
+        let prev_inject_rx = self.prev_injecting_barrier.replace(inject_rx);
+        let await_complete_future =
+            self.context
+                .inject_barrier(command_context, Some(inject_tx), prev_inject_rx);
+        self.injected_in_progress_barrier
+            .push(await_complete_future);
+    }
+
+    pub(super) async fn next_collected_barrier(&mut self) -> BarrierCollectResult {
+        pending_on_none(self.injected_in_progress_barrier.next()).await
+    }
+}
 
 pub(super) type BarrierCollectFuture = impl Future<Output = BarrierCollectResult> + Send + 'static;
 

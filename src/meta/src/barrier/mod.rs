@@ -26,11 +26,11 @@ use fail::fail_point;
 use futures::FutureExt;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
-use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
@@ -45,7 +45,7 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{info, warn, Instrument};
 
@@ -55,7 +55,7 @@ use self::progress::TrackingCommand;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::rpc::BarrierCollectFuture;
+use crate::barrier::rpc::BarrierRpcManager;
 use crate::barrier::state::BarrierManagerState;
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -189,15 +189,15 @@ pub struct GlobalBarrierManager {
 
     checkpoint_control: CheckpointControl,
 
-    active_streaming_nodes: ActiveStreamingWorkerNodes,
+    rpc_manager: BarrierRpcManager,
 
-    prev_injecting_barrier: Option<Receiver<()>>,
+    active_streaming_nodes: ActiveStreamingWorkerNodes,
 }
 
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
-    inflight_command_ctx_queue: VecDeque<InflightCommand>,
+    command_ctx_queue: VecDeque<EpochNode>,
 
     /// Command that has been collected but is still completing.
     /// The join handle of the completing future is stored.
@@ -209,18 +209,14 @@ struct CheckpointControl {
 impl CheckpointControl {
     fn new(context: GlobalBarrierManagerContext) -> Self {
         Self {
-            inflight_command_ctx_queue: Default::default(),
+            command_ctx_queue: Default::default(),
             completing_command: None,
             context,
         }
     }
 
-    fn inflight_command_num(&self) -> usize {
-        self.inflight_command_ctx_queue.len()
-    }
-
     fn total_command_num(&self) -> usize {
-        self.inflight_command_ctx_queue.len()
+        self.command_ctx_queue.len()
             + if self.completing_command.is_some() {
                 1
             } else {
@@ -230,10 +226,12 @@ impl CheckpointControl {
 
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
-        self.context
-            .metrics
-            .in_flight_barrier_nums
-            .set(self.inflight_command_num() as i64);
+        self.context.metrics.in_flight_barrier_nums.set(
+            self.command_ctx_queue
+                .iter()
+                .filter(|x| matches!(x.state, BarrierEpochState::InFlight))
+                .count() as i64,
+        );
         self.context
             .metrics
             .all_barrier_nums
@@ -241,43 +239,54 @@ impl CheckpointControl {
     }
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
-    fn enqueue_inflight_command(
-        &mut self,
-        command_ctx: Arc<CommandContext>,
-        notifiers: Vec<Notifier>,
-        barrier_collect_future: BarrierCollectFuture,
-    ) {
-        let enqueue_time = self.context.metrics.barrier_latency.start_timer();
+    fn enqueue_command(&mut self, command_ctx: Arc<CommandContext>, notifiers: Vec<Notifier>) {
+        let timer = self.context.metrics.barrier_latency.start_timer();
 
-        if let Some(command) = self.inflight_command_ctx_queue.back() {
-            assert_eq!(
-                command.command_ctx.curr_epoch.value(),
-                command_ctx.prev_epoch.value()
-            );
-        }
-
-        self.inflight_command_ctx_queue.push_back(InflightCommand {
+        self.command_ctx_queue.push_back(EpochNode {
+            enqueue_time: timer,
+            state: BarrierEpochState::InFlight,
             command_ctx,
-            barrier_collect_future,
-            enqueue_time,
             notifiers,
         });
     }
 
+    /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
+    /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
+    fn barrier_collected(&mut self, prev_epoch: u64, result: Vec<BarrierCompleteResponse>) {
+        if let Some(node) = self
+            .command_ctx_queue
+            .iter_mut()
+            .find(|x| x.command_ctx.prev_epoch.value().0 == prev_epoch)
+        {
+            assert!(matches!(node.state, BarrierEpochState::InFlight));
+            node.state = BarrierEpochState::Completed(result);
+        } else {
+            panic!(
+                "received barrier complete response for an unknown epoch: {}",
+                prev_epoch
+            );
+        }
+    }
+
     /// Pause inject barrier until True.
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        let in_flight_not_full = self.inflight_command_num() < in_flight_barrier_nums;
+        let in_flight_not_full = self
+            .command_ctx_queue
+            .iter()
+            .filter(|x| matches!(x.state, BarrierEpochState::InFlight))
+            .count()
+            < in_flight_barrier_nums;
 
         // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
         let should_pause = self
-            .inflight_command_ctx_queue
+            .command_ctx_queue
             .back()
-            .map(|command| command.command_ctx.command.should_pause_inject_barrier())
+            .map(|x| x.command_ctx.command.should_pause_inject_barrier())
             .unwrap_or(false);
         debug_assert_eq!(
-            self.inflight_command_ctx_queue
+            self.command_ctx_queue
                 .iter()
-                .any(|command| command.command_ctx.command.should_pause_inject_barrier()),
+                .any(|x| x.command_ctx.command.should_pause_inject_barrier()),
             should_pause
         );
 
@@ -303,7 +312,7 @@ impl CheckpointControl {
                 Ok(Ok(_)) => {}
             };
         }
-        for command in self.inflight_command_ctx_queue.drain(..) {
+        for command in self.command_ctx_queue.drain(..) {
             for notifier in command.notifiers {
                 notifier.notify_collection_failed(err.clone());
             }
@@ -312,14 +321,26 @@ impl CheckpointControl {
     }
 }
 
-struct InflightCommand {
-    command_ctx: Arc<CommandContext>,
-
-    barrier_collect_future: BarrierCollectFuture,
-
+/// The state and message of this barrier, a node for concurrent checkpoint.
+pub struct EpochNode {
+    /// Timer for recording barrier latency, taken after `complete_barriers`.
     enqueue_time: HistogramTimer,
 
+    /// Whether this barrier is in-flight or completed.
+    state: BarrierEpochState,
+    /// Context of this command to generate barrier and do some post jobs.
+    command_ctx: Arc<CommandContext>,
+    /// Notifiers of this barrier.
     notifiers: Vec<Notifier>,
+}
+
+/// The state of barrier.
+enum BarrierEpochState {
+    /// This barrier is current in-flight on the stream graph of compute nodes.
+    InFlight,
+
+    /// This barrier is completed or failed.
+    Completed(Vec<BarrierCompleteResponse>),
 }
 
 struct CompletingCommand {
@@ -380,6 +401,8 @@ impl GlobalBarrierManager {
 
         let checkpoint_control = CheckpointControl::new(context.clone());
 
+        let rpc_manager = BarrierRpcManager::new(context.clone());
+
         Self {
             enable_recovery,
             scheduled_barriers,
@@ -388,8 +411,8 @@ impl GlobalBarrierManager {
             env,
             state: initial_invalid_state,
             checkpoint_control,
+            rpc_manager,
             active_streaming_nodes,
-            prev_injecting_barrier: None,
         }
     }
 
@@ -570,6 +593,18 @@ impl GlobalBarrierManager {
                             .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
                     }
                 }
+                // Barrier completes.
+                collect_result = self.rpc_manager.next_collected_barrier() => {
+                    match collect_result.result {
+                        Ok(resps) => {
+                            self.checkpoint_control.barrier_collected(collect_result.prev_epoch, resps);
+                        },
+                        Err(e) => {
+                            fail_point!("inject_barrier_err_success");
+                            self.failure_recovery(e).await;
+                        }
+                    }
+                }
                 complete_result = self.checkpoint_control.next_completed_barrier() => {
                     match complete_result {
                         Ok((command_context, remaining)) => {
@@ -632,14 +667,7 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        // this is to notify that the barrier has been injected so that the next
-        // barrier can be injected to avoid out of order barrier injection.
-        // TODO: can be removed when bidi-stream control in implemented.
-        let (inject_tx, inject_rx) = oneshot::channel();
-        let prev_inject_rx = self.prev_injecting_barrier.replace(inject_rx);
-        let await_collect_future =
-            self.context
-                .inject_barrier(command_ctx.clone(), Some(inject_tx), prev_inject_rx);
+        self.rpc_manager.inject_barrier(command_ctx.clone());
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
@@ -656,15 +684,12 @@ impl GlobalBarrierManager {
         // Update the paused state after the barrier is injected.
         self.state.set_paused_reason(curr_paused_reason);
         // Record the in-flight barrier.
-        self.checkpoint_control.enqueue_inflight_command(
-            command_ctx.clone(),
-            notifiers,
-            await_collect_future,
-        );
+        self.checkpoint_control
+            .enqueue_command(command_ctx.clone(), notifiers);
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
-        self.prev_injecting_barrier = None;
+        self.rpc_manager.clear();
         self.checkpoint_control.clear_and_fail_all_nodes(&err).await;
 
         if self.enable_recovery {
@@ -856,59 +881,46 @@ impl CheckpointControl {
     pub(super) fn next_completed_barrier(
         &mut self,
     ) -> impl Future<Output = MetaResult<(Arc<CommandContext>, bool)>> + '_ {
-        poll_fn(|cx| {
-            let completing_command = match &mut self.completing_command {
-                Some(command) => command,
-                None => {
-                    // If there is no completing barrier, try to start completing the earliest barrier if
-                    // it has been collected.
-                    if let Some(inflight_command) = self.inflight_command_ctx_queue.front_mut() {
-                        // If the earliest barrier has been collected (i.e. return Poll::Ready), start completing
-                        // the barrier is the collection is ok. When it is still pending, the current poll cannot
-                        // make any progress and will return Poll::Pending.
-                        let BarrierCollectResult { prev_epoch, result } =
-                            ready!(inflight_command.barrier_collect_future.poll_unpin(cx));
-                        let resps = match result {
-                            Ok(resps) => resps,
-                            Err(err) => {
-                                // FIXME: If it is a connector source error occurred in the init barrier, we should pass
-                                // back to frontend
-                                fail_point!("inject_barrier_err_success");
-                                warn!(%prev_epoch, error = %err.as_report(), "Failed to collect epoch");
-                                return Poll::Ready(Err(err));
-                            }
-                        };
-                        // We only pop the command on successful collect. On error, no need to pop the node out,
-                        // because the error will trigger an error immediately after return, which clears the failed node.
-                        let earliest_inflight_command =
-                            self.inflight_command_ctx_queue.pop_front().unwrap();
-                        let join_handle = tokio::spawn(self.context.clone().complete_barrier(
-                            earliest_inflight_command.command_ctx.clone(),
-                            resps,
-                            earliest_inflight_command.notifiers,
-                            earliest_inflight_command.enqueue_time,
-                        ));
-                        self.completing_command.insert(CompletingCommand {
-                            command_ctx: earliest_inflight_command.command_ctx,
-                            join_handle,
-                        })
-                    } else {
-                        return Poll::Pending;
-                    }
-                }
-            };
-            let join_result = ready!(completing_command.join_handle.poll_unpin(cx))
-                .map_err(|e| {
-                    anyhow!("failed to join completing command: {:?}", e.as_report()).into()
-                })
-                .and_then(|result| result);
-            let completed_command = self.completing_command.take().expect("non-empty");
-            let result = join_result.map(|has_remaining| {
-                let command_ctx = completed_command.command_ctx.clone();
-                (command_ctx, has_remaining)
-            });
+        if self.completing_command.is_none() {
+            // If there is no completing barrier, try to start completing the earliest barrier if
+            // it has been collected.
+            if let Some(EpochNode {
+                state: BarrierEpochState::Completed(_),
+                ..
+            }) = self.command_ctx_queue.front_mut()
+            {
+                let node = self.command_ctx_queue.pop_front().expect("non-empty");
+                let resps = must_match!(node.state, BarrierEpochState::Completed(resps) => resps);
+                let join_handle = tokio::spawn(self.context.clone().complete_barrier(
+                    node.command_ctx.clone(),
+                    resps,
+                    node.notifiers,
+                    node.enqueue_time,
+                ));
+                let _ = self.completing_command.insert(CompletingCommand {
+                    command_ctx: node.command_ctx,
+                    join_handle,
+                });
+            }
+        }
 
-            Poll::Ready(result)
+        poll_fn(|cx| {
+            if let Some(completing_command) = &mut self.completing_command {
+                let join_result = ready!(completing_command.join_handle.poll_unpin(cx))
+                    .map_err(|e| {
+                        anyhow!("failed to join completing command: {:?}", e.as_report()).into()
+                    })
+                    .and_then(|result| result);
+                let completed_command = self.completing_command.take().expect("non-empty");
+                let result = join_result.map(|has_remaining| {
+                    let command_ctx = completed_command.command_ctx.clone();
+                    (command_ctx, has_remaining)
+                });
+
+                Poll::Ready(result)
+            } else {
+                Poll::Pending
+            }
         })
     }
 }
