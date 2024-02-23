@@ -439,16 +439,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                     && !join_entry.is_empty()
                                 {
                                     for right_row in join_entry.cached.values() {
-                                        if true {
-                                            row_matched_bitmap_builder.append(true);
-                                            if let Some(chunk) =
-                                                builder.append_row(op, left_row, right_row)
-                                            {
-                                                let row_matched =
-                                                    std::mem::take(&mut row_matched_bitmap_builder)
-                                                        .finish();
-                                                yield (chunk, row_matched);
-                                            }
+                                        row_matched_bitmap_builder.append(true);
+                                        if let Some(chunk) =
+                                            builder.append_row(op, left_row, right_row)
+                                        {
+                                            let row_matched =
+                                                std::mem::take(&mut row_matched_bitmap_builder)
+                                                    .finish();
+                                            yield (chunk, row_matched);
                                         }
                                     }
                                 } else if T == JoinType::LeftOuter {
