@@ -23,9 +23,12 @@ use crate::expr::{ExprDisplay, ExprImpl};
 #[derive(Fields)]
 #[primary_key(relation_id, name)]
 struct RwColumn {
-    relation_id: i32, // belonged relation id
-    name: String,     // column name
-    position: i32,    // 1-indexed position
+    relation_id: i32,
+    // belonged relation id
+    name: String,
+    // column name
+    position: i32,
+    // 1-indexed position
     is_hidden: bool,
     is_primary_key: bool,
     is_distribution_key: bool,
@@ -42,9 +45,7 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
 
-    Ok(schemas
-        .flat_map(|schema| read_rw_columns_in_schema(schema))
-        .collect())
+    Ok(schemas.flat_map(read_rw_columns_in_schema).collect())
 }
 
 fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
@@ -60,7 +61,8 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
                 is_primary_key: false,
                 is_distribution_key: false,
                 is_generated: false,
-                        generation_expression: None,data_type: column.data_type().to_string(),
+                generation_expression: None,
+                data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
                 type_len: column.data_type().type_len(),
                 udt_type: column.data_type().pg_name().into(),
@@ -79,7 +81,8 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
                 is_primary_key: sink.downstream_pk.contains(&index),
                 is_distribution_key: sink.distribution_key.contains(&index),
                 is_generated: false,
-                            generation_expression: None,data_type: column.data_type().to_string(),
+                generation_expression: None,
+                data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
                 type_len: column.data_type().type_len(),
                 udt_type: column.data_type().pg_name().into(),
@@ -99,7 +102,8 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
                 is_primary_key: table.pk.contains(&index),
                 is_distribution_key: false,
                 is_generated: false,
-                            generation_expression: None,data_type: column.data_type().to_string(),
+                generation_expression: None,
+                data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
                 type_len: column.data_type().type_len(),
                 udt_type: column.data_type().pg_name().into(),
@@ -107,7 +111,8 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
     });
 
     let table_rows = schema.iter_valid_table().flat_map(|table| {
-        let schema = table.column_schema();table
+        let schema = table.column_schema();
+        table
             .columns
             .iter()
             .enumerate()
@@ -117,15 +122,16 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
                 is_primary_key: table.pk().iter().any(|idx| idx.column_index == index),
-                is_distribution_key: table.distribution_key.contains(&index),is_generated: column.is_generated(),
-                            generation_expression: column.generated_expr().map(|expr_node| {
-                                let expr = ExprImpl::from_expr_proto(expr_node).unwrap();
-                                let expr_display = ExprDisplay {
-                                    expr: &expr,
-                                    input_schema: &schema,
-                                };
-                                expr_display.to_string()
-                            }),
+                is_distribution_key: table.distribution_key.contains(&index),
+                is_generated: column.is_generated(),
+                generation_expression: column.generated_expr().map(|expr_node| {
+                    let expr = ExprImpl::from_expr_proto(expr_node).unwrap();
+                    let expr_display = ExprDisplay {
+                        expr: &expr,
+                        input_schema: &schema,
+                    };
+                    expr_display.to_string()
+                }),
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
                 type_len: column.data_type().type_len(),
@@ -146,17 +152,18 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
                 is_primary_key: source.pk_col_ids.contains(&column.column_id()),
                 is_distribution_key: false,
                 is_generated: false,
-                            generation_expression: None,data_type: column.data_type().to_string(),
+                generation_expression: None,
+                data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
                 type_len: column.data_type().type_len(),
                 udt_type: column.data_type().pg_name().into(),
             })
     });
 
-    return view_rows
+    view_rows
         .chain(sink_rows)
         .chain(catalog_rows)
         .chain(table_rows)
         .chain(schema_rows)
-        .collect();
+        .collect()
 }

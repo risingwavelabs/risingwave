@@ -58,7 +58,7 @@ impl PgConstraint {
         // List of the constrained columns. First column starts from 1.
         let conkey: Vec<_> = table.pk.iter().map(|i| (*i + 1) as i16).collect();
         PgConstraint {
-            oid: table.id.table_id() as i32, // Use table_id as a mock oid of contraint here.
+            oid: table.id.table_id() as i32, // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
             connamespace: schema.id() as i32,
             contype: "p".to_owned(), // p = primary key constraint
@@ -66,7 +66,8 @@ impl PgConstraint {
             convalidated: true,
             conrelid: table.id.table_id() as i32,
             contypid: 0,
-            conindid: table.id.table_id() as i32, /* Use table_id as a mock index oid of contraint here. */
+            // Use table_id as a mock index oid of constraint here.
+            conindid: table.id.table_id() as i32,
             conparentid: 0,
             confrelid: 0,
             confupdtype: " ".to_owned(),
@@ -94,7 +95,7 @@ impl PgConstraint {
             .map(|i| (i.column_index + 1) as i16)
             .collect();
         PgConstraint {
-            oid: table.id.table_id() as i32, // Use table_id as a mock oid of contraint here.
+            oid: table.id.table_id() as i32, // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
             connamespace: schema.id() as i32,
             contype: "p".to_owned(), // p = primary key constraint
@@ -102,7 +103,8 @@ impl PgConstraint {
             convalidated: true,
             conrelid: table.id.table_id() as i32,
             contypid: 0,
-            conindid: table.id.table_id() as i32, /* Use table_id as a mock index oid of contraint here. */
+            // Use table_id as a mock index oid of constraint here.
+            conindid: table.id.table_id() as i32,
             conparentid: 0,
             confrelid: 0,
             confupdtype: " ".to_owned(),
@@ -128,9 +130,7 @@ fn read_pg_constraint(reader: &SysCatalogReaderImpl) -> Result<Vec<PgConstraint>
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
 
-    Ok(schemas
-        .flat_map(|schema| read_pg_constraint_in_schema(schema))
-        .collect())
+    Ok(schemas.flat_map(read_pg_constraint_in_schema).collect())
 }
 
 fn read_pg_constraint_in_schema(schema: &SchemaCatalog) -> Vec<PgConstraint> {
@@ -143,5 +143,5 @@ fn read_pg_constraint_in_schema(schema: &SchemaCatalog) -> Vec<PgConstraint> {
         .iter_valid_table()
         .map(|table| PgConstraint::from_table(schema, table.as_ref()));
 
-    return system_table_rows.chain(table_rows).collect();
+    system_table_rows.chain(table_rows).collect()
 }
