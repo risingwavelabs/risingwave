@@ -15,7 +15,9 @@
 use std::fmt::Write;
 
 use num_traits::CheckedNeg;
-use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
+use risingwave_common::types::{
+    write_date_time_tz, CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64,
+};
 use risingwave_expr::{function, ExprError, Result};
 use thiserror_ext::AsReport;
 
@@ -72,13 +74,7 @@ pub fn timestamptz_to_string(
 ) -> Result<()> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     let instant_local = elem.to_datetime_in_zone(time_zone);
-    write!(
-        writer,
-        "{}",
-        instant_local.format("%Y-%m-%d %H:%M:%S%.f%:z")
-    )
-    .map_err(|e| ExprError::Internal(e.into()))?;
-    Ok(())
+    write_date_time_tz(instant_local, writer).map_err(|e| ExprError::Internal(e.into()))
 }
 
 // Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
