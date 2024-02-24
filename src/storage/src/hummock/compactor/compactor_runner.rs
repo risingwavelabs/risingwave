@@ -766,6 +766,7 @@ where
         let mut is_new_user_key = full_key_tracker.observe(iter.key()).is_some();
         let mut drop = false;
 
+        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
         let epoch = iter_key.epoch_with_gap.pure_epoch();
         let value = iter.value();
         if is_new_user_key {
@@ -818,7 +819,9 @@ where
         // in our design, frontend avoid to access keys which had be deleted, so we dont
         // need to consider the epoch when the compaction_filter match (it
         // means that mv had drop)
-        if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
+        // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
+        // Do not assume that "the epoch of keys behind must be smaller than the current key."
+        if (epoch < task_config.watermark && task_config.gc_delete_keys && value.is_delete())
             || (epoch < task_config.watermark
                 && (watermark_can_see_last_key
                     || earliest_range_delete_which_can_see_iter_key <= task_config.watermark))
