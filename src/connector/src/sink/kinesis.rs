@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use aws_sdk_kinesis::error::DisplayErrorContext;
@@ -189,7 +190,10 @@ impl KinesisSinkPayloadWriter {
         let payload = Blob::new(payload);
         // todo: switch to put_records() for batching
         Retry::spawn(
-            ExponentialBackoff::from_millis(100).map(jitter).take(3),
+            ExponentialBackoff::from_millis(100)
+                .max_delay(Duration::from_secs(1))
+                .map(jitter)
+                .take(60),
             || async {
                 self.client
                     .put_record()
