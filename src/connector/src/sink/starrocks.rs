@@ -51,10 +51,10 @@ pub struct StarrocksCommon {
     #[serde(rename = "starrocks.host")]
     pub host: String,
     /// The port to the MySQL server of StarRocks FE.
-    #[serde(rename = "starrocks.mysqlport")]
+    #[serde(rename = "starrocks.mysqlport", alias = "starrocks.query_port")]
     pub mysql_port: String,
     /// The port to the HTTP server of StarRocks FE.
-    #[serde(rename = "starrocks.httpport")]
+    #[serde(rename = "starrocks.httpport", alias = "starrocks.http_port")]
     pub http_port: String,
     /// The user name used to access the StarRocks database.
     #[serde(rename = "starrocks.user")]
@@ -172,7 +172,7 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("varchar"))
             }
             risingwave_common::types::DataType::Time => Err(SinkError::Starrocks(
-                "starrocks can not support Time".to_string(),
+                "TIME is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
             risingwave_common::types::DataType::Timestamp => {
                 Ok(starrocks_data_type.contains("datetime"))
@@ -181,17 +181,17 @@ impl StarrocksSink {
                 "starrocks can not support Timestamptz".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
-                "starrocks can not support Interval".to_string(),
+                "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
             // todo! Validate the type struct and list
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
-                "starrocks can not support import struct".to_string(),
+                "STRUCT is not supported for Starrocks sink.".to_string(),
             )),
             risingwave_common::types::DataType::List(_) => {
                 Ok(starrocks_data_type.contains("unknown"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
-                "starrocks can not support Bytea".to_string(),
+                "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
             risingwave_common::types::DataType::Jsonb => Err(SinkError::Starrocks(
                 "starrocks can not support import json".to_string(),
@@ -200,7 +200,7 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("bigint"))
             }
             risingwave_common::types::DataType::Int256 => Err(SinkError::Starrocks(
-                "starrocks can not support Int256".to_string(),
+                "INT256 is not supported for Starrocks sink.".to_string(),
             )),
         }
     }
