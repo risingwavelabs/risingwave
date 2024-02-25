@@ -131,12 +131,15 @@ pub struct SourceCtrlOpts {
     // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
     // in batch scenario
     pub chunk_size: usize,
+    /// Rate limit of source
+    pub rate_limit: Option<u32>,
 }
 
 impl Default for SourceCtrlOpts {
     fn default() -> Self {
         Self {
             chunk_size: MAX_CHUNK_SIZE,
+            rate_limit: None,
         }
     }
 }
