@@ -105,6 +105,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                 }
 
                                 // the column is from a legacy version (v1.6.x)
+                                // introduced in https://github.com/risingwavelabs/risingwave/pull/15226
                                 if desc.additional_column_type
                                     == LegacyAdditionalColumnType::Key as i32
                                 {
