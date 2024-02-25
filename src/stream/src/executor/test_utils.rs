@@ -110,14 +110,13 @@ impl std::fmt::Debug for MockSource {
 }
 
 impl MockSource {
-    fn new(rx: mpsc::UnboundedReceiver<Message>, stop_on_finish: bool) -> Self {
-        Self { rx, stop_on_finish }
-    }
-
     #[allow(dead_code)]
     pub fn channel() -> (MessageSender, Self) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let source = Self::new(rx, true);
+        let source = Self {
+            rx,
+            stop_on_finish: true,
+        };
         (MessageSender(tx), source)
     }
 

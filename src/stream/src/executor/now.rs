@@ -52,7 +52,7 @@ impl<S: StateStore> NowExecutor<S> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(self) {
+    async fn execute_inner(self) {
         let Self {
             data_types,
             barrier_receiver,
@@ -151,7 +151,7 @@ impl<S: StateStore> NowExecutor<S> {
 
 impl<S: StateStore> Execute for NowExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
+        self.execute_inner().boxed()
     }
 }
 
