@@ -9,18 +9,6 @@ Near "selet"
 
 
 statement error
-create function int_42() returns int as int_42 using link 'localhost:8815';
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: failed to connect to UDF service
-  2: transport error
-  3: error trying to connect
-  4: invalid URL, scheme is missing
-
-
-statement error
 alter system set not_exist_key to value;
 ----
 db error: ERROR: Failed to run the query

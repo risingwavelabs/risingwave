@@ -76,8 +76,9 @@ impl ArrowFlightUdfClient {
         if addr.starts_with("https://") {
             addr = addr.strip_prefix("https://").unwrap();
         }
-        let host_addr = HostAddr::from_str(addr)
-            .map_err(|e| Error::service_error(format!("invalid address: {}, err: {}", addr, e)))?;
+        let host_addr = HostAddr::from_str(addr).map_err(|e| {
+            Error::service_error(format!("invalid address: {}, err: {}", addr, e.as_report()))
+        })?;
         let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
             .dns_probe_interval(std::time::Duration::from_secs(DNS_PROBE_INTERVAL_SECS))
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -88,7 +89,8 @@ impl ArrowFlightUdfClient {
             .map_err(|e| {
                 Error::service_error(format!(
                     "failed to create LoadBalancedChannel, address: {}, err: {}",
-                    host_addr, e
+                    host_addr,
+                    e.as_report()
                 ))
             })?;
         let client = FlightServiceClient::new(channel.into());
