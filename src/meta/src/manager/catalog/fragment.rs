@@ -850,7 +850,12 @@ impl FragmentManager {
         let mut table_id_to_apply = HashSet::new();
         for (table_id, table_fragments) in map.iter() {
             for fragment in table_fragments.fragments.values() {
+                // CREATE SOURCE
                 if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
+                    table_id_to_apply.insert(*table_id);
+                }
+                // CREATE TABLE WITH (connector='...')
+                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0 {
                     table_id_to_apply.insert(*table_id);
                 }
             }
