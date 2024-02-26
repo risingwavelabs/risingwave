@@ -66,8 +66,7 @@ function convertToMapAndAgg(
   }
 
   for (const [key, value] of mapValue) {
-    // add || 1 to avoid NaN and pass check
-    map.set(key, value / (mapNumber.get(key) || 1))
+    map.set(key, value / mapNumber.get(key)!)
   }
   return map
 }
