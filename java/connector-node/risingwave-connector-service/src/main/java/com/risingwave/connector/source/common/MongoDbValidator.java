@@ -34,12 +34,20 @@ public class MongoDbValidator extends DatabaseValidator {
         // check connectivity
         try (MongoClient mongoClient = MongoClients.create(mongodbUrl)) {
             var desc = mongoClient.getClusterDescription();
-            LOG.info("MongoDB cluster description: {}", desc);
+            LOG.info("test connectivity: MongoDB cluster description: {}", desc);
         }
     }
 
     @Override
-    void validateUserPrivilege() {}
+    void validateUserPrivilege() {
+        // TODO: check user privilege
+        // https://debezium.io/documentation/reference/stable/connectors/mongodb.html#setting-up-mongodb
+        // You must also have a MongoDB user that has the appropriate roles to read the admin
+        // database where the oplog can be read. Additionally, the user must also be able to read
+        // the config database in the configuration server of a sharded cluster and must have
+        // listDatabases privilege action. When change streams are used (the default) the user also
+        // must have cluster-wide privilege actions find and changeStream.
+    }
 
     @Override
     void validateTable() {
