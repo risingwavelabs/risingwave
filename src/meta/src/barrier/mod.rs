@@ -14,9 +14,9 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::{poll_fn, Future};
-use std::mem::replace;
+use std::mem::{replace, take};
 use std::sync::Arc;
 use std::task::{ready, Poll};
 use std::time::Duration;
@@ -198,7 +198,7 @@ pub struct GlobalBarrierManager {
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
-    command_ctx_queue: VecDeque<EpochNode>,
+    command_ctx_queue: BTreeMap<u64, EpochNode>,
 
     /// Command that has been collected but is still completing.
     /// The join handle of the completing future is stored.
@@ -228,7 +228,7 @@ impl CheckpointControl {
     fn update_barrier_nums_metrics(&self) {
         self.context.metrics.in_flight_barrier_nums.set(
             self.command_ctx_queue
-                .iter()
+                .values()
                 .filter(|x| matches!(x.state, BarrierEpochState::InFlight))
                 .count() as i64,
         );
@@ -242,22 +242,27 @@ impl CheckpointControl {
     fn enqueue_command(&mut self, command_ctx: Arc<CommandContext>, notifiers: Vec<Notifier>) {
         let timer = self.context.metrics.barrier_latency.start_timer();
 
-        self.command_ctx_queue.push_back(EpochNode {
-            enqueue_time: timer,
-            state: BarrierEpochState::InFlight,
-            command_ctx,
-            notifiers,
-        });
+        if let Some((_, node)) = self.command_ctx_queue.last_key_value() {
+            assert_eq!(
+                command_ctx.prev_epoch.value(),
+                node.command_ctx.curr_epoch.value()
+            );
+        }
+        self.command_ctx_queue.insert(
+            command_ctx.prev_epoch.value().0,
+            EpochNode {
+                enqueue_time: timer,
+                state: BarrierEpochState::InFlight,
+                command_ctx,
+                notifiers,
+            },
+        );
     }
 
     /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
     /// with `Completed` starting from first node [`Completed`..`InFlight`) and remove them.
     fn barrier_collected(&mut self, prev_epoch: u64, result: Vec<BarrierCompleteResponse>) {
-        if let Some(node) = self
-            .command_ctx_queue
-            .iter_mut()
-            .find(|x| x.command_ctx.prev_epoch.value().0 == prev_epoch)
-        {
+        if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
             assert!(matches!(node.state, BarrierEpochState::InFlight));
             node.state = BarrierEpochState::Collected(result);
         } else {
@@ -272,7 +277,7 @@ impl CheckpointControl {
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
         let in_flight_not_full = self
             .command_ctx_queue
-            .iter()
+            .values()
             .filter(|x| matches!(x.state, BarrierEpochState::InFlight))
             .count()
             < in_flight_barrier_nums;
@@ -280,12 +285,17 @@ impl CheckpointControl {
         // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
         let should_pause = self
             .command_ctx_queue
-            .back()
-            .map(|x| x.command_ctx.command.should_pause_inject_barrier())
+            .last_key_value()
+            .map(|(_, x)| &x.command_ctx)
+            .or(match &self.completing_command {
+                CompletingCommand::None | CompletingCommand::Err(_) => None,
+                CompletingCommand::Completing { command_ctx, .. } => Some(command_ctx),
+            })
+            .map(|command_ctx| command_ctx.command.should_pause_inject_barrier())
             .unwrap_or(false);
         debug_assert_eq!(
             self.command_ctx_queue
-                .iter()
+                .values()
                 .any(|x| x.command_ctx.command.should_pause_inject_barrier()),
             should_pause
         );
@@ -322,12 +332,15 @@ impl CheckpointControl {
         };
         if !is_err {
             // continue to finish the pending collected barrier.
-            while let Some(EpochNode {
-                state: BarrierEpochState::Collected(_),
-                ..
-            }) = self.command_ctx_queue.front()
+            while let Some((
+                _,
+                EpochNode {
+                    state: BarrierEpochState::Collected(_),
+                    ..
+                },
+            )) = self.command_ctx_queue.first_key_value()
             {
-                let node = self.command_ctx_queue.pop_front().expect("non-empty");
+                let (_, node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 let command_ctx = node.command_ctx.clone();
                 if let Err(e) = self.context.clone().complete_barrier(node).await {
                     error!(
@@ -346,7 +359,7 @@ impl CheckpointControl {
                 }
             }
         }
-        for node in self.command_ctx_queue.drain(..) {
+        for (_, node) in take(&mut self.command_ctx_queue) {
             for notifier in node.notifiers {
                 notifier.notify_collection_failed(err.clone());
             }
@@ -924,12 +937,15 @@ impl CheckpointControl {
         if matches!(&self.completing_command, CompletingCommand::None) {
             // If there is no completing barrier, try to start completing the earliest barrier if
             // it has been collected.
-            if let Some(EpochNode {
-                state: BarrierEpochState::Collected(_),
-                ..
-            }) = self.command_ctx_queue.front_mut()
+            if let Some((
+                _,
+                EpochNode {
+                    state: BarrierEpochState::Collected(_),
+                    ..
+                },
+            )) = self.command_ctx_queue.first_key_value()
             {
-                let node = self.command_ctx_queue.pop_front().expect("non-empty");
+                let (_, node) = self.command_ctx_queue.pop_first().expect("non-empty");
                 let command_ctx = node.command_ctx.clone();
                 let join_handle = tokio::spawn(self.context.clone().complete_barrier(node));
                 self.completing_command = CompletingCommand::Completing {
