@@ -637,6 +637,19 @@ impl MetadataManager {
         }
     }
 
+    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.node_actor_count().await),
+            MetadataManager::V2(mgr) => {
+                let actor_cnt = mgr.catalog_controller.worker_actor_count().await?;
+                Ok(actor_cnt
+                    .into_iter()
+                    .map(|(id, cnt)| (id as WorkerId, cnt))
+                    .collect())
+            }
+        }
+    }
+
     pub async fn count_streaming_job(&self) -> MetaResult<usize> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.count_streaming_job().await),

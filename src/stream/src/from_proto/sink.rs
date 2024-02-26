@@ -103,7 +103,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
@@ -189,23 +189,22 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector, sink_id.sink_id, params.executor_id
         );
 
-        match node.log_store_type() {
+        let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
             SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
                 let factory = BoundedInMemLogStoreFactory::new(1);
-                Ok(Box::new(
-                    SinkExecutor::new(
-                        params.actor_context,
-                        params.info,
-                        input_executor,
-                        sink_write_param,
-                        sink_param,
-                        columns,
-                        factory,
-                    )
-                    .await?,
-                ))
+                SinkExecutor::new(
+                    params.actor_context,
+                    params.info.clone(),
+                    input_executor,
+                    sink_write_param,
+                    sink_param,
+                    columns,
+                    factory,
+                )
+                .await?
+                .boxed()
             }
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
@@ -230,19 +229,20 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     pk_info,
                 );
 
-                Ok(Box::new(
-                    SinkExecutor::new(
-                        params.actor_context,
-                        params.info,
-                        input_executor,
-                        sink_write_param,
-                        sink_param,
-                        columns,
-                        factory,
-                    )
-                    .await?,
-                ))
+                SinkExecutor::new(
+                    params.actor_context,
+                    params.info.clone(),
+                    input_executor,
+                    sink_write_param,
+                    sink_param,
+                    columns,
+                    factory,
+                )
+                .await?
+                .boxed()
             }
-        }
+        };
+
+        Ok((params.info, exec).into())
     }
 }

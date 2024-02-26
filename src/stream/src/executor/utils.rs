@@ -13,39 +13,18 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Executor, ExecutorInfo, PkIndicesRef};
+use crate::executor::{BoxedMessageStream, Execute};
 use crate::task::{ActorId, FragmentId};
 
 #[derive(Default)]
-pub struct DummyExecutor {
-    pub info: ExecutorInfo,
-}
+pub struct DummyExecutor;
 
-impl DummyExecutor {
-    pub fn new(info: ExecutorInfo) -> Self {
-        Self { info }
-    }
-}
-
-impl Executor for DummyExecutor {
+impl Execute for DummyExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         futures::stream::pending().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
