@@ -413,7 +413,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             if false {
                                 return unreachable!("type hints only") as StreamExecutorResult<_>;
                             }
-                            let right_size = self.right_table.table_stream_key_indices.len();
                             let mut builder = StreamChunkBuilder::new(
                                 self.chunk_size,
                                 self.info.schema.data_types(),
