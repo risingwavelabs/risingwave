@@ -296,6 +296,14 @@ impl CheckpointControl {
         debug_assert_eq!(
             self.command_ctx_queue
                 .values()
+                .map(|node| &node.command_ctx)
+                .chain(
+                    match &self.completing_command {
+                        CompletingCommand::None | CompletingCommand::Err(_) => None,
+                        CompletingCommand::Completing { command_ctx, .. } => Some(command_ctx),
+                    }
+                    .iter()
+                )
                 .any(|x| x.command_ctx.command.should_pause_inject_barrier()),
             should_pause
         );
