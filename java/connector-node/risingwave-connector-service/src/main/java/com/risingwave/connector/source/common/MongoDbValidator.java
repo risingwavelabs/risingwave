@@ -51,6 +51,6 @@ public class MongoDbValidator extends DatabaseValidator {
 
     @Override
     void validateTable() {
-        // do nothing
+        // do nothing since MongoDB is schemaless
     }
 }
