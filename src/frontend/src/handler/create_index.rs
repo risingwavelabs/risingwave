@@ -45,15 +45,11 @@ use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::TableCatalog;
 
-pub(crate) fn gen_create_index_plan(
+pub(crate) fn resolve_index_schema(
     session: &SessionImpl,
-    context: OptimizerContextRef,
     index_name: ObjectName,
     table_name: ObjectName,
-    columns: Vec<OrderByExpr>,
-    include: Vec<Ident>,
-    distributed_by: Vec<ast::Expr>,
-) -> Result<(PlanRef, PbTable, PbIndex)> {
+) -> Result<(String, Arc<TableCatalog>, String)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().search_path();
@@ -63,12 +59,22 @@ pub(crate) fn gen_create_index_plan(
     let index_table_name = Binder::resolve_index_name(index_name)?;
 
     let catalog_reader = session.env().catalog_reader();
-    let (table, schema_name) = {
-        let read_guard = catalog_reader.read_guard();
-        let (table, schema_name) =
-            read_guard.get_table_by_name(db_name, schema_path, &table_name)?;
-        (table.clone(), schema_name.to_string())
-    };
+    let read_guard = catalog_reader.read_guard();
+    let (table, schema_name) = read_guard.get_table_by_name(db_name, schema_path, &table_name)?;
+    Ok((schema_name.to_string(), table.clone(), index_table_name))
+}
+
+pub(crate) fn gen_create_index_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    schema_name: String,
+    table: Arc<TableCatalog>,
+    index_table_name: String,
+    columns: Vec<OrderByExpr>,
+    include: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
+) -> Result<(PlanRef, PbTable, PbIndex)> {
+    let table_name = table.name.clone();
 
     if table.is_index() {
         return Err(
@@ -404,22 +410,27 @@ pub async fn handle_create_index(
     let session = handler_args.session.clone();
 
     let (graph, index_table, index) = {
-        {
-            if let Either::Right(resp) = session.check_relation_name_duplicated(
-                index_name.clone(),
-                StatementType::CREATE_INDEX,
-                if_not_exists,
-            )? {
-                return Ok(resp);
-            }
+        let (schema_name, table, index_table_name) =
+            resolve_index_schema(&session, index_name, table_name)?;
+        let qualified_index_name = ObjectName(vec![
+            Ident::with_quote_unchecked('"', &schema_name),
+            Ident::with_quote_unchecked('"', &index_table_name),
+        ]);
+        if let Either::Right(resp) = session.check_relation_name_duplicated(
+            qualified_index_name,
+            StatementType::CREATE_INDEX,
+            if_not_exists,
+        )? {
+            return Ok(resp);
         }
 
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),
-            index_name.clone(),
-            table_name,
+            schema_name,
+            table,
+            index_table_name,
             columns,
             include,
             distributed_by,
@@ -437,7 +448,7 @@ pub async fn handle_create_index(
 
     tracing::trace!(
         "name={}, graph=\n{}",
-        index_name,
+        index.name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
