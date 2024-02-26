@@ -220,15 +220,29 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let sstable_store = mock_sstable_store();
     let test_key_size = 256 * 1024;
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size/2, 1).await });
-    let info2 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 2, test_key_size/2 .. test_key_size, 1).await });
+        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size / 2, 1).await });
+    let info2 = runtime.block_on(async {
+        build_table(
+            sstable_store.clone(),
+            2,
+            test_key_size / 2..test_key_size,
+            1,
+        )
+        .await
+    });
     let level1 = vec![info1, info2];
 
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size/2, 2).await });
-    let info2 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 4, test_key_size/2 .. test_key_size, 2).await });
+        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size / 2, 2).await });
+    let info2 = runtime.block_on(async {
+        build_table(
+            sstable_store.clone(),
+            4,
+            test_key_size / 2..test_key_size,
+            2,
+        )
+        .await
+    });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(CachePriority::High),
