@@ -22,8 +22,9 @@ use risingwave_connector::source::{
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp, ColumnDescVersion,
-    FormatType, PbEncodeType,
+    AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp,
+    AdditionalColumnType as LegacyAdditionalColumnType, ColumnDescVersion, FormatType,
+    PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -45,7 +46,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
             .local_barrier_manager
@@ -53,7 +54,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let executor = {
+            let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
@@ -75,16 +76,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 }
 
                 let mut source_columns = source.columns.clone();
-
                 {
                     // compatible code: introduced in https://github.com/risingwavelabs/risingwave/pull/13707
                     // for upsert and (avro | protobuf) overwrite the `_rw_key` column's ColumnDesc.additional_column_type to Key
                     if source_info.format() == FormatType::Upsert
                         && (source_info.row_encode() == PbEncodeType::Avro
-                            || source_info.row_encode() == PbEncodeType::Protobuf)
+                            || source_info.row_encode() == PbEncodeType::Protobuf
+                            || source_info.row_encode() == PbEncodeType::Json)
                     {
-                        let _ = source_columns.iter_mut().map(|c| {
-                            let _ = c.column_desc.as_mut().map(|desc| {
+                        for c in &mut source_columns {
+                            if let Some(desc) = c.column_desc.as_mut() {
                                 let is_bytea = desc
                                     .get_column_type()
                                     .map(|col_type| col_type.type_name == PbTypeName::Bytea as i32)
@@ -93,7 +94,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                     &desc.version()
                                 )
                                     && is_bytea
-                                    // the column is from a legacy version
+                                    // the column is from a legacy version (before v1.5.x)
                                     && desc.version == ColumnDescVersion::Unspecified as i32
                                 {
                                     desc.additional_column = Some(AdditionalColumn {
@@ -102,8 +103,20 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                         )),
                                     });
                                 }
-                            });
-                        });
+
+                                // the column is from a legacy version (v1.6.x)
+                                // introduced in https://github.com/risingwavelabs/risingwave/pull/15226
+                                if desc.additional_column_type
+                                    == LegacyAdditionalColumnType::Key as i32
+                                {
+                                    desc.additional_column = Some(AdditionalColumn {
+                                        column_type: Some(AdditionalColumnType::Key(
+                                            AdditionalColumnKey {},
+                                        )),
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -192,7 +205,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     #[expect(deprecated)]
                     crate::executor::FsSourceExecutor::new(
                         params.actor_context.clone(),
-                        params.info,
                         stream_source_core,
                         params.executor_stats,
                         barrier_receiver,
@@ -203,7 +215,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),
-                        params.info.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
@@ -215,7 +226,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else {
                     SourceExecutor::new(
                         params.actor_context.clone(),
-                        params.info.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
@@ -226,14 +236,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .boxed()
                 }
             };
+            let mut info = params.info.clone();
+            info.identity = format!("{} (flow controlled)", info.identity);
+
             let rate_limit = source.rate_limit.map(|x| x as _);
-            Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
+            let exec =
+                FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
+            Ok((params.info, exec).into())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.
-            Ok(SourceExecutor::<PanicStateStore>::new(
+            let exec = SourceExecutor::<PanicStateStore>::new(
                 params.actor_context,
-                params.info,
                 None,
                 params.executor_stats,
                 barrier_receiver,
@@ -241,8 +255,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
                 params.env.connector_params(),
-            )
-            .boxed())
+            );
+            Ok((params.info, exec).into())
         }
     }
 }

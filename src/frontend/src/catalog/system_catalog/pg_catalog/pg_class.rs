@@ -29,7 +29,8 @@ use risingwave_frontend_macro::system_catalog;
     END relkind,
     0 AS relam,
     0 AS reltablespace,
-    ARRAY[]::varchar[] AS reloptions
+    ARRAY[]::varchar[] AS reloptions,
+    null AS relpartbound
     FROM rw_catalog.rw_relations
 ")]
 #[derive(Fields)]
@@ -46,4 +47,6 @@ struct PgClass {
     relam: i32,
     reltablespace: i32,
     reloptions: Vec<String>,
+    // PG uses pg_node_tree type but RW doesn't support it
+    relpartbound: Option<String>,
 }
