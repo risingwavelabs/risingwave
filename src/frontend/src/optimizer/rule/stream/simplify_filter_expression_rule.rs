@@ -25,6 +25,7 @@ use crate::optimizer::PlanRef;
 
 pub struct SimplifyFilterExpressionRule {}
 impl Rule for SimplifyFilterExpressionRule {
+    /// Currently the rule is only applied to the potential filters in `LogicalShare`
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let mut rewriter = SimplifyFilterExpressionRewriter {};
