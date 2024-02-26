@@ -140,7 +140,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         let epoch = self.state_store.epoch();
         let mut flush_info = FlushInfo::new();
 
-        // When the stream is paused, donot flush barrier  to ensure there is no dirty data in state store.
+        // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
         // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
         if !self.is_paused {
             for vnode in self.serde.vnodes().iter_vnodes() {
@@ -162,12 +162,11 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             })?;
 
         // No data is expected when the stream is paused.
-        assert!(
-            !self.is_paused
-                || (self.state_store.is_dirty()
-                    && flush_info.flush_count == 0
-                    && flush_info.flush_size == 0)
-        );
+        if self.is_paused {
+            assert_eq!(flush_info.flush_count, 0);
+            assert_eq!(flush_info.flush_size, 0);
+            assert!(self.state_store.is_dirty());
+        }
         flush_info.report(&self.metrics);
 
         let watermark = self.tx.pop_truncation(epoch).map(|truncation_offset| {
