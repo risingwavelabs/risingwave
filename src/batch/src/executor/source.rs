@@ -95,7 +95,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
             .collect();
 
-        let split = SplitImpl::restore_from_bytes(&source_node.split)?;
+        let split = SplitImpl::restore_from_bytes(&source_node.split[0])?;
 
         let fields = source_node
             .columns

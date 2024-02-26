@@ -378,7 +378,7 @@ pub struct TablePartitionInfo {
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum PartitionInfo {
     Table(TablePartitionInfo),
-    Source(SplitImpl),
+    Source(Vec<SplitImpl>),
 }
 
 /// Fragment part of `Query`.

@@ -359,7 +359,7 @@ impl LocalQueryExecution {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
-                            Some(PartitionInfo::Source(split.clone())),
+                            Some(PartitionInfo::Source(vec![split.clone()])),
                             next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {

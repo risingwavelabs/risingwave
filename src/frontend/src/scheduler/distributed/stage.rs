@@ -384,7 +384,7 @@ impl StageRunner {
                     task_id: id as u32,
                 };
                 let plan_fragment = self
-                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(vec![split.clone()])));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -1086,7 +1086,7 @@ impl StageRunner {
                     unreachable!();
                 };
                 let partition = partition
-                    .expect("no partition info for seq scan")
+                    [0].expect("no partition info for seq scan")
                     .into_table()
                     .expect("PartitionInfo should be TablePartitionInfo");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
@@ -1102,7 +1102,7 @@ impl StageRunner {
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition
+                let partition = partition[0]
                     .expect("no partition info for seq scan")
                     .into_source()
                     .expect("PartitionInfo should be SourcePartitionInfo");
@@ -1118,7 +1118,7 @@ impl StageRunner {
                     .children
                     .iter()
                     .map(|e| {
-                        self.convert_plan_node(e, task_id, partition.clone(), identity_id.clone())
+                        self.convert_plan_node(e, task_id, partition[0].clone(), identity_id.clone())
                     })
                     .collect();
 
