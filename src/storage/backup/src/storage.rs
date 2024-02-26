@@ -192,7 +192,7 @@ pub async fn unused() -> ObjectStoreMetaSnapshotStorage {
         Arc::new(ObjectStoreImpl::InMem(MonitoredObjectStore::new(
             InMemObjectStore::new(),
             Arc::new(ObjectStoreMetrics::unused()),
-            ObjectStoreConfig::default()
+            ObjectStoreConfig::default(),
         ))),
     )
     .await
