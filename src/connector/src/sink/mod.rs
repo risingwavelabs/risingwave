@@ -56,10 +56,12 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -531,6 +533,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
 }
 
 impl From<icelake::Error> for SinkError {
@@ -547,7 +555,7 @@ impl From<RpcError> for SinkError {
 
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(format!("{}", value))
+        SinkError::ClickHouse(value.to_report_string())
     }
 }
 
@@ -559,6 +567,6 @@ impl From<DeltaTableError> for SinkError {
 
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
-        SinkError::Redis(format!("{}", value))
+        SinkError::Redis(value.to_report_string())
     }
 }

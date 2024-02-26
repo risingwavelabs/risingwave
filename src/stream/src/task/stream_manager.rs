@@ -44,7 +44,10 @@ use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
-use crate::executor::*;
+use crate::executor::{
+    Actor, ActorContext, ActorContextRef, Barrier, DispatchExecutor, DispatcherImpl, Executor,
+    ExecutorInfo, WrapperExecutor,
+};
 use crate::from_proto::create_executor;
 use crate::task::barrier_manager::{LocalBarrierEvent, LocalBarrierWorker};
 use crate::task::{
@@ -102,7 +105,7 @@ pub struct ExecutorParams {
     pub op_info: String,
 
     /// The input executor.
-    pub input: Vec<BoxedExecutor>,
+    pub input: Vec<Executor>,
 
     /// FragmentId of the actor
     pub fragment_id: FragmentId,
@@ -231,9 +234,12 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub async fn reset(&self) {
+    pub async fn reset(&self, prev_epoch: u64) {
         self.local_barrier_manager
-            .send_and_await(LocalBarrierEvent::Reset)
+            .send_and_await(|result_sender| LocalBarrierEvent::Reset {
+                result_sender,
+                prev_epoch,
+            })
             .await
             .expect("should receive reset")
     }
@@ -268,7 +274,7 @@ impl LocalBarrierWorker {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self) {
+    pub(super) async fn reset(&mut self, prev_epoch: u64) {
         let actor_handles = self.actor_manager_state.drain_actor_handles();
         for (actor_id, handle) in &actor_handles {
             tracing::debug!("force stopping actor {}", actor_id);
@@ -295,7 +301,7 @@ impl LocalBarrierWorker {
             m.lock().clear();
         }
         dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
-            store.clear_shared_buffer().await.unwrap();
+            store.clear_shared_buffer(prev_epoch).await;
         });
         self.reset_state();
         self.actor_manager.env.dml_manager_ref().clear();
@@ -348,7 +354,7 @@ impl StreamActorManager {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &self,
-        input: BoxedExecutor,
+        input: Executor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
         fragment_id: FragmentId,
@@ -381,7 +387,7 @@ impl StreamActorManager {
         vnode_bitmap: Option<Bitmap>,
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
@@ -432,21 +438,22 @@ impl StreamActorManager {
         let schema: Schema = node.fields.iter().map(Field::from).collect();
 
         let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity,
+        };
+
         let eval_error_report = ActorEvalErrorReport {
             actor_context: actor_context.clone(),
-            identity: identity.clone().into(),
+            identity: info.identity.clone().into(),
         };
 
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
 
-            info: ExecutorInfo {
-                schema: schema.clone(),
-                pk_indices: pk_indices.clone(),
-                identity: identity.clone(),
-            },
-
+            info: info.clone(),
             executor_id,
             operator_id,
             op_info,
@@ -462,26 +469,14 @@ impl StreamActorManager {
         };
 
         let executor = create_executor(executor_params, node, store).await?;
-        assert_eq!(
-            executor.pk_indices(),
-            &pk_indices,
-            "`pk_indices` of {} not consistent with what derived by optimizer",
-            executor.identity()
-        );
-        assert_eq!(
-            executor.schema(),
-            &schema,
-            "`schema` of {} not consistent with what derived by optimizer",
-            executor.identity()
-        );
 
         // Wrap the executor for debug purpose.
-        let executor = WrapperExecutor::new(
+        let wrapped = WrapperExecutor::new(
             executor,
             actor_context.clone(),
             env.config().developer.enable_executor_row_count,
-        )
-        .boxed();
+        );
+        let executor = (info, wrapped).into();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
         let executor = if has_stateful && is_stateful {
@@ -507,7 +502,7 @@ impl StreamActorManager {
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-    ) -> StreamResult<(BoxedExecutor, Vec<SubtaskHandle>)> {
+    ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
         let executor = dispatch_state_store!(env.state_store(), store, {

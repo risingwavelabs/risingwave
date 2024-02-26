@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::common::PbWorkerNode;
+use tracing::warn;
 
 use crate::manager::{ActorInfos, WorkerId};
 use crate::model::ActorId;
@@ -87,10 +88,16 @@ impl InflightActorInfo {
 
     /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
     pub fn resolve_worker_nodes(&mut self, all_nodes: impl IntoIterator<Item = PbWorkerNode>) {
-        self.node_map = all_nodes
+        let new_node_map = all_nodes
             .into_iter()
             .map(|node| (node.id, node))
             .collect::<HashMap<_, _>>();
+        for (actor_id, location) in &self.actor_location_map {
+            if !new_node_map.contains_key(location) {
+                warn!(actor_id, location, node = ?self.node_map.get(location), "node with running actors is deleted");
+            }
+        }
+        self.node_map = new_node_map;
     }
 
     /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update

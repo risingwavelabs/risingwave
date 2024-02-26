@@ -131,6 +131,7 @@ pub(crate) trait Build: Expression + Sized {
 
     /// Build the expression `Self` from protobuf for test, where each child is built with
     /// [`build_from_prost`].
+    #[cfg(test)]
     fn build_for_test(prost: &ExprNode) -> Result<Self> {
         Self::build(prost, build_from_prost)
     }

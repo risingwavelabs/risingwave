@@ -1,7 +1,102 @@
 query TT
-SELECT * FROM pg_catalog.pg_settings;
+SELECT context, name FROM pg_catalog.pg_settings ORDER BY (context, name);
 ----
+internal    block_size_kb
+internal    bloom_false_positive
+internal    data_directory
+internal    parallel_compact_size_mb
+internal    sstable_size_mb
+internal    state_store
+internal    wasm_storage_url
+postmaster  backup_storage_directory
+postmaster  backup_storage_url
+postmaster  barrier_interval_ms
+postmaster  checkpoint_frequency
+postmaster  enable_tracing
+postmaster  max_concurrent_creating_streaming_jobs
+postmaster  pause_on_next_bootstrap
+user        application_name
+user        background_ddl
+user        batch_enable_distributed_dml
+user        batch_parallelism
+user        bytea_output
+user        client_encoding
+user        client_min_messages
+user        create_compaction_group_for_mv
+user        datestyle
+user        extra_float_digits
+user        idle_in_transaction_session_timeout
+user        intervalstyle
+user        lock_timeout
+user        max_split_range_gap
+user        query_epoch
+user        query_mode
+user        row_security
+user        rw_batch_enable_lookup_join
+user        rw_batch_enable_sort_agg
+user        rw_enable_join_ordering
+user        rw_enable_share_plan
+user        rw_enable_two_phase_agg
+user        rw_force_split_distinct_agg
+user        rw_force_two_phase_agg
+user        rw_implicit_flush
+user        rw_streaming_allow_jsonb_in_stream_key
+user        rw_streaming_enable_bushy_join
+user        rw_streaming_enable_delta_join
+user        rw_streaming_over_window_cache_policy
+user        search_path
+user        server_encoding
+user        server_version
+user        server_version_num
+user        sink_decouple
+user        standard_conforming_strings
+user        statement_timeout
+user        streaming_enable_arrangement_backfill
+user        streaming_parallelism
+user        streaming_rate_limit
+user        synchronize_seqscans
+user        timezone
+user        transaction_isolation
+user        visibility_mode
 
 query TT
 SELECT * FROM pg_catalog.pg_settings where name='dummy';
 ----
+
+# https://github.com/risingwavelabs/risingwave/issues/15125
+query TT
+SELECT min(name) name, context FROM pg_catalog.pg_settings GROUP BY context;
+----
+application_name            user
+backup_storage_directory    postmaster
+block_size_kb               internal
+
+# Tab-completion of `SET` command
+query T
+SELECT name
+FROM
+  (SELECT pg_catalog.lower(name) AS name
+   FROM pg_catalog.pg_settings
+   WHERE context IN ('user',
+                     'superuser')
+   UNION ALL SELECT 'constraints'
+   UNION ALL SELECT 'transaction'
+   UNION ALL SELECT 'session'
+   UNION ALL SELECT 'role'
+   UNION ALL SELECT 'tablespace'
+   UNION ALL SELECT 'all') ss
+WHERE substring(name, 1, 8)='search_p';
+----
+search_path
+
+# Tab-completion of `ALTER SYSTEM SET` command
+query T
+SELECT name
+FROM
+  (SELECT pg_catalog.lower(name) AS name
+   FROM pg_catalog.pg_settings
+   WHERE context != 'internal'
+   UNION ALL SELECT 'all') ss
+WHERE substring(name, 1, 7)='checkpo';
+----
+checkpoint_frequency

@@ -191,7 +191,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 
     /// Clears contents in shared buffer.
     /// This method should only be called when dropping all actors in the local compute node.
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_;
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
 

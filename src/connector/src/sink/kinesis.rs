@@ -176,7 +176,7 @@ impl KinesisSinkWriter {
             .common
             .build_client()
             .await
-            .map_err(SinkError::Kinesis)?;
+            .map_err(|err| SinkError::Kinesis(anyhow!(err)))?;
         Ok(Self {
             config: config.clone(),
             formatter,

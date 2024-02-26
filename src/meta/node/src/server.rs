@@ -35,6 +35,7 @@ use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
+use risingwave_meta::stream::ScaleController;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
 use risingwave_meta_service::backup_service::BackupServiceImpl;
@@ -185,6 +186,7 @@ pub async fn rpc_serve(
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
                 .max_connections(max_connection)
+                .sqlx_logging(false)
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
             let conn = sea_orm::Database::connect(options).await?;
@@ -476,20 +478,13 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-    let diagnose_command = match &metadata_manager {
-        MetadataManager::V1(mgr) => Some(Arc::new(
-            risingwave_meta::manager::diagnose::DiagnoseCommand::new(
-                mgr.cluster_manager.clone(),
-                mgr.catalog_manager.clone(),
-                mgr.fragment_manager.clone(),
-                hummock_manager.clone(),
-                env.event_log_manager_ref(),
-                prometheus_client.clone(),
-                prometheus_selector.clone(),
-            ),
-        )),
-        MetadataManager::V2(_) => None,
-    };
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        metadata_manager.clone(),
+        hummock_manager.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+    ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
         max_length: opts.cached_traces_num,
@@ -537,6 +532,13 @@ pub async fn start_service_as_election_leader(
 
     let stream_rpc_manager = StreamRpcManager::new(env.clone());
 
+    let scale_controller = Arc::new(ScaleController::new(
+        &metadata_manager,
+        source_manager.clone(),
+        stream_rpc_manager.clone(),
+        env.clone(),
+    ));
+
     let barrier_manager = GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
@@ -546,6 +548,7 @@ pub async fn start_service_as_election_leader(
         sink_manager.clone(),
         meta_metrics.clone(),
         stream_rpc_manager.clone(),
+        scale_controller.clone(),
     );
 
     {
@@ -563,6 +566,7 @@ pub async fn start_service_as_election_leader(
             source_manager.clone(),
             hummock_manager.clone(),
             stream_rpc_manager,
+            scale_controller.clone(),
         )
         .unwrap(),
     );
@@ -627,6 +631,7 @@ pub async fn start_service_as_election_leader(
         source_manager,
         stream_manager.clone(),
         barrier_manager.context().clone(),
+        scale_controller.clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone());
