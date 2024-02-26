@@ -8982,6 +8982,7 @@ dependencies = [
  "gcp-bigquery-client",
  "glob",
  "google-cloud-pubsub",
+ "governor",
  "http 0.2.9",
  "hyper",
  "hyper-tls",

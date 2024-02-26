@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::num::NonZeroU32;
 use std::sync::LazyLock;
 
 use auto_enums::auto_enum;
@@ -23,6 +24,8 @@ use csv_parser::CsvParser;
 pub use debezium::*;
 use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
@@ -560,7 +563,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 }
 
 #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
-async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) {
+async fn ensure_rate_limit(stream: BoxSourceStream, rate_limit: u32) {
+    let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+    let clock = MonotonicClock;
+    let rate_limiter = RateLimiter::direct_with_clock(quota, &clock);
     #[for_await]
     for batch in stream {
         let mut batch = batch?;
@@ -568,6 +574,9 @@ async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) 
         let end = batch.len();
         while start < end {
             let next = std::cmp::min(start + rate_limit as usize, end);
+            let batch_len = next - start;
+            let batch_len = NonZeroU32::new(batch_len as u32).unwrap();
+            rate_limiter.until_n_ready(batch_len).await.unwrap();
             yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
             start = next;
         }
@@ -590,7 +599,7 @@ impl<P: ByteStreamSourceParser> P {
 
         // Ensure chunk size is smaller than rate limit
         let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
-            Box::pin(ensure_largest_at_rate_limit(data_stream, *rate_limit))
+            Box::pin(ensure_rate_limit(data_stream, *rate_limit))
         } else {
             data_stream
         };

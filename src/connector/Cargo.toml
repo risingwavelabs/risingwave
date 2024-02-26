@@ -58,6 +58,11 @@ futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-pubsub = "0.22"
+governor = { version = "0.6", default-features = false, features = [
+    "std",
+    "dashmap",
+    "jitter",
+] }
 http = "0.2"
 hyper = { version = "0.14", features = [
     "client",
