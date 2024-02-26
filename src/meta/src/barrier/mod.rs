@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::{poll_fn, Future};
+use std::mem::replace;
 use std::sync::Arc;
 use std::task::{ready, Poll};
 use std::time::Duration;
@@ -47,7 +48,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::{info, warn, Instrument};
+use tracing::{error, info, warn, Instrument};
 
 use self::command::CommandContext;
 use self::notifier::Notifier;
@@ -201,7 +202,7 @@ struct CheckpointControl {
 
     /// Command that has been collected but is still completing.
     /// The join handle of the completing future is stored.
-    completing_command: Option<CompletingCommand>,
+    completing_command: CompletingCommand,
 
     context: GlobalBarrierManagerContext,
 }
@@ -210,17 +211,16 @@ impl CheckpointControl {
     fn new(context: GlobalBarrierManagerContext) -> Self {
         Self {
             command_ctx_queue: Default::default(),
-            completing_command: None,
+            completing_command: CompletingCommand::None,
             context,
         }
     }
 
     fn total_command_num(&self) -> usize {
         self.command_ctx_queue.len()
-            + if self.completing_command.is_some() {
-                1
-            } else {
-                0
+            + match &self.completing_command {
+                CompletingCommand::Completing { .. } => 1,
+                _ => 0,
             }
     }
 
@@ -259,7 +259,7 @@ impl CheckpointControl {
             .find(|x| x.command_ctx.prev_epoch.value().0 == prev_epoch)
         {
             assert!(matches!(node.state, BarrierEpochState::InFlight));
-            node.state = BarrierEpochState::Completed(result);
+            node.state = BarrierEpochState::Collected(result);
         } else {
             panic!(
                 "received barrier complete response for an unknown epoch: {}",
@@ -294,29 +294,63 @@ impl CheckpointControl {
     }
 
     /// We need to make sure there are no changes when doing recovery
-    pub async fn clear_and_fail_all_nodes(&mut self, err: &MetaError) {
+    pub async fn clear_on_err(&mut self, err: &MetaError) {
         // join spawned completing command to finish no matter it succeeds or not.
-        if let Some(command) = self.completing_command.take() {
-            info!(
-                prev_epoch = ?command.command_ctx.prev_epoch,
-                curr_epoch = ?command.command_ctx.curr_epoch,
-                "waiting for completing command to finish in recovery"
-            );
-            match command.join_handle.await {
-                Err(e) => {
-                    warn!(err = ?e.as_report(), "failed to join completing task");
+        let is_err = match replace(&mut self.completing_command, CompletingCommand::None) {
+            CompletingCommand::None => false,
+            CompletingCommand::Completing {
+                command_ctx,
+                join_handle,
+            } => {
+                info!(
+                    prev_epoch = ?command_ctx.prev_epoch,
+                    curr_epoch = ?command_ctx.curr_epoch,
+                    "waiting for completing command to finish in recovery"
+                );
+                match join_handle.await {
+                    Err(e) => {
+                        warn!(err = ?e.as_report(), "failed to join completing task");
+                    }
+                    Ok(Err(e)) => {
+                        warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                    }
+                    Ok(Ok(_)) => {}
+                };
+                false
+            }
+            CompletingCommand::Err(_) => true,
+        };
+        if !is_err {
+            // continue to finish the pending collected barrier.
+            while let Some(EpochNode {
+                state: BarrierEpochState::Collected(_),
+                ..
+            }) = self.command_ctx_queue.front()
+            {
+                let node = self.command_ctx_queue.pop_front().expect("non-empty");
+                let command_ctx = node.command_ctx.clone();
+                if let Err(e) = self.context.clone().complete_barrier(node).await {
+                    error!(
+                        prev_epoch = ?command_ctx.prev_epoch,
+                        curr_epoch = ?command_ctx.curr_epoch,
+                        err = ?e.as_report(),
+                        "failed to complete barrier during recovery"
+                    );
+                    break;
+                } else {
+                    info!(
+                        prev_epoch = ?command_ctx.prev_epoch,
+                        curr_epoch = ?command_ctx.curr_epoch,
+                        "succeed to complete barrier during recovery"
+                    )
                 }
-                Ok(Err(e)) => {
-                    warn!(err = ?e.as_report(), "failed to complete barrier during clear");
-                }
-                Ok(Ok(_)) => {}
-            };
+            }
         }
-        for command in self.command_ctx_queue.drain(..) {
-            for notifier in command.notifiers {
+        for node in self.command_ctx_queue.drain(..) {
+            for notifier in node.notifiers {
                 notifier.notify_collection_failed(err.clone());
             }
-            command.enqueue_time.observe_duration();
+            node.enqueue_time.observe_duration();
         }
     }
 }
@@ -339,17 +373,21 @@ enum BarrierEpochState {
     /// This barrier is current in-flight on the stream graph of compute nodes.
     InFlight,
 
-    /// This barrier is completed or failed.
-    Completed(Vec<BarrierCompleteResponse>),
+    /// This barrier is collected.
+    Collected(Vec<BarrierCompleteResponse>),
 }
 
-struct CompletingCommand {
-    command_ctx: Arc<CommandContext>,
+enum CompletingCommand {
+    None,
+    Completing {
+        command_ctx: Arc<CommandContext>,
 
-    // The join handle of a spawned task that completes the barrier.
-    // The return value indicate whether there is some create streaming job command
-    // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
-    join_handle: JoinHandle<MetaResult<bool>>,
+        // The join handle of a spawned task that completes the barrier.
+        // The return value indicate whether there is some create streaming job command
+        // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
+        join_handle: JoinHandle<MetaResult<bool>>,
+    },
+    Err(MetaError),
 }
 
 /// The result of barrier collect.
@@ -690,7 +728,7 @@ impl GlobalBarrierManager {
 
     async fn failure_recovery(&mut self, err: MetaError) {
         self.rpc_manager.clear();
-        self.checkpoint_control.clear_and_fail_all_nodes(&err).await;
+        self.checkpoint_control.clear_on_err(&err).await;
 
         if self.enable_recovery {
             self.context
@@ -717,13 +755,15 @@ impl GlobalBarrierManager {
 
 impl GlobalBarrierManagerContext {
     /// Try to commit this node. If err, returns
-    async fn complete_barrier(
-        self,
-        command_ctx: Arc<CommandContext>,
-        resps: Vec<BarrierCompleteResponse>,
-        mut notifiers: Vec<Notifier>,
-        enqueue_time: HistogramTimer,
-    ) -> MetaResult<bool> {
+    async fn complete_barrier(self, node: EpochNode) -> MetaResult<bool> {
+        let EpochNode {
+            command_ctx,
+            mut notifiers,
+            enqueue_time,
+            state,
+            ..
+        } = node;
+        let resps = must_match!(state, BarrierEpochState::Collected(resps) => resps);
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps);
         if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
@@ -881,41 +921,42 @@ impl CheckpointControl {
     pub(super) fn next_completed_barrier(
         &mut self,
     ) -> impl Future<Output = MetaResult<(Arc<CommandContext>, bool)>> + '_ {
-        if self.completing_command.is_none() {
+        if matches!(&self.completing_command, CompletingCommand::None) {
             // If there is no completing barrier, try to start completing the earliest barrier if
             // it has been collected.
             if let Some(EpochNode {
-                state: BarrierEpochState::Completed(_),
+                state: BarrierEpochState::Collected(_),
                 ..
             }) = self.command_ctx_queue.front_mut()
             {
                 let node = self.command_ctx_queue.pop_front().expect("non-empty");
-                let resps = must_match!(node.state, BarrierEpochState::Completed(resps) => resps);
-                let join_handle = tokio::spawn(self.context.clone().complete_barrier(
-                    node.command_ctx.clone(),
-                    resps,
-                    node.notifiers,
-                    node.enqueue_time,
-                ));
-                let _ = self.completing_command.insert(CompletingCommand {
-                    command_ctx: node.command_ctx,
+                let command_ctx = node.command_ctx.clone();
+                let join_handle = tokio::spawn(self.context.clone().complete_barrier(node));
+                self.completing_command = CompletingCommand::Completing {
+                    command_ctx,
                     join_handle,
-                });
+                };
             }
         }
 
         poll_fn(|cx| {
-            if let Some(completing_command) = &mut self.completing_command {
-                let join_result = ready!(completing_command.join_handle.poll_unpin(cx))
+            if let CompletingCommand::Completing {
+                join_handle,
+                command_ctx,
+            } = &mut self.completing_command
+            {
+                let join_result = ready!(join_handle.poll_unpin(cx))
                     .map_err(|e| {
                         anyhow!("failed to join completing command: {:?}", e.as_report()).into()
                     })
                     .and_then(|result| result);
-                let completed_command = self.completing_command.take().expect("non-empty");
-                let result = join_result.map(|has_remaining| {
-                    let command_ctx = completed_command.command_ctx.clone();
-                    (command_ctx, has_remaining)
-                });
+                let command_ctx = command_ctx.clone();
+                if let Err(e) = &join_result {
+                    self.completing_command = CompletingCommand::Err(e.clone());
+                } else {
+                    self.completing_command = CompletingCommand::None;
+                }
+                let result = join_result.map(move |has_remaining| (command_ctx, has_remaining));
 
                 Poll::Ready(result)
             } else {
