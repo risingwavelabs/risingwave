@@ -18,7 +18,7 @@ use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::executor::{ExecutorInfo, OverWindowExecutor, OverWindowExecutorArgs};
+use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
 
 use crate::prelude::*;
 
@@ -63,7 +63,6 @@ async fn create_executor<S: StateStore>(
         });
         Schema { fields }
     };
-    let output_pk_indices = vec![2];
 
     let state_table = StateTable::new_without_distribution(
         store,
@@ -74,17 +73,14 @@ async fn create_executor<S: StateStore>(
     )
     .await;
 
-    let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_pk_indices.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
         actor_ctx: ActorContext::for_test(123),
-        info: ExecutorInfo {
-            schema: output_schema,
-            pk_indices: output_pk_indices,
-            identity: "OverWindowExecutor".to_string(),
-        },
 
-        input: source.boxed(),
+        input: source,
 
+        schema: output_schema,
         calls,
         partition_key_indices,
         order_key_indices,
