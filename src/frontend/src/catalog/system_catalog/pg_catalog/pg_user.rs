@@ -22,6 +22,7 @@ use risingwave_frontend_macro::system_catalog;
     "pg_catalog.pg_user",
     "SELECT id AS usesysid,
         name,
+        name AS usename,
         create_db AS usecreatedb,
         is_super AS usesuper,
         '********' AS passwd
@@ -30,6 +31,7 @@ use risingwave_frontend_macro::system_catalog;
 #[derive(Fields)]
 struct PgUser {
     usesysid: i32,
+    name: String, // FIXME: For backward compatibility, remove it when the cloud update it.
     usename: String,
     usecreatedb: bool,
     usesuper: bool,
