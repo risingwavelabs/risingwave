@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::stream_plan::UnionNode;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use super::*;
-use crate::executor::UnionExecutor;
-
-pub struct UnionExecutorBuilder;
-
-impl ExecutorBuilder for UnionExecutorBuilder {
-    type Node = UnionNode;
-
-    async fn new_boxed_executor(
-        params: ExecutorParams,
-        _node: &Self::Node,
-        _store: impl StateStore,
-    ) -> StreamResult<Executor> {
-        Ok((params.info, UnionExecutor::new(params.input)).into())
-    }
+/// The catalog `pg_rewrite` stores rewrite rules for tables and views.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-rewrite.html`]
+/// This is introduced only for pg compatibility and is not used in our system.
+#[system_catalog(view, "pg_catalog.pg_rewrite")]
+#[derive(Fields)]
+struct PgRewrite {
+    #[primary_key]
+    oid: i32,
+    rulename: String,
+    ev_class: i32,
+    ev_type: String,
+    ev_enabled: String,
+    is_instead: bool,
+    ev_qual: String,
+    ev_action: String,
 }

@@ -46,7 +46,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
             .local_barrier_manager
@@ -54,7 +54,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let executor = {
+            let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
@@ -205,7 +205,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     #[expect(deprecated)]
                     crate::executor::FsSourceExecutor::new(
                         params.actor_context.clone(),
-                        params.info,
                         stream_source_core,
                         params.executor_stats,
                         barrier_receiver,
@@ -216,7 +215,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),
-                        params.info.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
@@ -228,7 +226,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 } else {
                     SourceExecutor::new(
                         params.actor_context.clone(),
-                        params.info.clone(),
                         Some(stream_source_core),
                         params.executor_stats.clone(),
                         barrier_receiver,
@@ -239,14 +236,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .boxed()
                 }
             };
+            let mut info = params.info.clone();
+            info.identity = format!("{} (flow controlled)", info.identity);
+
             let rate_limit = source.rate_limit.map(|x| x as _);
-            Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
+            let exec =
+                FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
+            Ok((params.info, exec).into())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.
-            Ok(SourceExecutor::<PanicStateStore>::new(
+            let exec = SourceExecutor::<PanicStateStore>::new(
                 params.actor_context,
-                params.info,
                 None,
                 params.executor_stats,
                 barrier_receiver,
@@ -254,8 +255,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
                 params.env.connector_params(),
-            )
-            .boxed())
+            );
+            Ok((params.info, exec).into())
         }
     }
 }
