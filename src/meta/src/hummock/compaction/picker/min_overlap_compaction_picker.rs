@@ -227,7 +227,7 @@ impl NonOverlapSubLevelPicker {
 
         // Pay attention to the order here: Make sure to select the lowest sub_level to meet the requirements of base compaction. If you break the assumption of this order, you need to redesign it.
         // TODO: Use binary selection to replace the step algorithm to optimize algorithm complexity
-        for (target_index, target_level) in levels.iter().enumerate().skip(1) {
+        'expand_new_level: for (target_index, target_level) in levels.iter().enumerate().skip(1) {
             if target_level.level_type() != LevelType::Nonoverlapping {
                 break;
             }
@@ -261,8 +261,8 @@ impl NonOverlapSubLevelPicker {
 
             let mut add_files_size: u64 = 0;
             let mut add_files_count: usize = 0;
-            let mut finish = false;
-            let mut pending_compact = false;
+            // let mut finish = false;
+            // let mut pending_compact = false;
 
             let mut select_level_count = 0;
             for reverse_index in (0..=target_index).rev() {
@@ -274,17 +274,16 @@ impl NonOverlapSubLevelPicker {
                     basic_overlap_info.check_multiple_overlap(target_tables)
                 };
 
+                // We allow a layer in the middle without overlap, so we need to continue to
+                // the next layer to search for overlap
                 if overlap_files_range.is_empty() {
                     // empty level
                     continue;
                 }
 
-                // We allow a layer in the middle without overlap, so we need to continue to
-                // the next layer to search for overlap
                 for other in &target_tables[overlap_files_range.clone()] {
                     if level_handler.is_pending_compact(&other.sst_id) {
-                        pending_compact = true;
-                        break;
+                        break 'expand_new_level;
                     }
                     basic_overlap_info.update(other);
 
@@ -292,25 +291,16 @@ impl NonOverlapSubLevelPicker {
                     add_files_count += 1;
                 }
 
-                if pending_compact {
-                    break;
-                }
-
                 // When size / file count has exceeded the limit, we need to abandon this plan, it cannot be expanded to the last sub_level
                 if max_select_level_count > 1
                     && (add_files_size >= self.max_compaction_bytes
                         || add_files_count >= self.max_file_count as usize)
                 {
-                    finish = true;
-                    break;
+                    break 'expand_new_level;
                 }
 
                 overlap_levels.push((reverse_index, overlap_files_range.clone()));
                 select_level_count += 1;
-            }
-
-            if pending_compact || finish {
-                break;
             }
 
             if select_level_count > max_select_level_count {
