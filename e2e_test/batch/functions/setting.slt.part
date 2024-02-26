@@ -17,3 +17,8 @@ query T
 SELECT set_config('client_min_messages', 'notice', false);
 ----
 notice
+
+query T
+SELECT setting FROM pg_settings WHERE name IN ('server_version_num', 'crdb_version') ORDER BY name DESC;
+----
+130014
