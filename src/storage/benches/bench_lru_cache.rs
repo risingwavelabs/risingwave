@@ -136,7 +136,7 @@ impl Hash for BlockKey {
 }
 
 pub struct FIFOCacheImpl {
-    inner: FifoCache<BlockKey, Arc<Block>>,
+    inner: Arc<FifoCache<BlockKey, Arc<Block>>>,
     fake_io_latency: Duration,
     write_requests: Arc<Mutex<HashMap<BlockKey, RequestQueue>>>,
 }
@@ -144,7 +144,7 @@ pub struct FIFOCacheImpl {
 impl FIFOCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: FifoCache::new(capacity * BLOCK_SIZE),
+            inner: Arc::new(FifoCache::new(2, capacity * BLOCK_SIZE)),
             fake_io_latency,
             write_requests: Arc::new(Mutex::new(HashMap::default())),
         }
@@ -158,7 +158,7 @@ impl CacheBase for FIFOCacheImpl {
             object_id,
             block_idx,
         };
-        if let Some(ret) = self.inner.get(&key) {
+        if let Some(ret) = self.inner.lookup(&key) {
             return Ok(ret);
         }
 
