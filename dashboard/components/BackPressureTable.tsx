@@ -29,10 +29,7 @@ import { sortBy } from "lodash"
 import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
 import useErrorToast from "../hook/useErrorToast"
-import {
-  BackPressuresMetrics,
-  getActorBackPressures,
-} from "../pages/api/metric"
+import { BackPressuresMetrics, getActorBackPressures } from "../lib/api/metric"
 import RateBar from "./RateBar"
 
 export default function BackPressureTable({

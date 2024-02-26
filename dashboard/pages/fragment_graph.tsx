@@ -37,12 +37,12 @@ import FragmentDependencyGraph from "../components/FragmentDependencyGraph"
 import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
+import useFetch from "../lib/api/fetch"
+import { getActorBackPressures, p50, p90, p95, p99 } from "../lib/api/metric"
+import { getFragments, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
-import useFetch from "./api/fetch"
-import { getActorBackPressures, p50, p90, p95, p99 } from "./api/metric"
-import { getFragments, getStreamingJobs } from "./api/streaming"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
