@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
+use risingwave_common::bail;
 
+use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
@@ -57,12 +59,12 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     async fn new(
         properties: KafkaProperties,
         context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<KafkaSplitEnumerator> {
+    ) -> ConnectorResult<KafkaSplitEnumerator> {
         let mut config = rdkafka::ClientConfig::new();
         let common_props = &properties.common;
 
         let broker_address = common_props.brokers.clone();
-        let broker_rewrite_map = common_props.broker_rewrite_map.clone();
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
@@ -77,11 +79,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Some("earliest") => KafkaEnumeratorOffset::Earliest,
             Some("latest") => KafkaEnumeratorOffset::Latest,
             None => KafkaEnumeratorOffset::Earliest,
-            _ => {
-                return Err(anyhow!(
-                    "properties `scan_startup_mode` only support earliest and latest or leave it empty"
-                ));
-            }
+            _ => bail!(
+                "properties `scan_startup_mode` only support earliest and latest or leave it empty"
+            ),
         };
 
         if let Some(s) = &properties.time_offset {
@@ -105,13 +105,14 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
-            anyhow!(format!(
-                "failed to fetch metadata from kafka ({}), error: {}",
-                self.broker_address, e
-            ))
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
+            )
         })?;
+
         let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
         let mut start_offsets = self
             .fetch_start_offset(topic_partitions.as_ref(), &watermarks)
@@ -153,12 +154,12 @@ impl KafkaSplitEnumerator {
         &mut self,
         expect_start_timestamp_millis: Option<i64>,
         expect_stop_timestamp_millis: Option<i64>,
-    ) -> anyhow::Result<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
-            anyhow!(format!(
-                "failed to fetch metadata from kafka ({}), error: {}",
-                self.broker_address, e
-            ))
+    ) -> ConnectorResult<Vec<KafkaSplit>> {
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
+            )
         })?;
 
         // here we are getting the start offset and end offset for each partition with the given
@@ -349,7 +350,7 @@ impl KafkaSplitEnumerator {
             .is_ok()
     }
 
-    async fn fetch_topic_partition(&self) -> anyhow::Result<Vec<i32>> {
+    async fn fetch_topic_partition(&self) -> ConnectorResult<Vec<i32>> {
         // for now, we only support one topic
         let metadata = self
             .client
@@ -358,11 +359,11 @@ impl KafkaSplitEnumerator {
 
         let topic_meta = match metadata.topics() {
             [meta] => meta,
-            _ => return Err(anyhow!("topic {} not found", self.topic)),
+            _ => bail!("topic {} not found", self.topic),
         };
 
         if topic_meta.partitions().is_empty() {
-            return Err(anyhow!("topic {} not found", self.topic));
+            bail!("topic {} not found", self.topic);
         }
 
         Ok(topic_meta

@@ -87,6 +87,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         };
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: source.context().get_config().developer.chunk_size,
+            rate_limit: None,
         };
 
         let column_ids: Vec<_> = source_node
@@ -147,6 +148,7 @@ impl SourceExecutor {
             self.source_ctrl_opts.clone(),
             None,
             ConnectorProperties::default(),
+            "NA".to_owned(), // FIXME: source name was not passed in batch plan
         ));
         let stream = self
             .source

@@ -12,40 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
-pub const RW_ACTORS: BuiltinTable = BuiltinTable {
-    name: "rw_actors",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "actor_id"),
-        (DataType::Int32, "fragment_id"),
-        (DataType::Int32, "parallel_unit_id"),
-        (DataType::Varchar, "status"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwActor {
+    #[primary_key]
+    actor_id: i32,
+    fragment_id: i32,
+    parallel_unit_id: i32,
+    state: String,
+}
 
-impl SysCatalogReaderImpl {
-    pub async fn read_rw_actor_states_info(&self) -> Result<Vec<OwnedRow>> {
-        let states = self.meta_client.list_actor_states().await?;
+#[system_catalog(table, "rw_catalog.rw_actors")]
+async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActor>> {
+    let states = reader.meta_client.list_actor_states().await?;
 
-        Ok(states
-            .into_iter()
-            .map(|state| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(state.actor_id as i32)),
-                    Some(ScalarImpl::Int32(state.fragment_id as i32)),
-                    Some(ScalarImpl::Int32(state.parallel_unit_id as i32)),
-                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
-                ])
-            })
-            .collect_vec())
-    }
+    Ok(states
+        .into_iter()
+        .map(|state| RwActor {
+            actor_id: state.actor_id as i32,
+            fragment_id: state.fragment_id as i32,
+            parallel_unit_id: state.parallel_unit_id as i32,
+            state: state.state().as_str_name().into(),
+        })
+        .collect())
 }

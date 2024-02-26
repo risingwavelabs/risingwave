@@ -761,7 +761,7 @@ mod tests {
         }
 
         fn create_source_new_before_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 1 4 1001",
@@ -792,7 +792,7 @@ mod tests {
         }
 
         fn create_source_new_after_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 9 1 1003
@@ -1209,7 +1209,7 @@ mod tests {
         }
 
         fn create_source_before_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     "  I I
                     +  1 0
@@ -1248,7 +1248,7 @@ mod tests {
         }
 
         fn create_source_after_recovery() -> Box<MockSource> {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I
                     - 1 0",

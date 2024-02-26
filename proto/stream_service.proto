@@ -46,6 +46,7 @@ message DropActorsResponse {
 
 message ForceStopActorsRequest {
   string request_id = 1;
+  uint64 prev_epoch = 2;
 }
 
 message ForceStopActorsResponse {
@@ -103,20 +104,6 @@ message WaitEpochCommitResponse {
   common.Status status = 1;
 }
 
-// Back pressure
-message GetBackPressureRequest {}
-
-message BackPressureInfo {
-  uint32 actor_id = 1;
-  uint32 fragment_id = 2;
-  uint32 downstream_fragment_id = 3;
-  double value = 4;
-}
-
-message GetBackPressureResponse {
-  repeated BackPressureInfo back_pressure_infos = 1;
-}
-
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -126,7 +113,6 @@ service StreamService {
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
-  rpc GetBackPressure(GetBackPressureRequest) returns (GetBackPressureResponse);
 }
 
 // TODO: Lifecycle management for actors.

@@ -85,8 +85,11 @@ pub enum AlterTableOperation {
     ChangeOwner { new_owner_name: Ident },
     /// `SET SCHEMA <schema_name>`
     SetSchema { new_schema_name: ObjectName },
-    /// `SET PARALLELISM TO <parallelism>`
-    SetParallelism { parallelism: SetVariableValue },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,9 +99,10 @@ pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
     },
-    /// `SET PARALLELISM TO <parallelism>`
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
     },
 }
 
@@ -115,9 +119,10 @@ pub enum AlterViewOperation {
     SetSchema {
         new_schema_name: ObjectName,
     },
-    /// `SET PARALLELISM TO <parallelism>`
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
     },
 }
 
@@ -134,9 +139,10 @@ pub enum AlterSinkOperation {
     SetSchema {
         new_schema_name: ObjectName,
     },
-    /// `SET PARALLELISM TO <parallelism>`
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
     },
 }
 
@@ -144,11 +150,20 @@ pub enum AlterSinkOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSubscriptionOperation {
-    RenameSubscription { subscription_name: ObjectName },
-    ChangeOwner { new_owner_name: Ident },
-    SetSchema { new_schema_name: ObjectName },
-    // TODO! `SET PARALLELISM TO <parallelism>`
-    SetParallelism { parallelism: SetVariableValue },
+    RenameSubscription {
+        subscription_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -257,8 +272,16 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterTableOperation::SetParallelism { parallelism } => {
-                write!(f, "SET PARALLELISM TO {}", parallelism)
+            AlterTableOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }
@@ -270,8 +293,16 @@ impl fmt::Display for AlterIndexOperation {
             AlterIndexOperation::RenameIndex { index_name } => {
                 write!(f, "RENAME TO {index_name}")
             }
-            AlterIndexOperation::SetParallelism { parallelism } => {
-                write!(f, "SET PARALLELISM TO {}", parallelism)
+            AlterIndexOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }
@@ -289,8 +320,16 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterViewOperation::SetParallelism { parallelism } => {
-                write!(f, "SET PARALLELISM TO {}", parallelism)
+            AlterViewOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }
@@ -308,8 +347,16 @@ impl fmt::Display for AlterSinkOperation {
             AlterSinkOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSinkOperation::SetParallelism { parallelism } => {
-                write!(f, "SET PARALLELISM TO {}", parallelism)
+            AlterSinkOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }
@@ -327,8 +374,16 @@ impl fmt::Display for AlterSubscriptionOperation {
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSubscriptionOperation::SetParallelism { parallelism } => {
-                write!(f, "SET PARALLELISM TO {}", parallelism)
+            AlterSubscriptionOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }

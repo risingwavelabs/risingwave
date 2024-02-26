@@ -27,9 +27,10 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
-    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
+    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
+    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
+    StackTraceResponse,
 };
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
@@ -193,6 +194,15 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .stack_trace(StackTraceRequest::default())
+            .await?
+            .into_inner())
+    }
+
+    pub async fn get_back_pressure(&self) -> Result<GetBackPressureResponse> {
+        Ok(self
+            .monitor_client
+            .to_owned()
+            .get_back_pressure(GetBackPressureRequest::default())
             .await?
             .into_inner())
     }

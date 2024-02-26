@@ -891,9 +891,10 @@ impl DdlService for DdlServiceImpl {
 
         let table_id = req.get_table_id();
         let parallelism = req.get_parallelism()?.clone();
+        let deferred = req.get_deferred();
 
         self.ddl_controller
-            .alter_parallelism(table_id, parallelism)
+            .alter_parallelism(table_id, parallelism, deferred)
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))

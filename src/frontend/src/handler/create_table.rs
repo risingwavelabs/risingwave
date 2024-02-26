@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -26,13 +27,13 @@ use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
+use risingwave_connector::source::cdc::CDC_BACKFILL_ENABLE_KEY;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
@@ -54,11 +55,13 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
     check_source_schema, handle_addition_columns, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
+use crate::handler::util::is_iceberg_connector;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
@@ -212,7 +215,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 type_name: "".to_string(),
                 generated_or_default_column: None,
                 description: None,
-                additional_columns: AdditionalColumn { column_type: None },
+                additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
             },
             is_hidden: false,
@@ -409,6 +412,7 @@ fn multiple_pk_definition_err() -> RwError {
 pub fn bind_pk_on_relation(
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
+    must_need_pk: bool,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
     for c in &columns {
         assert!(c.column_id() != ColumnId::placeholder());
@@ -429,8 +433,10 @@ pub fn bind_pk_on_relation(
         })
         .try_collect()?;
 
-    // Add `_row_id` column if `pk_column_ids` is empty.
-    let row_id_index = pk_column_ids.is_empty().then(|| {
+    // Add `_row_id` column if `pk_column_ids` is empty and must_need_pk
+    let need_row_id = pk_column_ids.is_empty() && must_need_pk;
+
+    let row_id_index = need_row_id.then(|| {
         let column = ColumnCatalog::row_id_column();
         let index = columns.len();
         pk_column_ids = vec![column.column_id()];
@@ -508,7 +514,12 @@ pub(crate) async fn gen_create_table_plan_with_source(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
+    if is_iceberg_connector(&with_properties) {
+        return Err(
+            ErrorCode::BindError("can't create table with iceberg connector".to_string()).into(),
+        );
+    }
+    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
 
     let watermark_descs = bind_source_watermark(
         session,
@@ -529,7 +540,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&with_properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     gen_table_plan_inner(
         context.into(),
@@ -592,7 +603,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
+    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names, true)?;
 
     let watermark_descs = bind_source_watermark(
         context.session_ctx(),
@@ -772,7 +783,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     }
 
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-    let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
+    let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names, true)?;
 
     let definition = context.normalized_sql().to_owned();
 
@@ -808,10 +819,20 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
+    // disable backfill if 'snapshot=false'
+    let disable_backfill = match context.with_options().get(CDC_BACKFILL_ENABLE_KEY) {
+        None => false,
+        Some(v) => {
+            !(bool::from_str(v)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?)
+        }
+    };
+
     let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
+        disable_backfill,
     );
 
     let scan_node: PlanRef = logical_scan.into();
@@ -1263,7 +1284,7 @@ mod tests {
                 }
                 ensure_table_constraints_supported(&constraints)?;
                 let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
-                let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
+                let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names, true)?;
                 Ok(pk_column_ids)
             })();
             match (expected, actual) {

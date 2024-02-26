@@ -29,7 +29,7 @@ use jni::JavaVM;
 use risingwave_jni_core::call_method;
 use risingwave_jni_core::jvm_runtime::{execute_with_jni_env, jobj_to_str, JVM};
 
-use crate::sink::{Result, SinkError};
+use crate::error::ConnectorResult;
 
 pub struct JniCatalog {
     java_catalog: GlobalRef,
@@ -144,7 +144,7 @@ impl JniCatalog {
         name: impl ToString,
         catalog_impl: impl ToString,
         java_catalog_props: HashMap<String, String>,
-    ) -> Result<CatalogRef> {
+    ) -> ConnectorResult<CatalogRef> {
         let jvm = JVM.get_or_init()?;
 
         execute_with_jni_env(jvm, |env| {
@@ -184,6 +184,6 @@ impl JniCatalog {
                 config: base_config,
             }) as CatalogRef)
         })
-        .map_err(SinkError::Iceberg)
+        .map_err(Into::into)
     }
 }

@@ -99,21 +99,30 @@ impl std::fmt::Debug for LruWatermarkController {
 ///
 /// - `stats.allocated`: Total number of bytes allocated by the application.
 /// - `stats.active`: Total number of bytes in active pages allocated by the application. This is a multiple of the page size, and greater than or equal to `stats.allocated`. This does not include `stats.arenas.<i>.pdirty`, `stats.arenas.<i>.pmuzzy`, nor pages entirely devoted to allocator metadata.
+/// - `stats.resident`: Total number of bytes in physically resident data pages mapped by the allocator.
+/// - `stats.metadata`: Total number of bytes dedicated to jemalloc metadata.
 ///
 /// Reference: <https://jemalloc.net/jemalloc.3.html>
-fn jemalloc_memory_stats() -> (usize, usize) {
+fn jemalloc_memory_stats() -> (usize, usize, usize, usize) {
     if let Err(e) = tikv_jemalloc_ctl::epoch::advance() {
         tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
     }
     let allocated = tikv_jemalloc_ctl::stats::allocated::read().unwrap();
     let active = tikv_jemalloc_ctl::stats::active::read().unwrap();
-    (allocated, active)
+    let resident = tikv_jemalloc_ctl::stats::resident::read().unwrap();
+    let metadata = tikv_jemalloc_ctl::stats::metadata::read().unwrap();
+    (allocated, active, resident, metadata)
 }
 
 impl LruWatermarkController {
     pub fn tick(&mut self, interval_ms: u32) -> Epoch {
         // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
-        let (jemalloc_allocated_bytes, jemalloc_active_bytes) = jemalloc_memory_stats();
+        let (
+            jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
+            jemalloc_resident_bytes,
+            jemalloc_metadata_bytes,
+        ) = jemalloc_memory_stats();
         let (jvm_allocated_bytes, jvm_active_bytes) = load_jvm_memory_stats();
 
         let cur_used_memory_bytes = jemalloc_active_bytes + jvm_allocated_bytes;
@@ -188,6 +197,12 @@ impl LruWatermarkController {
         self.metrics
             .jemalloc_active_bytes
             .set(jemalloc_active_bytes as i64);
+        self.metrics
+            .jemalloc_resident_bytes
+            .set(jemalloc_resident_bytes as i64);
+        self.metrics
+            .jemalloc_metadata_bytes
+            .set(jemalloc_metadata_bytes as i64);
         self.metrics
             .jvm_allocated_bytes
             .set(jvm_allocated_bytes as i64);

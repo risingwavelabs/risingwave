@@ -12,13 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use super::DataType;
+use crate::row::OwnedRow;
+use crate::util::chunk_coalesce::DataChunkBuilder;
 
 /// A struct can implements `Fields` when if can be represented as a relational Row.
 ///
-/// Can be automatically derived with [`#[derive(Fields)]`](derive@super::Fields).
+/// # Derivable
+///
+/// This trait can be automatically derived with [`#[derive(Fields)]`](derive@super::Fields).
+/// Type of the fields must implement [`WithDataType`](super::WithDataType) and [`ToOwnedDatum`](super::ToOwnedDatum).
+///
+/// ```
+/// # use risingwave_common::types::Fields;
+///
+/// #[derive(Fields)]
+/// struct Data {
+///     v1: i16,
+///     v2: i32,
+/// }
+/// ```
+///
+/// You can add `#[primary_key]` attribute to one of the fields to specify the primary key of the table.
+///
+/// ```
+/// # use risingwave_common::types::Fields;
+///
+/// #[derive(Fields)]
+/// struct Data {
+///     #[primary_key]
+///     v1: i16,
+///     v2: i32,
+/// }
+/// ```
+///
+/// If the primary key is composite, you can add `#[primary_key(...)]` attribute to the struct to specify the order of the fields.
+///
+/// ```
+/// # use risingwave_common::types::Fields;
+///
+/// #[derive(Fields)]
+/// #[primary_key(v2, v1)]
+/// struct Data {
+///     v1: i16,
+///     v2: i32,
+/// }
+/// ```
 pub trait Fields {
-    /// When the struct being converted to an [`Row`](crate::row::Row) or a [`DataChunk`](crate::array::DataChunk), it schema must be consistent with the `fields` call.
+    /// The primary key of the table.
+    ///
+    /// - `None` if the primary key is not applicable.
+    /// - `Some(&[])` if the primary key is empty, i.e., there'll be at most one row in the table.
+    const PRIMARY_KEY: Option<&'static [usize]>;
+
+    /// Return the schema of the struct.
     fn fields() -> Vec<(&'static str, DataType)>;
+
+    /// Convert the struct to an `OwnedRow`.
+    fn into_owned_row(self) -> OwnedRow;
+
+    /// Create a [`DataChunkBuilder`](crate::util::chunk_coalesce::DataChunkBuilder) with the schema of the struct.
+    fn data_chunk_builder(capacity: usize) -> DataChunkBuilder {
+        DataChunkBuilder::new(
+            Self::fields().into_iter().map(|(_, ty)| ty).collect(),
+            capacity,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -48,8 +106,8 @@ mod tests {
             v7: Vec<u8>,
             v8: std::vec::Vec<i16>,
             v9: Option<Vec<i64>>,
-            v10: std::option::Option<Vec<Option<f32>>>,
-            v11: Box<Timestamp>,
+            v10: std::option::Option<Vec<Option<F32>>>,
+            v11: Timestamp,
             v14: Sub,
         }
 

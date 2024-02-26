@@ -484,10 +484,12 @@ impl MetaClient {
         &self,
         table_id: u32,
         parallelism: PbTableParallelism,
+        deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id,
             parallelism: Some(parallelism),
+            deferred,
         };
 
         self.inner.alter_parallelism(request).await?;

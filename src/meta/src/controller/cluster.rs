@@ -31,12 +31,12 @@ use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId,
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
 use risingwave_pb::common::{
     HostAddress, ParallelUnit, PbHostAddress, PbParallelUnit, PbWorkerNode, PbWorkerType,
+    WorkerNode,
 };
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
-use risingwave_pb::stream_service::{BackPressureInfo, GetBackPressureResponse};
 use sea_orm::prelude::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -44,6 +44,7 @@ use sea_orm::{
     TransactionTrait,
 };
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -110,7 +111,11 @@ impl ClusterController {
         let meta_store = env
             .sql_meta_store()
             .expect("sql meta store is not initialized");
-        let inner = ClusterControllerInner::new(meta_store.conn).await?;
+        let inner = ClusterControllerInner::new(
+            meta_store.conn,
+            env.opts.disable_automatic_parallelism_control,
+        )
+        .await?;
         Ok(Self {
             env,
             max_heartbeat_interval,
@@ -335,6 +340,22 @@ impl ClusterController {
         Ok(workers)
     }
 
+    pub(crate) async fn subscribe_active_streaming_compute_nodes(
+        &self,
+    ) -> MetaResult<(Vec<WorkerNode>, UnboundedReceiver<LocalNotification>)> {
+        let inner = self.inner.read().await;
+        let worker_nodes = inner.list_active_streaming_workers().await?;
+        let (tx, rx) = unbounded_channel();
+
+        // insert before release the read lock to ensure that we don't lose any update in between
+        self.env
+            .notification_manager()
+            .insert_local_sender(tx)
+            .await;
+        drop(inner);
+        Ok((worker_nodes, rx))
+    }
+
     /// A convenient method to get all running compute nodes that may have running actors on them
     /// i.e. CNs which are running
     pub async fn list_active_streaming_workers(&self) -> MetaResult<Vec<PbWorkerNode>> {
@@ -369,32 +390,6 @@ impl ClusterController {
             .read()
             .await
             .get_worker_extra_info_by_id(worker_id)
-    }
-
-    pub async fn get_back_pressure(&self) -> MetaResult<GetBackPressureResponse> {
-        let nodes = self
-            .inner
-            .read()
-            .await
-            .list_active_serving_workers()
-            .await
-            .unwrap();
-        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
-        for node in nodes {
-            let client = self.env.stream_client_pool().get(&node).await.unwrap();
-            let request = risingwave_pb::stream_service::GetBackPressureRequest {};
-            back_pressure_infos.extend(
-                client
-                    .get_back_pressure(request)
-                    .await
-                    .unwrap()
-                    .back_pressure_infos,
-            );
-        }
-
-        Ok(GetBackPressureResponse {
-            back_pressure_infos,
-        })
     }
 }
 
@@ -487,13 +482,17 @@ pub struct ClusterControllerInner {
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
+    disable_automatic_parallelism_control: bool,
 }
 
 impl ClusterControllerInner {
     pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
-    pub async fn new(db: DatabaseConnection) -> MetaResult<Self> {
+    pub async fn new(
+        db: DatabaseConnection,
+        disable_automatic_parallelism_control: bool,
+    ) -> MetaResult<Self> {
         let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
             .select_only()
             .column(worker::Column::WorkerId)
@@ -519,6 +518,7 @@ impl ClusterControllerInner {
             db,
             available_transactional_ids,
             worker_extra_info,
+            disable_automatic_parallelism_control,
         })
     }
 
@@ -625,14 +625,25 @@ impl ClusterControllerInner {
 
                 match new_parallelism.cmp(&current_parallelism.len()) {
                     Ordering::Less => {
-                        // Warn and keep the original parallelism if the worker registered with a
-                        // smaller parallelism.
-                        tracing::warn!(
-                            "worker {} parallelism is less than current, current is {}, but received {}",
-                            worker.worker_id,
-                            current_parallelism.len(),
-                            new_parallelism
-                        );
+                        if !self.disable_automatic_parallelism_control {
+                            // Handing over to the subsequent recovery loop for a forced reschedule.
+                            tracing::info!(
+                                "worker {} parallelism reduced from {} to {}",
+                                worker.worker_id,
+                                current_parallelism.len(),
+                                new_parallelism
+                            );
+                            current_parallelism.truncate(new_parallelism);
+                        } else {
+                            // Warn and keep the original parallelism if the worker registered with a
+                            // smaller parallelism.
+                            tracing::warn!(
+                                "worker {} parallelism is less than current, current is {}, but received {}",
+                                worker.worker_id,
+                                current_parallelism.len(),
+                                new_parallelism
+                            );
+                        }
                     }
                     Ordering::Greater => {
                         tracing::info!(

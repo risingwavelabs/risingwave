@@ -38,6 +38,7 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    S3,
     Obs,
     Oss,
     Webhdfs,
@@ -158,7 +159,7 @@ impl ObjectStore for OpendalObjectStore {
             .op
             .lister_with(prefix)
             .recursive(true)
-            .metakey(Metakey::ContentLength | Metakey::ContentType)
+            .metakey(Metakey::ContentLength)
             .await?;
 
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
@@ -190,6 +191,7 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::S3 => "S3",
             EngineType::Gcs => "Gcs",
             EngineType::Obs => "Obs",
             EngineType::Oss => "Oss",
@@ -206,7 +208,11 @@ pub struct OpendalStreamingUploader {
 }
 impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op.writer_with(&path).buffer(OPENDAL_BUFFER_SIZE).await?;
+        let writer = op
+            .writer_with(&path)
+            .concurrent(8)
+            .buffer(OPENDAL_BUFFER_SIZE)
+            .await?;
         Ok(Self { writer })
     }
 }

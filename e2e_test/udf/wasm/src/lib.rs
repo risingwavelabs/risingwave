@@ -1,6 +1,11 @@
 use arrow_udf::function;
 use rust_decimal::Decimal;
 
+#[function("count_char(varchar, varchar) -> int")]
+fn count_char(s: &str, c: &str) -> i32 {
+    s.matches(c).count() as i32
+}
+
 #[function("int_42() -> int")]
 fn int_42() -> i32 {
     42
