@@ -1,5 +1,6 @@
 use std::assert_matches::assert_matches;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -524,6 +525,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -725,6 +727,7 @@ impl PlanRoot {
             pk_column_indices,
             row_id_index,
             version,
+            retention_seconds,
         )
     }
 
@@ -748,6 +751,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            None,
         )
     }
 
@@ -756,6 +760,7 @@ impl PlanRoot {
         &mut self,
         index_name: String,
         definition: String,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
@@ -770,6 +775,7 @@ impl PlanRoot {
             definition,
             TableType::Index,
             cardinality,
+            retention_seconds,
         )
     }
 
