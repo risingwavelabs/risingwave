@@ -1,3 +1,23 @@
+statement ok
+CREATE TABLE IF NOT EXISTS data_types (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    timestamptz_column TIMESTAMPTZ,
+    jsonb_column JSONB,
+    bytea_column BYTEA
+);
+
 query T
 SELECT setting FROM pg_settings WHERE name IN ('server_version_num', 'crdb_version') ORDER BY name DESC;
 ----
@@ -20,7 +40,6 @@ rw_catalog (empty)
 
 query TTTTTTT
 SELECT
-	t3.oid,
 	t1.table_schema,
 	t1.table_name,
 	pg_catalog.obj_description(t3.oid, 'pg_class') AS comment,
@@ -41,3 +60,7 @@ WHERE
 ORDER BY
 	t1.table_schema, t1.table_name;
 ----
+public data_types (empty) NULL NULL (empty)
+
+statement ok
+DROP TABLE data_types;
