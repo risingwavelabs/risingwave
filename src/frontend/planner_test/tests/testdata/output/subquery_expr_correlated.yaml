@@ -956,7 +956,7 @@
     └─LogicalTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [t.a] }
       └─LogicalProject { exprs: [t.a, 1:Int32] }
         └─LogicalFilter { predicate: (t.c = di.d2) AND IsNotNull(t.a) }
-          └─LogicalShare { id: 2 }
+          └─LogicalShare { id: 8 }
             └─LogicalJoin { type: Inner, on: ((t.b = di.d1) OR (t.c = di.d2)), output: all }
               ├─LogicalScan { table: t, columns: [t.a, t.b, t.c], predicate: IsNotNull(t.a) }
               └─LogicalScan { table: di, columns: [di.d1, di.d2] }

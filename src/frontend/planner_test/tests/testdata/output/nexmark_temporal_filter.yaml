@@ -164,14 +164,14 @@
     GROUP BY Q.category;
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
-      └─StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
+    └─StreamProject { exprs: [$expr5, (sum(max($expr9)) / count(max($expr9))::Decimal) as $expr11] }
+      └─StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr9)), count(max($expr9)), count] }
         └─StreamExchange { dist: HashShard($expr5) }
-          └─StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
-            └─StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr8), count] }
-              └─StreamProject { exprs: [$expr2, $expr5, $expr8, _row_id, _row_id] }
-                └─StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
-                  └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
+          └─StreamProject { exprs: [$expr2, $expr5, max($expr9)] }
+            └─StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr9), count] }
+              └─StreamProject { exprs: [$expr2, $expr5, $expr9, _row_id, _row_id] }
+                └─StreamFilter { predicate: ($expr10 >= $expr3) AND ($expr10 <= $expr4) }
+                  └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr8, output: all }
                     ├─StreamExchange { dist: HashShard($expr2) }
                     │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 5:Int32) as $expr3, Field(auction, 6:Int32) as $expr4, Field(auction, 8:Int32) as $expr5, _row_id] }
                     │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -181,35 +181,35 @@
                     │           └─StreamRowIdGen { row_id_index: 5 }
                     │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                     │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-                    └─StreamExchange { dist: HashShard($expr7) }
-                      └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
-                        └─StreamDynamicFilter { predicate: ($expr1 > $expr6), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+                    └─StreamExchange { dist: HashShard($expr8) }
+                      └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr8, Field(bid, 2:Int32) as $expr9, Field(bid, 5:Int32) as $expr10, _row_id] }
+                        └─StreamDynamicFilter { predicate: ($expr6 > $expr7), output_watermarks: [$expr6], output: [event_type, auction, bid, $expr6, _row_id], cleaned_by_watermark: true }
                           ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                          │ └─StreamShare { id: 5 }
-                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                          │ └─StreamShare { id: 13 }
+                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr6, _row_id], output_watermarks: [$expr6] }
                           │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                           │       └─StreamRowIdGen { row_id_index: 5 }
-                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr6, _row_id], output_watermarks: [$expr6] }
                           │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
-                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr7], output_watermarks: [$expr7] }
                               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
-        └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
+    └── StreamProject { exprs: [$expr5, (sum(max($expr9)) / count(max($expr9))::Decimal) as $expr11] }
+        └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr9)), count(max($expr9)), count] }
             ├── tables: [ HashAggState: 0 ]
             └── StreamExchange Hash([1]) from 1
 
     Fragment 1
-    StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
-    └── StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr8), count] }
+    StreamProject { exprs: [$expr2, $expr5, max($expr9)] }
+    └── StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr9), count] }
         ├── tables: [ HashAggState: 2, HashAggCall0: 1 ]
-        └── StreamProject { exprs: [$expr2, $expr5, $expr8, _row_id, _row_id] }
-            └── StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
-                └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
+        └── StreamProject { exprs: [$expr2, $expr5, $expr9, _row_id, _row_id] }
+            └── StreamFilter { predicate: ($expr10 >= $expr3) AND ($expr10 <= $expr4) }
+                └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr8, output: all }
                     ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
                     ├── StreamExchange Hash([0]) from 2
                     └── StreamExchange Hash([0]) from 4
@@ -227,32 +227,39 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 7 ] }
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr6), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr8, Field(bid, 2:Int32) as $expr9, Field(bid, 5:Int32) as $expr10, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr6 > $expr7), output_watermarks: [$expr6], output: [event_type, auction, bid, $expr6, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 8, DynamicFilterRight: 9 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 3
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
-    └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr6, _row_id], output_watermarks: [$expr6] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr6, _row_id], output_watermarks: [$expr6] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 10 ] }
+
+    Fragment 6
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr7], output_watermarks: [$expr7] }
+    └── StreamNow { output: [now] } { tables: [ Now: 11 ] }
 
     Table 0
-    ├── columns: [ $expr5, sum(max($expr8)), count(max($expr8)), count ]
+    ├── columns: [ $expr5, sum(max($expr9)), count(max($expr9)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ $expr2, $expr5, $expr8, _row_id, _row_id_0 ]
+    ├── columns: [ $expr2, $expr5, $expr9, _row_id, _row_id_0 ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
 
-    Table 2 { columns: [ $expr2, $expr5, max($expr8), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ $expr2, $expr5, max($expr9), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
     Table 3
     ├── columns: [ $expr2, $expr3, $expr4, $expr5, _row_id ]
@@ -263,22 +270,24 @@
 
     Table 4 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr7, $expr8, $expr9, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr8, $expr9, $expr10, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ $expr7, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ $expr8, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 8
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id ]
+    ├── columns: [ event_type, auction, bid, $expr6, _row_id ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
 
-    Table 9 { columns: [ $expr6 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ $expr7 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 10 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 10 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 11 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ category, avg ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -456,15 +465,15 @@
     WHERE Q.rank <= 1;
   stream_plan: |-
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
-      └─StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+    └─StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr11, $expr2] }
+      └─StreamOverWindow { window_functions: [sum($expr9) OVER(PARTITION BY $expr5 ORDER BY $expr10 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr9) OVER(PARTITION BY $expr5 ORDER BY $expr10 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard($expr5) }
-          └─StreamProject { exprs: [$expr5, $expr8, $expr9, $expr2] }
-            └─StreamGroupTopN { order: [$expr8 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr5] }
+          └─StreamProject { exprs: [$expr5, $expr9, $expr10, $expr2] }
+            └─StreamGroupTopN { order: [$expr9 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr5] }
               └─StreamExchange { dist: HashShard($expr2, $expr5) }
-                └─StreamProject { exprs: [$expr2, $expr5, $expr8, $expr9, _row_id, _row_id] }
-                  └─StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
-                    └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
+                └─StreamProject { exprs: [$expr2, $expr5, $expr9, $expr10, _row_id, _row_id] }
+                  └─StreamFilter { predicate: ($expr10 >= $expr3) AND ($expr10 <= $expr4) }
+                    └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr8, output: all }
                       ├─StreamExchange { dist: HashShard($expr2) }
                       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 5:Int32) as $expr3, Field(auction, 6:Int32) as $expr4, Field(auction, 7:Int32) as $expr5, _row_id] }
                       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -474,36 +483,36 @@
                       │           └─StreamRowIdGen { row_id_index: 5 }
                       │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-                      └─StreamExchange { dist: HashShard($expr7) }
-                        └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
-                          └─StreamDynamicFilter { predicate: ($expr1 > $expr6), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+                      └─StreamExchange { dist: HashShard($expr8) }
+                        └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr8, Field(bid, 2:Int32) as $expr9, Field(bid, 5:Int32) as $expr10, _row_id] }
+                          └─StreamDynamicFilter { predicate: ($expr6 > $expr7), output_watermarks: [$expr6], output: [event_type, auction, bid, $expr6, _row_id], cleaned_by_watermark: true }
                             ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                            │ └─StreamShare { id: 5 }
-                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                            │ └─StreamShare { id: 13 }
+                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr6, _row_id], output_watermarks: [$expr6] }
                             │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                             │       └─StreamRowIdGen { row_id_index: 5 }
-                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr6, _row_id], output_watermarks: [$expr6] }
                             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
-                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr7], output_watermarks: [$expr7] }
                                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
-    └── StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
-        └── StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+    └── StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr11, $expr2] }
+        └── StreamOverWindow { window_functions: [sum($expr9) OVER(PARTITION BY $expr5 ORDER BY $expr10 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr9) OVER(PARTITION BY $expr5 ORDER BY $expr10 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
             ├── tables: [ OverWindow: 0 ]
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    StreamProject { exprs: [$expr5, $expr8, $expr9, $expr2] }
-    └── StreamGroupTopN { order: [$expr8 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr5] } { tables: [ GroupTopN: 1 ] }
+    StreamProject { exprs: [$expr5, $expr9, $expr10, $expr2] }
+    └── StreamGroupTopN { order: [$expr9 ASC], limit: 1, offset: 0, group_key: [$expr2, $expr5] } { tables: [ GroupTopN: 1 ] }
         └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
-    StreamProject { exprs: [$expr2, $expr5, $expr8, $expr9, _row_id, _row_id] }
-    └── StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
-        └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
+    StreamProject { exprs: [$expr2, $expr5, $expr9, $expr10, _row_id, _row_id] }
+    └── StreamFilter { predicate: ($expr10 >= $expr3) AND ($expr10 <= $expr4) }
+        └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr8, output: all } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
             ├── StreamExchange Hash([0]) from 3
             └── StreamExchange Hash([0]) from 5
 
@@ -520,35 +529,44 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 6 ] }
 
     Fragment 5
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr6), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 7, DynamicFilterRight: 8 ] }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr8, Field(bid, 2:Int32) as $expr9, Field(bid, 5:Int32) as $expr10, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr6 > $expr7), output_watermarks: [$expr6], output: [event_type, auction, bid, $expr6, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 7, DynamicFilterRight: 8 ] }
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 4
-        └── StreamExchange Broadcast from 6
+        │   └── StreamExchange NoShuffle from 6
+        └── StreamExchange Broadcast from 7
 
     Fragment 6
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
-    └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr6, _row_id], output_watermarks: [$expr6] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr6, _row_id], output_watermarks: [$expr6] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 9 ] }
 
-    Table 0 { columns: [ $expr5, $expr8, $expr9, $expr2, sum, count ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Fragment 7
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr7], output_watermarks: [$expr7] }
+    └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
-    Table 1 { columns: [ $expr2, $expr5, $expr8, $expr9, _row_id, _row_id_0 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+    Table 0 { columns: [ $expr5, $expr9, $expr10, $expr2, sum, count ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 1 { columns: [ $expr2, $expr5, $expr9, $expr10, _row_id, _row_id_0 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
     Table 2 { columns: [ $expr2, $expr3, $expr4, $expr5, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ $expr7, $expr8, $expr9, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ $expr8, $expr9, $expr10, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr7, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr8, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ event_type, auction, bid, $expr1, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ event_type, auction, bid, $expr6, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ $expr6 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 8 { columns: [ $expr7 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 9 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 10 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ seller, avg, $expr2 ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
@@ -707,9 +725,9 @@
       AND P.starttime = A.starttime
       AND P.endtime = A.endtime;
   stream_plan: |-
-    StreamMaterialize { columns: [id, name, starttime, $expr6(hidden), $expr8(hidden), $expr9(hidden), $expr10(hidden)], stream_key: [id, name, starttime, $expr6], pk_columns: [id, name, starttime, $expr6], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [id, name, starttime, $expr6(hidden), $expr9(hidden), $expr10(hidden), $expr11(hidden)], stream_key: [id, name, starttime, $expr6], pk_columns: [id, name, starttime, $expr6], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr2, $expr3, $expr5, $expr6) }
-      └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr8 AND $expr5 = $expr9 AND $expr6 = $expr10, output: all }
+      └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr9 AND $expr5 = $expr10 AND $expr6 = $expr11, output: all }
         ├─StreamExchange { dist: HashShard($expr2, $expr5, $expr6) }
         │ └─StreamAppendOnlyDedup { dedup_cols: [$expr2, $expr3, $expr5, $expr6] }
         │   └─StreamExchange { dist: HashShard($expr2, $expr3, $expr5, $expr6) }
@@ -723,28 +741,28 @@
         │                   └─StreamRowIdGen { row_id_index: 5 }
         │                     └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │                       └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-        └─StreamAppendOnlyDedup { dedup_cols: [$expr8, $expr9, $expr10] }
-          └─StreamExchange { dist: HashShard($expr8, $expr9, $expr10) }
-            └─StreamProject { exprs: [$expr8, $expr9, ($expr9 + '00:00:10':Interval) as $expr10] }
-              └─StreamProject { exprs: [$expr7, $expr8, TumbleStart($expr7, '00:00:10':Interval) as $expr9, _row_id] }
-                └─StreamProject { exprs: [Field(auction, 5:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, _row_id] }
+        └─StreamAppendOnlyDedup { dedup_cols: [$expr9, $expr10, $expr11] }
+          └─StreamExchange { dist: HashShard($expr9, $expr10, $expr11) }
+            └─StreamProject { exprs: [$expr9, $expr10, ($expr10 + '00:00:10':Interval) as $expr11] }
+              └─StreamProject { exprs: [$expr8, $expr9, TumbleStart($expr8, '00:00:10':Interval) as $expr10, _row_id] }
+                └─StreamProject { exprs: [Field(auction, 5:Int32) as $expr8, Field(auction, 7:Int32) as $expr9, _row_id] }
                   └─StreamFilter { predicate: (event_type = 1:Int32) }
-                    └─StreamShare { id: 5 }
+                    └─StreamShare { id: 17 }
                       └─StreamProject { exprs: [event_type, person, auction, _row_id] }
                         └─StreamFilter { predicate: ((event_type = 0:Int32) OR (event_type = 1:Int32)) }
                           └─StreamRowIdGen { row_id_index: 5 }
-                            └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                            └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr7, _row_id], output_watermarks: [$expr7] }
                               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [id, name, starttime, $expr6(hidden), $expr8(hidden), $expr9(hidden), $expr10(hidden)], stream_key: [id, name, starttime, $expr6], pk_columns: [id, name, starttime, $expr6], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [id, name, starttime, $expr6(hidden), $expr9(hidden), $expr10(hidden), $expr11(hidden)], stream_key: [id, name, starttime, $expr6], pk_columns: [id, name, starttime, $expr6], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 1, 2, 3]) from 1
 
     Fragment 1
-    StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr8 AND $expr5 = $expr9 AND $expr6 = $expr10, output: all } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
+    StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr9 AND $expr5 = $expr10 AND $expr6 = $expr11, output: all } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
     ├── StreamExchange Hash([0, 2, 3]) from 2
-    └── StreamAppendOnlyDedup { dedup_cols: [$expr8, $expr9, $expr10] } { tables: [ AppendOnlyDedup: 6 ] }
+    └── StreamAppendOnlyDedup { dedup_cols: [$expr9, $expr10, $expr11] } { tables: [ AppendOnlyDedup: 6 ] }
         └── StreamExchange Hash([0, 1, 2]) from 5
 
     Fragment 2
@@ -766,28 +784,37 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 5 ] }
 
     Fragment 5
-    StreamProject { exprs: [$expr8, $expr9, ($expr9 + '00:00:10':Interval) as $expr10] }
-    └── StreamProject { exprs: [$expr7, $expr8, TumbleStart($expr7, '00:00:10':Interval) as $expr9, _row_id] }
-        └── StreamProject { exprs: [Field(auction, 5:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, _row_id] }
+    StreamProject { exprs: [$expr9, $expr10, ($expr10 + '00:00:10':Interval) as $expr11] }
+    └── StreamProject { exprs: [$expr8, $expr9, TumbleStart($expr8, '00:00:10':Interval) as $expr10, _row_id] }
+        └── StreamProject { exprs: [Field(auction, 5:Int32) as $expr8, Field(auction, 7:Int32) as $expr9, _row_id] }
             └── StreamFilter { predicate: (event_type = 1:Int32) }
-                └── StreamExchange NoShuffle from 4
+                └── StreamExchange NoShuffle from 6
+
+    Fragment 6
+    StreamProject { exprs: [event_type, person, auction, _row_id] }
+    └── StreamFilter { predicate: ((event_type = 0:Int32) OR (event_type = 1:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr7, _row_id], output_watermarks: [$expr7] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 7 ] }
 
     Table 0 { columns: [ $expr2, $expr3, $expr5, $expr6 ], primary key: [ $0 ASC, $2 ASC, $3 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3 }
 
     Table 1 { columns: [ $expr2, $expr5, $expr6, $expr3, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 2 { columns: [ $expr8, $expr9, $expr10 ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ $expr9, $expr10, $expr11 ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 3 { columns: [ $expr8, $expr9, $expr10, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 3 { columns: [ $expr9, $expr10, $expr11, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 4 { columns: [ $expr2, $expr3, $expr5, $expr6 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
 
     Table 5 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ $expr8, $expr9, $expr10 ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 6 { columns: [ $expr9, $expr10, $expr11 ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+
+    Table 7 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294
-    ├── columns: [ id, name, starttime, $expr6, $expr8, $expr9, $expr10 ]
+    ├── columns: [ id, name, starttime, $expr6, $expr9, $expr10, $expr11 ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 0, 1, 2, 3 ]
@@ -809,10 +836,10 @@
     WHERE rownum <= 1;
   stream_plan: |-
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id(hidden), _row_id#1(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    └─StreamGroupTopN { order: [$expr14 DESC, $expr15 ASC], limit: 1, offset: 0, group_key: [$expr2] }
-      └─StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr12, $expr13, $expr14, $expr15, _row_id, _row_id] }
-        └─StreamFilter { predicate: ($expr15 >= $expr7) AND ($expr15 <= $expr8) }
-          └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr12, output: all }
+    └─StreamGroupTopN { order: [$expr15 DESC, $expr16 ASC], limit: 1, offset: 0, group_key: [$expr2] }
+      └─StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr13, $expr14, $expr15, $expr16, _row_id, _row_id] }
+        └─StreamFilter { predicate: ($expr16 >= $expr7) AND ($expr16 <= $expr8) }
+          └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr13, output: all }
             ├─StreamExchange { dist: HashShard($expr2) }
             │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, Field(auction, 5:Int32) as $expr7, Field(auction, 6:Int32) as $expr8, Field(auction, 7:Int32) as $expr9, Field(auction, 8:Int32) as $expr10, _row_id] }
             │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -822,27 +849,27 @@
             │           └─StreamRowIdGen { row_id_index: 5 }
             │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
             │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-            └─StreamExchange { dist: HashShard($expr12) }
-              └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr12, Field(bid, 1:Int32) as $expr13, Field(bid, 2:Int32) as $expr14, Field(bid, 5:Int32) as $expr15, _row_id] }
-                └─StreamDynamicFilter { predicate: ($expr1 > $expr11), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+            └─StreamExchange { dist: HashShard($expr13) }
+              └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr13, Field(bid, 1:Int32) as $expr14, Field(bid, 2:Int32) as $expr15, Field(bid, 5:Int32) as $expr16, _row_id] }
+                └─StreamDynamicFilter { predicate: ($expr11 > $expr12), output_watermarks: [$expr11], output: [event_type, auction, bid, $expr11, _row_id], cleaned_by_watermark: true }
                   ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                  │ └─StreamShare { id: 5 }
-                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                  │ └─StreamShare { id: 13 }
+                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr11, _row_id], output_watermarks: [$expr11] }
                   │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                   │       └─StreamRowIdGen { row_id_index: 5 }
-                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr11, _row_id], output_watermarks: [$expr11] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
-                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr11], output_watermarks: [$expr11] }
+                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr12], output_watermarks: [$expr12] }
                       └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id(hidden), _row_id#1(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamGroupTopN { order: [$expr14 DESC, $expr15 ASC], limit: 1, offset: 0, group_key: [$expr2] } { tables: [ GroupTopN: 0 ] }
-        └── StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr12, $expr13, $expr14, $expr15, _row_id, _row_id] }
-            └── StreamFilter { predicate: ($expr15 >= $expr7) AND ($expr15 <= $expr8) }
-                └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr12, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
+    └── StreamGroupTopN { order: [$expr15 DESC, $expr16 ASC], limit: 1, offset: 0, group_key: [$expr2] } { tables: [ GroupTopN: 0 ] }
+        └── StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr13, $expr14, $expr15, $expr16, _row_id, _row_id] }
+            └── StreamFilter { predicate: ($expr16 >= $expr7) AND ($expr16 <= $expr8) }
+                └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr13, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
                     ├── StreamExchange Hash([0]) from 1
                     └── StreamExchange Hash([0]) from 3
 
@@ -859,33 +886,42 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 5 ] }
 
     Fragment 3
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr12, Field(bid, 1:Int32) as $expr13, Field(bid, 2:Int32) as $expr14, Field(bid, 5:Int32) as $expr15, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr11), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 6, DynamicFilterRight: 7 ] }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr13, Field(bid, 1:Int32) as $expr14, Field(bid, 2:Int32) as $expr15, Field(bid, 5:Int32) as $expr16, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr11 > $expr12), output_watermarks: [$expr11], output: [event_type, auction, bid, $expr11, _row_id], cleaned_by_watermark: true } { tables: [ DynamicFilterLeft: 6, DynamicFilterRight: 7 ] }
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 2
-        └── StreamExchange Broadcast from 4
+        │   └── StreamExchange NoShuffle from 4
+        └── StreamExchange Broadcast from 5
 
     Fragment 4
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr11], output_watermarks: [$expr11] }
-    └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr11, _row_id], output_watermarks: [$expr11] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr11, _row_id], output_watermarks: [$expr11] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 8 ] }
 
-    Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr12, $expr13, $expr14, $expr15, _row_id, _row_id_0 ], primary key: [ $0 ASC, $11 DESC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Fragment 5
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr12], output_watermarks: [$expr12] }
+    └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
+
+    Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, $expr13, $expr14, $expr15, $expr16, _row_id, _row_id_0 ], primary key: [ $0 ASC, $11 DESC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr10, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 2 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ $expr12, $expr13, $expr14, $expr15, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr13, $expr14, $expr15, $expr16, _row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ $expr12, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ $expr13, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 5 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ event_type, auction, bid, $expr1, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ event_type, auction, bid, $expr11, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ $expr11 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 7 { columns: [ $expr12 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 8 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 9 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id, _row_id#1 ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1174,7 +1210,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, _row_id(hidden), _row_id#1(hidden)], stream_key: [_row_id, _row_id#1, auction], pk_columns: [_row_id, _row_id#1, auction], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr3, _row_id, _row_id) }
-      └─StreamHashJoin { type: Inner, predicate: $expr3 = $expr9, output: [$expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr10, $expr11, $expr12, $expr13, $expr14, $expr15, $expr16, $expr17, _row_id, _row_id] }
+      └─StreamHashJoin { type: Inner, predicate: $expr3 = $expr10, output: [$expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr11, $expr12, $expr13, $expr14, $expr15, $expr16, $expr17, $expr18, _row_id, _row_id] }
         ├─StreamExchange { dist: HashShard($expr3) }
         │ └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 3:Int32) as $expr6, Field(bid, 4:Int32) as $expr7, Field(bid, 5:Int32) as $expr8, _row_id] }
         │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
@@ -1188,14 +1224,14 @@
         │     └─StreamExchange { dist: Broadcast }
         │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
         │         └─StreamNow { output: [now] }
-        └─StreamExchange { dist: HashShard($expr9) }
-          └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr9, Field(auction, 1:Int32) as $expr10, Field(auction, 2:Int32) as $expr11, Field(auction, 3:Int32) as $expr12, Field(auction, 4:Int32) as $expr13, Field(auction, 5:Int32) as $expr14, Field(auction, 6:Int32) as $expr15, Field(auction, 7:Int32) as $expr16, Field(auction, 8:Int32) as $expr17, _row_id] }
+        └─StreamExchange { dist: HashShard($expr10) }
+          └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr10, Field(auction, 1:Int32) as $expr11, Field(auction, 2:Int32) as $expr12, Field(auction, 3:Int32) as $expr13, Field(auction, 4:Int32) as $expr14, Field(auction, 5:Int32) as $expr15, Field(auction, 6:Int32) as $expr16, Field(auction, 7:Int32) as $expr17, Field(auction, 8:Int32) as $expr18, _row_id] }
             └─StreamFilter { predicate: (Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32) }
-              └─StreamShare { id: 5 }
-                └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+              └─StreamShare { id: 16 }
+                └─StreamProject { exprs: [event_type, auction, bid, $expr9, _row_id], output_watermarks: [$expr9] }
                   └─StreamFilter { predicate: ((event_type = 2:Int32) OR ((Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32))) }
                     └─StreamRowIdGen { row_id_index: 5 }
-                      └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                      └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr9, _row_id], output_watermarks: [$expr9] }
                         └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
@@ -1204,7 +1240,7 @@
     └── StreamExchange Hash([0, 14, 15]) from 1
 
     Fragment 1
-    StreamHashJoin { type: Inner, predicate: $expr3 = $expr9, output: [$expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr10, $expr11, $expr12, $expr13, $expr14, $expr15, $expr16, $expr17, _row_id, _row_id] } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
+    StreamHashJoin { type: Inner, predicate: $expr3 = $expr10, output: [$expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr11, $expr12, $expr13, $expr14, $expr15, $expr16, $expr17, $expr18, _row_id, _row_id] } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
     ├── StreamExchange Hash([0]) from 2
     └── StreamExchange Hash([0]) from 5
 
@@ -1227,17 +1263,24 @@
     └── StreamNow { output: [now] } { tables: [ Now: 7 ] }
 
     Fragment 5
-    StreamProject { exprs: [Field(auction, 0:Int32) as $expr9, Field(auction, 1:Int32) as $expr10, Field(auction, 2:Int32) as $expr11, Field(auction, 3:Int32) as $expr12, Field(auction, 4:Int32) as $expr13, Field(auction, 5:Int32) as $expr14, Field(auction, 6:Int32) as $expr15, Field(auction, 7:Int32) as $expr16, Field(auction, 8:Int32) as $expr17, _row_id] }
+    StreamProject { exprs: [Field(auction, 0:Int32) as $expr10, Field(auction, 1:Int32) as $expr11, Field(auction, 2:Int32) as $expr12, Field(auction, 3:Int32) as $expr13, Field(auction, 4:Int32) as $expr14, Field(auction, 5:Int32) as $expr15, Field(auction, 6:Int32) as $expr16, Field(auction, 7:Int32) as $expr17, Field(auction, 8:Int32) as $expr18, _row_id] }
     └── StreamFilter { predicate: (Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32) }
-        └── StreamExchange NoShuffle from 3
+        └── StreamExchange NoShuffle from 6
+
+    Fragment 6
+    StreamProject { exprs: [event_type, auction, bid, $expr9, _row_id], output_watermarks: [$expr9] }
+    └── StreamFilter { predicate: ((event_type = 2:Int32) OR ((Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32))) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr9, _row_id], output_watermarks: [$expr9] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 8 ] }
 
     Table 0 { columns: [ $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, _row_id ], primary key: [ $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ $expr3, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ $expr9, $expr10, $expr11, $expr12, $expr13, $expr14, $expr15, $expr16, $expr17, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr10, $expr11, $expr12, $expr13, $expr14, $expr15, $expr16, $expr17, $expr18, _row_id ], primary key: [ $0 ASC, $9 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ $expr9, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr10, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ event_type, auction, bid, $expr1, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
@@ -1246,6 +1289,8 @@
     Table 6 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+
+    Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294
     ├── columns: [ auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, _row_id, _row_id#1 ]
@@ -1377,9 +1422,9 @@
         GROUP BY b1.auction
     ) b ON a.id = b.auction;
   stream_plan: |-
-    StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, _row_id(hidden), $expr5(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, _row_id(hidden), $expr6(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr2, _row_id) }
-      └─StreamHashJoin { type: LeftOuter, predicate: $expr2 = $expr5, output: [$expr2, $expr3, max($expr6), _row_id, $expr5] }
+      └─StreamHashJoin { type: LeftOuter, predicate: $expr2 = $expr6, output: [$expr2, $expr3, max($expr7), _row_id, $expr6] }
         ├─StreamExchange { dist: HashShard($expr2) }
         │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
         │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -1389,33 +1434,33 @@
         │           └─StreamRowIdGen { row_id_index: 5 }
         │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-        └─StreamProject { exprs: [$expr5, max($expr6)] }
-          └─StreamHashAgg { group_key: [$expr5], aggs: [max($expr6), count] }
-            └─StreamExchange { dist: HashShard($expr5) }
-              └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, Field(bid, 2:Int32) as $expr6, _row_id] }
-                └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+        └─StreamProject { exprs: [$expr6, max($expr7)] }
+          └─StreamHashAgg { group_key: [$expr6], aggs: [max($expr7), count] }
+            └─StreamExchange { dist: HashShard($expr6) }
+              └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, Field(bid, 2:Int32) as $expr7, _row_id] }
+                └─StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
                   ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                  │ └─StreamShare { id: 5 }
-                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                  │ └─StreamShare { id: 13 }
+                  │   └─StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
                   │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                   │       └─StreamRowIdGen { row_id_index: 5 }
-                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                  │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
                   │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                   └─StreamExchange { dist: Broadcast }
-                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                    └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
                       └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, _row_id(hidden), $expr5(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, _row_id(hidden), $expr6(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
     └── StreamExchange Hash([0, 3]) from 1
 
     Fragment 1
-    StreamHashJoin { type: LeftOuter, predicate: $expr2 = $expr5, output: [$expr2, $expr3, max($expr6), _row_id, $expr5] }
+    StreamHashJoin { type: LeftOuter, predicate: $expr2 = $expr6, output: [$expr2, $expr3, max($expr7), _row_id, $expr6] }
     ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0]) from 2
-    └── StreamProject { exprs: [$expr5, max($expr6)] }
-        └── StreamHashAgg { group_key: [$expr5], aggs: [max($expr6), count] } { tables: [ HashAggState: 6, HashAggCall0: 5 ] }
+    └── StreamProject { exprs: [$expr6, max($expr7)] }
+        └── StreamHashAgg { group_key: [$expr6], aggs: [max($expr7), count] } { tables: [ HashAggState: 6, HashAggCall0: 5 ] }
             └── StreamExchange Hash([0]) from 4
 
     Fragment 2
@@ -1431,39 +1476,48 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 4 ] }
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, Field(bid, 2:Int32) as $expr6, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, Field(bid, 2:Int32) as $expr7, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 7, DynamicFilterRight: 8 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 3
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
-    └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 9 ] }
+
+    Fragment 6
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+    └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ $expr5, max($expr6) ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr6, max($expr7) ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ $expr5, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr6, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr5, $expr6, _row_id ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr6, $expr7, _row_id ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ $expr5, max($expr6), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ $expr6, max($expr7), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ event_type, auction, bid, $expr1, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ event_type, auction, bid, $expr4, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ $expr4 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 8 { columns: [ $expr5 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 9 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 10 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294
-    ├── columns: [ auction_id, auction_item_name, current_highest_bid, _row_id, $expr5 ]
+    ├── columns: [ auction_id, auction_item_name, current_highest_bid, _row_id, $expr6 ]
     ├── primary key: [ $3 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0, 3 ]
@@ -1489,10 +1543,10 @@
     )
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
-    └─StreamDynamicFilter { predicate: (count($expr5) >= $expr6), output: [$expr2, $expr3, count($expr5)] }
-      ├─StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
-      │ └─StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] }
-      │   └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
+    └─StreamDynamicFilter { predicate: (count($expr6) >= $expr7), output: [$expr2, $expr3, count($expr6)] }
+      ├─StreamProject { exprs: [$expr2, $expr3, count($expr6)] }
+      │ └─StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr6), count] }
+      │   └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr6, output: [$expr2, $expr3, $expr6, _row_id, _row_id] }
       │     ├─StreamExchange { dist: HashShard($expr2) }
       │     │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
       │     │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -1502,52 +1556,52 @@
       │     │           └─StreamRowIdGen { row_id_index: 5 }
       │     │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │     │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-      │     └─StreamExchange { dist: HashShard($expr5) }
-      │       └─StreamShare { id: 14 }
-      │         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-      │           └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+      │     └─StreamExchange { dist: HashShard($expr6) }
+      │       └─StreamShare { id: 19 }
+      │         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+      │           └─StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
       │             ├─StreamFilter { predicate: (event_type = 2:Int32) }
-      │             │ └─StreamShare { id: 5 }
-      │             │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+      │             │ └─StreamShare { id: 13 }
+      │             │   └─StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
       │             │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
       │             │       └─StreamRowIdGen { row_id_index: 5 }
-      │             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+      │             │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
       │             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       │             └─StreamExchange { dist: Broadcast }
-      │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+      │               └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
       │                 └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
-          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] }
+        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr6))) as $expr7] }
+          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr6)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr5)] }
-                └─StreamHashAgg { group_key: [$expr5], aggs: [count] }
-                  └─StreamExchange { dist: HashShard($expr5) }
-                    └─StreamShare { id: 14 }
-                      └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-                        └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+              └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr6)] }
+                └─StreamHashAgg { group_key: [$expr6], aggs: [count] }
+                  └─StreamExchange { dist: HashShard($expr6) }
+                    └─StreamShare { id: 19 }
+                      └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+                        └─StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
                           ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                          │ └─StreamShare { id: 5 }
-                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                          │ └─StreamShare { id: 13 }
+                          │   └─StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
                           │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                           │       └─StreamRowIdGen { row_id_index: 5 }
-                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                          │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
                           │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                           └─StreamExchange { dist: Broadcast }
-                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                            └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
                               └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamDynamicFilter { predicate: (count($expr5) >= $expr6), output: [$expr2, $expr3, count($expr5)] } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
-        ├── StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
-        │   └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { tables: [ HashAggState: 2 ] }
-        │       └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
+    └── StreamDynamicFilter { predicate: (count($expr6) >= $expr7), output: [$expr2, $expr3, count($expr6)] } { tables: [ DynamicFilterLeft: 0, DynamicFilterRight: 1 ] }
+        ├── StreamProject { exprs: [$expr2, $expr3, count($expr6)] }
+        │   └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr6), count] } { tables: [ HashAggState: 2 ] }
+        │       └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr6, output: [$expr2, $expr3, $expr6, _row_id, _row_id] }
         │           ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
         │           ├── StreamExchange Hash([0]) from 1
         │           └── StreamExchange Hash([0]) from 3
-        └── StreamExchange Broadcast from 6
+        └── StreamExchange Broadcast from 7
 
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
@@ -1566,61 +1620,70 @@
     └── StreamExchange NoShuffle from 4
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 8, DynamicFilterRight: 9 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 2
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
-    └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 10 ] }
 
     Fragment 6
-    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] } { tables: [ SimpleAggState: 11 ] }
-        └── StreamExchange Single from 7
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+    └── StreamNow { output: [now] } { tables: [ Now: 11 ] }
 
     Fragment 7
-    StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr5)] }
-    └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { tables: [ HashAggState: 12 ] }
-        └── StreamExchange Hash([0]) from 8
+    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr6))) as $expr7] }
+    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr6)), count] } { tables: [ SimpleAggState: 12 ] }
+        └── StreamExchange Single from 8
 
     Fragment 8
+    StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr6)] }
+    └── StreamHashAgg { group_key: [$expr6], aggs: [count] } { tables: [ HashAggState: 13 ] }
+        └── StreamExchange Hash([0]) from 9
+
+    Fragment 9
     StreamNoOp
     └── StreamExchange NoShuffle from 4
 
-    Table 0 { columns: [ $expr2, $expr3, count($expr5) ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ $expr2, $expr3, count($expr6) ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ $expr6 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ $expr7 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2 { columns: [ $expr2, $expr3, count($expr5), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ $expr2, $expr3, count($expr6), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
     Table 3 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr5, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr6, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ $expr5, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ $expr6, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 8
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id ]
+    ├── columns: [ event_type, auction, bid, $expr4, _row_id ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
 
-    Table 9 { columns: [ $expr4 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ $expr5 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 10 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 10 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ sum0(sum0(count)), sum0(count($expr5)), count ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 11 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 12 { columns: [ $expr5, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 12 { columns: [ sum0(sum0(count)), sum0(count($expr6)), count ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+
+    Table 13 { columns: [ $expr6, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4294967294
     ├── columns: [ auction_id, auction_item_name, bid_count ]
@@ -1648,7 +1711,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, _row_id(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr2, _row_id) }
-      └─StreamHashJoin { type: LeftSemi, predicate: $expr2 = $expr5, output: all }
+      └─StreamHashJoin { type: LeftSemi, predicate: $expr2 = $expr6, output: all }
         ├─StreamExchange { dist: HashShard($expr2) }
         │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
         │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -1658,21 +1721,21 @@
         │           └─StreamRowIdGen { row_id_index: 5 }
         │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-        └─StreamProject { exprs: [$expr5] }
+        └─StreamProject { exprs: [$expr6] }
           └─StreamFilter { predicate: (count >= 20:Int32) }
-            └─StreamHashAgg { group_key: [$expr5], aggs: [count] }
-              └─StreamExchange { dist: HashShard($expr5) }
-                └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-                  └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+            └─StreamHashAgg { group_key: [$expr6], aggs: [count] }
+              └─StreamExchange { dist: HashShard($expr6) }
+                └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+                  └─StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
                     ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                    │ └─StreamShare { id: 5 }
-                    │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                    │ └─StreamShare { id: 13 }
+                    │   └─StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
                     │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                     │       └─StreamRowIdGen { row_id_index: 5 }
-                    │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                    │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
                     │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                     └─StreamExchange { dist: Broadcast }
-                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
                         └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1681,12 +1744,12 @@
     └── StreamExchange Hash([0, 2]) from 1
 
     Fragment 1
-    StreamHashJoin { type: LeftSemi, predicate: $expr2 = $expr5, output: all }
+    StreamHashJoin { type: LeftSemi, predicate: $expr2 = $expr6, output: all }
     ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0]) from 2
-    └── StreamProject { exprs: [$expr5] }
+    └── StreamProject { exprs: [$expr6] }
         └── StreamFilter { predicate: (count >= 20:Int32) }
-            └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { tables: [ HashAggState: 5 ] }
+            └── StreamHashAgg { group_key: [$expr6], aggs: [count] } { tables: [ HashAggState: 5 ] }
                 └── StreamExchange Hash([0]) from 4
 
     Fragment 2
@@ -1702,39 +1765,48 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 4 ] }
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 6, DynamicFilterRight: 7 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 3
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
-    └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 8 ] }
+
+    Fragment 6
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+    └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ $expr5 ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr6 ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ $expr5, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr6, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr5, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr6, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id ]
+    ├── columns: [ event_type, auction, bid, $expr4, _row_id ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
 
-    Table 7 { columns: [ $expr4 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 7 { columns: [ $expr5 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 8 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 9 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294
     ├── columns: [ auction_id, auction_item_name, _row_id ]
@@ -1762,7 +1834,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, _row_id(hidden)], stream_key: [_row_id, auction_id], pk_columns: [_row_id, auction_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr2, _row_id) }
-      └─StreamHashJoin { type: LeftAnti, predicate: $expr2 = $expr5, output: all }
+      └─StreamHashJoin { type: LeftAnti, predicate: $expr2 = $expr6, output: all }
         ├─StreamExchange { dist: HashShard($expr2) }
         │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
         │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -1772,21 +1844,21 @@
         │           └─StreamRowIdGen { row_id_index: 5 }
         │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
         │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-        └─StreamProject { exprs: [$expr5] }
+        └─StreamProject { exprs: [$expr6] }
           └─StreamFilter { predicate: (count < 20:Int32) }
-            └─StreamHashAgg { group_key: [$expr5], aggs: [count] }
-              └─StreamExchange { dist: HashShard($expr5) }
-                └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-                  └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+            └─StreamHashAgg { group_key: [$expr6], aggs: [count] }
+              └─StreamExchange { dist: HashShard($expr6) }
+                └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+                  └─StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
                     ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                    │ └─StreamShare { id: 5 }
-                    │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                    │ └─StreamShare { id: 13 }
+                    │   └─StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
                     │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                     │       └─StreamRowIdGen { row_id_index: 5 }
-                    │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                    │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
                     │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                     └─StreamExchange { dist: Broadcast }
-                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                      └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
                         └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
@@ -1795,12 +1867,12 @@
     └── StreamExchange Hash([0, 2]) from 1
 
     Fragment 1
-    StreamHashJoin { type: LeftAnti, predicate: $expr2 = $expr5, output: all }
+    StreamHashJoin { type: LeftAnti, predicate: $expr2 = $expr6, output: all }
     ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0]) from 2
-    └── StreamProject { exprs: [$expr5] }
+    └── StreamProject { exprs: [$expr6] }
         └── StreamFilter { predicate: (count < 20:Int32) }
-            └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { tables: [ HashAggState: 5 ] }
+            └── StreamHashAgg { group_key: [$expr6], aggs: [count] } { tables: [ HashAggState: 5 ] }
                 └── StreamExchange Hash([0]) from 4
 
     Fragment 2
@@ -1816,39 +1888,48 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 4 ] }
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 6, DynamicFilterRight: 7 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 3
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
-    └── StreamNow { output: [now] } { tables: [ Now: 8 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 8 ] }
+
+    Fragment 6
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+    └── StreamNow { output: [now] } { tables: [ Now: 9 ] }
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ $expr5 ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr6 ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ $expr5, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr6, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr5, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr6, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id ]
+    ├── columns: [ event_type, auction, bid, $expr4, _row_id ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
 
-    Table 7 { columns: [ $expr4 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 7 { columns: [ $expr5 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 8 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 9 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294
     ├── columns: [ auction_id, auction_item_name, _row_id ]
@@ -1875,13 +1956,13 @@
     LIMIT 1000;
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
-      └─StreamTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 }
+    └─StreamProject { exprs: [$expr2, $expr3, count($expr6)] }
+      └─StreamTopN { order: [count($expr6) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count($expr5) DESC], limit: 1000, offset: 0, group_key: [$expr6] }
-            └─StreamProject { exprs: [$expr2, $expr3, count($expr5), Vnode($expr2) as $expr6] }
-              └─StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] }
-                └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
+          └─StreamGroupTopN { order: [count($expr6) DESC], limit: 1000, offset: 0, group_key: [$expr7] }
+            └─StreamProject { exprs: [$expr2, $expr3, count($expr6), Vnode($expr2) as $expr7] }
+              └─StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr6), count] }
+                └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr6, output: [$expr2, $expr3, $expr6, _row_id, _row_id] }
                   ├─StreamExchange { dist: HashShard($expr2) }
                   │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
                   │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -1891,32 +1972,32 @@
                   │           └─StreamRowIdGen { row_id_index: 5 }
                   │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                   │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-                  └─StreamExchange { dist: HashShard($expr5) }
-                    └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-                      └─StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+                  └─StreamExchange { dist: HashShard($expr6) }
+                    └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+                      └─StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
                         ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                        │ └─StreamShare { id: 5 }
-                        │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                        │ └─StreamShare { id: 13 }
+                        │   └─StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
                         │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                         │       └─StreamRowIdGen { row_id_index: 5 }
-                        │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                        │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
                         │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                         └─StreamExchange { dist: Broadcast }
-                          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
+                          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
                             └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [bid_count, auction_id, auction_item_name], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
-        └── StreamTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 } { tables: [ TopN: 0 ] }
+    └── StreamProject { exprs: [$expr2, $expr3, count($expr6)] }
+        └── StreamTopN { order: [count($expr6) DESC], limit: 1000, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count($expr5) DESC], limit: 1000, offset: 0, group_key: [$expr6] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [$expr2, $expr3, count($expr5), Vnode($expr2) as $expr6] }
-        └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { tables: [ HashAggState: 2 ] }
-            └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
+    StreamGroupTopN { order: [count($expr6) DESC], limit: 1000, offset: 0, group_key: [$expr7] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [$expr2, $expr3, count($expr6), Vnode($expr2) as $expr7] }
+        └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr6), count] } { tables: [ HashAggState: 2 ] }
+            └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr6, output: [$expr2, $expr3, $expr6, _row_id, _row_id] }
                 ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
                 ├── StreamExchange Hash([0]) from 2
                 └── StreamExchange Hash([0]) from 4
@@ -1934,44 +2015,53 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 7 ] }
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr4), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr4 > $expr5), output_watermarks: [$expr4], output: [event_type, auction, bid, $expr4, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 8, DynamicFilterRight: 9 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 3
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
-    └── StreamNow { output: [now] } { tables: [ Now: 10 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr4, _row_id], output_watermarks: [$expr4] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr4, _row_id], output_watermarks: [$expr4] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 10 ] }
 
-    Table 0 { columns: [ $expr2, $expr3, count($expr5), $expr6 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Fragment 6
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+    └── StreamNow { output: [now] } { tables: [ Now: 11 ] }
+
+    Table 0 { columns: [ $expr2, $expr3, count($expr6), $expr7 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ $expr2, $expr3, count($expr5), $expr6 ]
+    ├── columns: [ $expr2, $expr3, count($expr6), $expr7 ]
     ├── primary key: [ $3 ASC, $2 DESC, $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 3
 
-    Table 2 { columns: [ $expr2, $expr3, count($expr5), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 2 { columns: [ $expr2, $expr3, count($expr6), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
     Table 3 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ $expr5, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr6, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ $expr5, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ $expr6, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ event_type, auction, bid, $expr1, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ event_type, auction, bid, $expr4, _row_id ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ $expr4 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ $expr5 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 10 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 10 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 11 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ auction_id, auction_item_name, bid_count ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 3 }
 
@@ -2000,15 +2090,15 @@
         )
   stream_plan: |-
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [min(min(max($expr7)))] }
-      └─StreamSimpleAgg { aggs: [min(min(max($expr7))), count] }
+    └─StreamProject { exprs: [min(min(max($expr8)))] }
+      └─StreamSimpleAgg { aggs: [min(min(max($expr8))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr9], aggs: [min(max($expr7)), count] }
-            └─StreamProject { exprs: [$expr2, max($expr7), Vnode($expr2) as $expr9] }
-              └─StreamHashAgg { group_key: [$expr2], aggs: [max($expr7), count] }
-                └─StreamProject { exprs: [$expr2, $expr7, _row_id, _row_id] }
-                  └─StreamFilter { predicate: ($expr8 >= $expr3) AND ($expr8 <= $expr4) }
-                    └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr6, output: all }
+          └─StreamHashAgg { group_key: [$expr10], aggs: [min(max($expr8)), count] }
+            └─StreamProject { exprs: [$expr2, max($expr8), Vnode($expr2) as $expr10] }
+              └─StreamHashAgg { group_key: [$expr2], aggs: [max($expr8), count] }
+                └─StreamProject { exprs: [$expr2, $expr8, _row_id, _row_id] }
+                  └─StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
+                    └─StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
                       ├─StreamExchange { dist: HashShard($expr2) }
                       │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 5:Int32) as $expr3, Field(auction, 6:Int32) as $expr4, _row_id] }
                       │   └─StreamFilter { predicate: (event_type = 1:Int32) }
@@ -2018,37 +2108,37 @@
                       │           └─StreamRowIdGen { row_id_index: 5 }
                       │             └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
                       │               └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-                      └─StreamExchange { dist: HashShard($expr6) }
-                        └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, Field(bid, 2:Int32) as $expr7, Field(bid, 5:Int32) as $expr8, _row_id] }
-                          └─StreamDynamicFilter { predicate: ($expr1 > $expr5), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+                      └─StreamExchange { dist: HashShard($expr7) }
+                        └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
+                          └─StreamDynamicFilter { predicate: ($expr5 > $expr6), output_watermarks: [$expr5], output: [event_type, auction, bid, $expr5, _row_id], cleaned_by_watermark: true }
                             ├─StreamFilter { predicate: (event_type = 2:Int32) }
-                            │ └─StreamShare { id: 5 }
-                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
+                            │ └─StreamShare { id: 13 }
+                            │   └─StreamProject { exprs: [event_type, auction, bid, $expr5, _row_id], output_watermarks: [$expr5] }
                             │     └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
                             │       └─StreamRowIdGen { row_id_index: 5 }
-                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
+                            │         └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr5, _row_id], output_watermarks: [$expr5] }
                             │           └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
                             └─StreamExchange { dist: Broadcast }
-                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
+                              └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
                                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [min(min(max($expr7)))] }
-        └── StreamSimpleAgg { aggs: [min(min(max($expr7))), count] }
+    └── StreamProject { exprs: [min(min(max($expr8)))] }
+        └── StreamSimpleAgg { aggs: [min(min(max($expr8))), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamHashAgg { group_key: [$expr9], aggs: [min(max($expr7)), count] }
+    StreamHashAgg { group_key: [$expr10], aggs: [min(max($expr8)), count] }
     ├── tables: [ HashAggState: 3, HashAggCall0: 2 ]
-    └── StreamProject { exprs: [$expr2, max($expr7), Vnode($expr2) as $expr9] }
-        └── StreamHashAgg { group_key: [$expr2], aggs: [max($expr7), count] }
+    └── StreamProject { exprs: [$expr2, max($expr8), Vnode($expr2) as $expr10] }
+        └── StreamHashAgg { group_key: [$expr2], aggs: [max($expr8), count] }
             ├── tables: [ HashAggState: 5, HashAggCall0: 4 ]
-            └── StreamProject { exprs: [$expr2, $expr7, _row_id, _row_id] }
-                └── StreamFilter { predicate: ($expr8 >= $expr3) AND ($expr8 <= $expr4) }
-                    └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr6, output: all }
+            └── StreamProject { exprs: [$expr2, $expr8, _row_id, _row_id] }
+                └── StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
+                    └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
                         ├── tables:
                         │   ┌── HashJoinLeft: 6
                         │   ├── HashJoinDegreeLeft: 7
@@ -2070,23 +2160,30 @@
                 └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 10 ] }
 
     Fragment 4
-    StreamProject { exprs: [Field(bid, 0:Int32) as $expr6, Field(bid, 2:Int32) as $expr7, Field(bid, 5:Int32) as $expr8, _row_id] }
-    └── StreamDynamicFilter { predicate: ($expr1 > $expr5), output_watermarks: [$expr1], output: [event_type, auction, bid, $expr1, _row_id], cleaned_by_watermark: true }
+    StreamProject { exprs: [Field(bid, 0:Int32) as $expr7, Field(bid, 2:Int32) as $expr8, Field(bid, 5:Int32) as $expr9, _row_id] }
+    └── StreamDynamicFilter { predicate: ($expr5 > $expr6), output_watermarks: [$expr5], output: [event_type, auction, bid, $expr5, _row_id], cleaned_by_watermark: true }
         ├── tables: [ DynamicFilterLeft: 11, DynamicFilterRight: 12 ]
         ├── StreamFilter { predicate: (event_type = 2:Int32) }
-        │   └── StreamExchange NoShuffle from 3
-        └── StreamExchange Broadcast from 5
+        │   └── StreamExchange NoShuffle from 5
+        └── StreamExchange Broadcast from 6
 
     Fragment 5
-    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr5], output_watermarks: [$expr5] }
-    └── StreamNow { output: [now] } { tables: [ Now: 13 ] }
+    StreamProject { exprs: [event_type, auction, bid, $expr5, _row_id], output_watermarks: [$expr5] }
+    └── StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+        └── StreamRowIdGen { row_id_index: 5 }
+            └── StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr5, _row_id], output_watermarks: [$expr5] }
+                └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { tables: [ Source: 13 ] }
 
-    Table 0 { columns: [ min(max($expr7)), $expr9 ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Fragment 6
+    StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr6], output_watermarks: [$expr6] }
+    └── StreamNow { output: [now] } { tables: [ Now: 14 ] }
 
-    Table 1 { columns: [ min(min(max($expr7))), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ min(max($expr8)), $expr10 ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+
+    Table 1 { columns: [ min(min(max($expr8))), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ $expr9, max($expr7), $expr2 ]
+    ├── columns: [ $expr10, max($expr8), $expr2 ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
@@ -2094,7 +2191,7 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ $expr9, min(max($expr7)), count ]
+    ├── columns: [ $expr10, min(max($expr8)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: []
@@ -2102,13 +2199,13 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ $expr2, $expr7, _row_id, _row_id_0 ]
+    ├── columns: [ $expr2, $expr8, _row_id, _row_id_0 ]
     ├── primary key: [ $0 ASC, $1 DESC, $2 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 5 { columns: [ $expr2, max($expr7), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr2, max($expr8), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
     ├── columns: [ $expr2, $expr3, $expr4, _row_id ]
@@ -2120,26 +2217,28 @@
     Table 7 { columns: [ $expr2, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 8
-    ├── columns: [ $expr6, $expr7, $expr8, _row_id ]
+    ├── columns: [ $expr7, $expr8, $expr9, _row_id ]
     ├── primary key: [ $0 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 9 { columns: [ $expr6, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 9 { columns: [ $expr7, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 10 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 11
-    ├── columns: [ event_type, auction, bid, $expr1, _row_id ]
+    ├── columns: [ event_type, auction, bid, $expr5, _row_id ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
 
-    Table 12 { columns: [ $expr5 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 12 { columns: [ $expr6 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 13 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 13 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 14 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ min_final ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
