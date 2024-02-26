@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::mem::swap;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,6 +27,7 @@ use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
@@ -168,7 +169,7 @@ impl KafkaSplitReader {
 }
 
 impl CommonSplitReader for KafkaSplitReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {

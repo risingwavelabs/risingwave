@@ -8685,6 +8685,7 @@ dependencies = [
  "strum_macros 0.26.1",
  "task_stats_alloc",
  "tempfile",
+ "thiserror-ext",
  "tikv-jemallocator",
  "tracing",
  "vergen",

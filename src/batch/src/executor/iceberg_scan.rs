@@ -116,11 +116,7 @@ impl IcebergScanExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let table = self
-            .iceberg_config
-            .load_table()
-            .await
-            .map_err(BatchError::Internal)?;
+        let table = self.iceberg_config.load_table().await?;
 
         let table_scan: TableScan = table
             .new_scan_builder()
