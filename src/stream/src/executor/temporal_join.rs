@@ -387,6 +387,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
         let mut prev_epoch = None;
 
+        let full_schema: Vec<_> = self
+            .left
+            .schema()
+            .data_types()
+            .into_iter()
+            .chain(self.right.schema().data_types().into_iter())
+            .collect();
+
         let table_id_str = self.right_table.source.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
@@ -413,10 +421,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             if false {
                                 return unreachable!("type hints only") as StreamExecutorResult<_>;
                             }
-                            let mut builder = StreamChunkBuilder::new(
-                                self.chunk_size,
-                                self.info.schema.data_types(),
-                            );
+                            let mut builder =
+                                StreamChunkBuilder::new(self.chunk_size, full_schema.clone());
                             // The bitmap is aligned with `builder`. The bit is set if the record is matched.
                             // TODO: Consider adding the bitmap to `JoinStreamChunkBuilder`.
                             let mut row_matched_bitmap_builder =
@@ -505,7 +511,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 StreamChunk::with_visibility(ops, output_columns, new_vis);
                             yield Message::Chunk(new_chunk);
                         } else {
-                            yield Message::Chunk(chunk);
+                            let (data_chunk, ops) = chunk.into_parts();
+                            let (columns, vis) = data_chunk.into_parts();
+                            // apply output indices.
+                            let output_columns = self
+                                .output_indices
+                                .iter()
+                                .cloned()
+                                .map(|idx| columns[idx].clone())
+                                .collect();
+                            let new_chunk = StreamChunk::with_visibility(ops, output_columns, vis);
+                            yield Message::Chunk(new_chunk);
                         };
                     }
                 }
