@@ -14,6 +14,7 @@
 
 use aws_sdk_ec2::error::DisplayErrorContext;
 use risingwave_common::error::BoxedError;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
@@ -87,6 +88,13 @@ pub enum MetaErrorInner {
 
     #[error("SystemParams error: {0}")]
     SystemParams(String),
+
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
 
     #[error("Sink error: {0}")]
     Sink(

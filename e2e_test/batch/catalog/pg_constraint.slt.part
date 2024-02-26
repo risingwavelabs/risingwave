@@ -1,0 +1,10 @@
+statement ok
+create table t(a int, b int, c varchar, primary key(a,b));
+
+query TTTT
+select conname, contype, conkey from pg_constraint where conname='t_pkey';
+----
+t_pkey p {1,2}
+
+statement ok
+drop table t;

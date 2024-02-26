@@ -17,7 +17,7 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Executor, NoOpExecutor};
+use crate::executor::{Executor, NoOpExecutor};
 use crate::task::ExecutorParams;
 
 pub struct NoOpExecutorBuilder;
@@ -29,8 +29,8 @@ impl ExecutorBuilder for NoOpExecutorBuilder {
         params: ExecutorParams,
         _node: &NoOpNode,
         _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        Ok(NoOpExecutor::new(params.actor_context, params.info, input).boxed())
+        Ok((params.info, NoOpExecutor::new(params.actor_context, input)).into())
     }
 }

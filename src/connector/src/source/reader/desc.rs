@@ -25,6 +25,7 @@ use risingwave_pb::plan_common::{AdditionalColumn, PbColumnCatalog};
 #[expect(deprecated)]
 use super::fs_reader::FsSourceReader;
 use super::reader::SourceReader;
+use crate::error::ConnectorResult;
 use crate::parser::additional_columns::{
     build_additional_column_catalog, COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
     COMPATIBLE_ADDITIONAL_COLUMNS,
@@ -176,7 +177,7 @@ impl SourceDescBuilder {
         columns
     }
 
-    pub fn build(self) -> anyhow::Result<SourceDesc> {
+    pub fn build(self) -> ConnectorResult<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
         let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
@@ -201,7 +202,7 @@ impl SourceDescBuilder {
 
     #[deprecated = "will be replaced by new fs source (list + fetch)"]
     #[expect(deprecated)]
-    pub fn build_fs_source_desc(&self) -> anyhow::Result<FsSourceDesc> {
+    pub fn build_fs_source_desc(&self) -> ConnectorResult<FsSourceDesc> {
         let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (

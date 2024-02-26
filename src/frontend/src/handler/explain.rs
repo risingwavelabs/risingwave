@@ -18,7 +18,7 @@ use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use thiserror_ext::AsReport;
 
-use super::create_index::gen_create_index_plan;
+use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::{gen_sink_plan, get_partition_compute_info};
 use super::create_table::ColumnIdGenerator;
@@ -133,15 +133,20 @@ async fn do_handle_explain(
                         include,
                         distributed_by,
                         ..
-                    } => gen_create_index_plan(
-                        &session,
-                        context.clone(),
-                        name,
-                        table_name,
-                        columns,
-                        include,
-                        distributed_by,
-                    )
+                    } => {
+                        let (schema_name, table, index_table_name) =
+                            resolve_index_schema(&session, name, table_name)?;
+                        gen_create_index_plan(
+                            &session,
+                            context.clone(),
+                            schema_name,
+                            table,
+                            index_table_name,
+                            columns,
+                            include,
+                            distributed_by,
+                        )
+                    }
                     .map(|x| x.0),
 
                     // -- Batch Queries --
