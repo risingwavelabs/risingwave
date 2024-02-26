@@ -87,6 +87,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         };
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: source.context().get_config().developer.chunk_size,
+            rate_limit: None,
         };
 
         let column_ids: Vec<_> = source_node

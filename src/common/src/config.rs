@@ -391,9 +391,9 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     VirtualNode::COUNT
                 )))?
             } else {
-                NonZeroUsize::new(i)
-                    .context("default parallelism should be greater than 0")
-                    .map_err(|e| serde::de::Error::custom(e.to_string()))?
+                NonZeroUsize::new(i).ok_or_else(|| {
+                    serde::de::Error::custom("default parallelism should be greater than 0")
+                })?
             })),
         }
     }
@@ -1253,7 +1253,7 @@ pub mod default {
             3
         }
         pub fn mem_table_spill_threshold() -> usize {
-            0 // disable
+            4 << 20
         }
 
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {

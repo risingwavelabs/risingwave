@@ -123,6 +123,24 @@ fn create_mock_udf_context(
     ret
 }
 
+/// Find the pattern for better hint display
+/// return the exact index where the pattern first appears
+fn find_target(input: &str, target: &str) -> Option<usize> {
+    // Regex pattern to find `target` not preceded or followed by an ASCII letter
+    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
+    // the target is not surrounded by ASCII alphabetic characters
+    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
+    let Ok(re) = Regex::new(&pattern) else {
+        return None;
+    };
+
+    let Ok(Some(ma)) = re.find(input) else {
+        return None;
+    };
+
+    Some(ma.start())
+}
+
 pub async fn handle_create_sql_function(
     handler_args: HandlerArgs,
     or_replace: bool,

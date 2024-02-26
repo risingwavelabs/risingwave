@@ -30,6 +30,7 @@ use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
+use thiserror_ext::AsReport;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
@@ -46,7 +47,7 @@ pub struct DashboardService {
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    pub diagnose_command: Option<DiagnoseCommandRef>,
+    pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -354,13 +355,7 @@ pub(super) mod handlers {
     }
 
     pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
-        let report = if let Some(cmd) = &srv.diagnose_command {
-            cmd.report().await
-        } else {
-            "Not supported in sql-backend".to_string()
-        };
-
-        Ok(report)
+        Ok(srv.diagnose_command.report().await)
     }
 
     pub async fn get_back_pressure(
@@ -455,7 +450,7 @@ impl DashboardService {
                     proxy::proxy(req, cache).await.or_else(|err| {
                         Ok((
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", err),
+                            err.context("Unhandled internal error").to_report_string(),
                         )
                             .into_response())
                     })
