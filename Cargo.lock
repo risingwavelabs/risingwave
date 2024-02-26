@@ -6349,6 +6349,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
+dependencies = [
+ "bitflags 2.4.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nkeys"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8617,7 +8629,7 @@ dependencies = [
  "itertools 0.12.0",
  "libc",
  "madsim-tokio",
- "nix 0.27.1",
+ "nix 0.28.0",
  "opentelemetry",
  "parking_lot 0.12.1",
  "prometheus",
@@ -9920,7 +9932,7 @@ dependencies = [
  "memcomparable",
  "moka",
  "more-asserts",
- "nix 0.27.1",
+ "nix 0.28.0",
  "num-integer",
  "parking_lot 0.12.1",
  "procfs 0.16.0",
