@@ -666,6 +666,12 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
     pub compactor_fast_max_compact_task_size: u64,
 
+    #[serde(default = "default::storage::compactor_enable_block_based_filter_key_count")]
+    pub compactor_enable_block_based_filter_key_count: u64,
+
+    #[serde(default = "default::storage::compactor_enable_block_based_filter_start_level")]
+    pub compactor_enable_block_based_filter_start_level: u32,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -1266,6 +1272,14 @@ pub mod default {
 
         pub fn max_prefetch_block_number() -> usize {
             16
+        }
+
+        pub fn compactor_enable_block_based_filter_key_count() -> u64 {
+            256 * 1024
+        }
+
+        pub fn compactor_enable_block_based_filter_start_level() -> u32 {
+            1
         }
     }
 

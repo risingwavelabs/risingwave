@@ -796,3 +796,25 @@ fn get_task_progress(
     }
     progress_list
 }
+
+pub fn enable_block_based_filter(
+    context: CompactorContext,
+    kv_count: u64,
+    target_level: u32,
+) -> bool {
+    if context.is_share_buffer_compact {
+        kv_count
+            > context
+                .storage_opts
+                .compactor_enable_block_based_filter_key_count
+    } else {
+        kv_count
+            > context
+                .storage_opts
+                .compactor_enable_block_based_filter_key_count
+            || target_level
+                >= context
+                    .storage_opts
+                    .compactor_enable_block_based_filter_start_level
+    }
+}
