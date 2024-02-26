@@ -906,7 +906,7 @@ pub async fn build_remote_object_store(
         }
         #[cfg(madsim)]
         sim if sim.starts_with("sim://") => {
-            ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics))
+            ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics, config))
         }
         other => {
             unimplemented!(
