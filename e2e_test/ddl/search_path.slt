@@ -76,6 +76,11 @@ select a from test order by a;
 1
 2
 
+# Issue #15195
+# index shall be created in `search_path_test2` (same as table) rather than `search_path_test1` (first in path)
+statement ok
+create index if not exists index1_test_a on test(a);
+
 statement ok
 drop table test;
 
