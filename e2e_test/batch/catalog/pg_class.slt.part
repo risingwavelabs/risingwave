@@ -11,7 +11,7 @@ SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 
 8 pg_cast 1 r
 9 pg_class 1 v
 10 pg_collation 1 v
-11 pg_constraint 1 v
+11 pg_constraint 1 r
 12 pg_conversion 1 v
 13 pg_database 1 v
 14 pg_depend 1 v
