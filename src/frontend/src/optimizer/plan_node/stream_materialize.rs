@@ -205,7 +205,6 @@ impl StreamMaterialize {
 
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let _properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
