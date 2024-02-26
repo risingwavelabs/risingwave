@@ -47,7 +47,7 @@
               │           └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
               └─StreamExchange { dist: HashShard(id) }
                 └─StreamFilter { predicate: (initial_bid = 2:Int32) }
-                  └─StreamShare { id: 10 }
+                  └─StreamShare { id: 4 }
                     └─StreamProject { exprs: [id, initial_bid, _row_id] }
                       └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
                         └─StreamRowIdGen { row_id_index: 10 }
@@ -357,7 +357,7 @@
         │         └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(id) }
           └─StreamFilter { predicate: (initial_bid = 2:Int32) }
-            └─StreamShare { id: 15 }
+            └─StreamShare { id: 4 }
               └─StreamProject { exprs: [id, initial_bid, date_time, _row_id] }
                 └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
                   └─StreamRowIdGen { row_id_index: 10 }
