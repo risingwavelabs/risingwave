@@ -18,6 +18,7 @@ use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 
+use crate::error::ConnectorResult;
 use crate::source::filesystem::{FsPageItem, S3SplitEnumerator};
 use crate::source::{FsFilterCtrlCtx, FsListInner};
 
@@ -25,7 +26,7 @@ use crate::source::{FsFilterCtrlCtx, FsListInner};
 impl FsListInner for S3SplitEnumerator {
     async fn get_next_page<T: for<'a> From<&'a Object>>(
         &mut self,
-    ) -> anyhow::Result<(Vec<T>, bool)> {
+    ) -> ConnectorResult<(Vec<T>, bool)> {
         let mut has_finished = false;
         let mut req = self
             .client

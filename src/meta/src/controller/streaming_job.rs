@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -64,8 +65,8 @@ use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    check_relation_name_duplicate, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
+    get_fragment_actor_ids, get_fragment_mappings,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -141,6 +142,21 @@ impl CatalogController {
                 Table::insert(table).exec(&txn).await?;
             }
             StreamingJob::Sink(sink, _) => {
+                if let Some(target_table_id) = sink.target_table {
+                    if check_sink_into_table_cycle(
+                        target_table_id as ObjectId,
+                        sink.dependent_relations
+                            .iter()
+                            .map(|id| *id as ObjectId)
+                            .collect(),
+                        &txn,
+                    )
+                    .await?
+                    {
+                        bail!("Creating such a sink will result in circular dependency.");
+                    }
+                }
+
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Sink,

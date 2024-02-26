@@ -22,6 +22,7 @@ use protobuf_native::compiler::{
 };
 use protobuf_native::MessageLite;
 
+use crate::error::ConnectorResult;
 use crate::schema::schema_registry::Client;
 
 macro_rules! embed_wkts {
@@ -54,7 +55,7 @@ const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
 pub(super) async fn compile_file_descriptor_from_schema_registry(
     subject_name: &str,
     client: &Client,
-) -> anyhow::Result<Vec<u8>> {
+) -> ConnectorResult<Vec<u8>> {
     let (primary_subject, dependency_subjects) = client
         .get_subject_and_references(subject_name)
         .await

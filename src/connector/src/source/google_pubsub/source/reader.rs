@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
-use risingwave_common::bail;
+use risingwave_common::{bail, ensure};
 use tonic::Code;
 
 use super::TaggedReceivedMessage;
+use crate::error::{ConnectorError, ConnectorResult as Result};
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
@@ -41,7 +42,7 @@ pub struct PubsubSplitReader {
 }
 
 impl CommonSplitReader for PubsubSplitReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
     async fn into_data_stream(self) {
         loop {
             let pull_result = self
