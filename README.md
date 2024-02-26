@@ -72,7 +72,7 @@ Don’t have Docker? Learn how to install RisingWave on Mac, Ubuntu, and other e
 
 ## Production deployments
 
-For **single-node deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-trial/?method=docker-compose).
+For **single-node deployment**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-docker-compose/).
 
 For **distributed deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
 

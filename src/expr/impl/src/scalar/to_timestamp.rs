@@ -66,7 +66,7 @@ fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
 }
 
 #[function(
-    "to_timestamp1(varchar, varchar) -> timestamp",
+    "char_to_timestamptz(varchar, varchar) -> timestamp",
     prebuild = "ChronoPattern::compile($1)",
     deprecated
 )]
@@ -81,7 +81,7 @@ pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
 }
 
 #[function(
-    "to_timestamp1(varchar, varchar, varchar) -> timestamptz",
+    "char_to_timestamptz(varchar, varchar, varchar) -> timestamptz",
     prebuild = "ChronoPattern::compile($1)"
 )]
 pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
@@ -93,7 +93,7 @@ pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Tim
     })
 }
 
-#[function("to_timestamp1(varchar, varchar) -> timestamptz", rewritten)]
+#[function("char_to_timestamptz(varchar, varchar) -> timestamptz", rewritten)]
 fn _to_timestamp1() {}
 
 #[function(

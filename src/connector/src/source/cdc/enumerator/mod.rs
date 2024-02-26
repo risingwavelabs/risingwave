@@ -27,6 +27,7 @@ use risingwave_pb::connector_service::{
     SourceCommonParam, SourceType, ValidateSourceRequest, ValidateSourceResponse,
 };
 
+use crate::error::ConnectorResult;
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
 };
@@ -53,7 +54,7 @@ where
     async fn new(
         props: CdcProperties<T>,
         context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let server_addrs = props
             .properties
             .get(DATABASE_SERVERS_KEY)
@@ -71,7 +72,7 @@ where
         );
 
         let source_id = context.info.source_id;
-        tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let mut env = JVM.get_or_init()?.attach_current_thread()?;
 
             let validate_source_request = ValidateSourceRequest {
@@ -99,15 +100,11 @@ where
                     .deref(),
             )?;
 
-            validate_source_response.error.map_or_else(
-                || Ok(()),
-                |err| {
-                    Err(anyhow!(format!(
-                        "source cannot pass validation: {}",
-                        err.error_message
-                    )))
-                },
-            )
+            if let Some(error) = validate_source_response.error {
+                return Err(anyhow!(error.error_message).context("source cannot pass validation"));
+            }
+
+            Ok(())
         })
         .await
         .context("failed to validate source")??;
@@ -120,7 +117,7 @@ where
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<DebeziumCdcSplit<T>>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<DebeziumCdcSplit<T>>> {
         Ok(self.list_cdc_splits())
     }
 }

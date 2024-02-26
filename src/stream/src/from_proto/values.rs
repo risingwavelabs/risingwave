@@ -20,7 +20,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, ValuesExecutor};
+use crate::executor::{Executor, ValuesExecutor};
 use crate::task::ExecutorParams;
 
 /// Build a `ValuesExecutor` for stream. As is a leaf, current workaround registers a `sender` for
@@ -34,7 +34,7 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         params: ExecutorParams,
         node: &ValuesNode,
         _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
             .local_barrier_manager
@@ -55,12 +55,13 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
                     .collect_vec()
             })
             .collect_vec();
-        Ok(Box::new(ValuesExecutor::new(
+        let exec = ValuesExecutor::new(
             params.actor_context,
-            params.info,
+            params.info.schema.clone(),
             progress,
             rows,
             barrier_receiver,
-        )))
+        );
+        Ok((params.info, exec).into())
     }
 }

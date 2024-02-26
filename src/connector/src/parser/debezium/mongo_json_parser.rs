@@ -18,6 +18,7 @@ use anyhow::Context;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 
+use crate::error::ConnectorResult;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -50,7 +51,7 @@ impl DebeziumMongoJsonParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let id_column = rw_columns
             .iter()
             .find(|desc| {
@@ -96,7 +97,7 @@ impl DebeziumMongoJsonParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         let key_accessor = match key {
             None => None,
             Some(data) => Some(self.key_builder.generate_accessor(data).await?),
@@ -129,7 +130,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         self.parse_inner(key, payload, writer).await
     }
 }

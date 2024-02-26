@@ -1330,7 +1330,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     drop(local_hummock_storage);
 
-    hummock_storage.clear_shared_buffer().await.unwrap();
+    hummock_storage.clear_shared_buffer(epoch1).await;
 
     assert_eq!(
         hummock_storage

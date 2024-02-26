@@ -23,6 +23,7 @@ import com.risingwave.connector.api.sink.CommonSinkConfig;
 public class CassandraConfig extends CommonSinkConfig {
     /** Required */
     private String type;
+
     /** Required */
     private String url;
 

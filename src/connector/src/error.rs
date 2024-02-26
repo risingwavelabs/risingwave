@@ -13,13 +13,57 @@
 // limitations under the License.
 
 use risingwave_common::error::v2::def_anyhow_newtype;
+use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::RpcError;
+
+use crate::parser::AccessError;
+use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
+use crate::schema::InvalidOptionError;
+use crate::sink::SinkError;
 
 def_anyhow_newtype! {
     pub ConnectorError,
 
+    // Common errors
+    std::io::Error => transparent,
+
+    // Fine-grained connector errors
+    AccessError => transparent,
+    WireFormatError => transparent,
+    ConcurrentRequestError => transparent,
+    InvalidOptionError => transparent,
+    SinkError => transparent,
+    PbFieldNotFound => transparent,
+
     // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
+
+    // Parsing errors
+    url::ParseError => "failed to parse url",
+    serde_json::Error => "failed to parse json",
+    csv::Error => "failed to parse csv",
+
+    // Connector errors
+    opendal::Error => transparent, // believed to be self-explanatory
+
     mysql_async::Error => "MySQL error",
     tokio_postgres::Error => "Postgres error",
+    apache_avro::Error => "Avro error",
+    rdkafka::error::KafkaError => "Kafka error",
+    pulsar::Error => "Pulsar error",
+    async_nats::jetstream::consumer::StreamError => "Nats error",
+    async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
+    async_nats::jetstream::context::CreateStreamError => "Nats error",
+    async_nats::jetstream::stream::ConsumerError => "Nats error",
+    icelake::Error => "Iceberg error",
+    redis::RedisError => "Redis error",
+    arrow_schema::ArrowError => "Arrow error",
+    google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
 }
 
-pub type ConnectorResult<T> = Result<T, ConnectorError>;
+pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
+
+impl From<ConnectorError> for RpcError {
+    fn from(value: ConnectorError) -> Self {
+        RpcError::Internal(value.0)
+    }
+}
