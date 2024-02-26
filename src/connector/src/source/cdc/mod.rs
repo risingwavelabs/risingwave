@@ -37,6 +37,8 @@ pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
 pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 // User can set snapshot='false' to disable cdc backfill
 pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
+// We enable transaction for shared cdc source by default
+pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;

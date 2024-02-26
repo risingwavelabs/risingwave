@@ -28,7 +28,8 @@ use risingwave_frontend_macro::system_catalog;
         ARRAY[]::smallint[] as indoption,
         NULL AS indexprs,
         NULL AS indpred,
-        FALSE AS indisprimary
+        FALSE AS indisprimary,
+        ARRAY[]::int[] AS indclass
     FROM rw_catalog.rw_indexes"
 )]
 #[derive(Fields)]
@@ -46,4 +47,6 @@ struct PgIndex {
     indpred: Option<String>,
     // TODO: we return false as the default value.
     indisprimary: bool,
+    // Empty array. We only have a dummy implementation of `pg_opclass` yet.
+    indclass: Vec<i32>,
 }

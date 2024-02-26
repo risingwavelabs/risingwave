@@ -17,6 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
+use crate::expr::{ExprDisplay, ExprImpl};
 
 #[derive(Fields)]
 #[primary_key(relation_id, name)]
@@ -27,6 +28,8 @@ struct RwColumn {
     is_hidden: bool,
     is_primary_key: bool,
     is_distribution_key: bool,
+    is_generated: bool,
+    generation_expression: Option<String>,
     data_type: String,
     type_oid: i32,
     type_len: i16,
@@ -51,6 +54,8 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                         is_hidden: false,
                         is_primary_key: false,
                         is_distribution_key: false,
+                        is_generated: false,
+                        generation_expression: None,
                         data_type: column.data_type().to_string(),
                         type_oid: column.data_type().to_oid(),
                         type_len: column.data_type().type_len(),
@@ -71,6 +76,8 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                             is_hidden: column.is_hidden,
                             is_primary_key: sink.downstream_pk.contains(&index),
                             is_distribution_key: sink.distribution_key.contains(&index),
+                            is_generated: false,
+                            generation_expression: None,
                             data_type: column.data_type().to_string(),
                             type_oid: column.data_type().to_oid(),
                             type_len: column.data_type().type_len(),
@@ -93,6 +100,8 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                             is_hidden: column.is_hidden,
                             is_primary_key: table.pk.contains(&index),
                             is_distribution_key: false,
+                            is_generated: false,
+                            generation_expression: None,
                             data_type: column.data_type().to_string(),
                             type_oid: column.data_type().to_oid(),
                             type_len: column.data_type().type_len(),
@@ -104,6 +113,7 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
             let table_rows = schema
                 .iter_valid_table()
                 .flat_map(|table| {
+                    let schema = table.column_schema();
                     table
                         .columns
                         .iter()
@@ -115,6 +125,15 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                             is_hidden: column.is_hidden,
                             is_primary_key: table.pk().iter().any(|idx| idx.column_index == index),
                             is_distribution_key: table.distribution_key.contains(&index),
+                            is_generated: column.is_generated(),
+                            generation_expression: column.generated_expr().map(|expr_node| {
+                                let expr = ExprImpl::from_expr_proto(expr_node).unwrap();
+                                let expr_display = ExprDisplay {
+                                    expr: &expr,
+                                    input_schema: &schema,
+                                };
+                                expr_display.to_string()
+                            }),
                             data_type: column.data_type().to_string(),
                             type_oid: column.data_type().to_oid(),
                             type_len: column.data_type().type_len(),
@@ -138,6 +157,8 @@ fn read_rw_columns(reader: &SysCatalogReaderImpl) -> Result<Vec<RwColumn>> {
                             is_hidden: column.is_hidden,
                             is_primary_key: source.pk_col_ids.contains(&column.column_id()),
                             is_distribution_key: false,
+                            is_generated: false,
+                            generation_expression: None,
                             data_type: column.data_type().to_string(),
                             type_oid: column.data_type().to_oid(),
                             type_len: column.data_type().type_len(),

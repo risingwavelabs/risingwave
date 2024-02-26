@@ -19,6 +19,7 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
+#[primary_key(object_id, sst_id)] // TODO: is this correct?
 struct RwHummockBranchedObject {
     object_id: i64,
     sst_id: i64,

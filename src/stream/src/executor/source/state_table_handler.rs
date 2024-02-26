@@ -178,14 +178,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     where
         SS: SplitMetaData,
     {
-        if states.is_empty() {
-            // TODO should be a clear Error Code
-            bail!("states require not null");
-        } else {
-            for split_impl in states {
-                self.set(split_impl.id(), split_impl.encode_to_json())
-                    .await?;
-            }
+        for split_impl in states {
+            self.set(split_impl.id(), split_impl.encode_to_json())
+                .await?;
         }
         Ok(())
     }
