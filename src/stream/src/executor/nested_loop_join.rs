@@ -15,10 +15,10 @@
 use std::alloc::Global;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::pin::pin;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
@@ -31,12 +31,13 @@ use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::hash::{HashKey, NullBitmap, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
@@ -45,6 +46,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
+
+use self::builder::JoinChunkBuilder;
+use self::row::{row_concat, DegreeType, JoinRow};
 
 use super::join::*;
 use super::test_utils::prelude::StateTable;
@@ -67,7 +71,7 @@ pub struct NestedLoopJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     
     /// Left input executor
     input_l: Option<BoxedExecutor>,
-    /// Right input executor
+    /// Right input executor (broadcast side)
     input_r: Option<BoxedExecutor>,
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
@@ -97,7 +101,6 @@ struct JoinArgs<'a, S: StateStore> {
     side_r: &'a mut JoinSide<S>,
     actual_output_data_types: &'a [DataType],
     cond: &'a mut Option<NonStrictExpression>,
-    inequality_watermarks: &'a [Option<Watermark>],
     chunk: StreamChunk,
     append_only_optimize: bool,
     chunk_size: usize,
@@ -113,7 +116,7 @@ struct CachedJoinSide<S: StateStore> {
 
 struct JoinSide<S: StateStore> {
     /// State table. Contains the data from upstream.
-    state: TableInner<S>,
+    state: StateTable<S>,
     /// Degree table.
     ///
     /// The degree is generated from the hash join executor.
@@ -126,7 +129,9 @@ struct JoinSide<S: StateStore> {
     /// - Left Outer/Semi/Anti: left side
     /// - Right Outer/Semi/Anti: right side
     /// - Inner: None.
-    degree_state: TableInner<S>,
+    degree_state: StateTable<S>,
+    /// The pk indices of the state table.
+    state_pk_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
@@ -135,40 +140,174 @@ struct JoinSide<S: StateStore> {
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
 
-    /// Some fields which are required non null to match due to inequalities.
-    non_null_fields: Vec<usize>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
 }
 
-impl<S: StateStore> EstimateSize for CachedJoinSide<S> {
-    fn estimated_heap_size(&self) -> usize {
-        // TODO: Add internal size.
-        // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size.size()
+impl<S: StateStore> JoinSide<S> {
+    fn init(&mut self, epoch: EpochPair) {
+        self.state.init_epoch(epoch);
+        self.degree_state.init_epoch(epoch);
     }
-}
 
-impl<S: StateStore> CachedJoinSide<S> {
-    /// Insert into the cache.
-    pub fn insert(&mut self, key: OwnedRow, value: OwnedRow) -> StreamExecutorResult<()> {
-        self.kv_heap_size.add(&key, &value);
-        self.cached.put(key, value).ok_or(anyhow!("Inserting a pk that already existed in cache"))?;
+    /// Update the vnode bitmap and manipulate the cache if necessary.
+    fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
+        let (_previous_vnode_bitmap, cache_may_stale) =
+            self.state.update_vnode_bitmap(vnode_bitmap.clone());
+        let _ = self.degree_state.update_vnode_bitmap(vnode_bitmap);
+
+        cache_may_stale
+    }
+
+    /// Iter the rows in the table.
+    #[try_stream(ok = JoinRow<OwnedRow>, error = StreamExecutorError)]
+    async fn rows(&mut self) {
+        if self.need_degree_table {
+            let range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
+            let streams = futures::future::try_join_all(
+                    self.state.vnodes().iter_vnodes().map(|vnode| {
+                        let state_iter = self.state.iter_with_vnode(
+                            vnode,
+                            &range,
+                            PrefetchOptions::prefetch_for_large_range_scan(),
+                        );
+                        let degree_state_iter = self.degree_state.iter_with_vnode(
+                            vnode,
+                            &range,
+                            PrefetchOptions::prefetch_for_large_range_scan(),
+                        );
+                        futures::future::try_join(state_iter, degree_state_iter)
+                    })
+                ).await?.into_iter().map(|(state_iter, degree_state_iter)| Box::pin(state_iter.zip(degree_state_iter)));
+            
+            #[for_await]
+            for (row, degree) in stream::select_all(streams) {
+                let row = row?;
+                let degree_row = degree?;
+                let pk1 = row.key();
+                let pk2 = degree_row.key();
+                debug_assert_eq!(
+                    pk1, pk2,
+                    "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
+                );
+                let degree_i64 = degree_row
+                    .datum_at(degree_row.len() - 1)
+                    .expect("degree should not be NULL");
+                yield JoinRow::new(row.into_owned_row(), degree_i64.into_int64() as u64);
+            }
+        } else {
+            let range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
+            let streams = futures::future::try_join_all(
+                    self.state.vnodes().iter_vnodes().map(|vnode| {
+                        self.state.iter_with_vnode(
+                            vnode,
+                            &range,
+                            PrefetchOptions::prefetch_for_large_range_scan(),
+                        )
+                    })
+                ).await?.into_iter().map(Box::pin);
+            
+            #[for_await]
+            for entry in stream::select_all(streams) {
+                let row = entry?;
+                yield JoinRow::new(row.into_owned_row(), 0);
+            }
+        };
+    }
+
+    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        // self.metrics.flush();
+        self.state.commit(epoch).await?;
+        self.degree_state.commit(epoch).await?;
         Ok(())
     }
 
-    /// Delete from the cache.
-    pub fn remove(&mut self, key: &OwnedRow) {
-        if let Some(value) = self.cached.(key) {
-            self.kv_heap_size.sub(key, &value);
-        } else {
-            panic!("key {:?} should be in the cache", key);
-        }
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state.try_flush().await?;
+        self.degree_state.try_flush().await?;
+        Ok(())
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.cached.is_empty()
+    /// Insert a join row
+    #[allow(clippy::unused_async)]
+    pub async fn insert(&mut self, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+        // Update the flush buffer.
+        let (row, degree) = value.to_table_rows(&self.state_pk_indices);
+        self.state.insert(row);
+        self.degree_state.insert(degree);
+        Ok(())
     }
+
+    /// Insert a row.
+    /// Used when the side does not need to update degree.
+    #[allow(clippy::unused_async)]
+    pub async fn insert_row(&mut self, value: impl Row) -> StreamExecutorResult<()> {
+        // Update the flush buffer.
+        self.state.insert(value);
+        Ok(())
+    }
+
+    /// Delete a join row
+    pub fn delete(&mut self, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+        // If no cache maintained, only update the state table.
+        let (row, degree) = value.to_table_rows(&self.state_pk_indices);
+        self.state.delete(row);
+        self.degree_state.delete(degree);
+        Ok(())
+    }
+
+    /// Delete a row
+    /// Used when the side does not need to update degree.
+    pub fn delete_row(&mut self,value: impl Row) -> StreamExecutorResult<()> {
+        // If no cache maintained, only update the state table.
+        self.state.delete(value);
+        Ok(())
+    }
+
+    /// Manipulate the degree of the given [`JoinRow`] and update the degree table.
+    fn manipulate_degree(
+        &mut self,
+        join_row: &mut JoinRow<OwnedRow>,
+        action: impl Fn(&mut DegreeType),
+    ) {
+        // TODO: no need to `into_owned_row` here due to partial borrow.
+        let old_degree = join_row
+            .to_table_rows(&self.state_pk_indices)
+            .1
+            .into_owned_row();
+
+        action(&mut join_row.degree);
+
+        let new_degree = join_row.to_table_rows(&self.state_pk_indices).1;
+
+        self.degree_state.update(old_degree, new_degree);
+    }
+
+    /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    pub fn inc_degree(
+        &mut self,
+        join_row: &mut JoinRow<OwnedRow>,
+    ) {
+        self.manipulate_degree(join_row, |d| *d += 1)
+    }
+
+    /// Decrement the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
+    /// memory and in the degree table.
+    pub fn dec_degree(
+        &mut self,
+        join_row: &mut JoinRow<OwnedRow>,
+    ) {
+        self.manipulate_degree(join_row, |d| {
+            *d = d
+                .checked_sub(1)
+                .expect("Tried to decrement zero join row degree")
+        })
+    }
+
+    
 }
 
 enum InternalMessage {
@@ -304,23 +443,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             )
             .collect_vec();
 
-        let mut l_non_null_fields = l2inequality_index
-            .iter()
-            .positions(|inequalities| !inequalities.is_empty())
-            .collect_vec();
-        let mut r_non_null_fields = r2inequality_index
-            .iter()
-            .positions(|inequalities| !inequalities.is_empty())
-            .collect_vec();
-
-        if append_only_optimize {
-            l_state_clean_columns.clear();
-            r_state_clean_columns.clear();
-            l_non_null_fields.clear();
-            r_non_null_fields.clear();
-        }
-
-        let inequality_watermarks = vec![None; inequality_pairs.len()];
         let watermark_buffers = BTreeMap::new();
 
         Self {
@@ -330,20 +452,23 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             input_r: Some(input_r),
             actual_output_data_types,
             side_l: JoinSide {
+                state: state_table_l,
+                degree_state: degree_state_table_l,
+                state_pk_indices: state_pk_indices_l,
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
-                non_null_fields: l_non_null_fields,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
-                table: state_table_l,
             },
             side_r: JoinSide {
+                state: state_table_r,
+                degree_state: degree_state_table_r,
+                state_pk_indices: state_pk_indices_r,
                 all_data_types: state_all_data_types_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
-                non_null_fields: r_non_null_fields,
                 need_degree_table: need_degree_table_r,
             },
             cond,
@@ -436,13 +561,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                     let mut left_time = Duration::from_nanos(0);
                     let mut left_start_time = Instant::now();
                     #[for_await]
-                    for chunk in Self::eq_join_left(EqJoinArgs {
+                    for chunk in Self::eq_join_oneside::<{SideType::Left}>(JoinArgs {
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
                         cond: &mut self.cond,
-                        inequality_watermarks: &self.inequality_watermarks,
                         chunk,
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
@@ -460,13 +584,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                     let mut right_time = Duration::from_nanos(0);
                     let mut right_start_time = Instant::now();
                     #[for_await]
-                    for chunk in Self::eq_join_right(EqJoinArgs {
+                    for chunk in Self::eq_join_oneside::<{SideType::Right}>(JoinArgs {
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
                         cond: &mut self.cond,
-                        inequality_watermarks: &self.inequality_watermarks,
                         chunk,
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
@@ -486,25 +609,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
+                        if self.side_l.update_vnode_bitmap(vnode_bitmap.clone()) {
                             self.watermark_buffers
                                 .values_mut()
                                 .for_each(|buffers| buffers.clear());
-                            self.inequality_watermarks.fill(None);
                         }
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
-                    }
-
-                    // Update epoch for managed cache.
-                    self.side_l.ht.update_epoch(barrier.epoch.curr);
-                    self.side_r.ht.update_epoch(barrier.epoch.curr);
-
-                    // Report metrics of cached join rows/entries
-                    for (join_cached_entry_count, ht) in [
-                        (&left_join_cached_entry_count, &self.side_l.ht),
-                        (&right_join_cached_entry_count, &self.side_r.ht),
-                    ] {
-                        join_cached_entry_count.set(ht.entry_count() as i64);
+                        self.side_r.update_vnode_bitmap(vnode_bitmap);
                     }
 
                     barrier_join_match_duration_ns
@@ -524,7 +634,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             side_r,
             actual_output_data_types,
             cond,
-            inequality_watermarks,
             chunk,
             append_only_optimize,
             chunk_size,
@@ -538,14 +647,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             (side_r, side_l)
         };
 
-        let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
-            stream_chunk_builder: JoinStreamChunkBuilder::new(
+        let mut join_chunk_builder = JoinChunkBuilder::<T, SIDE>::new(
+            JoinStreamChunkBuilder::new(
                 chunk_size,
                 actual_output_data_types.to_vec(),
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
-            ),
-        };
+            )
+        );
 
         let join_matched_join_keys = ctx
             .streaming_metrics
@@ -553,46 +662,33 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             .with_label_values(&[
                 &ctx.id.to_string(),
                 &ctx.fragment_id.to_string(),
-                &side_update.ht.table_id().to_string(),
+                &side_update.state.table_id().to_string(),
             ]);
 
-        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+        for r in chunk.rows_with_holes() {
             let Some((op, row)) = r else {
                 continue;
             };
-            Self::evict_cache(side_update, side_match, cnt_rows_received);
 
-            let matched_rows: Option<HashValueType> = if side_update
-                .non_null_fields
-                .iter()
-                .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() })
-            {
-                Self::hash_eq_match(key, &mut side_match.ht).await?
-            } else {
-                None
-            };
 
-            if let Some(rows) = &matched_rows {
-                join_matched_join_keys.observe(rows.len() as _);
-            } else {
-                join_matched_join_keys.observe(0.0)
-            }
+            let rows = side_match.rows();
+            
+            let mut matched_rows_cnt = 0;
 
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
                     let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
-                    if let Some(mut matched_rows) = matched_rows {
-                        let mut matched_rows_to_clean = vec![];
-                        for (matched_row_ref, matched_row) in
-                            matched_rows.values_mut(&side_match.all_data_types)
+                        #[for_await]
+                        for matched_row in rows
                         {
+                            matched_rows_cnt += 1;
                             let mut matched_row = matched_row?;
                             // TODO(yuhao-su): We should find a better way to eval the expression
                             // without concat two rows.
                             // if there are non-equi expressions
                             let check_join_condition = if let Some(ref mut cond) = cond {
-                                let new_row = Self::row_concat(
+                                let new_row = row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
@@ -606,32 +702,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                             } else {
                                 true
                             };
-                            let mut need_state_clean = false;
                             if check_join_condition {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
-                                    if let Some(chunk) = hashjoin_chunk_builder
+                                    if let Some(chunk) = join_chunk_builder
                                         .with_match_on_insert(&row, &matched_row)
                                     {
                                         yield chunk;
                                     }
                                 }
                                 if side_match.need_degree_table {
-                                    side_match.ht.inc_degree(matched_row_ref, &mut matched_row);
-                                }
-                            } else {
-                                for (column_idx, watermark) in &useful_state_clean_columns {
-                                    if matched_row.row.datum_at(*column_idx).map_or(
-                                        false,
-                                        |scalar| {
-                                            scalar
-                                                .default_cmp(&watermark.val.as_scalar_ref_impl())
-                                                .is_lt()
-                                        },
-                                    ) {
-                                        need_state_clean = true;
-                                        break;
-                                    }
+                                    side_match.inc_degree(&mut matched_row);
                                 }
                             }
                             // If the stream is append-only and the join key covers pk in both side,
@@ -642,48 +723,34 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                                 // one row if matched.
                                 assert!(append_only_matched_row.is_none());
                                 append_only_matched_row = Some(matched_row);
-                            } else if need_state_clean {
-                                // `append_only_optimize` and `need_state_clean` won't both be true.
-                                // 'else' here is only to suppress compiler error.
-                                matched_rows_to_clean.push(matched_row);
                             }
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                                join_chunk_builder.forward_if_not_matched(Op::Insert, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
+                            join_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
-                        // Insert back the state taken from ht.
-                        side_match.ht.update_state(key, matched_rows);
-                        for matched_row in matched_rows_to_clean {
-                            if side_match.need_degree_table {
-                                side_match.ht.delete(key, matched_row)?;
-                            } else {
-                                side_match.ht.delete_row(key, matched_row.row)?;
-                            }
-                        }
 
                         if append_only_optimize && let Some(row) = append_only_matched_row {
-                            side_match.ht.delete(key, row)?;
+                            side_match.delete(row)?;
                         } else if side_update.need_degree_table {
                             side_update
-                                .ht
-                                .insert(key, JoinRow::new(row, degree))
+                                .insert(JoinRow::new(row, degree))
                                 .await?;
                         } else {
-                            side_update.ht.insert_row(key, row).await?;
+                            side_update.insert_row(row).await?;
                         }
-                    } else {
+                    if matched_rows_cnt == 0 {
                         // Row which violates null-safe bitmap will never be matched so we need not
                         // store.
                         if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                            join_chunk_builder.forward_if_not_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
@@ -691,17 +758,16 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                 }
                 Op::Delete | Op::UpdateDelete => {
                     let mut degree = 0;
-                    if let Some(mut matched_rows) = matched_rows {
-                        let mut matched_rows_to_clean = vec![];
-                        for (matched_row_ref, matched_row) in
-                            matched_rows.values_mut(&side_match.all_data_types)
+                        #[for_await]
+                        for matched_row in rows
                         {
+                            matched_rows_cnt += 1;
                             let mut matched_row = matched_row?;
                             // TODO(yuhao-su): We should find a better way to eval the expression
                             // without concat two rows.
                             // if there are non-equi expressions
                             let check_join_condition = if let Some(ref mut cond) = cond {
-                                let new_row = Self::row_concat(
+                                let new_row = row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
@@ -719,74 +785,48 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                             if check_join_condition {
                                 degree += 1;
                                 if side_match.need_degree_table {
-                                    side_match.ht.dec_degree(matched_row_ref, &mut matched_row);
+                                    side_match.dec_degree(&mut matched_row);
                                 }
                                 if !forward_exactly_once(T, SIDE) {
-                                    if let Some(chunk) = hashjoin_chunk_builder
+                                    if let Some(chunk) = join_chunk_builder
                                         .with_match_on_delete(&row, &matched_row)
                                     {
                                         yield chunk;
                                     }
                                 }
-                            } else {
-                                for (column_idx, watermark) in &useful_state_clean_columns {
-                                    if matched_row.row.datum_at(*column_idx).map_or(
-                                        false,
-                                        |scalar| {
-                                            scalar
-                                                .default_cmp(&watermark.val.as_scalar_ref_impl())
-                                                .is_lt()
-                                        },
-                                    ) {
-                                        need_state_clean = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if need_state_clean {
-                                matched_rows_to_clean.push(matched_row);
                             }
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                                join_chunk_builder.forward_if_not_matched(Op::Delete, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Delete, row)
+                            join_chunk_builder.forward_exactly_once_if_matched(Op::Delete, row)
                         {
                             yield chunk;
-                        }
-                        // Insert back the state taken from ht.
-                        side_match.ht.update_state(key, matched_rows);
-                        for matched_row in matched_rows_to_clean {
-                            if side_match.need_degree_table {
-                                side_match.ht.delete(key, matched_row)?;
-                            } else {
-                                side_match.ht.delete_row(key, matched_row.row)?;
-                            }
                         }
 
                         if append_only_optimize {
                             unreachable!();
                         } else if side_update.need_degree_table {
-                            side_update.ht.delete(key, JoinRow::new(row, degree))?;
+                            side_update.delete(JoinRow::new(row, degree))?;
                         } else {
-                            side_update.ht.delete_row(key, row)?;
+                            side_update.delete_row(row)?;
                         };
-                    } else {
-                        // We do not store row which violates null-safe bitmap.
+                    if matched_rows_cnt == 0 {
                         if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                            join_chunk_builder.forward_if_not_matched(Op::Delete, row)
                         {
                             yield chunk;
                         }
                     }
                 }
             }
+            join_matched_join_keys.observe(matched_rows_cnt as _);
         }
-        if let Some(chunk) = hashjoin_chunk_builder.take() {
+        if let Some(chunk) = join_chunk_builder.take() {
             yield chunk;
         }
     }
@@ -794,31 +834,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.table.commit(epoch).await?;
-        self.side_r.table.commit(epoch).await?;
+        self.side_l.state.commit(epoch).await?;
+        self.side_r.degree_state.commit(epoch).await?;
         Ok(())
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.table.try_flush().await?;
-        self.side_r.table.try_flush().await?;
+        self.side_l.state.try_flush().await?;
+        self.side_r.degree_state.try_flush().await?;
         Ok(())
-    }
-
-    // We need to manually evict the cache.
-    fn evict_cache(
-        side_update: &mut JoinSide<S>,
-        side_match: &mut JoinSide<S>,
-        cnt_rows_received: &mut u32,
-    ) {
-        *cnt_rows_received += 1;
-        if *cnt_rows_received == EVICT_EVERY_N_ROWS {
-            side_update.ht.evict();
-            side_match.ht.evict();
-            *cnt_rows_received = 0;
-        }
     }
 
     async fn handle_watermark(

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::RowRef;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
 use crate::executor::StreamExecutorResult;
 
@@ -79,4 +80,21 @@ impl EncodedJoinRow {
         let row = self.compacted_row.deserialize(data_types)?;
         Ok(row)
     }
+}
+
+pub fn row_concat(
+    row_update: &RowRef<'_>,
+    update_start_pos: usize,
+    row_matched: &OwnedRow,
+    matched_start_pos: usize,
+) -> OwnedRow {
+    let mut new_row = vec![None; row_update.len() + row_matched.len()];
+
+    for (i, datum_ref) in row_update.iter().enumerate() {
+        new_row[i + update_start_pos] = datum_ref.to_owned_datum();
+    }
+    for i in 0..row_matched.len() {
+        new_row[i + matched_start_pos] = row_matched[i].clone();
+    }
+    OwnedRow::new(new_row)
 }

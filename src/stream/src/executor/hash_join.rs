@@ -34,6 +34,7 @@ use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
 use self::builder::JoinChunkBuilder;
+use self::row::row_concat;
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::join::hash_join::*;
@@ -757,23 +758,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    fn row_concat(
-        row_update: &RowRef<'_>,
-        update_start_pos: usize,
-        row_matched: &OwnedRow,
-        matched_start_pos: usize,
-    ) -> OwnedRow {
-        let mut new_row = vec![None; row_update.len() + row_matched.len()];
-
-        for (i, datum_ref) in row_update.iter().enumerate() {
-            new_row[i + update_start_pos] = datum_ref.to_owned_datum();
-        }
-        for i in 0..row_matched.len() {
-            new_row[i + matched_start_pos] = row_matched[i].clone();
-        }
-        OwnedRow::new(new_row)
-    }
-
     /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_left(
         args: EqJoinArgs<'_, K, S>,
@@ -874,7 +858,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             // without concat two rows.
                             // if there are non-equi expressions
                             let check_join_condition = if let Some(ref mut cond) = cond {
-                                let new_row = Self::row_concat(
+                                let new_row = row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
@@ -983,7 +967,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             // without concat two rows.
                             // if there are non-equi expressions
                             let check_join_condition = if let Some(ref mut cond) = cond {
-                                let new_row = Self::row_concat(
+                                let new_row = row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
