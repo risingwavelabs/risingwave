@@ -302,9 +302,9 @@ impl CheckpointControl {
                         CompletingCommand::None | CompletingCommand::Err(_) => None,
                         CompletingCommand::Completing { command_ctx, .. } => Some(command_ctx),
                     }
-                    .iter()
+                    .into_iter()
                 )
-                .any(|x| x.command_ctx.command.should_pause_inject_barrier()),
+                .any(|command_ctx| command_ctx.command.should_pause_inject_barrier()),
             should_pause
         );
 
