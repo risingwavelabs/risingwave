@@ -21,6 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, Schema, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -151,6 +152,12 @@ async fn extract_avro_table_schema(
         let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
     } else {
+        if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
+            &parser_config.encoding_config
+            && !avro_props.use_schema_registry
+        {
+            bail_not_implemented!(issue = 12871, "avro without schema registry");
+        }
         let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
     };
