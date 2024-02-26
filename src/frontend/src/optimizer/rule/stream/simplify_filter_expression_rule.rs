@@ -32,9 +32,9 @@ impl Rule for SimplifyFilterExpressionRule {
         let logical_share_plan = filter.input();
         let share: &LogicalShare = logical_share_plan.as_logical_share()?;
         let input = share.input().rewrite_exprs(&mut rewriter);
-        let share = LogicalShare::new(input);
+        share.replace_input(input);
         Some(LogicalFilter::create(
-            share.into(),
+            share.clone().into(),
             filter.predicate().clone(),
         ))
     }
