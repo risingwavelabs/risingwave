@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_pb::plan_common::JoinType;
 
 use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, WatermarkDerivation
+    Expr, ExprImpl, ExprRewriter, ExprType,
 };
-use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalJoin, LogicalNow, LogicalShare, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{
+    ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary,
+};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 
@@ -32,7 +32,10 @@ impl Rule for SimplifyFilterExpressionRule {
         let share: &LogicalShare = logical_share_plan.as_logical_share()?;
         let input = share.input().rewrite_exprs(&mut rewriter);
         let share = LogicalShare::new(input);
-        Some(LogicalFilter::create(share.into(), filter.predicate().clone()))
+        Some(LogicalFilter::create(
+            share.into(),
+            filter.predicate().clone(),
+        ))
     }
 }
 
