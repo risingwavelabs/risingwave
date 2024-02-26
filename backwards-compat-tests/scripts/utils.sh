@@ -227,6 +227,12 @@ seed_old_cluster() {
   create_kafka_topic
   seed_json_kafka
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
+  # use the old syntax for version at most 1.5.4
+  if version_le "$OLD_VERSION" "1.5.4" ; then
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/deprecate_upsert.slt"
+  else
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/include_key_as.slt"
+  fi
 
   echo "--- KAFKA TEST: wait 5s for kafka to process data"
   sleep 5

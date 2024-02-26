@@ -52,7 +52,7 @@ yjtyjtyyy 9 NULL NULL 4 NULL
 
 # kafka_table should do the upsert and overwrite the existing records
 query I rowsort
-SELECT * FROM kafka_table;
+SELECT action, user_id, obj_id, name, page_id, age, _rw_key FROM kafka_table;
 ----
 6786745ge 6 NULL NULL 3 NULL \x7b22757365725f6964223a20367d
 erwerhghj 4 NULL NULL 2 NULL \x7b22757365725f6964223a20347d

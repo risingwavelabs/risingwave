@@ -1,19 +1,18 @@
 statement ok
-CREATE SOURCE IF NOT EXISTS kafka_source
+CREATE TABLE IF NOT EXISTS kafka_table
 (
  action varchar,
  user_id integer,
  obj_id integer,
  name varchar,
  page_id integer,
- age integer
+ age integer,
+ primary key (_rw_key)
 )
+INCLUDE key as _rw_key
 WITH (
  connector='kafka',
  topic='backwards_compat_test_kafka_source',
  properties.bootstrap.server='localhost:29092',
  scan.startup.mode='earliest',
-) FORMAT PLAIN ENCODE JSON;
-
-statement ok
-CREATE MATERIALIZED VIEW kafka_mv1 as SELECT * FROM kafka_source;
+) FORMAT UPSERT ENCODE JSON;
