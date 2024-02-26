@@ -171,7 +171,7 @@ impl ColumnDesc {
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
             additional_column_type: 0, // deprecated
-            additional_column: Some(self.additional_column.clone()),
+            additional_columns: Some(self.additional_columns.clone()),
             version: self.version as i32,
         }
     }
@@ -307,7 +307,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
             additional_column_type: 0, // deprecated
-            additional_column: c.additional_column.clone().into(),
+            additional_columns: c.additional_columns.clone().into(),
             version: c.version as i32,
         }
     }

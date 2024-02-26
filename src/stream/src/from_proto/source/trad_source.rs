@@ -109,7 +109,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                 if desc.additional_column_type
                                     == LegacyAdditionalColumnType::Key as i32
                                 {
-                                    desc.additional_column = Some(AdditionalColumn {
+                                    desc.additional_columns = Some(AdditionalColumn {
                                         column_type: Some(AdditionalColumnType::Key(
                                             AdditionalColumnKey {},
                                         )),
