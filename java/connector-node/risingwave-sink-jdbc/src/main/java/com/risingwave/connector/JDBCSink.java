@@ -65,7 +65,8 @@ public class JDBCSink implements SinkWriter {
                 columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
             }
             LOG.info(
-                    "sink table {}, columnSqlTypes: {}",
+                    "schema = {}, table = {}: columnSqlTypes = {}",
+                    config.getSchemaName(),
                     config.getTableName(),
                     Arrays.toString(columnSqlTypes));
 
@@ -108,7 +109,11 @@ public class JDBCSink implements SinkWriter {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
-        LOG.info("sink table: {}, detected column type mapping {}", tableName, columnTypeMap);
+        LOG.info(
+                "schema = {}, table = {}: detected column type mapping = {}",
+                schemaName,
+                tableName,
+                columnTypeMap);
         return columnTypeMap;
     }
 
@@ -126,7 +131,11 @@ public class JDBCSink implements SinkWriter {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
-        LOG.info("sink table {}: detected pk column {}", tableName, pkColumnNames);
+        LOG.info(
+                "schema = {}, table = {}: detected pk column = {}",
+                schemaName,
+                tableName,
+                pkColumnNames);
         return pkColumnNames;
     }
 
