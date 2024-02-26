@@ -46,7 +46,9 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
 
     metrics: KvLogStoreMetrics,
 
-    is_paused: watch::Sender<bool>,
+    paused_notifier: watch::Sender<bool>,
+
+    is_paused: bool,
 
     identity: String,
 }
@@ -58,7 +60,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         serde: LogStoreRowSerde,
         tx: LogStoreBufferSender,
         metrics: KvLogStoreMetrics,
-        is_paused: watch::Sender<bool>,
+        paused_notifier: watch::Sender<bool>,
         identity: String,
     ) -> Self {
         Self {
@@ -68,8 +70,9 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             serde,
             tx,
             metrics,
-            is_paused,
+            paused_notifier,
             identity,
+            is_paused: false,
         }
     }
 }
@@ -93,6 +96,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+        // No data is expected when the stream is paused.
+        assert!(!self.is_paused);
+
         if chunk.cardinality() == 0 {
             return Ok(());
         }
@@ -133,10 +139,15 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     ) -> LogStoreResult<()> {
         let epoch = self.state_store.epoch();
         let mut flush_info = FlushInfo::new();
-        for vnode in self.serde.vnodes().iter_vnodes() {
-            let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
-            flush_info.flush_one(key.estimated_size() + value.estimated_size());
-            self.state_store.insert(key, value, None)?;
+
+        // When the stream is paused, donot flush barrier  to ensure there is no dirty data in state store.
+        // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
+        if !self.is_paused {
+            for vnode in self.serde.vnodes().iter_vnodes() {
+                let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
+                flush_info.flush_one(key.estimated_size() + value.estimated_size());
+                self.state_store.insert(key, value, None)?;
+            }
         }
         self.tx
             .flush_all_unflushed(|chunk, epoch, start_seq_id, end_seq_id| {
@@ -149,7 +160,16 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 }
                 Ok(())
             })?;
+
+        // No data is expected when the stream is paused.
+        assert!(
+            !self.is_paused
+                || (self.state_store.is_dirty()
+                    && flush_info.flush_count == 0
+                    && flush_info.flush_size == 0)
+        );
         flush_info.report(&self.metrics);
+
         let watermark = self.tx.pop_truncation(epoch).map(|truncation_offset| {
             VnodeWatermark::new(
                 self.serde.vnodes().clone(),
@@ -180,14 +200,18 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
 
     fn pause(&mut self) -> LogStoreResult<()> {
         info!("KvLogStore of {} is paused", self.identity);
-        self.is_paused
+        assert!(!self.is_paused);
+        self.is_paused = true;
+        self.paused_notifier
             .send(true)
             .map_err(|_| anyhow!("unable to set pause"))
     }
 
     fn resume(&mut self) -> LogStoreResult<()> {
         info!("KvLogStore of {} is resumed", self.identity);
-        self.is_paused
+        assert!(self.is_paused);
+        self.is_paused = false;
+        self.paused_notifier
             .send(false)
             .map_err(|_| anyhow!("unable to set resume"))
     }
