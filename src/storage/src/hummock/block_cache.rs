@@ -98,20 +98,16 @@ impl BlockResponse {
     pub async fn wait(self) -> HummockResult<BlockHolder> {
         match self {
             BlockResponse::Block(block_holder) => Ok(block_holder),
-            BlockResponse::WaitPendingRequest(receiver) => {
-                receiver
-                    .verbose_instrument_await("wait_pending_fetch_block")
-                    .await
-                    .map_err(|recv_error| recv_error.into())
-                    .map(BlockHolder::from_ref_block)
-            },
-            BlockResponse::Miss(join_handle) => {
-               join_handle
-                    .verbose_instrument_await("fetch_block")
-                    .await
-                    .unwrap()
-                .map(BlockHolder::from_ref_block)
-            },
+            BlockResponse::WaitPendingRequest(receiver) => receiver
+                .verbose_instrument_await("wait_pending_fetch_block")
+                .await
+                .map_err(|recv_error| recv_error.into())
+                .map(BlockHolder::from_ref_block),
+            BlockResponse::Miss(join_handle) => join_handle
+                .verbose_instrument_await("fetch_block")
+                .await
+                .unwrap()
+                .map(BlockHolder::from_ref_block),
         }
     }
 }
@@ -190,16 +186,16 @@ impl BlockCache {
         Fut: Future<Output = HummockResult<Block>> + Send + 'static,
     {
         let key = (object_id, block_idx);
-        let lookup_response =
-            self.inner
-                .lookup_or_insert_with::<_, HummockError, _>(key, || {
-                    let f = fetch_block();
-                    async move {
-                        let block = f.await?;
-                        let len = block.capacity();
-                        Ok((Arc::new(block), len))
-                    }
-                });
+        let lookup_response = self
+            .inner
+            .lookup_or_insert_with::<_, HummockError, _>(key, || {
+                let f = fetch_block();
+                async move {
+                    let block = f.await?;
+                    let len = block.capacity();
+                    Ok((Arc::new(block), len))
+                }
+            });
         match lookup_response {
             LookupResponse::Invalid => unreachable!(),
             LookupResponse::Cached(entry) => {
@@ -212,12 +208,12 @@ impl BlockCache {
                 let last_miss_count = self
                     .cache_miss_times
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if last_miss_count % 30000 == 0 {
+                if last_miss_count % 10000 == 0 {
                     let debug_info = self.inner.debug_print();
                     tracing::info!("cache debug info: {:?}", debug_info);
                 }
                 BlockResponse::Miss(join_handle)
-            },
+            }
         }
     }
 

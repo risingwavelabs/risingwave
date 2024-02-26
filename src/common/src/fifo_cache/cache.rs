@@ -21,8 +21,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
 use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::oneshot::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 
 use crate::fifo_cache::ghost::GhostCache;
@@ -51,6 +51,8 @@ pub enum LookupResponse<T: CacheValue + 'static, E> {
 }
 type RequestQueue<T> = Vec<Sender<T>>;
 
+pub const SMALL_CACHE_RATIO_PERCENT: usize = 40;
+
 pub struct FifoCacheShard<K: CacheKey, V: CacheValue> {
     map: HashMap<K, CacheHandle<K, V>>,
     small: SmallHotCache<K, V>,
@@ -66,8 +68,9 @@ pub struct FifoCacheShard<K: CacheKey, V: CacheValue> {
 
 impl<K: CacheKey, V: CacheValue> FifoCacheShard<K, V> {
     pub fn new(capacity: usize) -> Self {
-        let small = SmallHotCache::new(capacity / 5);
-        let main = MainCache::new(capacity * 4 / 5);
+        let small_cache_capacity = capacity * SMALL_CACHE_RATIO_PERCENT / 100;
+        let small = SmallHotCache::new(small_cache_capacity);
+        let main = MainCache::new(capacity - small_cache_capacity);
         Self {
             map: HashMap::new(),
             small,
@@ -129,7 +132,6 @@ impl<K: CacheKey, V: CacheValue> FifoCacheShard<K, V> {
             }
         }
     }
-
 
     pub fn insert(
         &mut self,
@@ -193,7 +195,7 @@ impl<'a, K: CacheKey + 'static, T: CacheValue + 'static> CleanCacheGuard<'a, K, 
     }
 }
 
-impl<'a, K: CacheKey + 'static, T: CacheValue+ 'static> Drop for CleanCacheGuard<'a, K, T> {
+impl<'a, K: CacheKey + 'static, T: CacheValue + 'static> Drop for CleanCacheGuard<'a, K, T> {
     fn drop(&mut self) {
         if let Some(key) = self.key.as_ref() {
             self.cache.clear_pending_request(key);
@@ -289,11 +291,15 @@ impl<K: CacheKey + 'static, V: CacheValue + 'static> FifoCache<K, V> {
         }
     }
 
-    pub fn lookup_or_insert_with<F, E, VC>(self: &Arc<Self>, key: K, fetch_value: F) -> LookupResponse<V, E>
-        where
-            F: FnOnce() -> VC,
-            E: Error + Send + 'static + From<RecvError>,
-            VC: Future<Output = Result<(V, usize), E>> + Send + 'static,
+    pub fn lookup_or_insert_with<F, E, VC>(
+        self: &Arc<Self>,
+        key: K,
+        fetch_value: F,
+    ) -> LookupResponse<V, E>
+    where
+        F: FnOnce() -> VC,
+        E: Error + Send + 'static + From<RecvError>,
+        VC: Future<Output = Result<(V, usize), E>> + Send + 'static,
     {
         let hash = Self::hash(&key);
         {

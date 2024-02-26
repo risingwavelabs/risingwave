@@ -55,14 +55,28 @@ impl<K: CacheKey, V: CacheValue> MainCache<K, V> {
 
     pub fn evict(&mut self) -> Option<Box<CacheItem<K, V>>> {
         let mut idx = 0;
+        let mut second_item = None;
         while let Some(mut item) = self.queue.pop_front() {
-            if item.dec_freq() && idx < MAX_EVICT_LOOP {
-                idx += 1;
-                self.queue.push_back(item);
-            } else {
+            if !item.dec_freq() {
+                if let Some(last_item) = second_item {
+                    self.queue.push_back(last_item);
+                }
                 self.cost
                     .fetch_sub(item.cost(), std::sync::atomic::Ordering::Release);
                 return Some(item);
+            } else if item.get_freq() == 0 && second_item.is_none() {
+                second_item = Some(item);
+            } else {
+                if idx >= MAX_EVICT_LOOP {
+                    if second_item.is_some() {
+                        self.queue.push_back(item);
+                        return second_item;
+                    } else {
+                        return Some(item);
+                    }
+                }
+                self.queue.push_back(item);
+                idx += 1;
             }
         }
         None
