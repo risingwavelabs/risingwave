@@ -83,7 +83,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         {
             citus_server_addr = Some(server_addr.clone());
             let host_addr =
-                HostAddr::from_str(&server_addr).context("invalid server address for cdc split")?;
+                HostAddr::from_str(server_addr).context("invalid server address for cdc split")?;
             properties.insert("hostname".to_string(), host_addr.host);
             properties.insert("port".to_string(), host_addr.port.to_string());
             // rewrite table name with suffix to capture all shards in the split
