@@ -209,6 +209,10 @@ impl NonOverlapSubLevelPicker {
     }
 
     // Use the incoming sst as the basic range and select as many sub levels as possible
+    // 1. Build basic range based on sst
+    // 2. Add a new sub level in each round
+    // 3. Expand sst according to the basic range from new to old sub levels.
+    // 4. According to the size and count restrictions, select the plan that contains the most sub levels as much as possible
     fn pick_sub_level(
         &self,
         levels: &[Level],
@@ -261,8 +265,6 @@ impl NonOverlapSubLevelPicker {
 
             let mut add_files_size: u64 = 0;
             let mut add_files_count: usize = 0;
-            // let mut finish = false;
-            // let mut pending_compact = false;
 
             let mut select_level_count = 0;
             for reverse_index in (0..=target_index).rev() {
