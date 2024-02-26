@@ -87,7 +87,7 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { workspace = true, features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 moka = { version = "0.12", features = ["future"] }
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
