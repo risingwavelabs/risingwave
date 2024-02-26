@@ -43,3 +43,9 @@ select * from v;
 
 statement ok
 drop materialized view v;
+
+statement ok
+drop table stream;
+
+statement ok
+drop table version;
