@@ -16,37 +16,68 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_meta_model_migration::{
-    Alias, CommonTableExpression, Expr, MysqlQueryBuilder, PostgresQueryBuilder,
-    QueryStatementBuilder, SelectStatement, SqliteQueryBuilder, UnionType, WithClause, WithQuery,
+    Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
+    UnionType, WithClause, WithQuery,
 };
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment};
 use risingwave_meta_model_v2::{actor, actor_dispatcher, fragment, ActorId, FragmentId};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    QueryTrait, RelationTrait, Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, JoinType, QueryFilter, QueryResult,
+    QuerySelect, QueryTrait, RelationTrait, Statement,
 };
 
 use crate::controller::catalog::CatalogController;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
-/// This function will construct a query using recursive cte to find no_shuffle relation graph for target fragments.
+/// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
 ///
 /// # Examples
 ///
 /// ```
-/// use risingwave_meta::controller::scale::construct_no_shuffle_traverse_query;
+/// use risingwave_meta::controller::scale::construct_no_shuffle_upstream_traverse_query;
 /// use sea_orm::sea_query::*;
 /// use sea_orm::*;
 ///
-/// let query = construct_no_shuffle_traverse_query(vec![2, 3]);
+/// let query = construct_no_shuffle_upstream_traverse_query(vec![2, 3]);
 ///
 /// assert_eq!(query.to_string(MysqlQueryBuilder), r#"WITH RECURSIVE `shuffle_deps` (`fragment_id`, `dispatcher_type`, `dispatcher_id`) AS (SELECT DISTINCT `actor`.`fragment_id`, `actor_dispatcher`.`dispatcher_type`, `actor_dispatcher`.`dispatcher_id` FROM `actor` INNER JOIN `actor_dispatcher` ON `actor`.`actor_id` = `actor_dispatcher`.`actor_id` WHERE `actor_dispatcher`.`dispatcher_type` = 'NO_SHUFFLE' AND `actor_dispatcher`.`dispatcher_id` IN (2, 3) UNION ALL (SELECT DISTINCT `actor`.`fragment_id`, `actor_dispatcher`.`dispatcher_type`, `actor_dispatcher`.`dispatcher_id` FROM `actor` INNER JOIN `actor_dispatcher` ON `actor`.`actor_id` = `actor_dispatcher`.`actor_id` INNER JOIN `shuffle_deps` ON `shuffle_deps`.`fragment_id` = `actor_dispatcher`.`dispatcher_id` WHERE `actor_dispatcher`.`dispatcher_type` = 'NO_SHUFFLE')) SELECT DISTINCT `fragment_id`, `dispatcher_type`, `dispatcher_id` FROM `shuffle_deps`"#);
 /// assert_eq!(query.to_string(PostgresQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("fragment_id", "dispatcher_type", "dispatcher_id") AS (SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE' AND "actor_dispatcher"."dispatcher_id" IN (2, 3) UNION ALL (SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" INNER JOIN "shuffle_deps" ON "shuffle_deps"."fragment_id" = "actor_dispatcher"."dispatcher_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE')) SELECT DISTINCT "fragment_id", "dispatcher_type", "dispatcher_id" FROM "shuffle_deps""#);
 /// assert_eq!(query.to_string(SqliteQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("fragment_id", "dispatcher_type", "dispatcher_id") AS (SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE' AND "actor_dispatcher"."dispatcher_id" IN (2, 3) UNION ALL SELECT DISTINCT "actor"."fragment_id", "actor_dispatcher"."dispatcher_type", "actor_dispatcher"."dispatcher_id" FROM "actor" INNER JOIN "actor_dispatcher" ON "actor"."actor_id" = "actor_dispatcher"."actor_id" INNER JOIN "shuffle_deps" ON "shuffle_deps"."fragment_id" = "actor_dispatcher"."dispatcher_id" WHERE "actor_dispatcher"."dispatcher_type" = 'NO_SHUFFLE') SELECT DISTINCT "fragment_id", "dispatcher_type", "dispatcher_id" FROM "shuffle_deps""#);
 /// ```
-pub fn construct_no_shuffle_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
+pub fn construct_no_shuffle_upstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
+    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::UPSTREAM)
+}
+
+pub fn construct_no_shuffle_downstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
+    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::DOWNSTREAM)
+}
+
+enum NoShuffleResolveDirection {
+    UPSTREAM,
+    DOWNSTREAM,
+}
+
+fn construct_no_shuffle_traverse_query_helper(
+    fragment_ids: Vec<FragmentId>,
+    direction: NoShuffleResolveDirection,
+) -> WithQuery {
     let cte_alias = Alias::new("shuffle_deps");
+
+    // If we need to look upwards
+    //     resolve by fragment_id -> dispatcher_id
+    // and if downwards
+    //     resolve by dispatcher_id -> fragment_id
+    let (cte_ref_column, compared_column) = match direction {
+        NoShuffleResolveDirection::UPSTREAM => (
+            (cte_alias.clone(), actor::Column::FragmentId).into_column_ref(),
+            (ActorDispatcher, actor_dispatcher::Column::DispatcherId).into_column_ref(),
+        ),
+        NoShuffleResolveDirection::DOWNSTREAM => (
+            (cte_alias.clone(), actor_dispatcher::Column::DispatcherId).into_column_ref(),
+            (Actor, actor::Column::FragmentId).into_column_ref(),
+        ),
+    };
 
     let mut base_query = SelectStatement::new()
         .column((Actor, actor::Column::FragmentId))
@@ -65,10 +96,7 @@ pub fn construct_no_shuffle_traverse_query(fragment_ids: Vec<FragmentId>) -> Wit
             Expr::col((ActorDispatcher, actor_dispatcher::Column::DispatcherType))
                 .eq(DispatcherType::NoShuffle),
         )
-        .and_where(
-            Expr::col((ActorDispatcher, actor_dispatcher::Column::DispatcherId))
-                .is_in(fragment_ids.clone()),
-        )
+        .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids.clone()))
         .to_owned();
 
     let cte_referencing = SelectStatement::new()
@@ -86,10 +114,7 @@ pub fn construct_no_shuffle_traverse_query(fragment_ids: Vec<FragmentId>) -> Wit
         )
         .inner_join(
             cte_alias.clone(),
-            Expr::col((cte_alias.clone(), actor::Column::FragmentId)).eq(Expr::col((
-                ActorDispatcher,
-                actor_dispatcher::Column::DispatcherId,
-            ))),
+            Expr::col(cte_ref_column).eq(Expr::col(compared_column)),
         )
         .and_where(
             Expr::col((ActorDispatcher, actor_dispatcher::Column::DispatcherType))
@@ -126,6 +151,33 @@ pub struct RescheduleWorkingSet {
     fragments: HashMap<FragmentId, fragment::Model>,
     actors: HashMap<ActorId, actor::Model>,
     actor_dispatchers: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+
+    fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
+    fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
+}
+
+async fn resolve_no_shuffle_query<C>(
+    txn: &C,
+    query: WithQuery,
+) -> MetaResult<Vec<(FragmentId, DispatcherType, FragmentId)>>
+where
+    C: ConnectionTrait,
+{
+    let (sql, values) = query.build_any(&*txn.get_database_backend().get_query_builder());
+
+    let result = txn
+        .query_all(Statement::from_sql_and_values(
+            txn.get_database_backend(),
+            sql,
+            values,
+        ))
+        .await?
+        .into_iter()
+        .map(|res| res.try_get_many_by_index())
+        .collect::<Result<Vec<(FragmentId, DispatcherType, FragmentId)>, DbErr>>()
+        .map_err(|e| MetaError::from(e))?;
+
+    Ok(result)
 }
 
 impl CatalogController {
@@ -138,29 +190,18 @@ impl CatalogController {
         C: ConnectionTrait,
     {
         // NO_SHUFFLE related multi-layer upstream fragments
-        let no_shuffle_related_fragment_ids = {
-            let query = construct_no_shuffle_traverse_query(fragment_ids.clone());
-            let (sql, values) = query.build_any(&*txn.get_database_backend().get_query_builder());
+        let no_shuffle_related_upstream_fragment_ids = resolve_no_shuffle_query(
+            txn,
+            construct_no_shuffle_upstream_traverse_query(fragment_ids.clone()),
+        )
+        .await?;
 
-            txn.query_all(Statement::from_sql_and_values(
-                txn.get_database_backend(),
-                sql,
-                values,
-            ))
-            .await?
-            .into_iter()
-            .map(|res| {
-                // res.try_get_many_by_index()
-                // let fragment_id: FragmentId = res.try_get_by(0).unwrap();
-                // let dispatcher_type: DispatcherType = res.try_get_by(1).unwrap();
-                // let dispatcher_id: FragmentId = res.try_get_by(2).unwrap();
-                let ts: (FragmentId, DispatcherType, FragmentId) =
-                    res.try_get_many_by_index().unwrap();
-
-                ts
-            })
-            .collect_vec()
-        };
+        // NO_SHUFFLE related multi-layer downstream fragments
+        let no_shuffle_related_downstream_fragment_ids = resolve_no_shuffle_query(
+            txn,
+            construct_no_shuffle_downstream_traverse_query(fragment_ids.clone()),
+        )
+        .await?;
 
         // single-layer upstream fragment ids
         let upstream_fragments: Vec<(FragmentId, DispatcherType, FragmentId)> = Actor::find()
@@ -188,11 +229,28 @@ impl CatalogController {
             .all(txn)
             .await?;
 
-        let all_fragment_relations: HashSet<_> = no_shuffle_related_fragment_ids
+        let all_fragment_relations: HashSet<_> = no_shuffle_related_upstream_fragment_ids
             .into_iter()
+            .chain(no_shuffle_related_downstream_fragment_ids.into_iter())
             .chain(upstream_fragments.into_iter())
             .chain(downstream_fragments.into_iter())
             .collect();
+
+        let mut fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>> =
+            HashMap::new();
+        let mut fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>> =
+            HashMap::new();
+
+        for (src, dispatcher_type, dst) in &all_fragment_relations {
+            fragment_upstreams
+                .entry(*dst)
+                .or_default()
+                .push((*src, *dispatcher_type));
+            fragment_downstreams
+                .entry(*src)
+                .or_default()
+                .push((*dst, *dispatcher_type));
+        }
 
         let all_fragment_ids: HashSet<_> = all_fragment_relations
             .iter()
@@ -229,6 +287,8 @@ impl CatalogController {
             fragments,
             actors,
             actor_dispatchers,
+            fragment_downstreams,
+            fragment_upstreams,
         })
     }
 }
@@ -236,6 +296,9 @@ impl CatalogController {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
+    use risingwave_meta_model_migration::PostgresQueryBuilder;
+    use sea_orm::TransactionTrait;
+
     use super::*;
     use crate::manager::{MetaOpts, MetaSrvEnv};
 
@@ -251,7 +314,7 @@ mod tests {
             .await
             .unwrap();
 
-        println!("working set {:#?}", working_set);
+        // println!("working set {:#?}", working_set);
 
         Ok(())
     }

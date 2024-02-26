@@ -19,7 +19,7 @@ use sea_orm::entity::prelude::*;
 
 use crate::{ActorId, ActorMapping, FragmentId, I32Array};
 
-#[derive(Hash, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Hash, Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum DispatcherType {
     #[sea_orm(string_value = "HASH")]

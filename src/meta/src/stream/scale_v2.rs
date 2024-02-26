@@ -26,13 +26,13 @@ use std::collections::HashMap;
 
 use mv2::FragmentId;
 use risingwave_meta_model_v2 as mv2;
-use risingwave_meta_model_v2::actor::Relation::Fragment;
+
 use risingwave_meta_model_v2::WorkerId;
 use sea_orm::TransactionTrait;
 
-use crate::barrier::Command::RescheduleFragment;
+
 use crate::manager::MetadataManager;
-use crate::model::Worker;
+
 use crate::MetaResult;
 
 impl ScaleControllerV2 {
@@ -44,7 +44,7 @@ impl ScaleControllerV2 {
 
         let fragment_ids = reschedule.plan.keys().cloned().collect::<Vec<_>>();
 
-        let working_set = metadata_manager
+        let _working_set = metadata_manager
             .catalog_controller
             .resolve_working_set_for_reschedule(&txn, fragment_ids)
             .await?;
