@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use icelake::types::DataContentType;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
@@ -140,16 +141,17 @@ impl IcebergSplitEnumerator {
         &self,
         batch_parallelism: usize,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
+        if batch_parallelism == 0 {
+            bail!("Batch parallelism is 0. Cannot split the iceberg files.");
+        }
         let table = self.config.load_table().await?;
         let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
-        let files = table
-            .current_data_files()
-            .await?
-            .into_iter()
-            .map(|f| f.file_path)
-            .collect_vec();
-        if batch_parallelism == 0 {
-            bail!("Batch parallelism is 0. Cannot split the iceberg files.")
+        let mut files = vec![];
+        for file in table.current_data_files().await? {
+            if file.content != DataContentType::Data {
+                bail!("Reading iceberg table with delete files is unsupported. Please try to compact the table first.");
+            }
+            files.push(file.file_path);
         }
         let split_num = batch_parallelism;
         // evenly split the files into splits based on the parallelism.
