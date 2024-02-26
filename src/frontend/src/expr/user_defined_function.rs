@@ -58,6 +58,7 @@ impl UserDefinedFunction {
             identifier: udf.identifier.clone(),
             body: udf.body.clone(),
             link: udf.link.clone(),
+            compressed_binary: udf.compressed_binary.clone(),
         };
 
         Ok(Self {
@@ -92,6 +93,7 @@ impl Expr for UserDefinedFunction {
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
+                compressed_binary: self.catalog.compressed_binary.clone(),
             })),
         }
     }

@@ -92,6 +92,7 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
 uuid = "1"
+zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

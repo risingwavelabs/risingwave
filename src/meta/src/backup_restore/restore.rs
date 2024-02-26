@@ -244,7 +244,6 @@ mod tests {
             data_directory: Some("data_directory".into()),
             backup_storage_url: Some("backup_storage_url".into()),
             backup_storage_directory: Some("backup_storage_directory".into()),
-            wasm_storage_url: Some("wasm_storage_url".into()),
             ..SystemConfig::default().into_init_system_params()
         }
     }

@@ -234,6 +234,7 @@ pub async fn handle_create_sql_function(
         language,
         identifier: None,
         body: Some(body),
+        compressed_binary: None,
         link: None,
         owner: session.user_id(),
     };

@@ -18,7 +18,6 @@ use bytes::Bytes;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::get_or_create_wasm_runtime;
 use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
@@ -123,6 +122,7 @@ pub async fn handle_create_function(
     let identifier;
     let mut link = None;
     let mut body = None;
+    let mut compressed_binary = None;
 
     match language.as_str() {
         "python" | "java" | "" => {
@@ -204,23 +204,10 @@ pub async fn handle_create_function(
                     .context("failed to build rust function")?;
 
             // below is the same as `wasm` language
-            let runtime = arrow_udf_wasm::Runtime::new(&wasm_binary)?;
+            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
             check_wasm_function(&runtime, &identifier)?;
 
-            let system_params = session.env().meta_client().get_system_params().await?;
-            let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
-            upload_wasm_binary(
-                system_params.wasm_storage_url(),
-                &object_name,
-                wasm_binary.into(),
-            )
-            .await?;
-
-            link = Some(format!(
-                "{}/{}",
-                system_params.wasm_storage_url(),
-                object_name
-            ));
+            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
         }
         "wasm" => {
             identifier = wasm_identifier(
@@ -235,38 +222,21 @@ pub async fn handle_create_function(
                 )
                 .into());
             };
-            link = match using {
-                CreateFunctionUsing::Link(link) => {
-                    let runtime = get_or_create_wasm_runtime(&link).await?;
-                    check_wasm_function(&runtime, &identifier)?;
-                    Some(link)
-                }
+            let wasm_binary = match using {
+                CreateFunctionUsing::Link(link) => download_binary_from_link(&link).await?,
                 CreateFunctionUsing::Base64(encoded) => {
                     // decode wasm binary from base64
                     use base64::prelude::{Engine, BASE64_STANDARD};
-                    let wasm_binary = BASE64_STANDARD
+                    BASE64_STANDARD
                         .decode(encoded)
-                        .context("invalid base64 encoding")?;
-
-                    let runtime = arrow_udf_wasm::Runtime::new(&wasm_binary)?;
-                    check_wasm_function(&runtime, &identifier)?;
-
-                    let system_params = session.env().meta_client().get_system_params().await?;
-                    let object_name = format!("{:?}.wasm", md5::compute(&wasm_binary));
-                    upload_wasm_binary(
-                        system_params.wasm_storage_url(),
-                        &object_name,
-                        wasm_binary.into(),
-                    )
-                    .await?;
-
-                    Some(format!(
-                        "{}/{}",
-                        system_params.wasm_storage_url(),
-                        object_name
-                    ))
+                        .context("invalid base64 encoding")?
+                        .into()
                 }
             };
+            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+            check_wasm_function(&runtime, &identifier)?;
+
+            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_ref(), 0)?);
         }
         _ => unreachable!("invalid language: {language}"),
     };
@@ -284,6 +254,7 @@ pub async fn handle_create_function(
         identifier: Some(identifier),
         link,
         body,
+        compressed_binary,
         owner: session.user_id(),
     };
 
@@ -293,13 +264,12 @@ pub async fn handle_create_function(
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
 }
 
-/// Upload wasm binary to object store.
-async fn upload_wasm_binary(
-    wasm_storage_url: &str,
-    object_name: &str,
-    wasm_binary: Bytes,
-) -> Result<()> {
-    // Note: it will panic if the url is invalid. We did a validation on meta startup.
+/// Download wasm binary from a link to object store.
+async fn download_binary_from_link(link: &str) -> Result<Bytes> {
+    let (wasm_storage_url, object_name) = link
+        .rsplit_once('/')
+        .context("invalid link for wasm function")?;
+
     let object_store = build_remote_object_store(
         wasm_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
@@ -307,11 +277,10 @@ async fn upload_wasm_binary(
         ObjectStoreConfig::default(),
     )
     .await;
-    object_store
-        .upload(object_name, wasm_binary)
+    Ok(object_store
+        .read(object_name, ..)
         .await
-        .context("failed to upload wasm binary to object store")?;
-    Ok(())
+        .context("failed to download wasm binary")?)
 }
 
 /// Check if the function exists in the wasm binary.
