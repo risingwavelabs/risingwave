@@ -176,7 +176,7 @@ pub struct ExecutorInfo {
     pub identity: String,
 }
 
-/// `Executor` supports handling of control messages.
+/// [`Execute`] describes the methods an executor should implement to handle control messages.
 pub trait Execute: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
@@ -192,6 +192,8 @@ pub trait Execute: Send + 'static {
     }
 }
 
+/// [`Executor`] combines the static information ([`ExecutorInfo`]) and the executable object to
+/// handle messages ([`Execute`]).
 pub struct Executor {
     info: ExecutorInfo,
     execute: Box<dyn Execute>,
