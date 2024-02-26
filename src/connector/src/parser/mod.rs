@@ -974,6 +974,7 @@ pub enum EncodingProperties {
     Json(JsonProperties),
     Bytes(BytesProperties),
     Native,
+    /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
     None,
     #[default]
     Unspecified,
@@ -988,6 +989,7 @@ pub enum ProtocolProperties {
     Plain,
     Upsert,
     Native,
+    /// Protocol can't be specified because the source will determines it. Now only used in Iceberg.
     None,
     #[default]
     Unspecified,
