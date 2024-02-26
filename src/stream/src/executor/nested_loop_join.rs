@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Global;
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+
+
+use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,35 +24,33 @@ use futures::stream;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use lru::DefaultHasher;
+
+
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_common::hash::{HashKey, NullBitmap, VnodeBitmapExt};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::epoch::EpochPair;
+
 use risingwave_expr::expr::NonStrictExpression;
-use risingwave_expr::ExprError;
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+
+
 use risingwave_storage::store::PrefetchOptions;
 
 use risingwave_storage::StateStore;
 
-use self::row::{row_concat, DegreeType, JoinRow};
+use self::row::row_concat;
 
 use super::join::*;
 use super::test_utils::prelude::StateTable;
 use super::watermark::BufferedWatermarks;
 use super::{
-    Barrier, Executor, ExecutorInfo, Message, MessageStream, StreamExecutorError, StreamExecutorResult
+    Barrier, Executor, ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult
 };
-use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
-use crate::common::metrics::MetricsInfo;
+
 use crate::executor::join::SideType;
 use super::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
@@ -96,13 +94,6 @@ struct JoinArgs<'a, S: StateStore> {
     chunk: StreamChunk,
     append_only_optimize: bool,
     chunk_size: usize,
-}
-
-struct CachedJoinSide<S: StateStore> {
-    /// pk -> row
-    cached: ManagedLruCache<OwnedRow, OwnedRow>,
-    kv_heap_size: KvSize,
-    inner: JoinSide<S>,
 }
 
 struct JoinSide<S: StateStore> {
@@ -160,7 +151,7 @@ impl<S: StateStore> JoinSide<S> {
                     self.state.vnodes().iter_vnodes().map(|vnode| {
                         self.state.iter_with_vnode(
                             vnode,
-                            &range,
+                            range,
                             PrefetchOptions::prefetch_for_large_range_scan(),
                         )
                     })
@@ -218,7 +209,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         info: ExecutorInfo,
         input_l: BoxedExecutor,
         input_r: BoxedExecutor,
-        null_safe: Vec<bool>,
+        _null_safe: Vec<bool>,
         output_indices: Vec<usize>,
         cond: Option<NonStrictExpression>,
         inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
@@ -226,7 +217,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
-        watermark_epoch: AtomicU64Ref,
+        _watermark_epoch: AtomicU64Ref,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -262,17 +253,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         let state_order_key_indices_l = state_table_l.pk_indices();
         let state_order_key_indices_r = state_table_r.pk_indices();
 
-        let degree_pk_indices_l = input_l.pk_indices().clone();
-        let degree_pk_indices_r = input_r.pk_indices().clone();
+        let _degree_pk_indices_l = input_l.pk_indices();
+        let _degree_pk_indices_r = input_r.pk_indices();
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only;
 
-        let degree_all_data_types_l = state_order_key_indices_l
+        let _degree_all_data_types_l = state_order_key_indices_l
             .iter()
             .map(|idx| state_all_data_types_l[*idx].clone())
             .collect_vec();
-        let degree_all_data_types_r = state_order_key_indices_r
+        let _degree_all_data_types_r = state_order_key_indices_r
             .iter()
             .map(|idx| state_all_data_types_r[*idx].clone())
             .collect_vec();
@@ -300,7 +291,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         let mut r2inequality_index = vec![vec![]; right_input_len];
         let mut l_state_clean_columns = vec![];
         let mut r_state_clean_columns = vec![];
-        let inequality_pairs = inequality_pairs
+        let _inequality_pairs = inequality_pairs
             .into_iter()
             .enumerate()
             .map(
@@ -582,13 +573,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                             } else {
                                 true
                             };
-                            if check_join_condition {
-                                if !forward_exactly_once(T, SIDE) {
-                                    if let Some(chunk) = join_chunk_builder
-                                        .append_row(Op::Insert, &row, &matched_row)
-                                    {
-                                        yield chunk;
-                                    }
+                            if check_join_condition && !forward_exactly_once(T, SIDE) {
+                                if let Some(chunk) = join_chunk_builder
+                                    .append_row(Op::Insert, row, &matched_row)
+                                {
+                                    yield chunk;
                                 }
                             }
                             // If the stream is append-only and the join key covers pk in both side,
@@ -636,7 +625,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                             };
                             if check_join_condition {
                                     if let Some(chunk) = join_chunk_builder
-                                        .append_row(Op::Delete, &row, &matched_row)
+                                        .append_row(Op::Delete, row, &matched_row)
                                     {
                                         yield chunk;
                                     }
