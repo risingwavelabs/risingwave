@@ -165,7 +165,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         if self.is_paused {
             assert_eq!(flush_info.flush_count, 0);
             assert_eq!(flush_info.flush_size, 0);
-            assert!(self.state_store.is_dirty());
+            assert!(!self.state_store.is_dirty());
         }
         flush_info.report(&self.metrics);
 
