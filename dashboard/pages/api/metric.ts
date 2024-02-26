@@ -150,7 +150,7 @@ export const BackPressureInfo = {
 
 // Get back pressure from meta node -> compute node
 export async function getBackPressureWithoutPrometheus() {
-  const response = await api.get("/metrics/embedded_back_pressures")
+  const response = await api.get("/metrics/fragment/embedded_back_pressures")
   let backPressureInfos: BackPressureInfo[] = response.backPressureInfos.map(
     BackPressureInfo.fromJSON
   )

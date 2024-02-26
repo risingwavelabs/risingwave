@@ -420,7 +420,7 @@ impl DashboardService {
                 get(prometheus::list_prometheus_fragment_back_pressure),
             )
             .route(
-                "/metrics/embedded_back_pressures",
+                "/metrics/fragment/embedded_back_pressures",
                 get(get_embedded_back_pressures),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
