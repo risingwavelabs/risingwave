@@ -111,7 +111,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                     iceberg_properties.to_iceberg_config(),
                     Some(split.snapshot_id),
                     FileSelector::FileList(split.files),
-                    1024,
+                    source.context.get_config().developer.chunk_size,
                     schema,
                     source.plan_node().get_identity().clone(),
                 )))
