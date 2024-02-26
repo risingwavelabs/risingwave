@@ -27,7 +27,6 @@ pub struct SimplifyFilterExpressionRule {}
 impl Rule for SimplifyFilterExpressionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        println!("filter: {:#?}", filter);
         let mut rewriter = SimplifyFilterExpressionRewriter {};
         let logical_share_plan = filter.input();
         let share: &LogicalShare = logical_share_plan.as_logical_share()?;
@@ -45,8 +44,6 @@ impl SimplifyFilterExpressionRule {
 
 /// If ever `Not (e)` and `(e)` appear together
 fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> bool {
-    println!("e1: {:#?}", e1);
-    println!("e2: {:#?}", e2);
     let ExprImpl::FunctionCall(e1_func) = e1.clone() else {
         return false;
     };
@@ -58,17 +55,13 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> bool {
     }
     if e1_func.func_type() != ExprType::Not {
         if e2_func.inputs().len() != 1 {
-            println!("1");
             return false;
         }
-            println!("2");
         e1 == e2_func.inputs()[0].clone()
     } else {
         if e1_func.inputs().len() != 1 {
-            println!("3");
             return false;
         }
-            println!("4");
         e2 == e1_func.inputs()[0].clone()
     }
 }
@@ -80,7 +73,6 @@ impl ExprRewriter for SimplifyFilterExpressionRewriter {
     /// 1. (NOT (e)) OR (e) => True | (NOT (e)) AND (e) => False
     /// 2. (NOT (e1) AND NOT (e2)) OR (e1 OR e2) => True # TODO
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
-        println!("expr: {:#?}", expr);
         let ExprImpl::FunctionCall(func_call) = expr.clone() else {
             return expr;
         };
