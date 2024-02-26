@@ -31,7 +31,9 @@ use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioE
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
+use thiserror_ext::AsReport;
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
@@ -56,7 +58,7 @@ impl SplitReader for PulsarSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
         let topic = split.topic.to_string();
@@ -106,7 +108,7 @@ pub struct PulsarBrokerReader {
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
-fn parse_message_id(id: &str) -> anyhow::Result<MessageIdData> {
+fn parse_message_id(id: &str) -> ConnectorResult<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
     if splits.len() < 2 || splits.len() > 4 {
@@ -150,7 +152,7 @@ impl SplitReader for PulsarBrokerReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
         let pulsar = props
@@ -233,7 +235,7 @@ impl SplitReader for PulsarBrokerReader {
 }
 
 impl CommonSplitReader for PulsarBrokerReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         #[for_await]
@@ -278,7 +280,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    async fn scan(&self) -> anyhow::Result<FileScanStream> {
+    async fn scan(&self) -> ConnectorResult<FileScanStream> {
         let table = self.create_iceberg_table().await?;
         let schema = table.current_table_metadata().current_schema()?;
         tracing::debug!("Created iceberg pulsar table, schema is: {:?}", schema,);
@@ -321,12 +323,13 @@ impl PulsarIcebergReader {
             .new_scan_builder()
             .with_partition_value(partition_value)
             .with_batch_size(max_chunk_size)
-            .build()?
+            .build()
+            .context("failed to build iceberg table scan")?
             .scan(&table)
             .await?)
     }
 
-    async fn create_iceberg_table(&self) -> anyhow::Result<Table> {
+    async fn create_iceberg_table(&self) -> ConnectorResult<Table> {
         let catalog = load_catalog(&self.build_iceberg_configs()?)
             .await
             .context("Unable to load iceberg catalog")?;
@@ -340,7 +343,7 @@ impl PulsarIcebergReader {
         Ok(table)
     }
 
-    #[try_stream(ok = (StreamChunk, HashMap<SplitId, String>), error = anyhow::Error)]
+    #[try_stream(ok = (StreamChunk, HashMap<SplitId, String>), error = crate::error::ConnectorError)]
     async fn as_stream_chunk_stream(&self) {
         #[for_await]
         for file_scan in self.scan().await? {
@@ -355,7 +358,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    #[try_stream(ok = StreamChunk, error = anyhow::Error)]
+    #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_stream(self) {
         let (props, mut split, parser_config, source_ctx) = (
             self.props.clone(),
@@ -368,8 +371,9 @@ impl PulsarIcebergReader {
 
         #[for_await]
         for msg in self.as_stream_chunk_stream() {
-            let (_chunk, mapping) =
-                msg.inspect_err(|e| tracing::error!("Failed to read message from iceberg: {}", e))?;
+            let (_chunk, mapping) = msg.inspect_err(
+                |e| tracing::error!(error = %e.as_report(), "Failed to read message from iceberg"),
+            )?;
             last_msg_id = mapping.get(self.split.topic.to_string().as_str()).cloned();
         }
 
@@ -394,7 +398,7 @@ impl PulsarIcebergReader {
         }
     }
 
-    fn build_iceberg_configs(&self) -> anyhow::Result<HashMap<String, String>> {
+    fn build_iceberg_configs(&self) -> ConnectorResult<HashMap<String, String>> {
         let mut iceberg_configs = HashMap::new();
 
         let bucket = self
@@ -451,7 +455,7 @@ impl PulsarIcebergReader {
     fn convert_record_batch_to_source_with_state(
         &self,
         record_batch: &RecordBatch,
-    ) -> anyhow::Result<(StreamChunk, HashMap<SplitId, String>)> {
+    ) -> ConnectorResult<(StreamChunk, HashMap<SplitId, String>)> {
         let mut offsets = Vec::with_capacity(record_batch.num_rows());
 
         let ledger_id_array = record_batch
@@ -493,7 +497,8 @@ impl PulsarIcebergReader {
             .iter()
             .filter(|col| col.name != ROWID_PREFIX)
             .map(|col| record_batch.schema().index_of(col.name.as_str()))
-            .try_collect()?;
+            .try_collect()
+            .context("failed to look up column name in arrow record batch")?;
 
         for row in 0..record_batch.num_rows() {
             let offset = format!(
@@ -507,7 +512,8 @@ impl PulsarIcebergReader {
             offsets.push(offset);
         }
 
-        let data_chunk = DataChunk::try_from(&record_batch.project(&field_indices)?)?;
+        let data_chunk = DataChunk::try_from(&record_batch.project(&field_indices)?)
+            .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);
 

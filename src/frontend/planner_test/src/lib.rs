@@ -944,7 +944,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
                     "Test #{i} (id: {}) failed, SQL:\n{}\nError: {}",
                     c.id().clone().unwrap_or_else(|| "<none>".to_string()),
                     c.sql(),
-                    e
+                    e.as_report()
                 );
                 failed_num += 1;
             }

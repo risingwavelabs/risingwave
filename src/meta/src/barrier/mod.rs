@@ -608,7 +608,9 @@ impl GlobalBarrierManager {
         };
 
         // Tracing related stuff
-        tracing::info!(target: "rw_tracing", parent: prev_epoch.span(), epoch = curr_epoch.value().0, "new barrier enqueued");
+        prev_epoch.span().in_scope(|| {
+            tracing::info!(target: "rw_tracing", epoch = curr_epoch.value().0, "new barrier enqueued");
+        });
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
