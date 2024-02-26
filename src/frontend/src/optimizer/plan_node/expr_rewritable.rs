@@ -18,7 +18,7 @@ use super::*;
 use crate::expr::ExprRewriter;
 
 /// Rewrites expressions in a `PlanRef`. Due to `Share` operator,
-/// the `ExprRewriter` needs to be idempotent i.e. applying it more than once
+/// the `ExprRewriter` needs to be idempotent i.e., applying it more than once
 /// to the same `ExprImpl` will be a noop on subsequent applications.
 /// `rewrite_exprs` should only return a plan with the given node modified.
 /// To rewrite recursively, call `rewrite_exprs_recursive` on [`RewriteExprsRecursive`].
