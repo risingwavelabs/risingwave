@@ -391,9 +391,9 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
                     VirtualNode::COUNT
                 )))?
             } else {
-                NonZeroUsize::new(i)
-                    .context("default parallelism should be greater than 0")
-                    .map_err(|e| serde::de::Error::custom(e.to_string()))?
+                NonZeroUsize::new(i).ok_or_else(|| {
+                    serde::de::Error::custom("default parallelism should be greater than 0")
+                })?
             })),
         }
     }
