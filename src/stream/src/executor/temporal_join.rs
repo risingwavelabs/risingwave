@@ -24,13 +24,14 @@ use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::{for_await, try_stream};
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
@@ -370,10 +371,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
-        let (left_map, right_map) = JoinStreamChunkBuilder::get_i2o_mapping(
+        let right_size = self.right.schema().len();
+
+        let (left_map, _right_map) = JoinStreamChunkBuilder::get_i2o_mapping(
             &self.output_indices,
             self.left.schema().len(),
-            self.right.schema().len(),
+            right_size,
         );
 
         let left_to_output: HashMap<usize, usize> = HashMap::from_iter(left_map.iter().cloned());
@@ -410,11 +413,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             if false {
                                 return unreachable!("type hints only") as StreamExecutorResult<_>;
                             }
-                            let mut builder = JoinStreamChunkBuilder::new(
+                            let right_size = self.right_table.table_stream_key_indices.len();
+                            let mut builder = StreamChunkBuilder::new(
                                 self.chunk_size,
                                 self.info.schema.data_types(),
-                                left_map.clone(),
-                                right_map.clone(),
                             );
                             // The bitmap is aligned with `builder`. The bit is set if the record is matched.
                             // TODO: Consider adding the bitmap to `JoinStreamChunkBuilder`.
@@ -442,7 +444,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                     for right_row in join_entry.cached.values() {
                                         row_matched_bitmap_builder.append(true);
                                         if let Some(chunk) =
-                                            builder.append_row(op, left_row, right_row)
+                                            builder.append_row(op, left_row.chain(right_row))
                                         {
                                             let row_matched =
                                                 std::mem::take(&mut row_matched_bitmap_builder)
@@ -452,7 +454,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                     }
                                 } else if T == JoinType::LeftOuter {
                                     row_matched_bitmap_builder.append(false);
-                                    if let Some(chunk) = builder.append_row_update(op, left_row) {
+                                    if let Some(chunk) = builder.append_row(
+                                        op,
+                                        left_row.chain(risingwave_common::row::repeat_n(
+                                            DatumRef::None,
+                                            right_size,
+                                        )),
+                                    ) {
                                         let row_matched =
                                             std::mem::take(&mut row_matched_bitmap_builder)
                                                 .finish();
@@ -487,7 +495,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             };
                             let new_vis = bool_array.to_bitmap() | (!row_matched);
                             let (columns, _) = data_chunk.into_parts();
-                            let new_chunk = StreamChunk::with_visibility(ops, columns, new_vis);
+                            // apply output indices.
+                            let output_columns = self
+                                .output_indices
+                                .iter()
+                                .cloned()
+                                .map(|idx| columns[idx].clone())
+                                .collect();
+                            let new_chunk =
+                                StreamChunk::with_visibility(ops, output_columns, new_vis);
                             yield Message::Chunk(new_chunk);
                         } else {
                             yield Message::Chunk(chunk);
