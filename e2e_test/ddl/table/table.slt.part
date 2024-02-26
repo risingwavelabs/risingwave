@@ -267,6 +267,9 @@ statement ok
 create table t(v int) APPEND ONLY with (retention_seconds = 5);
 
 statement ok
+create index i on t(v);
+
+statement ok
 insert into t values(1);
 
 statement ok
@@ -277,10 +280,19 @@ select * from t;
 ----
 1
 
+query I
+select * from i;
+----
+1
+
 sleep 10s
 
 query I
 select * from t;
+----
+
+query I
+select * from i;
 ----
 
 statement ok
