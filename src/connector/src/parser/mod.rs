@@ -44,10 +44,11 @@ pub use self::mysql::mysql_row_to_owned_row;
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-use self::unified::{AccessImpl, AccessResult};
+use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::util::{
     extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
@@ -56,7 +57,7 @@ use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
-    SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMeta,
+    SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMessage, SourceMeta,
 };
 
 pub mod additional_columns;
@@ -75,6 +76,8 @@ mod protobuf;
 mod unified;
 mod upsert_parser;
 mod util;
+
+pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
@@ -536,7 +539,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send + 'a;
+    ) -> impl Future<Output = ConnectorResult<()>> + Send + 'a;
 
     /// Parse one record from the given `payload`, either write rows to the `writer` or interpret it
     /// as a transaction control message.
@@ -550,9 +553,24 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = anyhow::Result<ParseResult>> + Send + 'a {
+    ) -> impl Future<Output = ConnectorResult<ParseResult>> + Send + 'a {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
+    }
+}
+
+#[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
+async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) {
+    #[for_await]
+    for batch in stream {
+        let mut batch = batch?;
+        let mut start = 0;
+        let end = batch.len();
+        while start < end {
+            let next = std::cmp::min(start + rate_limit as usize, end);
+            yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
+            start = next;
+        }
     }
 }
 
@@ -568,8 +586,14 @@ impl<P: ByteStreamSourceParser> P {
     ///
     /// A [`ChunkSourceStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
-        // Enable tracing to provide more information for parsing failures.
         let source_info = self.source_ctx().source_info.clone();
+
+        // Ensure chunk size is smaller than rate limit
+        let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
+            Box::pin(ensure_largest_at_rate_limit(data_stream, *rate_limit))
+        } else {
+            data_stream
+        };
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
@@ -589,7 +613,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunk, error = anyhow::Error)]
+#[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
@@ -679,14 +703,14 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             LazyLock::new(LogSuppresser::default);
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                             tracing::error!(
-                                %error,
+                                error = %error.as_report(),
                                 split_id = &*msg.split_id,
                                 offset = msg.offset,
                                 suppressed_count,
                                 "failed to parse message, skipping"
                             );
                         }
-                        parser.source_ctx().report_user_source_error(&*error);
+                        parser.source_ctx().report_user_source_error(&error);
                     }
                 }
 
@@ -729,7 +753,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 }
 
 pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>>;
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>>;
 }
 
 #[derive(Debug)]
@@ -749,7 +773,10 @@ pub enum AccessBuilderImpl {
 }
 
 impl AccessBuilderImpl {
-    pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> anyhow::Result<Self> {
+    pub async fn new_default(
+        config: EncodingProperties,
+        kv: EncodingType,
+    ) -> ConnectorResult<Self> {
         let accessor = match config {
             EncodingProperties::Avro(_) => {
                 let config = AvroParserConfig::new(config).await?;
@@ -773,7 +800,7 @@ impl AccessBuilderImpl {
     pub async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,
-    ) -> anyhow::Result<AccessImpl<'_, '_>> {
+    ) -> ConnectorResult<AccessImpl<'_, '_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
@@ -822,7 +849,7 @@ impl ByteStreamSourceParserImpl {
     pub async fn create(
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         let protocol = &parser_config.specific.protocol_config;
         let encode = &parser_config.specific.encoding_config;
@@ -947,6 +974,8 @@ pub enum EncodingProperties {
     Json(JsonProperties),
     Bytes(BytesProperties),
     Native,
+    /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
+    None,
     #[default]
     Unspecified,
 }
@@ -960,6 +989,8 @@ pub enum ProtocolProperties {
     Plain,
     Upsert,
     Native,
+    /// Protocol can't be specified because the source will determines it. Now only used in Iceberg.
+    None,
     #[default]
     Unspecified,
 }
@@ -969,7 +1000,7 @@ impl SpecificParserConfig {
     pub fn new(
         info: &StreamSourceInfo,
         with_properties: &HashMap<String, String>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
@@ -977,6 +1008,7 @@ impl SpecificParserConfig {
         // in the future
         let protocol_config = match format {
             SourceFormat::Native => ProtocolProperties::Native,
+            SourceFormat::None => ProtocolProperties::None,
             SourceFormat::Debezium => ProtocolProperties::Debezium,
             SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,
             SourceFormat::Maxwell => ProtocolProperties::Maxwell,
@@ -1087,6 +1119,7 @@ impl SpecificParserConfig {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }
             (SourceFormat::Native, SourceEncode::Native) => EncodingProperties::Native,
+            (SourceFormat::None, SourceEncode::None) => EncodingProperties::None,
             (format, encode) => {
                 bail!("Unsupported format {:?} encode {:?}", format, encode);
             }

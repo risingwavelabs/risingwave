@@ -84,3 +84,7 @@ drop index tab_idx;
 
 statement ok
 drop table tab;
+
+query T
+select * from pg_catalog.pg_sequences;
+----

@@ -14,6 +14,7 @@
 
 use std::sync::LazyLock;
 
+use anyhow::Result;
 use clap::Parser;
 use home::home_dir;
 use risingwave_common::config::{AsyncStackTraceOption, MetaBackend};
@@ -64,7 +65,7 @@ pub struct SingleNodeOpts {
 
     /// The store directory used by meta store and object store.
     #[clap(long, env = "RW_SINGLE_NODE_STORE_DIRECTORY")]
-    store_directory: Option<String>,
+    pub store_directory: Option<String>,
 
     /// The address of the meta node.
     #[clap(long, env = "RW_SINGLE_NODE_META_ADDR")]
@@ -142,6 +143,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
     }
 }
 
+// Defaults
 impl SingleNodeOpts {
     fn default_frontend_opts() -> FrontendOpts {
         FrontendOpts {
@@ -225,5 +227,17 @@ impl SingleNodeOpts {
             compactor_mode: None,
             proxy_rpc_endpoint: "".to_string(),
         }
+    }
+}
+
+impl SingleNodeOpts {
+    pub fn create_store_directories(&self) -> Result<()> {
+        let store_directory = self
+            .store_directory
+            .as_ref()
+            .unwrap_or_else(|| &*DEFAULT_STORE_DIRECTORY);
+        std::fs::create_dir_all(format!("{}/meta_store", store_directory))?;
+        std::fs::create_dir_all(format!("{}/state_store", store_directory))?;
+        Ok(())
     }
 }

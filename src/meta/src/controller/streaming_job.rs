@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -64,8 +65,8 @@ use crate::barrier::Reschedule;
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
-    check_relation_name_duplicate, ensure_object_id, ensure_user_id, get_fragment_actor_ids,
-    get_fragment_mappings,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_object_id, ensure_user_id,
+    get_fragment_actor_ids, get_fragment_mappings,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, SinkId, StreamingJob};
@@ -141,6 +142,21 @@ impl CatalogController {
                 Table::insert(table).exec(&txn).await?;
             }
             StreamingJob::Sink(sink, _) => {
+                if let Some(target_table_id) = sink.target_table {
+                    if check_sink_into_table_cycle(
+                        target_table_id as ObjectId,
+                        sink.dependent_relations
+                            .iter()
+                            .map(|id| *id as ObjectId)
+                            .collect(),
+                        &txn,
+                    )
+                    .await?
+                    {
+                        bail!("Creating such a sink will result in circular dependency.");
+                    }
+                }
+
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Sink,
@@ -401,12 +417,23 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
+        let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
+            .select_only()
+            .column(table::Column::OptionalAssociatedSourceId)
+            .filter(table::Column::OptionalAssociatedSourceId.is_not_null())
+            .into_tuple()
+            .one(&txn)
+            .await?;
+
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
                 .filter(object::Column::Oid.is_in(internal_table_ids))
                 .exec(&txn)
                 .await?;
+        }
+        if let Some(source_id) = associated_source_id {
+            Object::delete_by_id(source_id).exec(&txn).await?;
         }
         txn.commit().await?;
 
@@ -541,8 +568,8 @@ impl CatalogController {
         streaming_job: StreamingJob,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
-        _creating_sink_id: Option<SinkId>,
-        _dropping_sink_id: Option<SinkId>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         // Question: The source catalog should be remain unchanged?
         let StreamingJob::Table(_, table, ..) = streaming_job else {
@@ -553,7 +580,22 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         let job_id = table.id as ObjectId;
 
-        let table = table::ActiveModel::from(table).update(&txn).await?;
+        let mut table = table::ActiveModel::from(table);
+        let mut incoming_sinks = table.incoming_sinks.as_ref().inner_ref().clone();
+        if let Some(sink_id) = creating_sink_id {
+            debug_assert!(!incoming_sinks.contains(&(sink_id as i32)));
+            incoming_sinks.push(sink_id as _);
+        }
+
+        if let Some(sink_id) = dropping_sink_id {
+            let drained = incoming_sinks
+                .extract_if(|id| *id == sink_id as i32)
+                .collect_vec();
+            debug_assert_eq!(drained, vec![sink_id as i32]);
+        }
+
+        table.incoming_sinks = Set(incoming_sinks.into());
+        let table = table.update(&txn).await?;
 
         // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.

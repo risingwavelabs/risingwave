@@ -14,11 +14,10 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndicesRef};
+use crate::executor::{Barrier, BoxedMessageStream, Execute};
 
 mod cache;
 mod sides;
@@ -28,7 +27,7 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
-use super::{ActorContextRef, ExecutorInfo};
+use super::{ActorContextRef, Executor};
 
 #[cfg(test)]
 mod tests;
@@ -42,8 +41,6 @@ mod tests;
 pub struct LookupExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
-    info: ExecutorInfo,
-
     /// the data types of the produced data chunk inside lookup (before reordering)
     chunk_data_types: Vec<DataType>,
 
@@ -54,10 +51,10 @@ pub struct LookupExecutor<S: StateStore> {
     stream: StreamJoinSide,
 
     /// The executor for arrangement.
-    arrangement_executor: Option<Box<dyn Executor>>,
+    arrangement_executor: Option<Executor>,
 
     /// The executor for stream.
-    stream_executor: Option<Box<dyn Executor>>,
+    stream_executor: Option<Executor>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,
@@ -83,20 +80,8 @@ pub struct LookupExecutor<S: StateStore> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for LookupExecutor<S> {
+impl<S: StateStore> Execute for LookupExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }

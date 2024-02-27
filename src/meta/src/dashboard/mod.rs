@@ -30,6 +30,7 @@ use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
+use thiserror_ext::AsReport;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
@@ -46,7 +47,7 @@ pub struct DashboardService {
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    pub diagnose_command: Option<DiagnoseCommandRef>,
+    pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -354,16 +355,10 @@ pub(super) mod handlers {
     }
 
     pub async fn diagnose(Extension(srv): Extension<Service>) -> Result<String> {
-        let report = if let Some(cmd) = &srv.diagnose_command {
-            cmd.report().await
-        } else {
-            "Not supported in sql-backend".to_string()
-        };
-
-        Ok(report)
+        Ok(srv.diagnose_command.report().await)
     }
 
-    pub async fn get_back_pressure(
+    pub async fn get_embedded_back_pressures(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<GetBackPressureResponse>> {
         let worker_nodes = srv
@@ -421,10 +416,13 @@ impl DashboardService {
             .route("/sinks", get(list_sinks))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
-                "/metrics/actor/back_pressures",
-                get(prometheus::list_prometheus_actor_back_pressure),
+                "/metrics/fragment/prometheus_back_pressures",
+                get(prometheus::list_prometheus_fragment_back_pressure),
             )
-            .route("/metrics/back_pressures", get(get_back_pressure))
+            .route(
+                "/metrics/fragment/embedded_back_pressures",
+                get(get_embedded_back_pressures),
+            )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
@@ -455,7 +453,7 @@ impl DashboardService {
                     proxy::proxy(req, cache).await.or_else(|err| {
                         Ok((
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", err),
+                            err.context("Unhandled internal error").to_report_string(),
                         )
                             .into_response())
                     })

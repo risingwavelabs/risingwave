@@ -757,10 +757,10 @@ tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
 if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
 then
   echo "kill kafka"
-  kill_kafka
+  kill_kafka || true
 
   echo "kill zookeeper"
-  kill_zookeeper
+  kill_zookeeper || true
 
   # Kill their tmux sessions
   tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d

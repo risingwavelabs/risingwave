@@ -26,7 +26,8 @@ impl ExecutorBuilder for LookupUnionExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
-        Ok(LookupUnionExecutor::new(params.info, params.input, node.order.clone()).boxed())
+    ) -> StreamResult<Executor> {
+        let exec = LookupUnionExecutor::new(params.input, node.order.clone());
+        Ok((params.info, exec).into())
     }
 }

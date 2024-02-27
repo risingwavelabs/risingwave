@@ -86,7 +86,6 @@ macro_rules! for_all_params {
             { backup_storage_directory,                 String, None,                                       true,   "Remote directory for storing snapshots.", },
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
-            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  "", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
         }
     };
@@ -340,7 +339,7 @@ macro_rules! impl_set_system_param {
                 )*
                 _ => {
                     Err(format!(
-                        "unrecognized system param {:?}",
+                        "unrecognized system parameter {:?}",
                         key
                     ))
                 }
@@ -440,7 +439,6 @@ mod tests {
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
-            (WASM_STORAGE_URL_KEY, "a"),
             (ENABLE_TRACING_KEY, "true"),
             ("a_deprecated_param", "foo"),
         ];
