@@ -24,7 +24,7 @@ use super::*;
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {
-    let manager = LocalBarrierManager::for_test();
+    let (actor_op_tx, manager) = LocalBarrierManager::spawn_for_test().await;
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -46,7 +46,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    manager
+    actor_op_tx
         .send_barrier(barrier.clone(), actor_ids.clone(), actor_ids)
         .await
         .unwrap();
@@ -60,8 +60,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         })
         .collect_vec();
 
-    let manager_clone = manager.clone();
-    let mut await_epoch_future = pin!(manager_clone.await_epoch_completed(epoch));
+    let mut await_epoch_future = pin!(actor_op_tx.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
@@ -77,7 +76,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
 #[tokio::test]
 async fn test_managed_barrier_collection_before_send_request() -> StreamResult<()> {
-    let manager = LocalBarrierManager::for_test();
+    let (actor_op_tx, manager) = LocalBarrierManager::spawn_for_test().await;
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -110,7 +109,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     manager.collect(extra_actor_id, &barrier);
 
     // Send the barrier to all actors
-    manager
+    actor_op_tx
         .send_barrier(barrier.clone(), actor_ids_to_send, actor_ids_to_collect)
         .await
         .unwrap();
@@ -125,8 +124,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         })
         .collect_vec();
 
-    let manager_clone = manager.clone();
-    let mut await_epoch_future = pin!(manager_clone.await_epoch_completed(epoch));
+    let mut await_epoch_future = pin!(actor_op_tx.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {

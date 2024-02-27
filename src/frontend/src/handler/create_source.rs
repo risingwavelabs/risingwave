@@ -1155,7 +1155,7 @@ pub async fn check_iceberg_source(
     };
 
     let iceberg_config = IcebergConfig {
-        database_name: properties.database_name,
+        database_name: Some(properties.database_name),
         table_name: properties.table_name,
         catalog_type: Some(properties.catalog_type),
         path: properties.warehouse_path,
