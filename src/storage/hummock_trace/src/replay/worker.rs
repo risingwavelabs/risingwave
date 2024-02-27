@@ -284,7 +284,7 @@ impl ReplayWorker {
             }
             Operation::NewLocalStorage(new_local_opts, id) => {
                 assert_ne!(storage_type, StorageType::Global);
-                local_storage_opts_map.insert(id, new_local_opts);
+                local_storage_opts_map.insert(id, new_local_opts.clone());
                 let local_storage = replay.new_local(new_local_opts).await;
                 local_storages.insert(storage_type, local_storage);
             }

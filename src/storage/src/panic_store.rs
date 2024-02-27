@@ -14,10 +14,12 @@
 
 use std::ops::Bound;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -132,6 +134,10 @@ impl LocalStateStore for PanicStateStore {
 
     #[allow(clippy::unused_async)]
     async fn try_flush(&mut self) -> StorageResult<()> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         panic!("should not operate on the panic state store!");
     }
 }
