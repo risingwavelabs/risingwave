@@ -41,10 +41,9 @@ use crate::hummock::iterator::{
     Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
+    SharedBufferBatch, SharedBufferBatchInner, SharedBufferKeyEntry, VersionedSharedBufferValue,
 };
 use crate::hummock::utils::MemoryTracker;
-use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
     HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef,
@@ -316,7 +315,8 @@ pub async fn merge_imms_in_memory(
 
     let first_item_key = mi.current_key_entry().key.clone();
 
-    let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
+    let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::new();
+    let mut values: Vec<VersionedSharedBufferValue> = Vec::new();
 
     // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
     let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
@@ -324,7 +324,6 @@ pub async fn merge_imms_in_memory(
         first_item_key,
         EpochWithGap::new_max_epoch(),
     ));
-    let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
     while mi.is_valid() {
         let key_entry = mi.current_key_entry();
@@ -332,30 +331,25 @@ pub async fn merge_imms_in_memory(
             table_id,
             table_key: key_entry.key.clone(),
         };
-        if let Some(last_full_key) = full_key_tracker.observe_multi_version(
-            user_key,
-            key_entry
-                .new_values
-                .iter()
-                .map(|(epoch_with_gap, _)| *epoch_with_gap),
-        ) {
-            let last_user_key = last_full_key.user_key;
-            // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
-            // and should not be used because we use max epoch to initialize the tracker
-            let _epoch_with_gap = last_full_key.epoch_with_gap;
-
+        if full_key_tracker
+            .observe_multi_version(
+                user_key,
+                key_entry
+                    .values
+                    .iter()
+                    .map(|(epoch_with_gap, _)| *epoch_with_gap),
+            )
+            .is_some()
+        {
             // Record kv entries
-            merged_payload.push(SharedBufferVersionedEntry::new(
-                last_user_key.table_key,
-                table_key_versions,
-            ));
-
-            // Reset state before moving onto the new table key
-            table_key_versions = vec![];
+            merged_entries.push(SharedBufferKeyEntry {
+                key: full_key_tracker.latest_user_key().table_key.clone(),
+                value_offset: values.len(),
+            });
         }
-        table_key_versions.extend(
+        values.extend(
             key_entry
-                .new_values
+                .values
                 .iter()
                 .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
         );
@@ -365,18 +359,11 @@ pub async fn merge_imms_in_memory(
         tokio::task::consume_budget().await;
     }
 
-    // process the last key
-    if !table_key_versions.is_empty() {
-        merged_payload.push(SharedBufferVersionedEntry::new(
-            full_key_tracker.latest_full_key.user_key.table_key,
-            table_key_versions,
-        ));
-    }
-
     SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
-            merged_payload,
+            merged_entries,
+            values,
             kv_count,
             merged_size,
             max_imm_id,
