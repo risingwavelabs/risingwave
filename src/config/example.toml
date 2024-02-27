@@ -195,5 +195,4 @@ block_size_kb = 64
 bloom_false_positive = 0.001
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
-wasm_storage_url = "fs://.risingwave/data"
 enable_tracing = false
