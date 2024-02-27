@@ -32,7 +32,6 @@ aws-smithy-types = { version = "1", default-features = false, features = ["byte-
 axum = { version = "0.6" }
 base64 = { version = "0.21", features = ["alloc"] }
 bigdecimal = { version = "0.4" }
-bit-set = { version = "0.5" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 byteorder = { version = "1" }
