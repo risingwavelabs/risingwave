@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::fields::{null, Null};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
@@ -27,7 +28,7 @@ struct SystemTable {
     name: String,
     schema_id: i32,
     owner: i32,
-    definition: Option<String>,
+    definition: Null<String>,
     acl: String,
 }
 
@@ -46,7 +47,7 @@ fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTab
                 name: table.name().to_string(),
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
-                definition: None,
+                definition: null(),
                 acl: get_acl_items(
                     &Object::TableId(table.id.table_id),
                     false,

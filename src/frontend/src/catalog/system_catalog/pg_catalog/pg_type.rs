@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::fields::{null, Null};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -65,9 +66,9 @@ struct PgType {
     typnamespace: i32,
     typtype: &'static str,
     typrelid: i32,
-    typdefault: Option<String>,
-    typcategory: Option<String>,
-    typreceive: Option<i32>,
+    typdefault: Null<String>,
+    typcategory: Null<String>,
+    typreceive: Null<i32>,
 }
 
 #[system_catalog(table, "pg_catalog.pg_type")]
@@ -95,9 +96,9 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
             typnamespace: pg_catalog_id,
             typtype: "b",
             typrelid: 0,
-            typdefault: None,
-            typcategory: None,
-            typreceive: None,
+            typdefault: null(),
+            typcategory: null(),
+            typreceive: null(),
         });
     }
     Ok(rows)

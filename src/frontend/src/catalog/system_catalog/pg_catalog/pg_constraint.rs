@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::fields::{null, Null};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -44,13 +45,13 @@ struct PgConstraint {
     coninhcount: i32,
     connoinherit: bool,
     conkey: Option<Vec<i16>>,
-    confkey: Option<Vec<i16>>,
-    conpfeqop: Option<Vec<i32>>,
-    conppeqop: Option<Vec<i32>>,
-    conffeqop: Option<Vec<i32>>,
-    confdelsetcols: Option<Vec<i16>>,
-    conexclop: Option<Vec<i32>>,
-    conbin: Option<String>,
+    confkey: Null<Vec<i16>>,
+    conpfeqop: Null<Vec<i32>>,
+    conppeqop: Null<Vec<i32>>,
+    conffeqop: Null<Vec<i32>>,
+    confdelsetcols: Null<Vec<i16>>,
+    conexclop: Null<Vec<i32>>,
+    conbin: Null<String>,
 }
 
 impl PgConstraint {
@@ -77,13 +78,13 @@ impl PgConstraint {
             coninhcount: 0,
             connoinherit: true,
             conkey: Some(conkey),
-            confkey: None,
-            conpfeqop: None,
-            conppeqop: None,
-            conffeqop: None,
-            confdelsetcols: None,
-            conexclop: None,
-            conbin: None,
+            confkey: null(),
+            conpfeqop: null(),
+            conppeqop: null(),
+            conffeqop: null(),
+            confdelsetcols: null(),
+            conexclop: null(),
+            conbin: null(),
         }
     }
 
@@ -114,13 +115,13 @@ impl PgConstraint {
             coninhcount: 0,
             connoinherit: true,
             conkey: Some(conkey),
-            confkey: None,
-            conpfeqop: None,
-            conppeqop: None,
-            conffeqop: None,
-            confdelsetcols: None,
-            conexclop: None,
-            conbin: None,
+            confkey: null(),
+            conpfeqop: null(),
+            conppeqop: null(),
+            conffeqop: null(),
+            confdelsetcols: null(),
+            conexclop: null(),
+            conbin: null(),
         }
     }
 }

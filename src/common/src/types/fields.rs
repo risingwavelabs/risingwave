@@ -11,7 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use super::DataType;
+
+use std::marker::PhantomData;
+
+use super::{DataType, Datum, ToOwnedDatum, WithDataType};
 use crate::row::OwnedRow;
 use crate::util::chunk_coalesce::DataChunkBuilder;
 
@@ -76,6 +79,29 @@ pub trait Fields {
             Self::fields().into_iter().map(|(_, ty)| ty).collect(),
             capacity,
         )
+    }
+}
+
+/// A helper struct to represent an always-`NULL` column of a specific type.
+pub struct Null<T>(PhantomData<T>);
+
+/// Create a [`Null`] value for an always-`NULL` column.
+pub fn null<T>() -> Null<T> {
+    Null(PhantomData)
+}
+
+impl<T> WithDataType for Null<T>
+where
+    T: WithDataType,
+{
+    fn default_data_type() -> DataType {
+        T::default_data_type()
+    }
+}
+
+impl<T> ToOwnedDatum for Null<T> {
+    fn to_owned_datum(self) -> Datum {
+        None
     }
 }
 
