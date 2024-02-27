@@ -204,7 +204,7 @@ impl ArrowFlightUdfClient {
         unreachable!()
     }
 
-    /// Always retry on connection
+    /// Always retry on connection error
     pub async fn call_with_always_retry_on_network_error(
         &self,
         id: &str,
