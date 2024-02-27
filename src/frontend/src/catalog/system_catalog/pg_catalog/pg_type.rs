@@ -21,6 +21,34 @@ use crate::error::Result;
 
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
+
+// TODO: Make it a view atop of `rw_types` to reduce code duplication of the
+// `read` function, while reserving the property that `oid` acts as the
+// primary key. See https://github.com/risingwavelabs/risingwave/issues/15243.
+//
+// #[system_catalog(
+//     view,
+//     "pg_catalog.pg_type",
+//     "SELECT t.id AS oid,
+//         t.name AS typname,
+//         t.typelem AS typelem,
+//         t.typarray AS typarray,
+//         t.input_oid AS typinput,
+//         false AS typnotnull,
+//         0 AS typbasetype,
+//         -1 AS typtypmod,
+//         0 AS typcollation,
+//         0 AS typlen,
+//         s.id AS typnamespace,
+//         'b' AS typtype,
+//         0 AS typrelid,
+//         NULL AS typdefault,
+//         NULL AS typcategory,
+//         NULL::integer AS typreceive
+//     FROM rw_catalog.rw_types t
+//     JOIN rw_catalog.rw_schemas s
+//     ON s.name = 'pg_catalog'"
+// )]
 #[derive(Fields)]
 struct PgType {
     #[primary_key]
