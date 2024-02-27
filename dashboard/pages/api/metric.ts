@@ -25,7 +25,7 @@ export interface BackPressuresMetrics {
 // Get back pressure from meta node -> prometheus
 export async function getActorBackPressures() {
   const res: BackPressuresMetrics = await api.get(
-    "/metrics/actor/back_pressures"
+    "/metrics/fragment/prometheus_back_pressures"
   )
   return res
 }
@@ -150,7 +150,7 @@ export const BackPressureInfo = {
 
 // Get back pressure from meta node -> compute node
 export async function getBackPressureWithoutPrometheus() {
-  const response = await api.get("/metrics/back_pressures")
+  const response = await api.get("/metrics/fragment/embedded_back_pressures")
   let backPressureInfos: BackPressureInfo[] = response.backPressureInfos.map(
     BackPressureInfo.fromJSON
   )
