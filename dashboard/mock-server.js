@@ -73,8 +73,8 @@ app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
 })
 
-app.get("/metrics/actor/back_pressures", (req, res, next) => {
-  res.json(require("./mock/actor_back_pressures.json"))
+app.get("/metrics/fragment/prometheus_back_pressures", (req, res, next) => {
+  res.json(require("./mock/fragment_prometheus_back_pressures.json"))
 })
 
 app.get("/monitor/await_tree/1", (req, res, next) => {

@@ -42,7 +42,7 @@ def run_demo(demo: str, format: str, wait_time=40):
                 sleep(10)
                 continue
             # Fallback to default version when the protobuf version doesn't exist.
-        sql_file = os.path.join(demo_dir,  fname)
+        sql_file = os.path.join(demo_dir, fname)
         if not os.path.exists(sql_file):
             continue
         run_sql_file(sql_file, demo_dir)
@@ -55,7 +55,16 @@ def iceberg_cdc_demo():
     project_dir = dirname(file_dir)
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: iceberg-cdc")
-    subprocess.run(["bash","./run_test.sh"], cwd=demo_dir, check=True)
+    subprocess.run(["bash", "./run_test.sh"], cwd=demo_dir, check=True)
+
+
+def iceberg_sink_demo():
+    demo = "iceberg-sink2"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: iceberg-sink2")
+    subprocess.run(["bash", "./run.sh"], cwd=demo_dir, check=True)
 
 
 arg_parser = argparse.ArgumentParser(description="Run the demo")
@@ -75,5 +84,7 @@ os.environ['ENABLE_TELEMETRY'] = "false"
 
 if args.case == "iceberg-cdc":
     iceberg_cdc_demo()
+elif args.case == "iceberg-sink":
+    iceberg_sink_demo()
 else:
     run_demo(args.case, args.format)
