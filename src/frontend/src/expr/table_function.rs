@@ -79,6 +79,7 @@ impl TableFunction {
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
                     body: c.body.clone(),
+                    compressed_binary: c.compressed_binary.clone(),
                 }),
         }
     }
