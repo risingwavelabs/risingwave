@@ -58,6 +58,7 @@ impl UserDefinedFunction {
             identifier: udf.identifier.clone(),
             body: udf.body.clone(),
             link: udf.link.clone(),
+            always_retry_on_network_error: udf.always_retry_on_network_error,
         };
 
         Ok(Self {
@@ -92,6 +93,7 @@ impl Expr for UserDefinedFunction {
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
+                always_retry_on_network_error: self.catalog.always_retry_on_network_error,
             })),
         }
     }

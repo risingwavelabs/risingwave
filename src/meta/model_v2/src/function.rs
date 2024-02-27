@@ -45,6 +45,7 @@ pub struct Model {
     pub identifier: Option<String>,
     pub body: Option<String>,
     pub kind: FunctionKind,
+    pub always_retry_on_network_error: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -100,6 +101,7 @@ impl From<PbFunction> for ActiveModel {
             identifier: Set(function.identifier),
             body: Set(function.body),
             kind: Set(function.kind.unwrap().into()),
+            always_retry_on_network_error: Set(function.always_retry_on_network_error),
         }
     }
 }

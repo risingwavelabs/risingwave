@@ -33,6 +33,7 @@ pub struct FunctionCatalog {
     pub identifier: Option<String>,
     pub body: Option<String>,
     pub link: Option<String>,
+    pub always_retry_on_network_error: bool,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug)]
@@ -68,6 +69,7 @@ impl From<&PbFunction> for FunctionCatalog {
             identifier: prost.identifier.clone(),
             body: prost.body.clone(),
             link: prost.link.clone(),
+            always_retry_on_network_error: prost.always_retry_on_network_error,
         }
     }
 }
