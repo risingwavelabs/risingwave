@@ -208,6 +208,25 @@ impl ArrowFlightUdfClient {
         unreachable!()
     }
 
+    /// Always retry on connection error
+    pub async fn call_with_always_retry_on_network_error(
+        &self,
+        id: &str,
+        input: RecordBatch,
+    ) -> Result<RecordBatch> {
+        let mut backoff = Duration::from_millis(100);
+        loop {
+            match self.call(id, input.clone()).await {
+                Err(err) if err.is_connection_error() => {
+                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+                }
+                ret => return ret,
+            }
+            tokio::time::sleep(backoff).await;
+            backoff *= 2;
+        }
+    }
+
     /// Call a function with streaming input and output.
     #[panic_return = "Result<stream::Empty<_>>"]
     pub async fn call_stream(

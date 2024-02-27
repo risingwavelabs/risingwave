@@ -206,6 +206,7 @@ pub async fn handle(
             args,
             returns,
             params,
+            with_options,
         } => {
             // For general udf, `language` clause could be ignored
             // refer: https://github.com/risingwavelabs/risingwave/pull/10608
@@ -226,6 +227,7 @@ pub async fn handle(
                     args,
                     returns,
                     params,
+                    with_options,
                 )
                 .await
             } else {

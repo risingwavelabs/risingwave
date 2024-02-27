@@ -236,6 +236,7 @@ pub async fn handle_create_sql_function(
         body: Some(body),
         link: None,
         owner: session.user_id(),
+        always_retry_on_network_error: false,
     };
 
     let catalog_writer = session.catalog_writer()?;
