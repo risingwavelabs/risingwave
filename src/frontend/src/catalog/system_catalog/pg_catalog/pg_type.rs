@@ -82,7 +82,7 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
     let mut rows = Vec::with_capacity(rw_types.len());
     for rw_type in rw_types {
         rows.push(PgType {
-            oid: rw_type.id as i32,
+            oid: rw_type.id,
             typname: rw_type.name,
             typelem: rw_type.typelem,
             typarray: rw_type.typarray,
