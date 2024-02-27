@@ -616,8 +616,7 @@ pub fn simplify_stream_filter_expression(expr: ExprImpl) -> ExprImpl {
 /// If ever `Not (e)` and `(e)` appear together
 /// First return value indicates if the optimizable pattern exist
 /// Second return value indicates if the term `e` is either `IsNotNull` or `IsNull`
-/// i.e., for second case to be true, the result could be directly transfered to `True` or `False`
-/// Note: the second bool will be `True` iff the first bool is `True`
+/// If so, it will contain the actual wrapper `ExprImpl` for that; otherwise it will be `None`
 fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
     fn is_null_or_not_null(func_type: ExprType) -> bool {
         func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
