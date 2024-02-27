@@ -527,6 +527,7 @@ message UserDefinedFunction {
   optional string identifier = 6;
   // For JavaScript UDF, it's the body of the function.
   optional string body = 7;
+  bool always_retry_on_network_error = 9;
 }
 
 // Additional information for user defined table functions.
