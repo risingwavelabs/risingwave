@@ -303,7 +303,7 @@ where
 
         // FIXME(yuhao): only use `dist_key_in_pk` in the proto
         let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
-            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices).unwrap()
         } else {
             table_catalog
                 .get_dist_key_in_pk()
