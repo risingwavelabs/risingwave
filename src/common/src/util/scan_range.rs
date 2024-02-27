@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::scan_range::Bound as BoundPb;
 use risingwave_pb::batch_plan::ScanRange as ScanRangePb;
 
 use super::value_encoding::serialize_datum;
-use crate::catalog::get_dist_key_in_pk_indices;
+use crate::hash::table_distribution::TableDistribution;
 use crate::hash::VirtualNode;
 use crate::types::{Datum, ScalarImpl};
 use crate::util::value_encoding::serialize_datum_into;
@@ -83,31 +83,8 @@ impl ScanRange {
         }
     }
 
-    pub fn try_compute_vnode(
-        &self,
-        dist_key_indices: &[usize],
-        pk_indices: &[usize],
-    ) -> Option<VirtualNode> {
-        if dist_key_indices.is_empty() {
-            return Some(VirtualNode::ZERO);
-        }
-
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(dist_key_indices, pk_indices);
-        self.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices)
-    }
-
-    pub fn try_compute_vnode_with_dist_key_in_pk_indices(
-        &self,
-        dist_key_in_pk_indices: &[usize],
-    ) -> Option<VirtualNode> {
-        let pk_prefix_len = self.eq_conds.len();
-        if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
-            return None;
-        }
-
-        let pk_prefix_value: &[_] = &self.eq_conds;
-        let vnode = VirtualNode::compute_row(pk_prefix_value, dist_key_in_pk_indices);
-        Some(vnode)
+    pub fn try_compute_vnode(&self, table_distribution: &TableDistribution) -> Option<VirtualNode> {
+        table_distribution.try_compute_vnode_by_pk_prefix(self.eq_conds.as_slice())
     }
 }
 
@@ -180,12 +157,15 @@ mod tests {
     fn test_vnode_prefix() {
         let dist_key = vec![1, 3];
         let pk = vec![1, 3, 2];
+        let dist_key_idx_in_pk =
+            crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
+        let dist = TableDistribution::all(dist_key_idx_in_pk);
 
         let mut scan_range = ScanRange::full_table_scan();
-        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+        assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
-        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+        assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
         let row = OwnedRow::new(vec![
@@ -195,7 +175,7 @@ mod tests {
 
         let vnode = VirtualNode::compute_row(&row, &[0, 1]);
 
-        assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
+        assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }
 
     // dist_key is not prefix of pk
@@ -203,15 +183,18 @@ mod tests {
     fn test_vnode_not_prefix() {
         let dist_key = vec![2, 3];
         let pk = vec![1, 3, 2];
+        let dist_key_idx_in_pk =
+            crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
+        let dist = TableDistribution::all(dist_key_idx_in_pk);
 
         let mut scan_range = ScanRange::full_table_scan();
-        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+        assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
-        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+        assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
-        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+        assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
         let row = OwnedRow::new(vec![
@@ -222,6 +205,6 @@ mod tests {
 
         let vnode = VirtualNode::compute_row(&row, &[2, 1]);
 
-        assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
+        assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }
 }

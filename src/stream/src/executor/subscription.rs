@@ -18,15 +18,14 @@ use std::collections::HashMap;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::{Interval, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::store::LocalStateStore;
 use tokio::time::Instant;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::common::log_store_impl::kv_log_store::ReaderTruncationOffsetType;
 use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
@@ -35,8 +34,7 @@ const EXECUTE_GC_INTERVAL: u64 = 3600;
 
 pub struct SubscriptionExecutor<LS: LocalStateStore> {
     actor_context: ActorContextRef,
-    info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     log_store: SubscriptionLogStoreWriter<LS>,
     retention_seconds: i64,
 }
@@ -46,8 +44,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
     #[expect(clippy::unused_async)]
     pub async fn new(
         actor_context: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         log_store: SubscriptionLogStoreWriter<LS>,
         properties: HashMap<String, String>,
     ) -> StreamExecutorResult<Self> {
@@ -65,7 +62,6 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
 
         Ok(Self {
             actor_context,
-            info,
             input,
             log_store,
             retention_seconds,
@@ -129,24 +125,8 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         }
     }
 }
-impl<LS: LocalStateStore> Executor for SubscriptionExecutor<LS> {
+impl<LS: LocalStateStore> Execute for SubscriptionExecutor<LS> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
     }
 }

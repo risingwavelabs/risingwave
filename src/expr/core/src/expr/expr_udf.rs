@@ -55,6 +55,8 @@ pub struct UserDefinedFunction {
     /// On each successful call, the count will be decreased by 1.
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
     disable_retry_count: AtomicU8,
+    /// Always retry. Overrides `disable_retry_count`.
+    always_retry_on_network_error: bool,
 }
 
 const INITIAL_RETRY_COUNT: u8 = 16;
@@ -111,32 +113,40 @@ impl UserDefinedFunction {
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-                let result = if disable_retry_count != 0 {
+                let result = if self.always_retry_on_network_error {
                     client
-                        .call(&self.identifier, arrow_input)
+                        .call_with_always_retry_on_network_error(&self.identifier, arrow_input)
                         .instrument_await(self.span.clone())
                         .await
                 } else {
-                    client
-                        .call_with_retry(&self.identifier, arrow_input)
-                        .instrument_await(self.span.clone())
-                        .await
+                    let result = if disable_retry_count != 0 {
+                        client
+                            .call(&self.identifier, arrow_input)
+                            .instrument_await(self.span.clone())
+                            .await
+                    } else {
+                        client
+                            .call_with_retry(&self.identifier, arrow_input)
+                            .instrument_await(self.span.clone())
+                            .await
+                    };
+                    let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
+                    let connection_error = matches!(&result, Err(e) if e.is_connection_error());
+                    if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
+                        // reset count on connection error
+                        self.disable_retry_count
+                            .store(INITIAL_RETRY_COUNT, Ordering::Relaxed);
+                    } else if !connection_error && disable_retry_count != 0 {
+                        // decrease count on success, ignore if exchange failed
+                        _ = self.disable_retry_count.compare_exchange(
+                            disable_retry_count,
+                            disable_retry_count - 1,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        );
+                    }
+                    result
                 };
-                let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-                let connection_error = matches!(&result, Err(e) if e.is_connection_error());
-                if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
-                    // reset count on connection error
-                    self.disable_retry_count
-                        .store(INITIAL_RETRY_COUNT, Ordering::Relaxed);
-                } else if !connection_error && disable_retry_count != 0 {
-                    // decrease count on success, ignore if exchange failed
-                    _ = self.disable_retry_count.compare_exchange(
-                        disable_retry_count,
-                        disable_retry_count - 1,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    );
-                }
                 result?
             }
         };
@@ -234,6 +244,7 @@ impl Build for UserDefinedFunction {
             identifier: identifier.clone(),
             span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
+            always_retry_on_network_error: udf.always_retry_on_network_error,
         })
     }
 }

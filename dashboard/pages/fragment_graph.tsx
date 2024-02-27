@@ -29,7 +29,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import _ from "lodash"
+import _, { sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
@@ -41,7 +41,18 @@ import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 import useFetch from "./api/fetch"
-import { getActorBackPressures, p50, p90, p95, p99 } from "./api/metric"
+import {
+  BackPressureInfo,
+  BackPressuresMetrics,
+  INTERVAL,
+  calculateBPRate,
+  getActorBackPressures,
+  getBackPressureWithoutPrometheus,
+  p50,
+  p90,
+  p95,
+  p99,
+} from "./api/metric"
 import { getFragments, getStreamingJobs } from "./api/streaming"
 
 interface DispatcherNode {
@@ -171,6 +182,12 @@ const SIDEBAR_WIDTH = 200
 type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
 const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
 
+type BackPressureDataSource = "Embedded" | "Prometheus"
+const backPressureDataSources: BackPressureDataSource[] = [
+  "Embedded",
+  "Prometheus",
+]
+
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
@@ -178,11 +195,14 @@ export default function Streaming() {
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [backPressureAlgo, setBackPressureAlgo] = useQueryState("backPressure")
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
+  // used to get the data source
+  const [backPressureDataSourceAlgo, setBackPressureDataSourceAlgo] =
+    useState("Embedded")
 
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
-    5000,
-    backPressureAlgo !== null
+    INTERVAL,
+    backPressureDataSourceAlgo === "Prometheus" && backPressureAlgo !== null
   )
 
   const fragmentDependencyCallback = useCallback(() => {
@@ -213,6 +233,39 @@ export default function Streaming() {
     return () => {}
   }, [relationId, relationList, setRelationId])
 
+  // get back pressure rate without prometheus
+  const [backPressuresMetricsWithoutPromtheus, setBackPressuresMetrics] =
+    useState<BackPressuresMetrics>()
+  const [previousBP, setPreviousBP] = useState<BackPressureInfo[]>([])
+  const [currentBP, setCurrentBP] = useState<BackPressureInfo[]>([])
+  const toast = useErrorToast()
+
+  useEffect(() => {
+    if (backPressureDataSourceAlgo === "Embedded") {
+      const interval = setInterval(() => {
+        const fetchNewBP = async () => {
+          const newBP = await getBackPressureWithoutPrometheus()
+          setPreviousBP(currentBP)
+          setCurrentBP(newBP)
+        }
+
+        fetchNewBP().catch(console.error)
+      }, INTERVAL)
+      return () => clearInterval(interval)
+    }
+  }, [currentBP, backPressureDataSourceAlgo])
+
+  useEffect(() => {
+    if (currentBP !== null && previousBP !== null) {
+      const metrics = calculateBPRate(currentBP, previousBP)
+      metrics.outputBufferBlockingDuration = sortBy(
+        metrics.outputBufferBlockingDuration,
+        (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)
+      )
+      setBackPressuresMetrics(metrics)
+    }
+  }, [currentBP, previousBP])
+
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
   const fragments = fragmentDependencyCallback()?.fragments
@@ -238,8 +291,6 @@ export default function Streaming() {
 
   const [searchActorId, setSearchActorId] = useState<string>("")
   const [searchFragId, setSearchFragId] = useState<string>("")
-
-  const toast = useErrorToast()
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
@@ -279,38 +330,60 @@ export default function Streaming() {
   }
 
   const backPressures = useMemo(() => {
-    if (actorBackPressures && backPressureAlgo) {
+    if (
+      (actorBackPressures && backPressureAlgo && backPressureAlgo) ||
+      backPressuresMetricsWithoutPromtheus
+    ) {
       let map = new Map()
 
-      for (const m of actorBackPressures.outputBufferBlockingDuration) {
-        console.log(backPressureAlgo)
-        let algoFunc
-        switch (backPressureAlgo) {
-          case "p50":
-            algoFunc = p50
-            break
-          case "p90":
-            algoFunc = p90
-            break
-          case "p95":
-            algoFunc = p95
-            break
-          case "p99":
-            algoFunc = p99
-            break
-          default:
-            return
+      if (
+        backPressureDataSourceAlgo === "Embedded" &&
+        backPressuresMetricsWithoutPromtheus
+      ) {
+        for (const m of backPressuresMetricsWithoutPromtheus.outputBufferBlockingDuration) {
+          map.set(
+            `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
+            m.sample[0].value
+          )
         }
+      } else if (
+        backPressureDataSourceAlgo !== "Embedded" &&
+        actorBackPressures
+      ) {
+        for (const m of actorBackPressures.outputBufferBlockingDuration) {
+          let algoFunc
+          switch (backPressureAlgo) {
+            case "p50":
+              algoFunc = p50
+              break
+            case "p90":
+              algoFunc = p90
+              break
+            case "p95":
+              algoFunc = p95
+              break
+            case "p99":
+              algoFunc = p99
+              break
+            default:
+              return
+          }
 
-        const value = algoFunc(m.sample) * 100
-        map.set(
-          `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-          value
-        )
+          const value = algoFunc(m.sample) * 100
+          map.set(
+            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+            value
+          )
+        }
       }
       return map
     }
-  }, [actorBackPressures, backPressureAlgo])
+  }, [
+    backPressureDataSourceAlgo,
+    actorBackPressures,
+    backPressureAlgo,
+    backPressuresMetricsWithoutPromtheus,
+  ])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -381,25 +454,40 @@ export default function Streaming() {
             </VStack>
           </FormControl>
           <FormControl>
-            <FormLabel>Back Pressure</FormLabel>
+            <FormLabel>Back Pressure Data Source</FormLabel>
             <Select
-              value={backPressureAlgo ?? undefined}
+              value={backPressureDataSourceAlgo}
               onChange={(event) =>
-                setBackPressureAlgo(
-                  event.target.value === "disabled"
-                    ? null
-                    : (event.target.value as BackPressureAlgo)
-                )
+                setBackPressureDataSourceAlgo(event.target.value)
               }
             >
-              <option value="disabled">Disabled</option>
-              {backPressureAlgos.map((algo) => (
+              {backPressureDataSources.map((algo) => (
                 <option value={algo} key={algo}>
                   {algo}
                 </option>
               ))}
             </Select>
           </FormControl>
+          {backPressureDataSourceAlgo === "Prometheus" && (
+            <FormControl>
+              <FormLabel>Back Pressure Algorithm</FormLabel>
+              <Select
+                value={backPressureAlgo ?? undefined}
+                onChange={(event) => {
+                  setBackPressureAlgo(event.target.value as BackPressureAlgo)
+                }}
+              >
+                <option value="" disabled selected hidden>
+                  Please select
+                </option>
+                {backPressureAlgos.map((algo) => (
+                  <option value={algo} key={algo}>
+                    {algo}
+                  </option>
+                ))}
+              </Select>
+            </FormControl>
+          )}
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (

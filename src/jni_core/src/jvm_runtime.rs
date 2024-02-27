@@ -216,12 +216,14 @@ pub fn execute_with_jni_env<T>(
     let ret = f(&mut env);
 
     match env.exception_check() {
-        Ok(true) => env
-            .exception_clear()
-            .inspect_err(|e| {
+        Ok(true) => {
+            env.exception_describe().inspect_err(|e| {
+                tracing::warn!(error = %e.as_report(), "Failed to describe jvm exception");
+            })?;
+            env.exception_clear().inspect_err(|e| {
                 tracing::warn!(error = %e.as_report(), "Exception occurred but failed to clear");
-            })
-            .unwrap(),
+            })?;
+        }
         Ok(false) => {
             // No exception, do nothing
         }

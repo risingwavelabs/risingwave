@@ -21,7 +21,7 @@ use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
 use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, SubscriptionExecutor};
+use crate::executor::{Executor, SubscriptionExecutor};
 
 pub struct SubscriptionExecutorBuilder;
 
@@ -32,7 +32,7 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
         params: crate::task::ExecutorParams,
         node: &Self::Node,
         state_store: impl risingwave_storage::StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.log_store_table.as_ref().unwrap().id);
         let local_state_store = state_store
@@ -65,19 +65,17 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
         );
         let log_store =
             SubscriptionLogStoreWriter::new(table_id, local_state_store, serde, log_store_identity);
-        Ok(Box::new(
-            SubscriptionExecutor::new(
-                params.actor_context,
-                params.info,
-                input,
-                log_store,
-                node.subscription_catalog
-                    .as_ref()
-                    .unwrap()
-                    .properties
-                    .clone(),
-            )
-            .await?,
-        ))
+        let exec = SubscriptionExecutor::new(
+            params.actor_context,
+            input,
+            log_store,
+            node.subscription_catalog
+                .as_ref()
+                .unwrap()
+                .properties
+                .clone(),
+        )
+        .await?;
+        Ok((params.info, exec).into())
     }
 }

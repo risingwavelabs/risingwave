@@ -35,7 +35,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(self.args)?.boxed())
@@ -55,7 +55,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let group_key_indices = node
             .get_group_key()
             .iter()
@@ -93,13 +93,13 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
                 .await;
 
-        HashAggExecutorDispatcherArgs {
+        let exec = HashAggExecutorDispatcherArgs {
             args: AggExecutorArgs {
                 version: node.version(),
 
                 input,
                 actor_ctx: params.actor_context,
-                info: params.info,
+                info: params.info.clone(),
 
                 extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
@@ -122,6 +122,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             },
             group_key_types,
         }
-        .dispatch()
+        .dispatch()?;
+        Ok((params.info, exec).into())
     }
 }
