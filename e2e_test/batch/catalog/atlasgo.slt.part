@@ -1,0 +1,136 @@
+statement ok
+CREATE TABLE IF NOT EXISTS data_types (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    timestamptz_column TIMESTAMPTZ,
+    jsonb_column JSONB,
+    bytea_column BYTEA
+);
+
+query T
+SELECT setting FROM pg_settings WHERE name IN ('server_version_num', 'crdb_version') ORDER BY name DESC;
+----
+130014
+
+query TT rowsort
+SELECT
+	nspname AS schema_name,
+	pg_catalog.obj_description(oid) AS comment
+FROM
+    pg_catalog.pg_namespace
+WHERE
+    nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast', 'crdb_internal', 'pg_extension')
+    AND nspname NOT LIKE 'pg_%temp_%'
+ORDER BY
+    nspname;
+----
+public (empty)
+rw_catalog (empty)
+
+query TTTTTTT
+SELECT
+	t1.table_schema,
+	t1.table_name,
+	pg_catalog.obj_description(t3.oid, 'pg_class') AS comment,
+	t4.partattrs AS partition_attrs,
+	t4.partstrat AS partition_strategy,
+	pg_get_expr(t4.partexprs, t4.partrelid) AS partition_exprs
+FROM
+	INFORMATION_SCHEMA.TABLES AS t1
+	JOIN pg_catalog.pg_namespace AS t2 ON t2.nspname = t1.table_schema
+	JOIN pg_catalog.pg_class AS t3 ON t3.relnamespace = t2.oid AND t3.relname = t1.table_name
+	LEFT JOIN pg_catalog.pg_partitioned_table AS t4 ON t4.partrelid = t3.oid
+	LEFT JOIN pg_depend AS t5 ON t5.objid = t3.oid AND t5.deptype = 'e'
+WHERE
+	t1.table_type = 'BASE TABLE'
+	AND NOT COALESCE(t3.relispartition, false)
+	AND t1.table_schema IN ('public', 'rw_catalog')
+	AND t5.objid IS NULL
+ORDER BY
+	t1.table_schema, t1.table_name;
+----
+public data_types (empty) NULL NULL (empty)
+
+query TTTT
+SELECT
+	n.nspname AS schema_name,
+	e.enumtypid AS enum_id,
+	t.typname AS enum_name,
+	e.enumlabel AS enum_value
+FROM
+	pg_enum e
+	JOIN pg_type t ON e.enumtypid = t.oid
+	JOIN pg_namespace n ON t.typnamespace = n.oid
+WHERE
+    n.nspname IN ('public', 'rw_catalog')
+ORDER BY
+    n.nspname, e.enumtypid, e.enumsortorder
+----
+
+query TTTTTTTTTTTTTTTTTTTTTT
+SELECT
+	t1.table_name,
+	t1.column_name,
+	t1.data_type,
+	pg_catalog.format_type(a.atttypid, a.atttypmod) AS format_type,
+	t1.is_nullable,
+	t1.column_default,
+	t1.character_maximum_length,
+	t1.numeric_precision,
+	t1.datetime_precision,
+	t1.numeric_scale,
+	t1.interval_type,
+	t1.character_set_name,
+	t1.collation_name,
+	t1.is_identity,
+	t1.identity_start,
+	t1.identity_increment,
+	-- (CASE WHEN t1.is_identity = 'YES' THEN (SELECT last_value FROM pg_sequences WHERE quote_ident(schemaname) || '.' || quote_ident(sequencename) = pg_get_serial_sequence(quote_ident(t1.table_schema) || '.' || quote_ident(t1.table_name), t1.column_name)) END) AS identity_last,
+	t1.identity_generation,
+	t1.generation_expression,
+	col_description(t3.oid, "ordinal_position") AS comment,
+	t4.typtype,
+	t4.typelem,
+	-- (CASE WHEN t4.typcategory = 'A' AND t4.typelem <> 0 THEN (SELECT t.typtype FROM pg_catalog.pg_type t WHERE t.oid = t4.typelem) END) AS elemtyp,
+	t4.oid
+FROM
+	"information_schema"."columns" AS t1
+	JOIN pg_catalog.pg_namespace AS t2 ON t2.nspname = t1.table_schema
+	JOIN pg_catalog.pg_class AS t3 ON t3.relnamespace = t2.oid AND t3.relname = t1.table_name
+	JOIN pg_catalog.pg_attribute AS a ON a.attrelid = t3.oid AND a.attname = t1.column_name
+	LEFT JOIN pg_catalog.pg_type AS t4 ON t4.oid = a.atttypid
+WHERE
+	t1.table_schema = 'public' AND t1.table_name IN ('data_types')
+ORDER BY
+	t1.table_name, t1.ordinal_position;
+----
+data_types id bigint bigint YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 20
+data_types varchar_column character varying character varying YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1043
+data_types text_column character varying character varying YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1043
+data_types integer_column integer integer YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 23
+data_types smallint_column smallint smallint YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 21
+data_types bigint_column bigint bigint YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 20
+data_types decimal_column numeric numeric YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1700
+data_types real_column real real YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 700
+data_types double_column double precision double precision YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 701
+data_types boolean_column boolean boolean YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 16
+data_types date_column date date YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1082
+data_types time_column time without time zone time without time zone YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1083
+data_types timestamp_column timestamp without time zone timestamp without time zone YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1114
+data_types timestamptz_column timestamp with time zone timestamp with time zone YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 1184
+data_types jsonb_column jsonb jsonb YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 3802
+data_types bytea_column bytea bytea YES NULL NULL NULL NULL NULL NULL NULL NULL NO NULL NULL NULL NULL (empty) b 0 17
+
+statement ok
+DROP TABLE data_types;
