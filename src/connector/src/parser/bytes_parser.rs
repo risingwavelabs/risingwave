@@ -17,6 +17,7 @@ use risingwave_common::try_match_expand;
 use super::unified::bytes::BytesAccess;
 use super::unified::AccessImpl;
 use super::{AccessBuilder, EncodingProperties};
+use crate::error::ConnectorResult;
 
 #[derive(Debug)]
 pub struct BytesAccessBuilder {
@@ -25,7 +26,7 @@ pub struct BytesAccessBuilder {
 
 impl AccessBuilder for BytesAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         Ok(AccessImpl::Bytes(BytesAccess::new(
             &self.column_name,
             payload,
@@ -34,7 +35,7 @@ impl AccessBuilder for BytesAccessBuilder {
 }
 
 impl BytesAccessBuilder {
-    pub fn new(encoding_properties: EncodingProperties) -> anyhow::Result<Self> {
+    pub fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let config = try_match_expand!(encoding_properties, EncodingProperties::Bytes)?;
         Ok(Self {
             column_name: config.column_name,

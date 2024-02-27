@@ -14,11 +14,12 @@
 
 use std::sync::Arc;
 
-use anyhow;
 use async_trait::async_trait;
+use risingwave_common::bail;
 
 use super::source::{NatsOffset, NatsSplit};
 use super::NatsProperties;
+use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 
 #[derive(Debug, Clone)]
@@ -36,7 +37,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<NatsSplitEnumerator> {
+    ) -> ConnectorResult<NatsSplitEnumerator> {
         let client = properties.common.build_client().await?;
         Ok(Self {
             subject: properties.common.subject,
@@ -45,14 +46,14 @@ impl SplitEnumerator for NatsSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<NatsSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<NatsSplit>> {
         // Nats currently does not support list_splits API, if we simple return the default 0 without checking the client status, will result executor crash
         let state = self.client.connection_state();
         if state != async_nats::connection::State::Connected {
-            return Err(anyhow::anyhow!(
+            bail!(
                 "Nats connection status is not connected, current status is {:?}",
                 state
-            ));
+            );
         }
         // TODO: to simplify the logic, return 1 split for first version
         let nats_split = NatsSplit {

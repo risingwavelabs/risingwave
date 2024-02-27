@@ -15,11 +15,14 @@
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
-use risingwave_common::catalog::Schema;
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, Mutation, StreamExecutorError,
+};
 
 /// Flow Control Executor is used to control the rate of the input executor.
 ///
@@ -31,27 +34,16 @@ use super::*;
 ///
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     actor_ctx: ActorContextRef,
-    identity: String,
     rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
-    pub fn new(
-        input: Box<dyn Executor>,
-        actor_ctx: ActorContextRef,
-        rate_limit: Option<u32>,
-    ) -> Self {
-        let identity = if rate_limit.is_some() {
-            format!("{} (flow controlled)", input.identity())
-        } else {
-            input.identity().to_owned()
-        };
+    pub fn new(input: Executor, actor_ctx: ActorContextRef, rate_limit: Option<u32>) -> Self {
         Self {
             input,
             actor_ctx,
-            identity,
             rate_limit,
         }
     }
@@ -128,20 +120,8 @@ impl Debug for FlowControlExecutor {
     }
 }
 
-impl Executor for FlowControlExecutor {
+impl Execute for FlowControlExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        self.input.schema()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
     }
 }

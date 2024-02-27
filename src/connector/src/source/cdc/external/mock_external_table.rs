@@ -19,10 +19,9 @@ use futures_async_stream::try_stream;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ConnectorResult, ExternalTableReader, MySqlOffset,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, ExternalTableReader, MySqlOffset, SchemaTableName,
 };
 
 #[derive(Debug)]
