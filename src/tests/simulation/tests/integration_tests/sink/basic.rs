@@ -65,9 +65,16 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     .unwrap()[0]
         .to_string();
 
-    let result = session
+    let _result = session
         .run(format!(
             "select * from {} limit 10",
+            sink_internal_table_name
+        ))
+        .await?;
+
+    let _result = session
+        .run(format!(
+            "select * from {} where kv_log_store_vnode = 0 limit 10",
             sink_internal_table_name
         ))
         .await?;

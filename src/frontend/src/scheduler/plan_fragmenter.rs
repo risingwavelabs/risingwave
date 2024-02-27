@@ -25,6 +25,7 @@ use itertools::Itertools;
 use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
+use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
@@ -956,7 +957,8 @@ impl BatchPlanFragmenter {
             let vnode_mapping = self
                 .worker_node_manager
                 .fragment_mapping(table_catalog.fragment_id)?;
-            let partitions = derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
+            let partitions =
+                derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)?;
             let info = TableScanInfo::new(name, partitions);
             Ok(Some(info))
         } else {
@@ -1021,12 +1023,12 @@ fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
     vnode_mapping: &ParallelUnitMapping,
-) -> HashMap<ParallelUnitId, TablePartitionInfo> {
+) -> SchedulerResult<HashMap<ParallelUnitId, TablePartitionInfo>> {
     let num_vnodes = vnode_mapping.len();
     let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
-        return vnode_mapping
+        return Ok(vnode_mapping
             .to_bitmaps()
             .into_iter()
             .map(|(k, vnode_bitmap)| {
@@ -1038,14 +1040,16 @@ fn derive_partitions(
                     },
                 )
             })
-            .collect();
+            .collect());
     }
 
+    let table_distribution = TableDistribution::new_from_storage_table_desc(
+        Some(TableDistribution::all_vnodes()),
+        &table_desc.try_to_protobuf()?,
+    );
+
     for scan_range in scan_ranges {
-        let vnode = scan_range.try_compute_vnode(
-            &table_desc.distribution_key,
-            &table_desc.order_column_indices(),
-        );
+        let vnode = scan_range.try_compute_vnode(&table_distribution);
         match vnode {
             None => {
                 // put this scan_range to all partitions
@@ -1074,7 +1078,7 @@ fn derive_partitions(
         }
     }
 
-    partitions
+    Ok(partitions
         .into_iter()
         .map(|(k, (bitmap, scan_ranges))| {
             (
@@ -1085,7 +1089,7 @@ fn derive_partitions(
                 },
             )
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
