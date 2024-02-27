@@ -3874,16 +3874,6 @@ checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
 
 [[package]]
 name = "fancy-regex"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b95f7c0680e4142284cf8b22c14a476e87d61b004a3a0861872b32ef7ead40a2"
-dependencies = [
- "bit-set",
- "regex",
-]
-
-[[package]]
-name = "fancy-regex"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
@@ -9290,7 +9280,7 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "expect-test",
- "fancy-regex 0.13.0",
+ "fancy-regex",
  "futures-async-stream",
  "futures-util",
  "hex",
@@ -9352,7 +9342,7 @@ dependencies = [
  "educe 0.5.7",
  "either",
  "enum-as-inner",
- "fancy-regex 0.11.0",
+ "fancy-regex",
  "fixedbitset",
  "futures",
  "futures-async-stream",
