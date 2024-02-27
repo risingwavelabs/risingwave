@@ -26,7 +26,10 @@ use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::error::Result;
 use crate::expr::{
-    collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not, simplify_stream_filter_expression, to_conjunctions, try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef
+    collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not,
+    simplify_stream_filter_expression, to_conjunctions, try_get_bool_constant, ExprDisplay,
+    ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair,
+    InputRef,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
