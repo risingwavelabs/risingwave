@@ -627,6 +627,25 @@ if [ ! -f "${RC_ENV_FILE}" ]; then
 fi
 '''
 
+[tasks.psql-env]
+category = "RiseDev - Start/Stop"
+description = "Dump env configuration for psql"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+cat <<EOF > "${PREFIX_CONFIG}/psql-env"
+export PGHOST=$RW_FRONTEND_LISTEN_ADDRESS
+export PGPORT=$RW_FRONTEND_PORT
+export PGUSER=root
+export PGDATABASE=dev
+EOF
+
+echo "psql environment file is created at ${PREFIX_CONFIG}/psql-env"
+echo "You can source this file to use psql with default connection parameters."
+echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
+'''
+
 [tasks.psql]
 category = "RiseDev - Start/Stop"
 description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
