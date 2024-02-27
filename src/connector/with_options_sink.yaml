@@ -126,7 +126,7 @@ IcebergConfig:
     required: false
   - name: catalog.name
     field_type: String
-    required: true
+    required: false
   - name: catalog.type
     field_type: String
     required: false
