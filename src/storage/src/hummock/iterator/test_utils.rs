@@ -18,7 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::MetricLevel;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
@@ -54,10 +54,7 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::new().monitored(
-            Arc::new(ObjectStoreMetrics::unused()),
-            ObjectStoreConfig::default(),
-        ),
+        InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
     )))
 }
 

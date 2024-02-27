@@ -118,20 +118,26 @@ pub trait ObjectStore: Send + Sync {
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()>;
 
-    fn monitored(
-        self,
-        metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
-    ) -> MonitoredObjectStore<Self>
+    fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
     where
         Self: Sized,
     {
-        MonitoredObjectStore::new(self, metrics, config)
+        MonitoredObjectStore::new(self, metrics)
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
+
+    fn recv_buffer_size(&self) -> usize {
+        // 2MB
+        1 << 21
+    }
+
+    fn config(&self) -> Option<&ObjectStoreConfig> {
+        // TODO: remove option
+        None
+    }
 }
 
 pub enum ObjectStoreImpl {
@@ -272,6 +278,16 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::S3(_) => true,
             #[cfg(madsim)]
             ObjectStoreImpl::Sim(_) => true,
+        }
+    }
+
+    pub fn recv_buffer_size(&self) -> usize {
+        match self {
+            ObjectStoreImpl::InMem(store) => store.recv_buffer_size(),
+            ObjectStoreImpl::Opendal(store) => store.recv_buffer_size(),
+            ObjectStoreImpl::S3(store) => store.recv_buffer_size(),
+            #[cfg(madsim)]
+            ObjectStoreImpl::Sim(store) => store.recv_buffer_size(),
         }
     }
 }
@@ -510,22 +526,29 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - start `operation_latency` timer
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
-    pub fn new(
-        store: OS,
-        object_store_metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
-    ) -> Self {
-        Self {
-            object_store_metrics,
-            streaming_read_timeout: Some(Duration::from_millis(
-                config.object_store_streaming_read_timeout_ms,
-            )),
-            streaming_upload_timeout: Some(Duration::from_millis(
-                config.object_store_streaming_upload_timeout_ms,
-            )),
-            read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
-            upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
-            inner: store,
+    pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+        if let Some(config) = store.config() {
+            Self {
+                object_store_metrics,
+                streaming_read_timeout: Some(Duration::from_millis(
+                    config.object_store_streaming_read_timeout_ms,
+                )),
+                streaming_upload_timeout: Some(Duration::from_millis(
+                    config.object_store_streaming_upload_timeout_ms,
+                )),
+                read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
+                upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
+                inner: store,
+            }
+        } else {
+            Self {
+                inner: store,
+                object_store_metrics,
+                streaming_read_timeout: None,
+                streaming_upload_timeout: None,
+                read_timeout: None,
+                upload_timeout: None,
+            }
         }
     }
 
@@ -777,6 +800,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         res
     }
+
+    fn recv_buffer_size(&self) -> usize {
+        self.inner.recv_buffer_size()
+    }
 }
 
 /// Creates a new [`ObjectStore`] from the given `url`. Credentials are configured via environment
@@ -796,19 +823,19 @@ pub async fn build_remote_object_store(
                 let bucket = s3.strip_prefix("s3://").unwrap();
 
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config)
                         .unwrap()
-                        .monitored(metrics, config),
+                        .monitored(metrics),
                 )
             } else {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
                         s3.strip_prefix("s3://").unwrap().to_string(),
                         metrics.clone(),
-                        config.clone(),
+                        config,
                     )
                     .await
-                    .monitored(metrics, config),
+                    .monitored(metrics),
                 )
             }
         }
@@ -828,7 +855,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics),
             )
         }
         obs if obs.starts_with("obs://") => {
@@ -837,7 +864,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_obs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics),
             )
         }
 
@@ -847,7 +874,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics),
             )
         }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
@@ -856,7 +883,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_webhdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics),
             )
         }
         azblob if azblob.starts_with("azblob://") => {
@@ -865,7 +892,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics),
             )
         }
         fs if fs.starts_with("fs://") => {
@@ -873,7 +900,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_fs_engine(fs.to_string())
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics),
             )
         }
 
@@ -884,9 +911,9 @@ pub async fn build_remote_object_store(
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
+            S3ObjectStore::with_minio(minio, metrics.clone(), config)
                 .await
-                .monitored(metrics, config),
+                .monitored(metrics),
         ),
         "memory" => {
             if ident == "Meta Backup" {
@@ -894,7 +921,7 @@ pub async fn build_remote_object_store(
             } else {
                 tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics, config))
+            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         "memory-shared" => {
             if ident == "Meta Backup" {
@@ -902,11 +929,11 @@ pub async fn build_remote_object_store(
             } else {
                 tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
-            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics, config))
+            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
         #[cfg(madsim)]
         sim if sim.starts_with("sim://") => {
-            ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics, config))
+            ObjectStoreImpl::Sim(SimObjectStore::new(url).monitored(metrics))
         }
         other => {
             unimplemented!(

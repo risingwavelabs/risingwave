@@ -19,7 +19,7 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::MetricLevel;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -49,10 +49,7 @@ use risingwave_storage::monitor::{
 };
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored(
-        Arc::new(ObjectStoreMetrics::unused()),
-        ObjectStoreConfig::default(),
-    );
+    let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
     Arc::new(SstableStore::new(SstableStoreConfig {

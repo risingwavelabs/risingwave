@@ -532,6 +532,17 @@ impl ObjectStore for S3ObjectStore {
     fn store_media_type(&self) -> &'static str {
         "s3"
     }
+
+    fn recv_buffer_size(&self) -> usize {
+        self.config
+            .s3
+            .object_store_recv_buffer_size
+            .unwrap_or(1 << 21)
+    }
+
+    fn config(&self) -> Option<&ObjectStoreConfig> {
+        Some(&self.config)
+    }
 }
 
 impl S3ObjectStore {

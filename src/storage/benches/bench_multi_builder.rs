@@ -138,7 +138,7 @@ fn bench_builder(
             ObjectStoreConfig::default(),
         )
         .await
-        .monitored(metrics, ObjectStoreConfig::default())
+        .monitored(metrics)
     });
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
