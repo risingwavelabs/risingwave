@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use await_tree::InstrumentAwait;
-use futures::stream;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-
-
-use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -34,34 +28,28 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
-
 use risingwave_expr::expr::NonStrictExpression;
-
-
 use risingwave_storage::store::PrefetchOptions;
-
 use risingwave_storage::StateStore;
 
 use self::row::row_concat;
-
+use super::join::builder::JoinStreamChunkBuilder;
 use super::join::*;
 use super::test_utils::prelude::StateTable;
 use super::watermark::BufferedWatermarks;
-use super::{
-    Barrier, Executor, ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult
-};
-
-use crate::executor::join::SideType;
-use super::join::builder::JoinStreamChunkBuilder;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ expect_first_barrier_from_aligned_stream, ActorContextRef, BoxedExecutor, JoinType, Watermark};
+use super::{Executor, ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult};
 use crate::executor::barrier_align::{barrier_align, AlignedMessage};
+use crate::executor::join::SideType;
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{
+    expect_first_barrier_from_aligned_stream, ActorContextRef, BoxedExecutor, JoinType, Watermark,
+};
 use crate::task::AtomicU64Ref;
 
 pub struct NestedLoopJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
-    
+
     /// Left input executor
     input_l: Option<BoxedExecutor>,
     /// Right input executor (broadcast side)
@@ -74,9 +62,6 @@ pub struct NestedLoopJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     side_r: JoinSide<S>,
     /// Optional non-equi join conditions
     cond: Option<NonStrictExpression>,
-
-    /// Whether the logic can be optimized for append-only stream
-    append_only_optimize: bool,
 
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
@@ -92,51 +77,29 @@ struct JoinArgs<'a, S: StateStore> {
     actual_output_data_types: &'a [DataType],
     cond: &'a mut Option<NonStrictExpression>,
     chunk: StreamChunk,
-    append_only_optimize: bool,
     chunk_size: usize,
 }
 
 struct JoinSide<S: StateStore> {
     /// State table. Contains the data from upstream.
     state: StateTable<S>,
-    /// Degree table.
-    ///
-    /// The degree is generated from the hash join executor.
-    /// Each row in `state` has a corresponding degree in `degree state`.
-    /// A degree value `d` in for a row means the row has `d` matched row in the other join side.
-    ///
-    /// It will only be used when needed in a side.
-    ///
-    /// - Full Outer: both side
-    /// - Left Outer/Semi/Anti: left side
-    /// - Right Outer/Semi/Anti: right side
-    /// - Inner: None.
-    degree_state: StateTable<S>,
-    /// The pk indices of the state table.
-    state_pk_indices: Vec<usize>,
-    /// The data type of all columns without degree.
-    all_data_types: Vec<DataType>,
+    /// `Some(true)`: state table is right table and broadcasted singleton and need to write.
+    write_singleton: Option<bool>,
     /// The start position for the side in output new columns
     start_pos: usize,
     /// The mapping from input indices of a side to output columes.
     i2o_mapping: Vec<(usize, usize)>,
-    i2o_mapping_indexed: MultiMap<usize, usize>,
-
-    /// Whether degree table is needed for this side.
-    need_degree_table: bool,
 }
 
 impl<S: StateStore> JoinSide<S> {
     fn init(&mut self, epoch: EpochPair) {
         self.state.init_epoch(epoch);
-        self.degree_state.init_epoch(epoch);
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
         let (_previous_vnode_bitmap, cache_may_stale) =
             self.state.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self.degree_state.update_vnode_bitmap(vnode_bitmap);
 
         cache_may_stale
     }
@@ -144,63 +107,58 @@ impl<S: StateStore> JoinSide<S> {
     /// Iter the rows in the table.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     async fn rows(&mut self) {
-        
-            let range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                &(Bound::Unbounded, Bound::Unbounded);
-            let streams = futures::future::try_join_all(
-                    self.state.vnodes().iter_vnodes().map(|vnode| {
-                        self.state.iter_with_vnode(
-                            vnode,
-                            range,
-                            PrefetchOptions::prefetch_for_large_range_scan(),
-                        )
-                    })
-                ).await?.into_iter().map(Box::pin);
-            
-            #[for_await]
-            for entry in stream::select_all(streams) {
-                let row = entry?;
-                yield row.into_owned_row();
-            }
+        let range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
+        let streams =
+            futures::future::try_join_all(self.state.vnodes().iter_vnodes().map(|vnode| {
+                self.state.iter_with_vnode(
+                    vnode,
+                    range,
+                    PrefetchOptions::prefetch_for_large_range_scan(),
+                )
+            }))
+            .await?
+            .into_iter()
+            .map(Box::pin);
+
+        #[for_await]
+        for entry in stream::select_all(streams) {
+            let row = entry?;
+            yield row.into_owned_row();
+        }
     }
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // self.metrics.flush();
         self.state.commit(epoch).await?;
-        self.degree_state.commit(epoch).await?;
         Ok(())
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
         self.state.try_flush().await?;
-        self.degree_state.try_flush().await?;
         Ok(())
     }
-    
+
     /// Insert a row.
     /// Used when the side does not need to update degree.
     #[allow(clippy::unused_async)]
     pub async fn insert_row(&mut self, value: impl Row) -> StreamExecutorResult<()> {
         // Update the flush buffer.
-        self.state.insert(value);
+        if matches!(self.write_singleton, Some(true)) {
+            self.state.insert(value);
+        }
         Ok(())
     }
 
     /// Delete a row
     /// Used when the side does not need to update degree.
-    pub fn delete_row(&mut self,value: impl Row) -> StreamExecutorResult<()> {
+    pub fn delete_row(&mut self, value: impl Row) -> StreamExecutorResult<()> {
         // If no cache maintained, only update the state table.
-        self.state.delete(value);
+        if matches!(self.write_singleton, Some(true)) {
+            self.state.delete(value);
+        }
         Ok(())
-    }    
+    }
 }
-
-enum InternalMessage {
-    Chunk(StreamChunk),
-    Barrier(Vec<StreamChunk>, Barrier),
-    WaterMark(Watermark),
-}
-
 
 impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
     #[allow(clippy::too_many_arguments)]
@@ -209,16 +167,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         info: ExecutorInfo,
         input_l: BoxedExecutor,
         input_r: BoxedExecutor,
-        _null_safe: Vec<bool>,
         output_indices: Vec<usize>,
         cond: Option<NonStrictExpression>,
-        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
         state_table_l: StateTable<S>,
-        degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
-        degree_state_table_r: StateTable<S>,
         _watermark_epoch: AtomicU64Ref,
-        is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> Self {
@@ -247,88 +200,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         let state_all_data_types_l = input_l.schema().data_types();
         let state_all_data_types_r = input_r.schema().data_types();
 
-        let state_pk_indices_l = input_l.pk_indices().to_vec();
-        let state_pk_indices_r = input_r.pk_indices().to_vec();
-
-        let state_order_key_indices_l = state_table_l.pk_indices();
-        let state_order_key_indices_r = state_table_r.pk_indices();
-
-        let _degree_pk_indices_l = input_l.pk_indices();
-        let _degree_pk_indices_r = input_r.pk_indices();
-
-        // check whether join key contains pk in both side
-        let append_only_optimize = is_append_only;
-
-        let _degree_all_data_types_l = state_order_key_indices_l
-            .iter()
-            .map(|idx| state_all_data_types_l[*idx].clone())
-            .collect_vec();
-        let _degree_all_data_types_r = state_order_key_indices_r
-            .iter()
-            .map(|idx| state_all_data_types_r[*idx].clone())
-            .collect_vec();
-
-        let need_degree_table_l = need_left_degree(T);
-        let need_degree_table_r = need_right_degree(T);
-
-        let (left_to_output, right_to_output) = {
-            let (left_len, right_len) = if is_left_semi_or_anti(T) {
-                (state_all_data_types_l.len(), 0usize)
-            } else if is_right_semi_or_anti(T) {
-                (0usize, state_all_data_types_r.len())
-            } else {
-                (state_all_data_types_l.len(), state_all_data_types_r.len())
-            };
-            JoinStreamChunkBuilder::get_i2o_mapping(&output_indices, left_len, right_len)
-        };
-
-        let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
-        let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
-
-        let left_input_len = input_l.schema().len();
-        let right_input_len = input_r.schema().len();
-        let mut l2inequality_index = vec![vec![]; left_input_len];
-        let mut r2inequality_index = vec![vec![]; right_input_len];
-        let mut l_state_clean_columns = vec![];
-        let mut r_state_clean_columns = vec![];
-        let _inequality_pairs = inequality_pairs
-            .into_iter()
-            .enumerate()
-            .map(
-                |(
-                    index,
-                    (key_required_larger, key_required_smaller, clean_state, delta_expression),
-                )| {
-                    let output_indices = if key_required_larger < key_required_smaller {
-                        if clean_state {
-                            l_state_clean_columns.push((key_required_larger, index));
-                        }
-                        l2inequality_index[key_required_larger].push((index, false));
-                        r2inequality_index[key_required_smaller - left_input_len]
-                            .push((index, true));
-                        l2o_indexed
-                            .get_vec(&key_required_larger)
-                            .cloned()
-                            .unwrap_or_default()
-                    } else {
-                        if clean_state {
-                            r_state_clean_columns
-                                .push((key_required_larger - left_input_len, index));
-                        }
-                        l2inequality_index[key_required_smaller].push((index, true));
-                        r2inequality_index[key_required_larger - left_input_len]
-                            .push((index, false));
-                        r2o_indexed
-                            .get_vec(&(key_required_larger - left_input_len))
-                            .cloned()
-                            .unwrap_or_default()
-                    };
-                    (output_indices, delta_expression)
-                },
-            )
-            .collect_vec();
+        let (left_to_output, right_to_output) = 
+            JoinStreamChunkBuilder::get_i2o_mapping(&output_indices, state_all_data_types_l.len(), state_all_data_types_r.len())
+        ;
 
         let watermark_buffers = BTreeMap::new();
+
+        let need_write_right_table = state_table_l.vnodes().is_set(0);
 
         Self {
             ctx: ctx.clone(),
@@ -338,26 +216,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             actual_output_data_types,
             side_l: JoinSide {
                 state: state_table_l,
-                degree_state: degree_state_table_l,
-                state_pk_indices: state_pk_indices_l,
-                all_data_types: state_all_data_types_l,
+                write_singleton: None,
                 i2o_mapping: left_to_output,
-                i2o_mapping_indexed: l2o_indexed,
                 start_pos: 0,
-                need_degree_table: need_degree_table_l,
             },
             side_r: JoinSide {
                 state: state_table_r,
-                degree_state: degree_state_table_r,
-                state_pk_indices: state_pk_indices_r,
-                all_data_types: state_all_data_types_r,
+                write_singleton: Some(need_write_right_table),
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
-                i2o_mapping_indexed: r2o_indexed,
-                need_degree_table: need_degree_table_r,
             },
             cond,
-            append_only_optimize,
             metrics,
             chunk_size,
             watermark_buffers,
@@ -435,14 +304,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                     let mut left_time = Duration::from_nanos(0);
                     let mut left_start_time = Instant::now();
                     #[for_await]
-                    for chunk in Self::eq_join_oneside::<{SideType::Left}>(JoinArgs {
+                    for chunk in Self::eq_join_oneside::<{ SideType::Left }>(JoinArgs {
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
                         cond: &mut self.cond,
                         chunk,
-                        append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                     }) {
                         left_time += left_start_time.elapsed();
@@ -457,14 +325,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                     let mut right_time = Duration::from_nanos(0);
                     let mut right_start_time = Instant::now();
                     #[for_await]
-                    for chunk in Self::eq_join_oneside::<{SideType::Right}>(JoinArgs {
+                    for chunk in Self::eq_join_oneside::<{ SideType::Right }>(JoinArgs {
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
                         cond: &mut self.cond,
                         chunk,
-                        append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                     }) {
                         right_time += right_start_time.elapsed();
@@ -507,7 +374,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             actual_output_data_types,
             cond,
             chunk,
-            append_only_optimize,
             chunk_size,
             ..
         } = args;
@@ -518,13 +384,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             (side_r, side_l)
         };
 
-        let mut join_chunk_builder = 
-            JoinStreamChunkBuilder::new(
-                chunk_size,
-                actual_output_data_types.to_vec(),
-                side_update.i2o_mapping.clone(),
-                side_match.i2o_mapping.clone(),
-            );
+        let mut join_chunk_builder = JoinStreamChunkBuilder::new(
+            chunk_size,
+            actual_output_data_types.to_vec(),
+            side_update.i2o_mapping.clone(),
+            side_match.i2o_mapping.clone(),
+        );
+
 
         let join_matched_join_keys = ctx
             .streaming_metrics
@@ -534,7 +400,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                 &ctx.fragment_id.to_string(),
                 &side_update.state.table_id().to_string(),
             ]);
-        
+
         let side_match_start_pos = side_match.start_pos;
 
         for r in chunk.rows_with_holes() {
@@ -542,103 +408,79 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                 continue;
             };
 
-
             let rows = side_match.rows();
-            
             let mut matched_rows_cnt = 0;
 
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let mut append_only_matched_row: Option<OwnedRow> = None;
-                        #[for_await]
-                        for matched_row in rows
-                        {
-                            matched_rows_cnt += 1;
-                            let matched_row = matched_row?;
-                            // TODO(yuhao-su): We should find a better way to eval the expression
-                            // without concat two rows.
-                            // if there are non-equi expressions
-                            let check_join_condition = if let Some(ref mut cond) = cond {
-                                let new_row = row_concat(
-                                    &row,
-                                    side_update.start_pos,
-                                    &matched_row,
-                                    side_match_start_pos,
-                                );
+                    #[for_await]
+                    for matched_row in rows {
+                        matched_rows_cnt += 1;
+                        let matched_row = matched_row?;
+                        dbg!(matched_row);
+                        // TODO(yuhao-su): We should find a better way to eval the expression
+                        // without concat two rows.
+                        // if there are non-equi expressions
+                        let check_join_condition = if let Some(ref mut cond) = cond {
+                            let new_row = row_concat(
+                                &row,
+                                side_update.start_pos,
+                                &matched_row,
+                                side_match_start_pos,
+                            );
 
-                                cond.eval_row_infallible(&new_row)
-                                    .await
-                                    .map(|s| *s.as_bool())
-                                    .unwrap_or(false)
-                            } else {
-                                true
-                            };
-                            if check_join_condition && !forward_exactly_once(T, SIDE) {
-                                if let Some(chunk) = join_chunk_builder
-                                    .append_row(Op::Insert, row, &matched_row)
-                                {
-                                    yield chunk;
-                                }
-                            }
-                            // If the stream is append-only and the join key covers pk in both side,
-                            // then we can remove matched rows since pk is unique and will not be
-                            // inserted again
-                            if append_only_optimize {
-                                // Since join key contains pk and pk is unique, there should be only
-                                // one row if matched.
-                                assert!(append_only_matched_row.is_none());
-                                append_only_matched_row = Some(matched_row);
-                            }
-                        }
-
-                        if append_only_optimize && let Some(row) = append_only_matched_row {
-                            side_match.delete_row(row)?;
-                        
+                            cond.eval_row_infallible(&new_row)
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
                         } else {
-                            side_update.insert_row(row).await?;
-                        }
+                            true
+                        };
+                        dbg!(check_join_condition);
+                        if check_join_condition {
+                         dbg!("fuck");
 
+                            if let Some(chunk) =
+                                join_chunk_builder.append_row(Op::Insert, row, &matched_row)
+                            {
+                                yield chunk;
+                            }
+                        }
+                    }
+                    side_update.insert_row(row).await?;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                        #[for_await]
-                        for matched_row in rows
-                        {
-                            matched_rows_cnt += 1;
-                            let matched_row = matched_row?;
-                            // TODO(yuhao-su): We should find a better way to eval the expression
-                            // without concat two rows.
-                            // if there are non-equi expressions
-                            let check_join_condition = if let Some(ref mut cond) = cond {
-                                let new_row = row_concat(
-                                    &row,
-                                    side_update.start_pos,
-                                    &matched_row,
-                                    side_match_start_pos,
-                                );
+                    #[for_await]
+                    for matched_row in rows {
+                        matched_rows_cnt += 1;
+                        let matched_row = matched_row?;
+                        // TODO(yuhao-su): We should find a better way to eval the expression
+                        // without concat two rows.
+                        // if there are non-equi expressions
+                        let check_join_condition = if let Some(ref mut cond) = cond {
+                            let new_row = row_concat(
+                                &row,
+                                side_update.start_pos,
+                                &matched_row,
+                                side_match_start_pos,
+                            );
 
-                                cond.eval_row_infallible(&new_row)
-                                    .await
-                                    .map(|s| *s.as_bool())
-                                    .unwrap_or(false)
-                            } else {
-                                true
-                            };
-                            if check_join_condition {
-                                    if let Some(chunk) = join_chunk_builder
-                                        .append_row(Op::Delete, row, &matched_row)
-                                    {
-                                        yield chunk;
-                                    }
+                            cond.eval_row_infallible(&new_row)
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
+                        } else {
+                            true
+                        };
+                        if check_join_condition {
+                            if let Some(chunk) =
+                                join_chunk_builder.append_row(Op::Delete, row, &matched_row)
+                            {
+                                yield chunk;
                             }
                         }
-
-
-                        if append_only_optimize {
-                            unreachable!();
-                        } else {
-                            side_update.delete_row(row)?;
-                        };
-
+                    }
+                    side_update.delete_row(row)?;
                 }
             }
             join_matched_join_keys.observe(matched_rows_cnt as _);
@@ -651,19 +493,20 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.state.commit(epoch).await?;
-        self.side_r.degree_state.commit(epoch).await?;
+        self.side_l.flush(epoch).await?;
+        self.side_r.flush(epoch).await?;
         Ok(())
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.state.try_flush().await?;
-        self.side_r.degree_state.try_flush().await?;
+        self.side_l.try_flush().await?;
+        self.side_r.try_flush().await?;
         Ok(())
     }
 
+    #[expect(clippy::unused_async)]
     async fn handle_watermark(
         &mut self,
         _side: SideTypePrimitive,
@@ -674,12 +517,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         // TODO: Select watermarks to yield.
         Ok(vec![])
     }
-
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> Executor
-    for NestedLoopJoinExecutor<S, T>
-{
+impl<S: StateStore, const T: JoinTypePrimitive> Executor for NestedLoopJoinExecutor<S, T> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
     }
@@ -694,5 +534,180 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+}
+
+#[cfg(test)]
+mod test{
+    use std::sync::atomic::AtomicU64;
+
+    use super::*;
+    use crate::executor::test_utils::*;
+    use risingwave_common::{array::StreamChunkTestExt, catalog::{ColumnDesc, ColumnId, Field, TableId}, util::sort_util::OrderType};
+    use risingwave_storage::memory::MemoryStateStore;
+    use crate::executor::test_utils::expr::build_from_pretty;
+    use crate::executor::{BoxedMessageStream, ActorContext};
+
+    async fn create_in_memory_state_table(
+        mem_state: MemoryStateStore,
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+        table_id: u32,
+    ) -> StateTable<MemoryStateStore>  {
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        StateTable::new_without_distribution(
+            mem_state.clone(),
+            TableId::new(table_id),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+        )
+        .await
+
+    }
+    
+    fn create_cond(condition_text: Option<String>) -> NonStrictExpression {
+        build_from_pretty(
+            condition_text
+                .as_deref()
+                .unwrap_or("(less_than:boolean $1:int8 $3:int8)"),
+        )
+    }
+
+    async fn create_executor<const T: JoinTypePrimitive>(
+        with_condition: bool,
+        condition_text: Option<String>,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64), // join key
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+        let cond = with_condition.then(|| create_cond(condition_text));
+
+        let mem_state = MemoryStateStore::new();
+
+        let state_l = create_in_memory_state_table(
+            mem_state.clone(),
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::ascending(), OrderType::ascending()],
+            &[0, 1],
+            0,
+        )
+        .await;
+
+        let state_r= create_in_memory_state_table(
+            mem_state,
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::ascending(), OrderType::ascending()],
+            &[0, 1],
+            2,
+        )
+        .await;
+
+        let schema: Schema = 
+            [source_l.schema().fields(), source_r.schema().fields()]
+                .concat()
+                .into_iter()
+                .collect();
+        let schema_len = schema.len();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![1],
+            identity: "NestedLoopJoinExecutor".to_string(),
+        };
+
+        let executor = NestedLoopJoinExecutor::<MemoryStateStore, T>::new(
+            ActorContext::for_test(123),
+            info,
+            Box::new(source_l),
+            Box::new(source_r),
+            (0..schema_len).collect_vec(),
+            cond,
+            state_l,
+            state_r,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+        );
+        (tx_l, tx_r, Box::new(executor).execute())
+    }
+
+    #[tokio::test]
+    async fn test_streaming_nested_loop_inner_join() -> StreamExecutorResult<()> {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + 3 6",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I I
+             + 3 8
+             - 3 8",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 4 8
+             + 6 9",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I  I
+             + 3 10
+             + 6 11",
+        );
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(true, None).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+        hash_join.next_unwrap_pending();
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        hash_join.next_unwrap_pending();
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 2 5 2 7"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 3 6 3 10"
+            )
+        );
+
+        Ok(())
     }
 }

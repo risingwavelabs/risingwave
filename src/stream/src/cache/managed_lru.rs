@@ -179,10 +179,10 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         old_kv
     }
 
-    pub fn pop<Q>(&mut self, k: &Q) -> Option<(K, V)> 
+    pub fn pop<Q>(&mut self, k: &Q) -> Option<(K, V)>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized
+        Q: Hash + Eq + ?Sized,
     {
         let poped_kv = self.inner.pop_entry(k);
         if let Some((key, val)) = &poped_kv {
