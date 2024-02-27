@@ -571,23 +571,14 @@ impl LocalBarrierWorker {
             return root_failure.clone();
         }
         // fetch more actor errors within a timeout
-        let mut timeout = tokio::time::interval(Duration::from_secs(3));
-        timeout.reset();
-        loop {
-            select! {
-                biased;
-                _ = timeout.tick() => {
-                    break;
-                }
-                result = self.actor_failure_rx.recv() => {
-                    let Some((actor_id, error)) = result else {
-                        break;
-                    };
-                    self.add_failure(actor_id, error);
-                }
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some((actor_id, error)) = self.actor_failure_rx.recv().await {
+                self.add_failure(actor_id, error);
             }
-        }
-        try_find_root_actor_failure(self.failure_actors.values()).unwrap_or(default_err)
+        })
+        .await;
+        self.root_failure = try_find_root_actor_failure(self.failure_actors.values());
+        self.root_failure.clone().unwrap_or(default_err)
     }
 }
 
