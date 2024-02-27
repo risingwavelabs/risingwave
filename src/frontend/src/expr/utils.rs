@@ -614,26 +614,48 @@ pub fn simplify_stream_filter_expression(expr: ExprImpl) -> ExprImpl {
 }
 
 /// If ever `Not (e)` and `(e)` appear together
-fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> bool {
+/// First return value indicates if the optimizable pattern exist
+/// Second return value indicates if the term `e` is either `IsNotNull` or `IsNull`
+/// i.e., for second case to be true, the result could be directly transfered to `True` or `False`
+/// Note: the second bool will be `True` iff the first bool is `True`
+fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
+    fn is_null_or_not_null(func_type: ExprType) -> bool {
+        func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
+    }
+
+    /// Try wrapping inner expression with `IsNotNull`
+    fn try_wrap_inner_expression(expr: ExprImpl, func_type: ExprType) -> Option<ExprImpl> {
+        if is_null_or_not_null(func_type) {
+            None
+        } else {
+            let Ok(expr) = FunctionCall::new(ExprType::IsNotNull, vec![expr]) else {
+                return None;
+            };
+            Some(expr.into())
+        }
+    }
+
     let ExprImpl::FunctionCall(e1_func) = e1.clone() else {
-        return false;
+        return (false, None);
     };
     let ExprImpl::FunctionCall(e2_func) = e2.clone() else {
-        return false;
+        return (false, None);
     };
     if e1_func.func_type() != ExprType::Not && e2_func.func_type() != ExprType::Not {
-        return false;
+        return (false, None);
     }
+    println!("e1: {:#?}", e1);
+    println!("e2: {:#?}", e2);
     if e1_func.func_type() != ExprType::Not {
         if e2_func.inputs().len() != 1 {
-            return false;
+            return (false, None);
         }
-        e1 == e2_func.inputs()[0].clone()
+        (e1 == e2_func.inputs()[0].clone(), None)
     } else {
         if e1_func.inputs().len() != 1 {
-            return false;
+            return (false, None);
         }
-        e2 == e1_func.inputs()[0].clone()
+        (e2 == e1_func.inputs()[0].clone(), None)
     }
 }
 
@@ -653,7 +675,8 @@ impl ExprRewriter for SimplifyFilterExpressionRewriter {
             return expr;
         }
         let inputs = func_call.inputs();
-        if check_pattern(inputs[0].clone(), inputs[1].clone()) {
+        let (optimizable_flag, _) = check_pattern(inputs[0].clone(), inputs[1].clone());
+        if optimizable_flag {
             match func_call.func_type() {
                 ExprType::Or => ExprImpl::literal_bool(true),
                 ExprType::And => ExprImpl::literal_bool(false),
