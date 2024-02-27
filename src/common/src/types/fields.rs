@@ -105,6 +105,46 @@ impl<T> ToOwnedDatum for Null<T> {
     }
 }
 
+mod __const {
+    /// Marker trait for constant types.
+    pub trait Const: Default {}
+}
+
+macro_rules! def_const_type {
+    ($ty:ident, $dt:ident) => {
+        paste::paste! {
+            /// A helper struct to represent a column which always has a constant value.
+            #[derive(Default)]
+            pub struct [<Const $ty:camel>]<const VALUE: $ty>;
+
+            impl<const VALUE: $ty> __const::Const for [<Const $ty:camel>]<VALUE> {}
+
+            impl<const VALUE: $ty> WithDataType for [<Const $ty:camel>]<VALUE> {
+                fn default_data_type() -> DataType {
+                    DataType::$dt
+                }
+            }
+
+            impl<const VALUE: $ty> ToOwnedDatum for [<Const $ty:camel>]<VALUE> {
+                fn to_owned_datum(self) -> Datum {
+                    Some(VALUE).to_owned_datum()
+                }
+            }
+        }
+    };
+}
+
+def_const_type!(bool, Boolean);
+def_const_type!(i16, Int16);
+def_const_type!(i32, Int32);
+def_const_type!(i64, Int64);
+// TODO: string constants requiring the feature `adt_const_params`
+
+/// Create a value for a constant column.
+pub fn constant<T: __const::Const>() -> T {
+    T::default()
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;

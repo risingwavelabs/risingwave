@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::fields::{null, Null};
+use risingwave_common::types::fields::{constant, null, ConstBool, ConstI32, Null};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -58,14 +58,14 @@ struct PgType {
     typelem: i32,
     typarray: i32,
     typinput: String,
-    typnotnull: bool,
-    typbasetype: i32,
-    typtypmod: i32,
-    typcollation: i32,
-    typlen: i32,
+    typnotnull: ConstBool<false>,
+    typbasetype: ConstI32<0>,
+    typtypmod: ConstI32<-1>,
+    typcollation: ConstI32<0>,
+    typlen: ConstI32<0>,
     typnamespace: i32,
     typtype: &'static str,
-    typrelid: i32,
+    typrelid: ConstI32<0>,
     typdefault: Null<String>,
     typcategory: Null<String>,
     typreceive: Null<i32>,
@@ -88,14 +88,14 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
             typelem: rw_type.typelem,
             typarray: rw_type.typarray,
             typinput: rw_type.input_oid,
-            typnotnull: false,
-            typbasetype: 0,
-            typtypmod: -1,
-            typcollation: 0,
-            typlen: 0,
+            typnotnull: constant(),
+            typbasetype: constant(),
+            typtypmod: constant(),
+            typcollation: constant(),
+            typlen: constant(),
             typnamespace: pg_catalog_id,
             typtype: "b",
-            typrelid: 0,
+            typrelid: constant(),
             typdefault: null(),
             typcategory: null(),
             typreceive: null(),

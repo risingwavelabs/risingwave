@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::fields::{null, Null};
+use risingwave_common::types::fields::{constant, null, ConstBool, ConstI32, Null};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -31,20 +31,20 @@ struct PgConstraint {
     conname: String,
     connamespace: i32,
     contype: String,
-    condeferrable: bool,
-    convalidated: bool,
+    condeferrable: ConstBool<false>,
+    convalidated: ConstBool<true>,
     conrelid: i32,
-    contypid: i32,
+    contypid: ConstI32<0>,
     conindid: i32,
-    conparentid: i32,
-    confrelid: i32,
+    conparentid: ConstI32<0>,
+    confrelid: ConstI32<0>,
     confupdtype: String,
     confdeltype: String,
     confmatchtype: String,
-    conislocal: bool,
-    coninhcount: i32,
-    connoinherit: bool,
-    conkey: Option<Vec<i16>>,
+    conislocal: ConstBool<true>,
+    coninhcount: ConstI32<0>,
+    connoinherit: ConstBool<true>,
+    conkey: Vec<i16>,
     confkey: Null<Vec<i16>>,
     conpfeqop: Null<Vec<i32>>,
     conppeqop: Null<Vec<i32>>,
@@ -55,29 +55,35 @@ struct PgConstraint {
 }
 
 impl PgConstraint {
-    fn from_system_table(schema: &SchemaCatalog, table: &SystemTableCatalog) -> PgConstraint {
+    fn new(
+        schema_id: i32,
+        table_id: i32,
+        table_name: &str,
+        pk_indices: impl IntoIterator<Item = i16>,
+    ) -> PgConstraint {
         // List of the constrained columns. First column starts from 1.
-        let conkey: Vec<_> = table.pk.iter().map(|i| (*i + 1) as i16).collect();
+        let conkey = pk_indices.into_iter().map(|i| i + 1).collect();
+
         PgConstraint {
-            oid: table.id.table_id() as i32, // Use table_id as a mock oid of constraint here.
-            conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id() as i32,
+            oid: table_id, // Use table_id as a mock oid of constraint here.
+            conname: format!("{}_pkey", table_name),
+            connamespace: schema_id,
             contype: "p".to_owned(), // p = primary key constraint
-            condeferrable: false,
-            convalidated: true,
-            conrelid: table.id.table_id() as i32,
-            contypid: 0,
+            condeferrable: constant(),
+            convalidated: constant(),
+            conrelid: table_id,
+            contypid: constant(),
             // Use table_id as a mock index oid of constraint here.
-            conindid: table.id.table_id() as i32,
-            conparentid: 0,
-            confrelid: 0,
+            conindid: table_id,
+            conparentid: constant(),
+            confrelid: constant(),
             confupdtype: " ".to_owned(),
             confdeltype: " ".to_owned(),
             confmatchtype: " ".to_owned(),
-            conislocal: true,
-            coninhcount: 0,
-            connoinherit: true,
-            conkey: Some(conkey),
+            conislocal: constant(),
+            coninhcount: constant(),
+            connoinherit: constant(),
+            conkey,
             confkey: null(),
             conpfeqop: null(),
             conppeqop: null(),
@@ -88,41 +94,22 @@ impl PgConstraint {
         }
     }
 
+    fn from_system_table(schema: &SchemaCatalog, table: &SystemTableCatalog) -> PgConstraint {
+        PgConstraint::new(
+            schema.id() as i32,
+            table.id.table_id() as i32,
+            &table.name,
+            table.pk.iter().map(|i| *i as _),
+        )
+    }
+
     fn from_table(schema: &SchemaCatalog, table: &TableCatalog) -> PgConstraint {
-        // List of the constrained columns. First column starts from 1.
-        let conkey: Vec<_> = table
-            .pk
-            .iter()
-            .map(|i| (i.column_index + 1) as i16)
-            .collect();
-        PgConstraint {
-            oid: table.id.table_id() as i32, // Use table_id as a mock oid of constraint here.
-            conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id() as i32,
-            contype: "p".to_owned(), // p = primary key constraint
-            condeferrable: false,
-            convalidated: true,
-            conrelid: table.id.table_id() as i32,
-            contypid: 0,
-            // Use table_id as a mock index oid of constraint here.
-            conindid: table.id.table_id() as i32,
-            conparentid: 0,
-            confrelid: 0,
-            confupdtype: " ".to_owned(),
-            confdeltype: " ".to_owned(),
-            confmatchtype: " ".to_owned(),
-            conislocal: true,
-            coninhcount: 0,
-            connoinherit: true,
-            conkey: Some(conkey),
-            confkey: null(),
-            conpfeqop: null(),
-            conppeqop: null(),
-            conffeqop: null(),
-            confdelsetcols: null(),
-            conexclop: null(),
-            conbin: null(),
-        }
+        PgConstraint::new(
+            schema.id() as i32,
+            table.id.table_id() as i32,
+            &table.name,
+            table.pk.iter().map(|i| i.column_index as _),
+        )
     }
 }
 
