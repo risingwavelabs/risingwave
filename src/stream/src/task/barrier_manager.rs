@@ -456,7 +456,7 @@ impl LocalBarrierWorker {
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
                 // try_find_root_failure is not used merely because it requires async.
-                return Err(self.root_failure().unwrap_or(e.clone()));
+                return Err(self.root_failure.clone().unwrap_or(e.clone()));
             }
         }
 
@@ -564,10 +564,6 @@ impl LocalBarrierWorker {
                 "actor error overwritten"
             );
         }
-    }
-
-    fn root_failure(&self) -> Option<StreamError> {
-        self.root_failure.clone()
     }
 
     async fn try_find_root_failure(&mut self, default_err: StreamError) -> StreamError {
