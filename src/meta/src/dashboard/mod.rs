@@ -358,7 +358,7 @@ pub(super) mod handlers {
         Ok(srv.diagnose_command.report().await)
     }
 
-    pub async fn get_back_pressure(
+    pub async fn get_embedded_back_pressures(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<GetBackPressureResponse>> {
         let worker_nodes = srv
@@ -416,10 +416,13 @@ impl DashboardService {
             .route("/sinks", get(list_sinks))
             .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
-                "/metrics/actor/back_pressures",
-                get(prometheus::list_prometheus_actor_back_pressure),
+                "/metrics/fragment/prometheus_back_pressures",
+                get(prometheus::list_prometheus_fragment_back_pressure),
             )
-            .route("/metrics/back_pressures", get(get_back_pressure))
+            .route(
+                "/metrics/fragment/embedded_back_pressures",
+                get(get_embedded_back_pressures),
+            )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))

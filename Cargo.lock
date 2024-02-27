@@ -3680,9 +3680,9 @@ dependencies = [
 
 [[package]]
 name = "enum-iterator"
-version = "1.5.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fd242f399be1da0a5354aa462d57b4ab2b4ee0683cc552f7c007d2d12d36e94"
+checksum = "600536cfe9e2da0820aa498e570f6b2b9223eec3ce2f835c8ae4861304fa4794"
 dependencies = [
  "enum-iterator-derive",
 ]
@@ -3871,6 +3871,16 @@ name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fancy-regex"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b95f7c0680e4142284cf8b22c14a476e87d61b004a3a0861872b32ef7ead40a2"
+dependencies = [
+ "bit-set",
+ "regex",
+]
 
 [[package]]
 name = "fancy-regex"
@@ -4456,6 +4466,15 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
+]
+
+[[package]]
+name = "fuzzy-matcher"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
+dependencies = [
+ "thread_local",
 ]
 
 [[package]]
@@ -5196,16 +5215,17 @@ dependencies = [
 
 [[package]]
 name = "inquire"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c33e7c1ddeb15c9abcbfef6029d8e29f69b52b6d6c891031b88ed91b5065803b"
+checksum = "bd05e4e63529f3c9c5f5c668c398217f72756ffe48c85266b49692c55accd1f7"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.4.0",
  "crossterm 0.25.0",
  "dyn-clone",
- "lazy_static",
+ "fuzzy-matcher",
+ "fxhash",
  "newline-converter",
- "thiserror",
+ "once_cell",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -6308,9 +6328,9 @@ dependencies = [
 
 [[package]]
 name = "newline-converter"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f71d09d5c87634207f894c6b31b6a2b2c64ea3bdcf71bd5599fdbbe1600c00f"
+checksum = "47b6b097ecb1cbfed438542d16e84fd7ad9b0c76c8a65b7f9039212a3d14dc7f"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -6345,6 +6365,18 @@ checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
 dependencies = [
  "bitflags 2.4.0",
  "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
+dependencies = [
+ "bitflags 2.4.0",
+ "cfg-if",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -8617,7 +8649,7 @@ dependencies = [
  "itertools 0.12.0",
  "libc",
  "madsim-tokio",
- "nix 0.27.1",
+ "nix 0.28.0",
  "opentelemetry",
  "parking_lot 0.12.1",
  "prometheus",
@@ -9199,7 +9231,7 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "expect-test",
- "fancy-regex",
+ "fancy-regex 0.13.0",
  "futures-async-stream",
  "futures-util",
  "hex",
@@ -9261,6 +9293,7 @@ dependencies = [
  "educe 0.5.7",
  "either",
  "enum-as-inner",
+ "fancy-regex 0.11.0",
  "fixedbitset",
  "futures",
  "futures-async-stream",
@@ -9920,7 +9953,7 @@ dependencies = [
  "memcomparable",
  "moka",
  "more-asserts",
- "nix 0.27.1",
+ "nix 0.28.0",
  "num-integer",
  "parking_lot 0.12.1",
  "procfs 0.16.0",
@@ -13747,6 +13780,7 @@ dependencies = [
  "axum",
  "base64 0.21.4",
  "bigdecimal 0.4.2",
+ "bit-set",
  "bit-vec",
  "bitflags 2.4.0",
  "byteorder",

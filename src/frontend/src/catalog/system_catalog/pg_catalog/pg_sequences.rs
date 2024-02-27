@@ -15,25 +15,18 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// The catalog `pg_user` provides access to information about database users.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
-#[system_catalog(
-    view,
-    "pg_catalog.pg_user",
-    "SELECT id AS usesysid,
-        name,
-        name AS usename,
-        create_db AS usecreatedb,
-        is_super AS usesuper,
-        '********' AS passwd
-    FROM rw_catalog.rw_users"
-)]
+/// The view `pg_sequences` provides access to useful information about each sequence in the database.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-sequences.html`]
+#[system_catalog(view, "pg_catalog.pg_sequences")]
 #[derive(Fields)]
-struct PgUser {
-    usesysid: i32,
-    name: String, // FIXME: For backward compatibility, remove it when the cloud update it.
-    usename: String,
-    usecreatedb: bool,
-    usesuper: bool,
-    passwd: String,
+struct PgSequences {
+    schemaname: String,
+    sequencename: String,
+    sequenceowner: String,
+    increment_by: i64,
+    last_value: i64,
+    cycle: bool,
+    start_value: i64,
+    max_value: i64,
+    min_value: i64,
 }
