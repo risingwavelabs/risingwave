@@ -416,14 +416,6 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
-static SIMPLIFY_FILTER_EXPRESSION: LazyLock<OptimizationStage> = LazyLock::new(|| {
-    OptimizationStage::new(
-        "Simplify Filter Expression",
-        vec![SimplifyFilterExpressionRule::create()],
-        ApplyOrder::TopDown,
-    )
-});
-
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -632,8 +624,6 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
-        plan = plan.optimize_by_rules(&SIMPLIFY_FILTER_EXPRESSION);
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -729,8 +719,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
-
-        plan = plan.optimize_by_rules(&SIMPLIFY_FILTER_EXPRESSION);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

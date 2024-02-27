@@ -605,6 +605,66 @@ impl WatermarkAnalyzer {
     }
 }
 
+/// The pattern we aim to optimize, e.g.,
+/// 1. (NOT (e)) OR (e) => True | (NOT (e)) AND (e) => False
+/// TODO(Zihao): 2. (NOT (e1) AND NOT (e2)) OR (e1 OR e2) => True
+pub fn simplify_stream_filter_expression(expr: ExprImpl) -> ExprImpl {
+    let mut rewriter = SimplifyFilterExpressionRewriter {};
+    rewriter.rewrite_expr(expr)
+}
+
+/// If ever `Not (e)` and `(e)` appear together
+fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> bool {
+    let ExprImpl::FunctionCall(e1_func) = e1.clone() else {
+        return false;
+    };
+    let ExprImpl::FunctionCall(e2_func) = e2.clone() else {
+        return false;
+    };
+    if e1_func.func_type() != ExprType::Not && e2_func.func_type() != ExprType::Not {
+        return false;
+    }
+    if e1_func.func_type() != ExprType::Not {
+        if e2_func.inputs().len() != 1 {
+            return false;
+        }
+        e1 == e2_func.inputs()[0].clone()
+    } else {
+        if e1_func.inputs().len() != 1 {
+            return false;
+        }
+        e2 == e1_func.inputs()[0].clone()
+    }
+}
+
+struct SimplifyFilterExpressionRewriter {}
+
+impl ExprRewriter for SimplifyFilterExpressionRewriter {
+    fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
+        let ExprImpl::FunctionCall(func_call) = expr.clone() else {
+            return expr;
+        };
+        if func_call.func_type() != ExprType::Or && func_call.func_type() != ExprType::And {
+            return expr;
+        }
+        assert_eq!(func_call.return_type(), DataType::Boolean);
+        // Currently just optimize the first rule
+        if func_call.inputs().len() != 2 {
+            return expr;
+        }
+        let inputs = func_call.inputs();
+        if check_pattern(inputs[0].clone(), inputs[1].clone()) {
+            match func_call.func_type() {
+                ExprType::Or => ExprImpl::literal_bool(true),
+                ExprType::And => ExprImpl::literal_bool(false),
+                _ => expr,
+            }
+        } else {
+            expr
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
