@@ -20,11 +20,9 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::get_or_create_wasm_runtime;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{CreateFunctionBody, ObjectName, OperateFunctionArg};
-use risingwave_storage::monitor::ObjectStoreMetrics;
 use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
@@ -268,23 +266,17 @@ pub async fn handle_create_function(
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
 }
 
-/// Download wasm binary from a link to object store.
+/// Download wasm binary from a link.
+#[allow(clippy::unused_async)]
 async fn download_binary_from_link(link: &str) -> Result<Bytes> {
-    let (wasm_storage_url, object_name) = link
-        .rsplit_once('/')
-        .context("invalid link for wasm function")?;
-
-    let object_store = build_remote_object_store(
-        wasm_storage_url,
-        Arc::new(ObjectStoreMetrics::unused()),
-        "Wasm Engine",
-        ObjectStoreConfig::default(),
-    )
-    .await;
-    Ok(object_store
-        .read(object_name, ..)
-        .await
-        .context("failed to download wasm binary")?)
+    // currently only local file system is supported
+    if let Some(path) = link.strip_prefix("fs://") {
+        let content =
+            std::fs::read(path).context("failed to read wasm binary from local file system")?;
+        Ok(content.into())
+    } else {
+        Err(ErrorCode::InvalidParameterValue("only 'fs://' is supported".to_string()).into())
+    }
 }
 
 /// Check if the function exists in the wasm binary.
