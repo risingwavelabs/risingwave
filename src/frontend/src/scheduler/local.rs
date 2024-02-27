@@ -356,6 +356,7 @@ impl LocalQueryExecution {
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
                     for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
+                        // todo(wcy-fdu): convert split to split vec
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
@@ -471,7 +472,10 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
-                            source_node.split = partition.encode_to_bytes().into();
+                            source_node.split = partition
+                            .into_iter()
+                            .map(|split| split.encode_to_bytes().into())
+                            .collect_vec();
                         }
                     }
                     _ => unreachable!(),

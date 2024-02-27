@@ -383,8 +383,10 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: id as u32,
                 };
-                let plan_fragment = self
-                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(vec![split.clone()])));
+                let plan_fragment = self.create_plan_fragment(
+                    id as u32,
+                    Some(PartitionInfo::Source(vec![split.clone()])),
+                );
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -907,24 +909,6 @@ impl StageRunner {
         }
     }
 
-    pub fn create_plan_fragment_for_file_source(
-        &self,
-        task_id: TaskId,
-        partition_vec: Vec<Option<PartitionInfo>>,
-    ) -> PlanFragment {
-        // Used to maintain auto-increment identity_id of a task.
-        let identity_id: Rc<RefCell<u64>> = Rc::new(RefCell::new(0));
-
-        let plan_node_prost =
-            self.convert_plan_node_for_file_source(&self.stage.root, task_id, partition_vec, identity_id);
-        let exchange_info = self.stage.exchange_info.clone().unwrap();
-
-        PlanFragment {
-            root: Some(plan_node_prost),
-            exchange_info: Some(exchange_info),
-        }
-    }
-
     fn convert_plan_node(
         &self,
         execution_plan_node: &ExecutionPlanNode,
@@ -1003,7 +987,11 @@ impl StageRunner {
                     .expect("no partition info for seq scan")
                     .into_source()
                     .expect("PartitionInfo should be SourcePartitionInfo");
-                source_node.split = partition.encode_to_bytes().into();
+
+                source_node.split = partition
+                    .into_iter()
+                    .map(|split| split.encode_to_bytes().into())
+                    .collect_vec();
                 PlanNodePb {
                     children: vec![],
                     identity,
@@ -1016,109 +1004,6 @@ impl StageRunner {
                     .iter()
                     .map(|e| {
                         self.convert_plan_node(e, task_id, partition.clone(), identity_id.clone())
-                    })
-                    .collect();
-
-                PlanNodePb {
-                    children,
-                    identity,
-                    node_body: Some(execution_plan_node.node.clone()),
-                }
-            }
-        }
-    }
-
-    fn convert_plan_node_for_file_source(
-        &self,
-        execution_plan_node: &ExecutionPlanNode,
-        task_id: TaskId,
-        partition: Vec<Option<PartitionInfo>>,
-        identity_id: Rc<RefCell<u64>>,
-    ) -> PlanNodePb {
-        // Generate identity
-        let identity = {
-            let identity_type = execution_plan_node.plan_node_type;
-            let id = *identity_id.borrow();
-            identity_id.replace(id + 1);
-            format!("{:?}-{}", identity_type, id)
-        };
-
-        match execution_plan_node.plan_node_type {
-            PlanNodeType::BatchExchange => {
-                // Find the stage this exchange node should fetch from and get all exchange sources.
-                let child_stage = self
-                    .children
-                    .iter()
-                    .find(|child_stage| {
-                        child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
-                    })
-                    .unwrap();
-                let exchange_sources = child_stage.all_exchange_sources_for(task_id);
-
-                match &execution_plan_node.node {
-                    NodeBody::Exchange(_exchange_node) => PlanNodePb {
-                        children: vec![],
-                        identity,
-                        node_body: Some(NodeBody::Exchange(ExchangeNode {
-                            sources: exchange_sources,
-                            sequential: true,
-                            input_schema: execution_plan_node.schema.clone(),
-                        })),
-                    },
-                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => PlanNodePb {
-                        children: vec![],
-                        identity,
-                        node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                            exchange: Some(ExchangeNode {
-                                sources: exchange_sources,
-                                sequential: true,
-                                input_schema: execution_plan_node.schema.clone(),
-                            }),
-                            column_orders: sort_merge_exchange_node.column_orders.clone(),
-                        })),
-                    },
-                    _ => unreachable!(),
-                }
-            }
-            PlanNodeType::BatchSeqScan => {
-                let node_body = execution_plan_node.node.clone();
-                let NodeBody::RowSeqScan(mut scan_node) = node_body else {
-                    unreachable!();
-                };
-                let partition = partition
-                    [0].expect("no partition info for seq scan")
-                    .into_table()
-                    .expect("PartitionInfo should be TablePartitionInfo");
-                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
-                scan_node.scan_ranges = partition.scan_ranges;
-                PlanNodePb {
-                    children: vec![],
-                    identity,
-                    node_body: Some(NodeBody::RowSeqScan(scan_node)),
-                }
-            }
-            PlanNodeType::BatchSource => {
-                let node_body = execution_plan_node.node.clone();
-                let NodeBody::Source(mut source_node) = node_body else {
-                    unreachable!();
-                };
-                let partition = partition[0]
-                    .expect("no partition info for seq scan")
-                    .into_source()
-                    .expect("PartitionInfo should be SourcePartitionInfo");
-                source_node.split = partition.encode_to_bytes().into();
-                PlanNodePb {
-                    children: vec![],
-                    identity,
-                    node_body: Some(NodeBody::Source(source_node)),
-                }
-            }
-            _ => {
-                let children = execution_plan_node
-                    .children
-                    .iter()
-                    .map(|e| {
-                        self.convert_plan_node(e, task_id, partition[0].clone(), identity_id.clone())
                     })
                     .collect();
 

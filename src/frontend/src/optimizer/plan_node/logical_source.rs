@@ -19,7 +19,6 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
