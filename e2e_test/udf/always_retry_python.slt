@@ -70,3 +70,6 @@ DROP FUNCTION sleep_always_retry;
 
 statement ok
 DROP FUNCTION sleep_no_retry;
+
+statement ok
+DROP TABLE t CASCADE;
