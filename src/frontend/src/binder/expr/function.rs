@@ -959,8 +959,8 @@ impl Binder {
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
-                        (1, raw_call(ExprType::ToTimestamp)),
-                        (2, raw_call(ExprType::ToTimestamp1)),
+                        (1, raw_call(ExprType::SecToTimestamptz)),
+                        (2, raw_call(ExprType::CharToTimestamptz)),
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
@@ -1243,6 +1243,7 @@ impl Binder {
                     inputs[0].cast_to_regclass_mut()?;
                     Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
                 })),
+                ("pg_get_serial_sequence", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_table_size", guard_by_len(1, raw(|_binder, mut inputs|{
                     inputs[0].cast_to_regclass_mut()?;
                     Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
@@ -1323,6 +1324,7 @@ impl Binder {
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
+                ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_backend_pid", raw(|binder, _inputs| {

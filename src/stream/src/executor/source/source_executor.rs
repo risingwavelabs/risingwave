@@ -24,7 +24,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
@@ -43,7 +43,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -68,7 +67,6 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -78,7 +76,6 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -138,13 +135,21 @@ impl<S: StateStore> SourceExecutor<S> {
         ]
     }
 
-    /// Returns `target_states` if split changed. Otherwise `None`.
+    /// - `should_trim_state`: whether to trim state for dropped splits.
+    ///
+    ///    For scaling, the connector splits can be migrated to other actors, but
+    ///    won't be added or removed. Actors should not trim states for splits that
+    ///    are moved to other actors.
+    ///
+    ///    For source split change, split will not be migrated and we can trim states
+    ///    for deleted splits.
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
-    ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
+        should_trim_state: bool,
+    ) -> StreamExecutorResult<()> {
         self.metrics
             .source_split_change_count
             .with_label_values(
@@ -156,82 +161,96 @@ impl<S: StateStore> SourceExecutor<S> {
             )
             .inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
-            if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
-                tracing::info!(
-                    actor_id = self.actor_ctx.id,
-                    state = ?target_state,
-                    "apply split change"
-                );
-
-                self.replace_stream_reader_with_target_state(
-                    source_desc,
-                    stream,
-                    target_state.clone(),
-                )
-                .await?;
-
-                return Ok(Some(target_state));
+            if self
+                .update_state_if_changed(target_splits, should_trim_state)
+                .await?
+            {
+                self.rebuild_stream_reader(source_desc, stream).await?;
             }
         }
 
-        Ok(None)
+        Ok(())
     }
 
-    /// Returns `target_states` if split changed. Otherwise `None`.
-    ///
-    /// Note: `update_state_if_changed` will modify `updated_splits_in_epoch`
+    /// Returns `true` if split changed. Otherwise `false`.
     async fn update_state_if_changed(
         &mut self,
-        state: ConnectorState,
-    ) -> StreamExecutorResult<ConnectorState> {
+        target_splits: Vec<SplitImpl>,
+        should_trim_state: bool,
+    ) -> StreamExecutorResult<bool> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let target_splits: HashMap<_, _> = state
-            .unwrap()
+        let target_splits: HashMap<_, _> = target_splits
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
 
-        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(target_splits.len());
+        let mut target_state: HashMap<SplitId, SplitImpl> =
+            HashMap::with_capacity(target_splits.len());
 
         let mut split_changed = false;
 
         // Checks added splits
-        for (split_id, split) in &target_splits {
-            if let Some(s) = core.updated_splits_in_epoch.get(split_id) {
-                // existing split, no change, clone from cache
-                target_state.push(s.clone())
+        for (split_id, split) in target_splits {
+            if let Some(s) = core.latest_split_info.get(&split_id) {
+                // For existing splits, we should use the latest offset from the cache.
+                // `target_splits` is from meta and contains the initial offset.
+                target_state.insert(split_id, s.clone());
             } else {
                 split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
                 let initial_state = if let Some(recover_state) = core
                     .split_state_store
-                    .try_recover_from_state_store(split)
+                    .try_recover_from_state_store(&split)
                     .await?
                 {
                     recover_state
                 } else {
-                    split.clone()
+                    split
                 };
 
                 core.updated_splits_in_epoch
-                    .entry(split.id())
+                    .entry(split_id.clone())
                     .or_insert_with(|| initial_state.clone());
 
-                target_state.push(initial_state);
+                target_state.insert(split_id, initial_state);
             }
         }
 
         // Checks dropped splits
         for existing_split_id in core.latest_split_info.keys() {
-            if !target_splits.contains_key(existing_split_id) {
+            if !target_state.contains_key(existing_split_id) {
                 tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
             }
         }
 
-        Ok(split_changed.then_some(target_state))
+        if split_changed {
+            tracing::info!(
+                actor_id = self.actor_ctx.id,
+                state = ?target_state,
+                "apply split change"
+            );
+
+            core.updated_splits_in_epoch
+                .retain(|split_id, _| target_state.get(split_id).is_some());
+
+            let dropped_splits = core
+                .latest_split_info
+                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .map(|(_, split)| split)
+                .collect_vec();
+
+            if should_trim_state && !dropped_splits.is_empty() {
+                // trim dropped splits' state
+                core.split_state_store.trim_state(&dropped_splits).await?;
+            }
+
+            core.latest_split_info = target_state;
+        }
+
+        Ok(split_changed)
     }
 
     /// Rebuild stream if there is a err in stream
@@ -256,17 +275,17 @@ impl<S: StateStore> SourceExecutor<S> {
             core.source_id.to_string(),
         ]);
 
-        let target_state = core.latest_split_info.values().cloned().collect();
-        self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
-            .await
+        self.rebuild_stream_reader(source_desc, stream).await
     }
 
-    async fn replace_stream_reader_with_target_state<const BIASED: bool>(
+    async fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
-        target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
+        let core = self.stream_source_core.as_mut().unwrap();
+        let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
+
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
             self.actor_ctx.id,
@@ -284,56 +303,21 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
-    /// - `target_state`: the new split info from barrier. `None` if no split update.
-    /// - `should_trim_state`: whether to trim state for dropped splits.
-    ///
-    ///    For scaling, the connector splits can be migrated to other actors, but
-    ///    won't be added or removed. Actors should not trim states for splits that
-    ///    are moved to other actors.
-    ///
-    ///    For source split change, split will not be migrated and we can trim states
-    ///    for deleted splits.
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-        // target_state is Some means split change (or migration) happened.
-        target_state: Option<Vec<SplitImpl>>,
-        should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let mut cache = core
+        let cache = core
             .updated_splits_in_epoch
             .values()
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
-        if let Some(target_splits) = target_state {
-            let target_split_ids: HashSet<_> =
-                target_splits.iter().map(|split| split.id()).collect();
-
-            cache.retain(|split| target_split_ids.contains(&split.id()));
-
-            let dropped_splits = core
-                .latest_split_info
-                .extract_if(|split_id, _| !target_split_ids.contains(split_id))
-                .map(|(_, split)| split)
-                .collect_vec();
-
-            if should_trim_state && !dropped_splits.is_empty() {
-                // trim dropped splits' state
-                core.split_state_store.trim_state(&dropped_splits).await?;
-            }
-
-            core.latest_split_info = target_splits
-                .into_iter()
-                .map(|split| (split.id(), split))
-                .collect();
-        }
-
         if !cache.is_empty() {
             tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
-            core.split_state_store.set_states(cache).await?
+            core.split_state_store.set_states(cache).await?;
         }
 
         // commit anyway, even if no message saved
@@ -471,9 +455,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let epoch = barrier.epoch;
 
-                    let mut target_state = None;
-                    let mut should_trim_state = false;
-
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => stream.pause_stream(),
@@ -485,23 +466,29 @@ impl<S: StateStore> SourceExecutor<S> {
                                     "source change split received"
                                 );
 
-                                target_state = self
-                                    .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
-                                should_trim_state = true;
+                                self.apply_split_change(
+                                    &source_desc,
+                                    &mut stream,
+                                    actor_splits,
+                                    true,
+                                )
+                                .await?;
                             }
 
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                target_state = self
-                                    .apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
+                                self.apply_split_change(
+                                    &source_desc,
+                                    &mut stream,
+                                    actor_splits,
+                                    false,
+                                )
+                                .await?;
                             }
                             _ => {}
                         }
                     }
 
-                    self.persist_state_and_clear_cache(epoch, target_state, should_trim_state)
-                        .await?;
+                    self.persist_state_and_clear_cache(epoch).await?;
 
                     self.metrics
                         .source_row_per_barrier
@@ -537,8 +524,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         // chunks.
                         self_paused = true;
                         tracing::warn!(
-                            "source {} paused, wait barrier for {:?}",
-                            self.info.identity,
+                            "source paused, wait barrier for {:?}",
                             last_barrier_time.elapsed()
                         );
                         stream.pause_stream();
@@ -626,25 +612,13 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for SourceExecutor<S> {
+impl<S: StateStore> Execute for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         if self.stream_source_core.is_some() {
             self.execute_with_stream_source().boxed()
         } else {
             self.execute_without_stream_source().boxed()
         }
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -654,7 +628,6 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
             f.debug_struct("SourceExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()
@@ -693,7 +666,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = None;
-        let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
@@ -730,11 +702,6 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "SourceExecutor".to_string(),
-            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
@@ -742,7 +709,7 @@ mod tests {
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
-        let mut executor = Box::new(executor).execute();
+        let mut executor = executor.boxed().execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),
@@ -786,7 +753,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
         let row_id_index = None;
-        let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
@@ -824,11 +790,6 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "SourceExecutor".to_string(),
-            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
@@ -836,7 +797,7 @@ mod tests {
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
-        let mut handler = Box::new(executor).execute();
+        let mut handler = executor.boxed().execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
             adds: HashMap::new(),

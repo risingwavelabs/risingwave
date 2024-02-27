@@ -61,11 +61,9 @@ pub enum HummockEvent {
     },
 
     /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>),
+    Clear(oneshot::Sender<()>, u64),
 
     Shutdown,
-
-    VersionUpdate(HummockVersionUpdate),
 
     ImmToUploader(ImmutableMemtable),
 
@@ -108,13 +106,9 @@ impl HummockEvent {
                 sync_result_sender: _,
             } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),
 
-            HummockEvent::Clear(_) => "Clear".to_string(),
+            HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
-
-            HummockEvent::VersionUpdate(version_update_payload) => {
-                format!("VersionUpdate {:?}", version_update_payload)
-            }
 
             HummockEvent::ImmToUploader(imm) => {
                 format!("ImmToUploader {:?}", imm)

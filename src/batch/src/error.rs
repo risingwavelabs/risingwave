@@ -20,6 +20,7 @@ pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::BoxedError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
+use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
@@ -154,5 +155,11 @@ impl<'a> From<&'a BatchError> for Status {
 impl From<BatchError> for Status {
     fn from(err: BatchError) -> Self {
         Self::from(&err)
+    }
+}
+
+impl From<ConnectorError> for BatchError {
+    fn from(value: ConnectorError) -> Self {
+        Self::Connector(value.into())
     }
 }

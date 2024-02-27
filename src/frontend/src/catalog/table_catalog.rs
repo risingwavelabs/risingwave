@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, Field, Schema, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -73,6 +73,8 @@ pub struct TableCatalog {
     pub associated_source_id: Option<TableId>, // TODO: use SourceId
 
     pub name: String,
+
+    pub dependent_relations: Vec<TableId>,
 
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
@@ -492,6 +494,15 @@ impl TableCatalog {
     pub fn has_generated_column(&self) -> bool {
         self.columns.iter().any(|c| c.is_generated())
     }
+
+    pub fn column_schema(&self) -> Schema {
+        Schema::new(
+            self.columns
+                .iter()
+                .map(|c| Field::from(&c.column_desc))
+                .collect(),
+        )
+    }
 }
 
 impl From<PbTable> for TableCatalog {
@@ -564,6 +575,11 @@ impl From<PbTable> for TableCatalog {
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
             retention_seconds: tb.retention_seconds,
+            dependent_relations: tb
+                .dependent_relations
+                .into_iter()
+                .map(TableId::from)
+                .collect_vec(),
         }
     }
 }
@@ -715,6 +731,7 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
+                dependent_relations: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

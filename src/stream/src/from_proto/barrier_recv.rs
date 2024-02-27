@@ -27,7 +27,7 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
         params: ExecutorParams,
         _node: &Self::Node,
         _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         assert!(
             params.input.is_empty(),
             "barrier receiver should not have input"
@@ -38,6 +38,7 @@ impl ExecutorBuilder for BarrierRecvExecutorBuilder {
             .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
 
-        Ok(BarrierRecvExecutor::new(params.actor_context, params.info, barrier_receiver).boxed())
+        let exec = BarrierRecvExecutor::new(params.actor_context, barrier_receiver);
+        Ok((params.info, exec).into())
     }
 }

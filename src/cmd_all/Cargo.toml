@@ -58,6 +58,7 @@ workspace-hack = { path = "../workspace-hack" }
 expect-test = "1"
 
 [build-dependencies]
+thiserror-ext = { workspace = true }
 vergen = { version = "8", default-features = false, features = [
     "build",
     "git",
