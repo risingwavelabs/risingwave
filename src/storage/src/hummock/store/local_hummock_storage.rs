@@ -21,7 +21,7 @@ use bytes::Bytes;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
@@ -30,13 +30,12 @@ use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
-    UserIterator,
+    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
-use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
+use crate::hummock::store::version::{read_filter_for_version, HummockVersionReader};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, wait_for_epoch,
     ENABLE_SANITY_CHECK,
@@ -111,7 +110,7 @@ impl LocalHummockStorage {
             Bound::Included(table_key.clone()),
         );
 
-        let (table_key_range, read_snapshot) = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
             table_key_range,
@@ -137,7 +136,7 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let (table_key_range, read_snapshot) = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
             table_key_range,
@@ -165,7 +164,7 @@ impl LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
-        let (table_key_range, read_snapshot) = read_filter_for_local(
+        let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
             table_key_range,
@@ -192,7 +191,7 @@ impl LocalHummockStorage {
             return Ok(true);
         }
 
-        let (key_range, read_snapshot) = read_filter_for_local(
+        let (key_range, read_snapshot) = read_filter_for_version(
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
             key_range,
@@ -260,6 +259,14 @@ impl LocalStateStore for LocalHummockStorage {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<Self::IterStream<'_>> {
+        let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
+        assert_eq!(
+            r_vnode_exclusive - l_vnode_inclusive,
+            1,
+            "read range {:?} for table {} iter contains more than one vnode",
+            key_range,
+            read_options.table_id
+        );
         self.iter_all(key_range.clone(), self.epoch(), read_options)
             .await
     }
@@ -387,15 +394,6 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
-        let prev_vnodes = self
-            .read_version
-            .write()
-            .update_vnode_bitmap(options.vnodes);
-        assert!(
-            prev_vnodes.is_none(),
-            "Vnode bitmap should be empty during init"
-        );
-
         Ok(())
     }
 
@@ -442,8 +440,7 @@ impl LocalStateStore for LocalHummockStorage {
         assert!(read_version.staging().is_empty(), "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
             self.table_id(), self.instance_id()
         );
-        let prev_vnodes = read_version.update_vnode_bitmap(vnodes);
-        prev_vnodes.expect("Previous vnode bitmap should not be none")
+        read_version.update_vnode_bitmap(vnodes)
     }
 }
 
@@ -581,15 +578,13 @@ impl LocalHummockStorage {
 pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
-pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
-    MergeIterator<
-        HummockIteratorUnion<
-            Forward,
-            StagingDataIterator,
-            SstableIterator,
-            ConcatIteratorInner<SstableIterator>,
-            MemTableHummockIterator<'a>,
-        >,
+pub type HummockStorageIteratorPayloadInner<'a> = MergeIterator<
+    HummockIteratorUnion<
+        Forward,
+        StagingDataIterator,
+        SstableIterator,
+        ConcatIteratorInner<SstableIterator>,
+        MemTableHummockIterator<'a>,
     >,
 >;
 
