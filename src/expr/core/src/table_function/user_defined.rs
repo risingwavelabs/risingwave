@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use arrow_udf_js::{CallMode, Runtime as JsRuntime};
@@ -188,14 +189,12 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let return_type = DataType::from(prost.get_return_type()?);
 
     let client = match udtf.language.as_str() {
-        "wasm" => {
-            let link = udtf.get_link()?;
-            // Use `block_in_place` as an escape hatch to run async code here in sync context.
-            // Calling `block_on` directly will panic.
-            UdfImpl::Wasm(tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(crate::expr::expr_udf::get_or_create_wasm_runtime(link))
-            })?)
+        "wasm" | "rust" => {
+            let compressed_wasm_binary = udtf.get_compressed_binary()?;
+            let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
+                .context("failed to decompress wasm binary")?;
+            let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
+            UdfImpl::Wasm(runtime)
         }
         "javascript" => {
             let mut rt = JsRuntime::new()?;
