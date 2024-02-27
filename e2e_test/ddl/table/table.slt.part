@@ -285,7 +285,8 @@ select * from i;
 ----
 1
 
-sleep 10s
+statement ok
+select pg_sleep(10);
 
 query I
 select * from t;
