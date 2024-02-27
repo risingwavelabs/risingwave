@@ -13,16 +13,20 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::sync::Arc;
 
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::store::{InitOptions, LocalStateStore};
 
 pub trait LocalStateStoreTestExt: LocalStateStore {
     fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        self.init(InitOptions::new_with_epoch(EpochPair::new_test_epoch(
-            epoch,
-        )))
+        self.init(InitOptions::new(
+            EpochPair::new_test_epoch(epoch),
+            Arc::new(Bitmap::ones(VirtualNode::COUNT)),
+        ))
     }
 }
 impl<T: LocalStateStore> LocalStateStoreTestExt for T {}
