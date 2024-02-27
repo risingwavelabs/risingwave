@@ -33,10 +33,10 @@ use tonic::transport::Channel;
 use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
 
-/// Used for lazy udf client connections
+// Interval between two successive probes of the UDF DNS.
 const DNS_PROBE_INTERVAL_SECS: u64 = 5;
-/// Used for eager udf client connections
-const EAGER_DNS_PROBE_INTERVAL_SECS: u64 = 5;
+// Timeout duration for performing an eager DNS resolution.
+const EAGER_DNS_RESOLVE_TIMEOUT_SECS: u64 = 5;
 const REQUEST_TIMEOUT_SECS: u64 = 5;
 const CONNECT_TIMEOUT_SECS: u64 = 5;
 
@@ -55,7 +55,7 @@ impl ArrowFlightUdfClient {
         Self::connect_inner(
             addr,
             ResolutionStrategy::Eager {
-                timeout: TokioDuration::from_secs(EAGER_DNS_PROBE_INTERVAL_SECS),
+                timeout: TokioDuration::from_secs(EAGER_DNS_RESOLVE_TIMEOUT_SECS),
             },
         )
         .await
