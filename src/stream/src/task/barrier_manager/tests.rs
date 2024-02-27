@@ -17,7 +17,6 @@ use std::iter::once;
 use std::pin::pin;
 use std::task::Poll;
 
-use futures::FutureExt;
 use itertools::Itertools;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -48,16 +47,9 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let epoch = barrier.epoch.prev;
 
     actor_op_tx
-        .send_and_await(|tx| LocalActorOperation::InjectBarrier {
-            barrier,
-            actor_ids_to_send: actor_ids.clone().into_iter().collect(),
-            actor_ids_to_collect: actor_ids.clone().into_iter().collect(),
-            result_sender: tx,
-        })
+        .send_barrier(barrier.clone(), actor_ids.clone(), actor_ids)
         .await
-        .unwrap()
         .unwrap();
-
     // Collect barriers from actors
     let collected_barriers = rxs
         .iter_mut()
@@ -68,12 +60,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         })
         .collect_vec();
 
-    let mut await_epoch_future = pin!(actor_op_tx
-        .send_and_await(|tx| LocalActorOperation::AwaitEpochCompleted {
-            epoch,
-            result_sender: tx,
-        })
-        .map(|result| result.unwrap().unwrap()));
+    let mut await_epoch_future = pin!(actor_op_tx.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
@@ -121,15 +108,10 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);
 
+    // Send the barrier to all actors
     actor_op_tx
-        .send_and_await(|tx| LocalActorOperation::InjectBarrier {
-            barrier,
-            actor_ids_to_send: actor_ids_to_send.clone().into_iter().collect(),
-            actor_ids_to_collect: actor_ids_to_collect.clone().into_iter().collect(),
-            result_sender: tx,
-        })
+        .send_barrier(barrier.clone(), actor_ids_to_send, actor_ids_to_collect)
         .await
-        .unwrap()
         .unwrap();
 
     // Collect barriers from actors
@@ -142,12 +124,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         })
         .collect_vec();
 
-    let mut await_epoch_future = pin!(actor_op_tx
-        .send_and_await(|tx| LocalActorOperation::AwaitEpochCompleted {
-            epoch,
-            result_sender: tx,
-        })
-        .map(|result| result.unwrap().unwrap()));
+    let mut await_epoch_future = pin!(actor_op_tx.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {

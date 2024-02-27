@@ -207,23 +207,14 @@ impl LocalStreamManager {
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> StreamResult<()> {
         self.actor_op_tx
-            .send_and_await(move |result_sender| LocalActorOperation::InjectBarrier {
-                barrier,
-                actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
-                actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
-                result_sender,
-            })
-            .await?
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
+            .await
     }
 
-    /// Use `prev_epoch` to remove collect rx and return rx.
+    /// Use `epoch` to find collect rx. And wait for all actor to be collected before
+    /// returning.
     pub async fn collect_barrier(&self, prev_epoch: u64) -> StreamResult<BarrierCompleteResult> {
-        self.actor_op_tx
-            .send_and_await(|result_sender| LocalActorOperation::AwaitEpochCompleted {
-                epoch: prev_epoch,
-                result_sender,
-            })
-            .await?
+        self.actor_op_tx.await_epoch_completed(prev_epoch).await
     }
 
     /// Drop the resources of the given actors.

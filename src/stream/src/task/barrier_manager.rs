@@ -557,14 +557,6 @@ impl LocalBarrierWorker {
     }
 }
 
-pub(super) struct EventSender<T>(pub(super) UnboundedSender<T>);
-
-impl<T> Clone for EventSender<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
 #[derive(Clone)]
 pub struct LocalBarrierManager {
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
@@ -604,6 +596,14 @@ impl LocalBarrierWorker {
     }
 }
 
+pub(super) struct EventSender<T>(pub(super) UnboundedSender<T>);
+
+impl<T> Clone for EventSender<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 impl<T> EventSender<T> {
     pub(super) fn send_event(&self, event: T) {
         self.0.send(event).expect("should be able to send event")
@@ -631,7 +631,40 @@ impl LocalBarrierManager {
     pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         self.send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
     }
+}
 
+impl EventSender<LocalActorOperation> {
+    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
+    /// barrier is finished, in managed mode.
+    pub(super) async fn send_barrier(
+        &self,
+        barrier: Barrier,
+        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
+    ) -> StreamResult<()> {
+        self.send_and_await(move |result_sender| LocalActorOperation::InjectBarrier {
+            barrier,
+            actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
+            actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
+            result_sender,
+        })
+        .await?
+    }
+
+    /// Use `prev_epoch` to remove collect rx and return rx.
+    pub(super) async fn await_epoch_completed(
+        &self,
+        prev_epoch: u64,
+    ) -> StreamResult<BarrierCompleteResult> {
+        self.send_and_await(|result_sender| LocalActorOperation::AwaitEpochCompleted {
+            epoch: prev_epoch,
+            result_sender,
+        })
+        .await?
+    }
+}
+
+impl LocalBarrierManager {
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
     pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
