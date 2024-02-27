@@ -39,6 +39,7 @@ pub async fn handle_create_function(
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
@@ -256,6 +257,9 @@ pub async fn handle_create_function(
         body,
         compressed_binary,
         owner: session.user_id(),
+        always_retry_on_network_error: with_options
+            .always_retry_on_network_error
+            .unwrap_or_default(),
     };
 
     let catalog_writer = session.catalog_writer()?;

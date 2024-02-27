@@ -40,6 +40,7 @@ mod pg_partitioned_table;
 mod pg_proc;
 mod pg_rewrite;
 mod pg_roles;
+mod pg_sequences;
 mod pg_settings;
 mod pg_shadow;
 mod pg_shdescription;

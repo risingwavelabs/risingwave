@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aws_sdk_ec2::error::DisplayErrorContext;
 use risingwave_common::error::BoxedError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -103,7 +102,7 @@ pub enum MetaErrorInner {
         SinkError,
     ),
 
-    #[error("AWS SDK error: {}", DisplayErrorContext(& * *.0))]
+    #[error("AWS SDK error: {0}")]
     Aws(#[source] BoxedError),
 
     #[error(transparent)]

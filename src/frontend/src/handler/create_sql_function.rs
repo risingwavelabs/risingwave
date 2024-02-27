@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fancy_regex::Regex;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -24,13 +25,18 @@ use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
 use risingwave_sqlparser::parser::{Parser, ParserError};
-use thiserror_ext::AsReport;
 
 use super::*;
 use crate::binder::UdfContext;
 use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
+
+const DEFAULT_ERR_MSG: &str = "Failed to conduct semantic check";
+
+const PROMPT: &str = "In SQL UDF definition: ";
+
+pub const SQL_UDF_PATTERN: &str = "[sql udf]";
 
 /// Create a mock `udf_context`, which is used for semantic check
 fn create_mock_udf_context(
@@ -51,6 +57,24 @@ fn create_mock_udf_context(
     }
 
     ret
+}
+
+/// Find the pattern for better hint display
+/// return the exact index where the pattern first appears
+fn find_target(input: &str, target: &str) -> Option<usize> {
+    // Regex pattern to find `target` not preceded or followed by an ASCII letter
+    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
+    // the target is not surrounded by ASCII alphabetic characters
+    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
+    let Ok(re) = Regex::new(&pattern) else {
+        return None;
+    };
+
+    let Ok(Some(ma)) = re.find(input) else {
+        return None;
+    };
+
+    Some(ma.start())
 }
 
 pub async fn handle_create_sql_function(
@@ -205,11 +229,46 @@ pub async fn handle_create_sql_function(
                         .into());
                     }
                 }
-                Err(e) => return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "failed to conduct semantic check, please see if you are calling non-existence functions or parameters\ndetailed error message: {}",
-                    e.as_report()
-                ))
-                .into()),
+                Err(e) => {
+                    if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
+                        let invalid_msg = error.to_string();
+
+                        // Valid error message for hint display
+                        let Some(_) = invalid_msg.as_str().find(SQL_UDF_PATTERN) else {
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
+                        };
+
+                        // Get the name of the invalid item
+                        // We will just display the first one found
+                        let invalid_item_name =
+                            invalid_msg.split_whitespace().last().unwrap_or("null");
+
+                        // Find the invalid parameter / column
+                        let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
+                        };
+
+                        // The exact error position for `^` to point to
+                        let position = format!(
+                            "{}{}",
+                            " ".repeat(idx + PROMPT.len() + 1),
+                            "^".repeat(invalid_item_name.len())
+                        );
+
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "{}\n{}\n{}`{}`\n{}",
+                            DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
+                        ))
+                        .into());
+                    }
+
+                    // Otherwise return the default error message
+                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                }
             }
         } else {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -237,6 +296,7 @@ pub async fn handle_create_sql_function(
         compressed_binary: None,
         link: None,
         owner: session.user_id(),
+        always_retry_on_network_error: false,
     };
 
     let catalog_writer = session.catalog_writer()?;

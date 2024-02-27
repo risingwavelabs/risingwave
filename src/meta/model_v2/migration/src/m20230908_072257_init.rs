@@ -725,6 +725,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Body).string())
                     .col(ColumnDef::new(Function::CompressedBinary).string())
                     .col(ColumnDef::new(Function::Kind).string().not_null())
+                    .col(
+                        ColumnDef::new(Function::AlwaysRetryOnNetworkError)
+                            .boolean()
+                            .not_null(),
+                    )
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_function_object_id")
@@ -1126,6 +1131,7 @@ enum Function {
     Body,
     CompressedBinary,
     Kind,
+    AlwaysRetryOnNetworkError,
 }
 
 #[derive(DeriveIden)]

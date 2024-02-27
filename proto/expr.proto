@@ -286,6 +286,7 @@ message ExprNode {
     PG_GET_USERBYID = 2403;
     PG_INDEXES_SIZE = 2404;
     PG_RELATION_SIZE = 2405;
+    PG_GET_SERIAL_SEQUENCE = 2406;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -526,7 +527,8 @@ message UserDefinedFunction {
   // - If `language` is `javascript`, the source code of the function.
   optional string body = 7;
   // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
-  optional bytes compressed_binary = 9;
+  optional bytes compressed_binary = 10;
+  bool always_retry_on_network_error = 9;
 }
 
 // Additional information for user defined table functions.
@@ -537,5 +539,5 @@ message UserDefinedTableFunction {
   optional string link = 5;
   optional string identifier = 6;
   optional string body = 7;
-  optional bytes compressed_binary = 9;
+  optional bytes compressed_binary = 10;
 }

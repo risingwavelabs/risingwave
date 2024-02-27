@@ -32,6 +32,7 @@ use risingwave_frontend_macro::system_catalog;
         NULL::integer AS character_maximum_length,
         NULL::integer AS numeric_precision,
         NULL::integer AS numeric_scale,
+        NULL::integer AS datetime_precision,
         c.position AS ordinal_position,
         'YES' AS is_nullable,
         CASE
@@ -64,7 +65,8 @@ use risingwave_frontend_macro::system_catalog;
             WHEN c.is_generated THEN 'ALWAYS'
             ELSE 'NEVER'
         END AS is_generated,
-        c.generation_expression
+        c.generation_expression,
+        NULL AS interval_type
     FROM rw_catalog.rw_columns c
     LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id
     JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id
@@ -80,6 +82,7 @@ struct Column {
     character_maximum_length: i32,
     numeric_precision: i32,
     numeric_scale: i32,
+    datetime_precision: i32,
     ordinal_position: i32,
     is_nullable: String,
     data_type: String,
@@ -107,4 +110,5 @@ struct Column {
     identity_cycle: String,
     is_generated: String,
     generation_expression: String,
+    interval_type: String,
 }

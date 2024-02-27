@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  spark:
+    depends_on:
+      - minio-0
+    image: ghcr.io/icelake-io/icelake-spark:latest
+    environment:
+      - SPARK_HOME=/opt/spark
+      - PYSPARK_PYTHON=/usr/bin/python3.9
+      - PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/spark/bin:/opt/spark/sbin
+    user: root
+    networks:
+      iceberg_net:
+    links:
+      - minio-0:icebergdata.minio-0
+    expose:
+      - 15002
+    healthcheck:
+      test: netstat -ltn | grep -c 15002
+      interval: 1s
+      retries: 1200
+    volumes:
+      - ./spark-script:/spark-script
+    entrypoint: ["/spark-script/spark-connect-server.sh"]
+
+  risingwave-standalone:
+    extends:
+      file: ../../../../docker/docker-compose.yml
+      service: risingwave-standalone
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $$?;'
+      interval: 1s
+      timeout: 30s
+    networks:
+      iceberg_net:
+
+  minio-0:
+    extends:
+      file: ../../../../docker/docker-compose.yml
+      service: minio-0
+    entrypoint: "
+
+          /bin/sh -c '
+
+          set -e
+
+          mkdir -p \"/data/icebergdata/demo\"
+          mkdir -p \"/data/hummock001\"
+
+          /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
+
+          '"
+    networks:
+      iceberg_net:
+
+  etcd-0:
+    extends:
+      file: ../../../../docker/docker-compose.yml
+      service: etcd-0
+    networks:
+      iceberg_net:
+
+volumes:
+  risingwave-standalone:
+    external: false
+  etcd-0:
+    external: false
+  minio-0:
+    external: false
+
+networks:
+  iceberg_net:
