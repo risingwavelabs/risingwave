@@ -648,7 +648,6 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
         let mut columns = vec![];
 
         extract_column(expr, &mut columns);
-        println!("columns: {:#?}", columns);
         if columns.is_empty() {
             return None;
         }
@@ -713,7 +712,6 @@ impl ExprRewriter for SimplifyFilterExpressionRewriter {
         }
         let inputs = func_call.inputs();
         let (optimizable_flag, columns) = check_pattern(inputs[0].clone(), inputs[1].clone());
-        println!("[out] columns: {:#?}", columns);
         if optimizable_flag {
             match func_call.func_type() {
                 ExprType::Or => if let Some(columns) = columns { columns } else { ExprImpl::literal_bool(true) },
