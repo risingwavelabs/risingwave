@@ -60,6 +60,7 @@ impl ColumnDescTestExt for ColumnDesc {
             field_descs: fields,
             generated_or_default_column: None,
             description: None,
+            additional_column_type: 0, // deprecated
             additional_columns: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::Pr13707 as i32,
         }
