@@ -974,6 +974,8 @@ pub enum EncodingProperties {
     Json(JsonProperties),
     Bytes(BytesProperties),
     Native,
+    /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
+    None,
     #[default]
     Unspecified,
 }
@@ -987,6 +989,8 @@ pub enum ProtocolProperties {
     Plain,
     Upsert,
     Native,
+    /// Protocol can't be specified because the source will determines it. Now only used in Iceberg.
+    None,
     #[default]
     Unspecified,
 }
@@ -1004,6 +1008,7 @@ impl SpecificParserConfig {
         // in the future
         let protocol_config = match format {
             SourceFormat::Native => ProtocolProperties::Native,
+            SourceFormat::None => ProtocolProperties::None,
             SourceFormat::Debezium => ProtocolProperties::Debezium,
             SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,
             SourceFormat::Maxwell => ProtocolProperties::Maxwell,
@@ -1114,6 +1119,7 @@ impl SpecificParserConfig {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }
             (SourceFormat::Native, SourceEncode::Native) => EncodingProperties::Native,
+            (SourceFormat::None, SourceEncode::None) => EncodingProperties::None,
             (format, encode) => {
                 bail!("Unsupported format {:?} encode {:?}", format, encode);
             }
