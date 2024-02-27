@@ -424,7 +424,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             let mut builder =
                                 StreamChunkBuilder::new(self.chunk_size, full_schema.clone());
                             // The bitmap is aligned with `builder`. The bit is set if the record is matched.
-                            // TODO: Consider adding the bitmap to `JoinStreamChunkBuilder`.
+                            // TODO: Consider adding the bitmap to `builder`.
                             let mut row_matched_bitmap_builder =
                                 BitmapBuilder::with_capacity(self.chunk_size);
                             let epoch =
