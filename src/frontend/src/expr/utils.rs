@@ -623,15 +623,54 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
         func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
     }
 
+    /// Simply extract every possible `InputRef` out from the input `expr`
+    fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
+        match expr {
+            ExprImpl::FunctionCall(func_call) => {
+                // `IsNotNull( ... )` or `IsNull( ... )` will be ignored
+                if is_null_or_not_null(func_call.func_type()) {
+                    return;
+                }
+                for sub_expr in func_call.inputs().iter() {
+                    extract_column(sub_expr.clone(), columns);
+                }
+            }
+            ExprImpl::InputRef(_) => {
+                columns.push(expr);
+            }
+            _ => (),
+        }
+    }
+
     /// Try wrapping inner expression with `IsNotNull`
-    fn try_wrap_inner_expression(expr: ExprImpl, func_type: ExprType) -> Option<ExprImpl> {
-        if is_null_or_not_null(func_type) {
-            None
-        } else {
-            let Ok(expr) = FunctionCall::new(ExprType::IsNotNull, vec![expr]) else {
+    /// Note: only column (i.e., `InputRef`) will be extracted and connected via `AND`
+    fn try_wrap_inner_expression(expr: ExprImpl) -> Option<ExprImpl> {
+        let mut columns = vec![];
+
+        extract_column(expr, &mut columns);
+        println!("columns: {:#?}", columns);
+        if columns.is_empty() {
+            return None;
+        }
+
+        let mut inputs: Vec<ExprImpl> = vec![];
+        // From [`c1`, `c2`, ... , `cn`] to [`IsNotNull(c1)`, ... , `IsNotNull(cn)`]
+        for column in columns {
+            let Ok(expr) = FunctionCall::new(ExprType::IsNotNull, vec![column]) else {
+                return None;
+            };
+            inputs.push(expr.into());
+        }
+
+        // Connect them with `AND` if multiple columns are involved
+        // i.e., AND [`IsNotNull(c1)`, ... , `IsNotNull(cn)`]
+        if inputs.len() > 1 {
+            let Ok(expr) = FunctionCall::new(ExprType::And, inputs) else {
                 return None;
             };
             Some(expr.into())
+        } else {
+            Some(inputs[0].clone())
         }
     }
 
@@ -644,18 +683,16 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
     if e1_func.func_type() != ExprType::Not && e2_func.func_type() != ExprType::Not {
         return (false, None);
     }
-    println!("e1: {:#?}", e1);
-    println!("e2: {:#?}", e2);
     if e1_func.func_type() != ExprType::Not {
         if e2_func.inputs().len() != 1 {
             return (false, None);
         }
-        (e1 == e2_func.inputs()[0].clone(), None)
+        (e1 == e2_func.inputs()[0].clone(), try_wrap_inner_expression(e1))
     } else {
         if e1_func.inputs().len() != 1 {
             return (false, None);
         }
-        (e2 == e1_func.inputs()[0].clone(), None)
+        (e2 == e1_func.inputs()[0].clone(), try_wrap_inner_expression(e2))
     }
 }
 
@@ -675,10 +712,12 @@ impl ExprRewriter for SimplifyFilterExpressionRewriter {
             return expr;
         }
         let inputs = func_call.inputs();
-        let (optimizable_flag, _) = check_pattern(inputs[0].clone(), inputs[1].clone());
+        let (optimizable_flag, columns) = check_pattern(inputs[0].clone(), inputs[1].clone());
+        println!("[out] columns: {:#?}", columns);
         if optimizable_flag {
             match func_call.func_type() {
-                ExprType::Or => ExprImpl::literal_bool(true),
+                ExprType::Or => if let Some(columns) = columns { columns } else { ExprImpl::literal_bool(true) },
+                // `AND` will always be false, no matter the underlying columns are null or not
                 ExprType::And => ExprImpl::literal_bool(false),
                 _ => expr,
             }
