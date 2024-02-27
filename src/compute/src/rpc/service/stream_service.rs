@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -37,14 +35,6 @@ pub struct StreamServiceImpl {
 impl StreamServiceImpl {
     pub fn new(mgr: LocalStreamManager, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
-    }
-
-    async fn try_get_root_actor_failure(&self) -> Option<StreamError> {
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        self.mgr
-            .local_barrier_manager
-            .try_get_root_actor_failure()
-            .await
     }
 }
 
@@ -142,13 +132,9 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
-        if let Err(e) = self
-            .mgr
+        self.mgr
             .send_barrier(barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
-            .await
-        {
-            return Err(self.try_get_root_actor_failure().await.unwrap_or(e).into());
-        }
+            .await?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
@@ -165,17 +151,14 @@ impl StreamService for StreamServiceImpl {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
-        } = match self
+        } = self
             .mgr
             .collect_barrier(req.prev_epoch)
             .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                return Err(self.try_get_root_actor_failure().await.unwrap_or(e).into());
-            }
-        };
+            .inspect_err(
+                |err| tracing::error!(error = %err.as_report(), "failed to collect barrier"),
+            )?;
 
         let (synced_sstables, table_watermarks) = sync_result
             .map(|sync_result| (sync_result.uncommitted_ssts, sync_result.table_watermarks))

@@ -41,7 +41,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
-use crate::error::{StreamError, StreamResult};
+use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
@@ -67,7 +67,7 @@ pub struct LocalStreamManager {
 
     context: Arc<SharedContext>,
 
-    pub local_barrier_manager: LocalBarrierManager,
+    local_barrier_manager: LocalBarrierManager,
 }
 
 /// Report expression evaluation errors to the actor context.
@@ -341,14 +341,6 @@ impl LocalBarrierWorker {
         self.actor_manager_state
             .creating_actors
             .push(AttachedFuture::new(join_handle, result_sender));
-    }
-
-    pub(super) fn try_get_root_actor_failure(
-        &mut self,
-        result_sender: oneshot::Sender<Option<StreamError>>,
-    ) {
-        let result = try_find_root_actor_failure(self.failure_actors.values());
-        let _ = result_sender.send(result);
     }
 }
 
@@ -752,32 +744,6 @@ impl StreamActorManagerState {
 
         Ok(())
     }
-}
-
-/// Tries to find the root cause of actor failures, based on hard-coded rules.
-pub fn try_find_root_actor_failure<'a>(
-    actor_errors: impl IntoIterator<Item = &'a StreamError>,
-) -> Option<StreamError> {
-    let stream_executor_error_score = |e: &StreamExecutorError| {
-        use crate::executor::error::ErrorKind;
-        match e.inner() {
-            ErrorKind::ChannelClosed(_) => 0,
-            ErrorKind::Internal(_) => 1,
-            _ => 999,
-        }
-    };
-    let stream_error_score = |e: &&StreamError| {
-        use crate::error::ErrorKind;
-        match e.inner() {
-            ErrorKind::Internal(_) => 1000,
-            ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
-            _ => 3000,
-        }
-    };
-    actor_errors
-        .into_iter()
-        .max_by_key(stream_error_score)
-        .cloned()
 }
 
 #[cfg(test)]
