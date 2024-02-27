@@ -58,7 +58,7 @@ pub struct IcebergProperties {
 impl IcebergProperties {
     pub fn to_iceberg_config(&self) -> IcebergConfig {
         IcebergConfig {
-            database_name: self.database_name.clone(),
+            database_name: Some(self.database_name.clone()),
             table_name: self.table_name.clone(),
             catalog_type: Some(self.catalog_type.clone()),
             path: self.warehouse_path.clone(),
