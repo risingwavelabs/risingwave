@@ -33,6 +33,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             info,
             input,
             env,
+            fragment_id,
             ..
         } = params;
 
@@ -47,12 +48,26 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_start_exprs: Vec<_> = node
             .get_window_start_exprs()
             .iter()
-            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .map(|e| {
+                build_non_strict_from_prost(
+                    e,
+                    params.eval_error_report.clone(),
+                    Some(actor_context.id),
+                    Some(fragment_id),
+                )
+            })
             .try_collect()?;
         let window_end_exprs: Vec<_> = node
             .get_window_end_exprs()
             .iter()
-            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .map(|e| {
+                build_non_strict_from_prost(
+                    e,
+                    params.eval_error_report.clone(),
+                    Some(actor_context.id),
+                    Some(fragment_id),
+                )
+            })
             .try_collect()?;
 
         let time_col = node.get_time_col() as usize;

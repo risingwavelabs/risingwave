@@ -19,7 +19,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
-use super::{BoxedExpression, Build};
+use super::{ActorId, BoxedExpression, Build, FragmentId};
 use crate::expr::Expression;
 use crate::Result;
 
@@ -81,6 +81,8 @@ impl Build for InputRefExpression {
     fn build(
         prost: &ExprNode,
         _build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        _actor_id: Option<ActorId>,
+        _fragment_id: Option<FragmentId>,
     ) -> Result<Self> {
         Ok(Self::from_prost(prost))
     }

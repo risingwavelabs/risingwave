@@ -50,7 +50,13 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
                     .get_cells()
                     .iter()
                     .map(|node| {
-                        build_non_strict_from_prost(node, params.eval_error_report.clone()).unwrap()
+                        build_non_strict_from_prost(
+                            node,
+                            params.eval_error_report.clone(),
+                            Some(params.actor_context.id),
+                            Some(params.fragment_id),
+                        )
+                        .unwrap()
                     })
                     .collect_vec()
             })

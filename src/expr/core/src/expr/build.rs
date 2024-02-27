@@ -32,9 +32,12 @@ use crate::expr::{
 use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, ExprError, Result};
 
+pub type ActorId = u32;
+pub type FragmentId = u32;
+
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let expr = ExprBuilder::new_strict().build(prost)?;
+    let expr = ExprBuilder::new_strict().build(prost, None, None)?;
     Ok(Strict::new(expr).boxed())
 }
 
@@ -42,9 +45,11 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 pub fn build_non_strict_from_prost(
     prost: &ExprNode,
     error_report: impl EvalErrorReport + 'static,
+    actor_id: Option<ActorId>,
+    fragment_id: Option<FragmentId>,
 ) -> Result<NonStrictExpression> {
     ExprBuilder::new_non_strict(error_report)
-        .build(prost)
+        .build(prost, actor_id, fragment_id)
         .map(NonStrictExpression)
 }
 
@@ -90,28 +95,46 @@ where
     }
 
     /// Build an expression with `build_inner` and attach some wrappers.
-    fn build(&self, prost: &ExprNode) -> Result<BoxedExpression> {
-        let expr = self.build_inner(prost)?;
+    fn build(
+        &self,
+        prost: &ExprNode,
+        actor_id: Option<ActorId>,
+        fragment_id: Option<FragmentId>,
+    ) -> Result<BoxedExpression> {
+        let expr = self.build_inner(prost, actor_id, fragment_id)?;
         Ok(self.wrap(expr))
     }
 
     /// Build an expression from protobuf.
-    fn build_inner(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+    fn build_inner(
+        &self,
+        prost: &ExprNode,
+        actor_id: Option<ActorId>,
+        fragment_id: Option<FragmentId>,
+    ) -> Result<BoxedExpression> {
         use PbType as E;
 
-        let build_child = |prost: &'_ ExprNode| self.build(prost);
+        let build_child = |prost: &'_ ExprNode| self.build(prost, actor_id, fragment_id);
 
         match prost.get_rex_node()? {
-            RexNode::InputRef(_) => InputRefExpression::build_boxed(prost, build_child),
-            RexNode::Constant(_) => LiteralExpression::build_boxed(prost, build_child),
-            RexNode::Udf(_) => UserDefinedFunction::build_boxed(prost, build_child),
+            RexNode::InputRef(_) => {
+                InputRefExpression::build_boxed(prost, build_child, actor_id, fragment_id)
+            }
+            RexNode::Constant(_) => {
+                LiteralExpression::build_boxed(prost, build_child, actor_id, fragment_id)
+            }
+            RexNode::Udf(_) => {
+                UserDefinedFunction::build_boxed(prost, build_child, actor_id, fragment_id)
+            }
 
             RexNode::FuncCall(_) => match prost.function_type() {
                 // Dedicated types
-                E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
+                E::All | E::Some => {
+                    SomeAllExpression::build_boxed(prost, build_child, actor_id, fragment_id)
+                }
 
                 // General types, lookup in the function signature map
-                _ => FuncCallBuilder::build_boxed(prost, build_child),
+                _ => FuncCallBuilder::build_boxed(prost, build_child, actor_id, fragment_id),
             },
 
             RexNode::Now(_) => unreachable!("now should not be built at backend"),
@@ -127,13 +150,15 @@ pub(crate) trait Build: Expression + Sized {
     fn build(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        actor_id: Option<ActorId>,
+        fragment_id: Option<FragmentId>,
     ) -> Result<Self>;
 
     /// Build the expression `Self` from protobuf for test, where each child is built with
     /// [`build_from_prost`].
     #[cfg(test)]
     fn build_for_test(prost: &ExprNode) -> Result<Self> {
-        Self::build(prost, build_from_prost)
+        Self::build(prost, build_from_prost, None, None)
     }
 }
 
@@ -143,6 +168,8 @@ pub(crate) trait BuildBoxed: 'static {
     fn build_boxed(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        actor_id: Option<ActorId>,
+        fragment_id: Option<FragmentId>,
     ) -> Result<BoxedExpression>;
 }
 
@@ -151,8 +178,10 @@ impl<E: Build + 'static> BuildBoxed for E {
     fn build_boxed(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        actor_id: Option<ActorId>,
+        fragment_id: Option<FragmentId>,
     ) -> Result<BoxedExpression> {
-        Self::build(prost, build_child).map(ExpressionBoxExt::boxed)
+        Self::build(prost, build_child, actor_id, fragment_id).map(ExpressionBoxExt::boxed)
     }
 }
 
@@ -163,6 +192,8 @@ impl BuildBoxed for FuncCallBuilder {
     fn build_boxed(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        _actor_id: Option<ActorId>,
+        _fragment_id: Option<FragmentId>,
     ) -> Result<BoxedExpression> {
         let func_type = prost.function_type();
         let ret_type = DataType::from(prost.get_return_type().unwrap());

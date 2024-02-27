@@ -78,6 +78,8 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             Ok(cond_prost) => Some(build_non_strict_from_prost(
                 cond_prost,
                 params.eval_error_report,
+                Some(params.actor_context.id),
+                Some(params.fragment_id),
             )?),
             Err(_) => None,
         };

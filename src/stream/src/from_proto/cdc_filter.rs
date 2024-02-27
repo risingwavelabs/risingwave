@@ -30,8 +30,12 @@ impl ExecutorBuilder for CdcFilterExecutorBuilder {
         _store: impl StateStore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let search_condition =
-            build_non_strict_from_prost(node.get_search_condition()?, params.eval_error_report)?;
+        let search_condition = build_non_strict_from_prost(
+            node.get_search_condition()?,
+            params.eval_error_report,
+            Some(params.actor_context.id),
+            Some(params.fragment_id),
+        )?;
 
         Ok(FilterExecutor::new(params.actor_context, params.info, input, search_condition).boxed())
     }

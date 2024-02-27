@@ -23,7 +23,7 @@ use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::build::get_children_and_return_type;
-use super::{BoxedExpression, Build, Expression};
+use super::{ActorId, BoxedExpression, Build, Expression, FragmentId};
 use crate::Result;
 
 #[derive(Debug)]
@@ -209,6 +209,8 @@ impl Build for SomeAllExpression {
     fn build(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        _actor_id: Option<ActorId>,
+        _fragment_id: Option<FragmentId>,
     ) -> Result<Self> {
         let outer_expr_type = prost.get_function_type().unwrap();
         let (outer_children, outer_return_type) = get_children_and_return_type(prost)?;

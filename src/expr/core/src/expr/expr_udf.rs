@@ -35,7 +35,7 @@ use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
 
-use super::{BoxedExpression, Build};
+use super::{ActorId, BoxedExpression, Build, FragmentId};
 use crate::expr::Expression;
 use crate::{bail, Result};
 
@@ -55,6 +55,8 @@ pub struct UserDefinedFunction {
     /// On each successful call, the count will be decreased by 1.
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
     disable_retry_count: AtomicU8,
+    actor_id: Option<ActorId>,
+    fragment_id: Option<FragmentId>,
 }
 
 const INITIAL_RETRY_COUNT: u8 = 16;
@@ -113,12 +115,22 @@ impl UserDefinedFunction {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
                     client
-                        .call(&self.identifier, arrow_input)
+                        .call(
+                            &self.identifier,
+                            arrow_input,
+                            self.actor_id,
+                            self.fragment_id,
+                        )
                         .instrument_await(self.span.clone())
                         .await
                 } else {
                     client
-                        .call_with_retry(&self.identifier, arrow_input)
+                        .call_with_retry(
+                            &self.identifier,
+                            arrow_input,
+                            self.actor_id,
+                            self.fragment_id,
+                        )
                         .instrument_await(self.span.clone())
                         .await
                 };
@@ -170,6 +182,8 @@ impl Build for UserDefinedFunction {
     fn build(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+        actor_id: Option<ActorId>,
+        fragment_id: Option<FragmentId>,
     ) -> Result<Self> {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
@@ -234,6 +248,8 @@ impl Build for UserDefinedFunction {
             identifier: identifier.clone(),
             span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
+            actor_id,
+            fragment_id,
         })
     }
 }

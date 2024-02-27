@@ -18,7 +18,7 @@ use risingwave_common::types::{literal_type_match, DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::ExprNode;
 
-use super::{Build, ValueImpl};
+use super::{ActorId, Build, FragmentId, ValueImpl};
 use crate::expr::Expression;
 use crate::{ExprError, Result};
 
@@ -69,6 +69,8 @@ impl Build for LiteralExpression {
     fn build(
         prost: &ExprNode,
         _build_child: impl Fn(&ExprNode) -> Result<super::BoxedExpression>,
+        _actor_id: Option<ActorId>,
+        _fragment_id: Option<FragmentId>,
     ) -> Result<Self> {
         let ret_type = DataType::from(prost.get_return_type().unwrap());
 

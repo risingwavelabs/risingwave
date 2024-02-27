@@ -35,7 +35,14 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         let project_exprs: Vec<_> = node
             .get_select_list()
             .iter()
-            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .map(|e| {
+                build_non_strict_from_prost(
+                    e,
+                    params.eval_error_report.clone(),
+                    Some(params.actor_context.id),
+                    Some(params.fragment_id),
+                )
+            })
             .try_collect()?;
 
         let watermark_derivations = MultiMap::from_iter(

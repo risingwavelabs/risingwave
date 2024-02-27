@@ -82,6 +82,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             Ok(cond_prost) => Some(build_non_strict_from_prost(
                 cond_prost,
                 params.eval_error_report.clone(),
+                Some(params.actor_context.id),
+                Some(params.fragment_id),
             )?),
             Err(_) => None,
         };
@@ -106,6 +108,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                             build_non_strict_from_prost(
                                 delta_expression.delta.as_ref().unwrap(),
                                 params.eval_error_report.clone(),
+                                Some(params.actor_context.id),
+                                Some(params.fragment_id),
                             )?
                             .into_inner(),
                         ],
