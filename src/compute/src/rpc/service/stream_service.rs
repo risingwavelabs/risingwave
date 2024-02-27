@@ -173,9 +173,7 @@ impl StreamService for StreamServiceImpl {
         {
             Ok(result) => result,
             Err(e) => {
-                let err = self.try_get_root_actor_failure().await.unwrap_or(e);
-                tracing::error!(error = %err.as_report(), "failed to collect barrier");
-                return Err(err.into());
+                return Err(self.try_get_root_actor_failure().await.unwrap_or(e).into());
             }
         };
 
