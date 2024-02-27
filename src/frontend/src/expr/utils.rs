@@ -685,12 +685,18 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
         if e2_func.inputs().len() != 1 {
             return (false, None);
         }
-        (e1 == e2_func.inputs()[0].clone(), try_wrap_inner_expression(e1))
+        (
+            e1 == e2_func.inputs()[0].clone(),
+            try_wrap_inner_expression(e1),
+        )
     } else {
         if e1_func.inputs().len() != 1 {
             return (false, None);
         }
-        (e2 == e1_func.inputs()[0].clone(), try_wrap_inner_expression(e2))
+        (
+            e2 == e1_func.inputs()[0].clone(),
+            try_wrap_inner_expression(e2),
+        )
     }
 }
 
@@ -713,7 +719,13 @@ impl ExprRewriter for SimplifyFilterExpressionRewriter {
         let (optimizable_flag, columns) = check_pattern(inputs[0].clone(), inputs[1].clone());
         if optimizable_flag {
             match func_call.func_type() {
-                ExprType::Or => if let Some(columns) = columns { columns } else { ExprImpl::literal_bool(true) },
+                ExprType::Or => {
+                    if let Some(columns) = columns {
+                        columns
+                    } else {
+                        ExprImpl::literal_bool(true)
+                    }
+                }
                 // `AND` will always be false, no matter the underlying columns are null or not
                 ExprType::And => ExprImpl::literal_bool(false),
                 _ => expr,
