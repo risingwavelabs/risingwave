@@ -169,3 +169,27 @@ wave   4
 
 statement ok
 drop function split;
+
+statement ok
+create function mismatched_arguments() returns int language python as $$
+def mismatched_arguments(x):
+    return x
+$$;
+
+statement error missing 1 required positional argument: 'x'
+select mismatched_arguments();
+
+statement ok
+drop function mismatched_arguments;
+
+statement ok
+create function mismatched_return_type() returns int language python as $$
+def mismatched_return_type():
+    return 1.0
+$$;
+
+statement error 'float' object cannot be interpreted as an integer
+select mismatched_return_type();
+
+statement ok
+drop function mismatched_return_type;
