@@ -9,6 +9,30 @@ Near "selet"
 
 
 statement error
+create function int_42() returns int as int_42 using link 'remotehost:8815';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Flight service error: failed to create LoadBalancedChannel, address: remotehost:8815, err: failed to resolve IPs: Failed to resolve ServiceDefinition: failed to resolve ips from host: no record found for Query { name: Name("remotehost."), query_type: AAAA, query_class: IN }
+
+
+statement error
+create function int_42() returns int as int_42 using link '55.55.55.55:5555';
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: failed to check UDF signature
+  2: failed to send requests to UDF service
+  3: status: Unavailable, message: "error trying to connect: tcp connect error: deadline has elapsed", details: [], metadata: MetadataMap { headers: {} }
+  4: transport error
+  5: error trying to connect
+  6: tcp connect error
+  7: deadline has elapsed
+
+
+statement error
 alter system set not_exist_key to value;
 ----
 db error: ERROR: Failed to run the query

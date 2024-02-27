@@ -33,7 +33,9 @@ use tonic::transport::Channel;
 use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
 
+/// Used for lazy udf client connections
 const DNS_PROBE_INTERVAL_SECS: u64 = 5;
+/// Used for eager udf client connections
 const EAGER_DNS_PROBE_INTERVAL_SECS: u64 = 5;
 const REQUEST_TIMEOUT_SECS: u64 = 5;
 const CONNECT_TIMEOUT_SECS: u64 = 5;
