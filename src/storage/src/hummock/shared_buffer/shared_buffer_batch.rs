@@ -49,7 +49,7 @@ pub(crate) type VersionedSharedBufferValue = (EpochWithGap, HummockValue<Bytes>)
 
 pub(crate) struct SharedBufferVersionedEntryRef<'a> {
     pub(crate) key: &'a TableKey<Bytes>,
-    pub(crate) values: &'a [VersionedSharedBufferValue],
+    pub(crate) new_values: &'a [VersionedSharedBufferValue],
 }
 
 fn values<'a>(
@@ -59,7 +59,7 @@ fn values<'a>(
 ) -> &'a [VersionedSharedBufferValue] {
     &values[entries[i].value_offset
         ..entries
-            .get(i)
+            .get(i + 1)
             .map(|entry| entry.value_offset)
             .unwrap_or(values.len())]
 }
@@ -80,7 +80,6 @@ pub(crate) struct SharedBufferBatchInner {
     new_values: Vec<VersionedSharedBufferValue>,
     /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
-    kv_count: usize,
     /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
     _tracker: Option<MemoryTracker>,
@@ -100,7 +99,6 @@ impl SharedBufferBatchInner {
         assert!(!payload.is_empty());
         debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
 
-        let kv_count = payload.len();
         let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
         let mut entries = Vec::with_capacity(payload.len());
         let mut new_values = Vec::with_capacity(payload.len());
@@ -117,7 +115,6 @@ impl SharedBufferBatchInner {
             entries,
             new_values,
             epochs: vec![epoch],
-            kv_count,
             size,
             _tracker,
             batch_id,
@@ -133,7 +130,6 @@ impl SharedBufferBatchInner {
         epochs: Vec<HummockEpoch>,
         entries: Vec<SharedBufferKeyEntry>,
         new_values: Vec<VersionedSharedBufferValue>,
-        num_items: usize,
         size: usize,
         imm_id: ImmId,
         tracker: Option<MemoryTracker>,
@@ -153,7 +149,6 @@ impl SharedBufferBatchInner {
             entries,
             new_values,
             epochs,
-            kv_count: num_items,
             size,
             _tracker: tracker,
             batch_id: imm_id,
@@ -294,7 +289,7 @@ impl SharedBufferBatch {
     }
 
     pub fn kv_count(&self) -> usize {
-        self.inner.kv_count
+        self.inner.new_values.len()
     }
 
     pub fn get(
@@ -520,7 +515,7 @@ impl SharedBufferBatchIterator<Forward> {
         assert_eq!(self.current_value_idx, 0);
         SharedBufferVersionedEntryRef {
             key: &self.inner.entries[self.current_idx].key,
-            values: self.inner.values(self.current_idx),
+            new_values: self.inner.values(self.current_idx),
         }
     }
 }

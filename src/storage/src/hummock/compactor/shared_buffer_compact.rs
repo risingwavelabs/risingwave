@@ -285,7 +285,6 @@ pub async fn merge_imms_in_memory(
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
-    let mut kv_count = 0;
     let mut epochs = vec![];
     let mut merged_size = 0;
     assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
@@ -301,7 +300,6 @@ pub async fn merge_imms_in_memory(
         );
 
         epochs.push(imm.min_epoch());
-        kv_count += imm.kv_count();
         merged_size += imm.size();
 
         imm_iters.push(imm.into_forward_iter());
@@ -335,7 +333,7 @@ pub async fn merge_imms_in_memory(
             .observe_multi_version(
                 user_key,
                 key_entry
-                    .values
+                    .new_values
                     .iter()
                     .map(|(epoch_with_gap, _)| *epoch_with_gap),
             )
@@ -349,7 +347,7 @@ pub async fn merge_imms_in_memory(
         }
         values.extend(
             key_entry
-                .values
+                .new_values
                 .iter()
                 .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
         );
@@ -364,7 +362,6 @@ pub async fn merge_imms_in_memory(
             epochs,
             merged_entries,
             values,
-            kv_count,
             merged_size,
             max_imm_id,
             memory_tracker,
