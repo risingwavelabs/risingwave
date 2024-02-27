@@ -9,12 +9,12 @@ Near "selet"
 
 
 statement error
-create function int_42() returns int as int_42 using link 'remotehost:8815';
+create function int_42() returns int as int_42 using link '555.0.0.1:8815';
 ----
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Flight service error: failed to create LoadBalancedChannel, address: remotehost:8815, err: failed to resolve IPs: Failed to resolve ServiceDefinition: failed to resolve ips from host: no record found for Query { name: Name("remotehost."), query_type: AAAA, query_class: IN }
+  Flight service error: invalid address: 555.0.0.1:8815, err: failed to parse address: http://555.0.0.1:8815: invalid IPv4 address
 
 
 statement error
