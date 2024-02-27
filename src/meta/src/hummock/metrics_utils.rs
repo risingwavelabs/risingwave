@@ -31,8 +31,8 @@ use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
-use super::compaction::get_compression_algorithm;
 use super::compaction::selector::DynamicLevelSelectorCore;
+use super::compaction::{get_compression_algorithm, CompactionDeveloperConfig};
 use crate::hummock::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
@@ -435,7 +435,11 @@ pub fn trigger_lsm_stat(
 ) {
     let group_label = compaction_group_id.to_string();
     // compact_pending_bytes
-    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config.clone());
+    // we don't actually generate a compaction task here so developer config can be ignored.
+    let dynamic_level_core = DynamicLevelSelectorCore::new(
+        compaction_config.clone(),
+        Arc::new(CompactionDeveloperConfig::default()),
+    );
     let ctx = dynamic_level_core.calculate_level_base_size(levels);
     {
         let compact_pending_bytes_needed =

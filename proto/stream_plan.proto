@@ -223,6 +223,7 @@ message SinkDesc {
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
   optional uint32 target_table = 14;
+  optional uint64 extra_partition_col_idx = 15;
 }
 
 enum SinkLogStoreType {
@@ -237,6 +238,13 @@ message SinkNode {
   // A sink with a kv log store should have a table.
   catalog.Table table = 2;
   SinkLogStoreType log_store_type = 3;
+}
+
+message SubscriptionNode {
+  // log store should have a table.
+  catalog.Table log_store_table = 1;
+  //retention time with seconds
+  uint64 retention_seconds = 2;
 }
 
 message ProjectNode {
@@ -256,7 +264,6 @@ message FilterNode {
 message CdcFilterNode {
   expr.ExprNode search_condition = 1;
   uint32 upstream_source_id = 2;
-  repeated int32 upstream_column_ids = 3;
 }
 
 // A materialized view is regarded as a table.
@@ -553,7 +560,7 @@ message StreamCdcScanNode {
   // Strips the primary key columns if they're unnecessary.
   repeated uint32 output_indices = 3;
 
-  /// The state table used by Backfill operator for persisting internal state
+  // The state table used by CdcBackfill operator for persisting internal state
   catalog.Table state_table = 4;
 
   // The external table that will be backfilled for CDC.
@@ -561,6 +568,9 @@ message StreamCdcScanNode {
 
   // The rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
+
+  // Whether skip the backfill and only consume from upstream.
+  bool disable_backfill = 7;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -760,6 +770,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
+    SubscriptionNode subscription = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

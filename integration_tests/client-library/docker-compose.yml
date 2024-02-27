@@ -48,6 +48,12 @@ services:
     command: tail -f /dev/null
     volumes:
       - ./php:/php-client
+  ruby:
+    image: ruby-library
+    build: ./ruby
+    command: tail -f /dev/null
+    volumes:
+      - ./ruby:/ruby-client
 
 volumes:
   risingwave-standalone:

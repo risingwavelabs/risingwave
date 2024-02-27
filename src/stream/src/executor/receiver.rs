@@ -94,7 +94,7 @@ impl ReceiverExecutor {
         use crate::executor::ActorContext;
 
         Self::new(
-            ActorContext::create(114),
+            ActorContext::for_test(114),
             ExecutorInfo {
                 schema: Schema::default(),
                 pk_indices: vec![],
@@ -278,7 +278,7 @@ mod tests {
         };
 
         let receiver = ReceiverExecutor::new(
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             info,
             fragment_id,
             upstream_fragment_id,

@@ -22,7 +22,6 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -33,9 +32,11 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::expr::{Expr, ExprImpl, InputRef};
+use crate::error::{ErrorCode, Result};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -90,6 +91,10 @@ pub(crate) fn gen_create_index_plan(
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
+        // Do constant folding and timezone transportation on expressions so that batch queries can match it in the same form.
+        let mut const_eval = ConstEvalRewriter { error: None };
+        let expr_impl = const_eval.rewrite_expr(expr_impl);
+        let expr_impl = context.session_timezone().rewrite_expr(expr_impl);
         match expr_impl {
             ExprImpl::InputRef(_) => {}
             ExprImpl::FunctionCall(_) => {
@@ -205,15 +210,8 @@ pub(crate) fn gen_create_index_plan(
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
     {
-        use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
-        let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
-
         // Inherit table properties
-        table.properties.get(&retention_second_string_key).map(|v| {
-            index_table_prost
-                .properties
-                .insert(retention_second_string_key, v.clone())
-        });
+        index_table_prost.retention_seconds = table.retention_seconds;
     }
 
     index_table_prost.owner = session.user_id();

@@ -17,7 +17,7 @@ mod postgres;
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -32,12 +32,10 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
-
-pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
 #[derive(Debug)]
 pub enum CdcTableType {
@@ -77,10 +75,7 @@ impl CdcTableType {
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(with_properties, schema).await?,
             )),
-            _ => bail!(ConnectorError::Config(anyhow!(
-                "invalid external table type: {:?}",
-                *self
-            ))),
+            _ => bail!("invalid external table type: {:?}", *self),
         }
     }
 }
@@ -191,29 +186,28 @@ pub struct DebeziumSourceOffset {
 
 impl MySqlOffset {
     pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
-        let dbz_offset: DebeziumOffset = serde_json::from_str(offset).map_err(|e| {
-            ConnectorError::Internal(anyhow!("invalid upstream offset: {}, error: {}", offset, e))
-        })?;
+        let dbz_offset: DebeziumOffset = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream offset: {}", offset))?;
 
         Ok(Self {
             filename: dbz_offset
                 .source_offset
                 .file
-                .ok_or_else(|| anyhow!("binlog file not found in offset"))?,
+                .context("binlog file not found in offset")?,
             position: dbz_offset
                 .source_offset
                 .pos
-                .ok_or_else(|| anyhow!("binlog position not found in offset"))?,
+                .context("binlog position not found in offset")?,
         })
     }
 }
+
+pub type CdcOffsetParseFunc = Box<dyn Fn(&str) -> ConnectorResult<CdcOffset> + Send>;
 
 pub trait ExternalTableReader {
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
-
-    fn parse_cdc_offset(&self, dbz_offset: &str) -> ConnectorResult<CdcOffset>;
 
     fn snapshot_read(
         &self,
@@ -268,18 +262,13 @@ impl ExternalTableReader for MySqlExternalTableReader {
         let row = rs
             .iter_mut()
             .exactly_one()
-            .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
+            .ok()
+            .context("expect exactly one row when reading binlog offset")?;
 
         Ok(CdcOffset::MySql(MySqlOffset {
             filename: row.take("File").unwrap(),
             position: row.take("Position").unwrap(),
         }))
-    }
-
-    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
-        Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
-            offset,
-        )?))
     }
 
     fn snapshot_read(
@@ -302,9 +291,7 @@ impl MySqlExternalTableReader {
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(with_properties).unwrap(),
         )
-        .map_err(|e| {
-            ConnectorError::Config(anyhow!("fail to extract mysql connector properties: {}", e))
-        })?;
+        .context("failed to extract mysql connector properties")?;
 
         let database_url = format!(
             "mysql://{}:{}@{}:{}/{}",
@@ -325,6 +312,14 @@ impl MySqlExternalTableReader {
             rw_schema,
             field_names,
             conn: tokio::sync::Mutex::new(conn),
+        })
+    }
+
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(move |offset| {
+            Ok(CdcOffset::MySql(MySqlOffset::parse_debezium_offset(
+                offset,
+            )?))
         })
     }
 
@@ -405,19 +400,11 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
-                            _ => {
-                                return Err(ConnectorError::Internal(anyhow!(
-                                    "unsupported primary key data type: {}",
-                                    ty
-                                )))
-                            }
+                            _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        Ok((pk.clone(), val))
+                        ConnectorResult::Ok((pk.clone(), val))
                     } else {
-                        Err(ConnectorError::Internal(anyhow!(
-                            "primary key {} cannot be null",
-                            pk
-                        )))
+                        bail!("primary key {} cannot be null", pk);
                     }
                 })
                 .try_collect()?;
@@ -502,14 +489,6 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         }
     }
 
-    fn parse_cdc_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
-        match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.parse_cdc_offset(offset),
-            ExternalTableReaderImpl::Postgres(postgres) => postgres.parse_cdc_offset(offset),
-            ExternalTableReaderImpl::Mock(mock) => mock.parse_cdc_offset(offset),
-        }
-    }
-
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
@@ -521,6 +500,16 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
+    pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
+        match self {
+            ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),
+            ExternalTableReaderImpl::Postgres(_) => {
+                PostgresExternalTableReader::get_cdc_offset_parser()
+            }
+            ExternalTableReaderImpl::Mock(_) => MockExternalTableReader::get_cdc_offset_parser(),
+        }
+    }
+
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(
         &self,
@@ -622,6 +611,10 @@ mod tests {
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
+
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
+        let parser = MySqlExternalTableReader::get_cdc_offset_parser();
+        println!("parsed offset: {:?}", parser(off0_str).unwrap());
 
         let table_name = SchemaTableName {
             schema_name: "mytest".to_string(),

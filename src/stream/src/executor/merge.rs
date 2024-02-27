@@ -86,7 +86,7 @@ impl MergeExecutor {
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            ActorContext::create(114),
+            ActorContext::for_test(114),
             ExecutorInfo {
                 schema,
                 pk_indices: vec![],
@@ -593,7 +593,7 @@ mod tests {
             .unwrap();
 
         let merge = MergeExecutor::new(
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             ExecutorInfo {
                 schema,
                 pk_indices: vec![],

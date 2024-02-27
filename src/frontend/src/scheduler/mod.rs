@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use futures::Stream;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::session::SessionImpl;
 
 mod distributed;

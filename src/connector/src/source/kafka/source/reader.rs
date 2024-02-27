@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::mem::swap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -25,7 +25,7 @@ use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_pb::plan_common::AdditionalColumnType;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -33,8 +33,8 @@ use crate::source::kafka::{
     KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
-    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
-    SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
+    SplitMetaData, SplitReader,
 };
 
 pub struct KafkaSplitReader {
@@ -61,7 +61,7 @@ impl SplitReader for KafkaSplitReader {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.common.brokers;
-        let broker_rewrite_map = properties.common.broker_rewrite_map.clone();
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
@@ -98,7 +98,7 @@ impl SplitReader for KafkaSplitReader {
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
-            .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
+            .context("failed to create kafka consumer")?;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -145,7 +145,7 @@ impl SplitReader for KafkaSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self, parser_config, source_context)
@@ -196,12 +196,12 @@ impl CommonSplitReader for KafkaSplitReader {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         let mut res = Vec::with_capacity(max_chunk_size);
         // ingest kafka message header can be expensive, do it only when required
-        let require_message_header = self
-            .parser_config
-            .common
-            .rw_columns
-            .iter()
-            .any(|col_desc| col_desc.additional_column_type == AdditionalColumnType::Header);
+        let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {
+            matches!(
+                col_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Headers(_) | AdditionalColumnType::HeaderInner(_))
+            )
+        });
 
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {

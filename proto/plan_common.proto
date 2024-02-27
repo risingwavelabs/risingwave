@@ -15,17 +15,6 @@ message Field {
   string name = 2;
 }
 
-enum AdditionalColumnType {
-  UNSPECIFIED = 0;
-  KEY = 1;
-  TIMESTAMP = 2;
-  PARTITION = 3;
-  OFFSET = 4;
-  HEADER = 5;
-  FILENAME = 6;
-  NORMAL = 7;
-}
-
 enum ColumnDescVersion {
   COLUMN_DESC_VERSION_UNSPECIFIED = 0;
   // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
@@ -64,9 +53,15 @@ message ColumnDesc {
 
   // This field is used to represent the connector-spec additional column type.
   // UNSPECIFIED or unset for normal column.
-  AdditionalColumnType additional_column_type = 9;
+
+  // deprecated, use AdditionalColumn instead
+  // AdditionalColumnType additional_column_type = 9;
+  reserved "additional_column_type";
+  reserved 9;
 
   ColumnDescVersion version = 10;
+
+  AdditionalColumn additional_column = 11;
 }
 
 message ColumnCatalog {
@@ -93,7 +88,7 @@ message StorageTableDesc {
   // TODO: may refactor primary key representations
   repeated common.ColumnOrder pk = 3;
   repeated uint32 dist_key_in_pk_indices = 4;
-  uint32 retention_seconds = 5;
+  reserved 5;
   repeated uint32 value_indices = 6;
   uint32 read_prefix_len_hint = 7;
   // Whether the table is versioned. If `true`, column-aware row encoding will
@@ -101,6 +96,7 @@ message StorageTableDesc {
   bool versioned = 8;
   repeated uint32 stream_key = 9;
   optional uint32 vnode_col_idx_in_pk = 10;
+  optional uint32 retention_seconds = 11;
 }
 
 // Represents a table in external database for CDC scenario
@@ -189,4 +185,34 @@ message Cardinality {
 // Provide statement-local context, e.g. session info like time zone, for execution.
 message ExprContext {
   string time_zone = 1;
+}
+
+message AdditionalColumnKey {}
+
+message AdditionalColumnTimestamp {}
+
+message AdditionalColumnPartition {}
+
+message AdditionalColumnOffset {}
+
+message AdditionalColumnFilename {}
+
+message AdditionalColumnHeader {
+  string inner_field = 1;
+  data.DataType data_type = 2;
+}
+
+// this type means we read all headers as a whole
+message AdditionalColumnHeaders {}
+
+message AdditionalColumn {
+  oneof column_type {
+    AdditionalColumnKey key = 1;
+    AdditionalColumnTimestamp timestamp = 2;
+    AdditionalColumnPartition partition = 3;
+    AdditionalColumnOffset offset = 4;
+    AdditionalColumnHeader header_inner = 5;
+    AdditionalColumnFilename filename = 6;
+    AdditionalColumnHeaders headers = 7;
+  }
 }

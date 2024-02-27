@@ -55,7 +55,7 @@ pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -814,10 +814,10 @@ impl fmt::Display for WindowFrameUnits {
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
-    /// `<N> PRECEDING` or `UNBOUNDED PRECEDING`
-    Preceding(Option<u64>),
-    /// `<N> FOLLOWING` or `UNBOUNDED FOLLOWING`.
-    Following(Option<u64>),
+    /// `<offset> PRECEDING` or `UNBOUNDED PRECEDING`
+    Preceding(Option<Box<Expr>>),
+    /// `<offset> FOLLOWING` or `UNBOUNDED FOLLOWING`.
+    Following(Option<Box<Expr>>),
 }
 
 impl fmt::Display for WindowFrameBound {
@@ -1132,7 +1132,7 @@ pub enum Statement {
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
-        include_column_options: Vec<(Ident, Option<Ident>)>,
+        include_column_options: IncludeOption,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1647,12 +1647,20 @@ impl fmt::Display for Statement {
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
-                        include_column_options.iter().map(|(a, b)| {
-                            if let Some(b) = b {
-                                format!("INCLUDE {} AS {}", a, b)
-                            } else {
-                                format!("INCLUDE {}", a)
-                            }
+                        include_column_options.iter().map(|option_item: &IncludeOptionItem| {
+                            format!("INCLUDE {}{}{}",
+                            option_item.column_type,
+                                    if let Some(inner_field) = &option_item.inner_field {
+                                        format!(" {}", inner_field)
+                                    } else {
+                                        "".into()
+                                    }
+                                    , if let Some(alias) = &option_item.column_alias {
+                                        format!(" AS {}", alias)
+                                    } else {
+                                        "".into()
+                                    }
+                                )
                         }).collect_vec().as_slice()
                     ))?;
                 }
@@ -2631,6 +2639,24 @@ impl fmt::Display for FunctionDefinition {
             FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
         }
         Ok(())
+    }
+}
+
+impl FunctionDefinition {
+    /// Returns the function definition as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+
+    /// Returns the function definition as a string.
+    pub fn into_string(self) -> String {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
     }
 }
 

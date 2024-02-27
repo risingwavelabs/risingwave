@@ -48,4 +48,11 @@ fn main() {
     let _ = (err.clone()).to_string();
     let _ = err.to_string().to_string();
     let _ = (&&err).to_string();
+
+    use anyhow::anyhow;
+
+    let _ = anyhow!("{}", err);
+    let _ = anyhow!("{:?}", err);
+    let _ = anyhow!("some error occurred: {}", err);
+    let _ = anyhow!("some error occurred: {:?}", err);
 }

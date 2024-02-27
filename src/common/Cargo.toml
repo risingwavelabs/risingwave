@@ -56,14 +56,14 @@ hytra = { workspace = true }
 itertools = "0.12"
 itoa = "1.0"
 jsonbb = "0.1.2"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
+lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
 opentelemetry = { version = "0.20", default-features = false }
 parking_lot = "0.12"
-parse-display = "0.8"
+parse-display = "0.9"
 paste = "1"
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.6", features = [
@@ -93,7 +93,7 @@ smallbitset = "0.7.1"
 speedate = "0.13.0"
 static_assertions = "1"
 strum = "0.25"
-strum_macros = "0.25"
+strum_macros = "0.26"
 sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
 thiserror-ext = { workspace = true }

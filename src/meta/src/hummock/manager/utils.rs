@@ -26,7 +26,7 @@ macro_rules! commit_multi_var {
                         $(
                             $val_txn.as_v1_ref().apply_to_txn(&mut trx).await?;
                         )*
-                        $meta_store.txn(trx).await?;
+                        $meta_store.unwrap().txn(trx).await?;
                         $(
                             $val_txn.into_v1().commit();
                         )*

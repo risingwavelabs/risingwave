@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
+use risingwave_common::catalog;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{ScaleController, ScaleControllerRef, TableRevision};
+use risingwave_meta::stream::{ScaleControllerRef, TableRevision};
+use risingwave_meta_model_v2::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -38,7 +39,7 @@ pub struct ScaleServiceImpl {
     source_manager: SourceManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
-    scale_controller: Option<ScaleControllerRef>,
+    scale_controller: ScaleControllerRef,
 }
 
 impl ScaleServiceImpl {
@@ -47,15 +48,8 @@ impl ScaleServiceImpl {
         source_manager: SourceManagerRef,
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
+        scale_controller: ScaleControllerRef,
     ) -> Self {
-        let scale_controller = match &metadata_manager {
-            MetadataManager::V1(_) => Some(Arc::new(ScaleController::new(
-                &metadata_manager,
-                source_manager.clone(),
-                stream_manager.env.clone(),
-            ))),
-            MetadataManager::V2(_) => None,
-        };
         Self {
             metadata_manager,
             source_manager,
@@ -68,7 +62,8 @@ impl ScaleServiceImpl {
     async fn get_revision(&self) -> TableRevision {
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr.fragment_manager.get_revision().await,
-            MetadataManager::V2(_) => unimplemented!("support table revision in v2"),
+            // todo, support table revision in meta model v2
+            MetadataManager::V2(_) => Default::default(),
         }
     }
 }
@@ -80,7 +75,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let table_fragments = match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr
@@ -141,17 +136,13 @@ impl ScaleService for ScaleServiceImpl {
     ) -> Result<Response<RescheduleResponse>, Status> {
         self.barrier_manager.check_status_running().await?;
 
-        let MetadataManager::V1(mgr) = &self.metadata_manager else {
-            unimplemented!("only available in v1");
-        };
-
         let RescheduleRequest {
             reschedules,
             revision,
             resolve_no_shuffle_upstream,
         } = request.into_inner();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
 
         let current_revision = self.get_revision().await;
 
@@ -163,19 +154,36 @@ impl ScaleService for ScaleServiceImpl {
         }
 
         let table_parallelisms = {
-            let guard = mgr.fragment_manager.get_fragment_read_guard().await;
+            match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
-            let mut table_parallelisms = HashMap::new();
-            for (table_id, table) in guard.table_fragments() {
-                if table
-                    .fragment_ids()
-                    .any(|fragment_id| reschedules.contains_key(&fragment_id))
-                {
-                    table_parallelisms.insert(*table_id, TableParallelism::Custom);
+                    let mut table_parallelisms = HashMap::new();
+                    for (table_id, table) in guard.table_fragments() {
+                        if table
+                            .fragment_ids()
+                            .any(|fragment_id| reschedules.contains_key(&fragment_id))
+                        {
+                            table_parallelisms.insert(*table_id, TableParallelism::Custom);
+                        }
+                    }
+
+                    table_parallelisms
+                }
+                MetadataManager::V2(mgr) => {
+                    let streaming_job_ids = mgr
+                        .catalog_controller
+                        .get_fragment_job_id(
+                            reschedules.keys().map(|id| *id as FragmentId).collect(),
+                        )
+                        .await?;
+
+                    streaming_job_ids
+                        .into_iter()
+                        .map(|id| (catalog::TableId::new(id as _), TableParallelism::Custom))
+                        .collect()
                 }
             }
-
-            table_parallelisms
         };
 
         self.stream_manager
@@ -224,7 +232,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let req = request.into_inner();
 
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let current_revision = self.get_revision().await;
 
@@ -240,11 +248,8 @@ impl ScaleService for ScaleServiceImpl {
             .policy
             .ok_or_else(|| Status::invalid_argument("policy is required"))?;
 
-        let Some(scale_controller) = &self.scale_controller else {
-            return Err(Status::unimplemented(
-                "reschedule plan is not supported in v2",
-            ));
-        };
+        let scale_controller = &self.scale_controller;
+
         let plan = scale_controller.get_reschedule_plan(policy).await?;
 
         let next_revision = self.get_revision().await;

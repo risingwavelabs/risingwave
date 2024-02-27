@@ -35,7 +35,11 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
 
     let clients = ComputeClientPool::default();
 
-    let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
+    let profile_root_path = std::env::var("PREFIX_PROFILING").unwrap_or_else(|_| {
+        tracing::info!("PREFIX_PROFILING is not set, using current directory");
+        "./".to_string()
+    });
+    let profile_root_path = PathBuf::from(&profile_root_path);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
     let dir_path = profile_root_path.join(dir_name);
     create_dir_all(&dir_path).await?;
