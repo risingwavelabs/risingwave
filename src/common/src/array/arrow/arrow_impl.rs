@@ -160,6 +160,14 @@ macro_rules! converts_generic {
                             .unwrap()
                             .try_into()?,
                     )),
+                    // This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
+                    Decimal128(_, _) => Ok(ArrayImpl::Decimal(
+                        array
+                            .as_any()
+                            .downcast_ref::<arrow_array::Decimal128Array>()
+                            .unwrap()
+                            .try_into()?,
+                    )),
                     t => Err(ArrayError::from_arrow(format!("unsupported data type: {t:?}"))),
                 }
             }
@@ -503,6 +511,30 @@ impl From<&DecimalArray> for arrow_array::LargeBinaryArray {
             builder.append_option(value.map(|d| d.to_string()));
         }
         builder.finish()
+    }
+}
+
+// This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
+impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::Decimal128Array) -> Result<Self, Self::Error> {
+        if array.scale() < 0 {
+            bail!("support negative scale for arrow decimal")
+        }
+        let from_arrow = |value| {
+            const NAN: i128 = i128::MIN + 1;
+            match value {
+                NAN => Decimal::NaN,
+                i128::MAX => Decimal::PositiveInf,
+                i128::MIN => Decimal::NegativeInf,
+                _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(
+                    value,
+                    array.scale() as u32,
+                )),
+            }
+        };
+        Ok(array.iter().map(|o| o.map(from_arrow)).collect())
     }
 }
 
