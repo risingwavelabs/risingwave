@@ -69,6 +69,7 @@ function restore() {
   stop_cluster
   clean_etcd_data
   start_etcd_minio
+  cmd_result=$(
   ${BACKUP_TEST_RW_ALL_IN_ONE} \
   risectl \
   meta \
@@ -78,7 +79,10 @@ function restore() {
   --etcd-endpoints 127.0.0.1:2388 \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-  1>/dev/null
+  2>&1
+  )
+  result=$(echo "${cmd_result}" | grep "restore: command succeeded")
+  [ -n "${result}" ]
 }
 
 function execute_sql() {
