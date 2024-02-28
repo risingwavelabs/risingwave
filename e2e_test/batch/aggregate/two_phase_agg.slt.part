@@ -3,7 +3,6 @@ SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
 SET RW_ENABLE_TWO_PHASE_AGG=false;
-
 # This should override `RW_ENABLE_TWO_PHASE_AGG`, enabling it.
 statement ok
 SET RW_FORCE_TWO_PHASE_AGG=true;
