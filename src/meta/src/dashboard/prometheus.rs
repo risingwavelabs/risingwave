@@ -127,12 +127,12 @@ pub async fn list_prometheus_cluster(
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ActorBackPressure {
+pub struct FragmentBackPressure {
     output_buffer_blocking_duration: Vec<PrometheusVector>,
 }
-pub async fn list_prometheus_actor_back_pressure(
+pub async fn list_prometheus_fragment_back_pressure(
     Extension(srv): Extension<Service>,
-) -> Result<Json<ActorBackPressure>> {
+) -> Result<Json<FragmentBackPressure>> {
     if let Some(ref client) = srv.prometheus_client {
         let now = SystemTime::now();
         let back_pressure_query =
@@ -159,7 +159,7 @@ pub async fn list_prometheus_actor_back_pressure(
             .iter()
             .map(PrometheusVector::from)
             .collect();
-        Ok(Json(ActorBackPressure {
+        Ok(Json(FragmentBackPressure {
             output_buffer_blocking_duration: back_pressure_data,
         }))
     } else {

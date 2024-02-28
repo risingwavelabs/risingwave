@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
 use async_trait::async_trait;
-use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 
@@ -39,7 +38,7 @@ impl FsListInner for S3SplitEnumerator {
         let mut res = req
             .send()
             .await
-            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+            .with_context(|| format!("failed to list objects in bucket `{}`", self.bucket_name))?;
         if res.is_truncated().unwrap_or_default() {
             self.next_continuation_token = res.next_continuation_token.clone();
         } else {

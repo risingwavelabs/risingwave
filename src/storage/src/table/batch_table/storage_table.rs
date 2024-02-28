@@ -155,14 +155,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         let versioned = table_desc.versioned;
-        let dist_key_in_pk_indices = table_desc
-            .dist_key_in_pk_indices
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
-        let vnode_col_idx_in_pk = table_desc.vnode_col_idx_in_pk.map(|k| k as usize);
-        let distribution =
-            TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+        let distribution = TableDistribution::new_from_storage_table_desc(vnodes, table_desc);
 
         Self::new_inner(
             store,

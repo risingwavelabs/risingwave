@@ -14,9 +14,9 @@
 
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError};
+use aws_sdk_kinesis::error::SdkError;
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
@@ -243,7 +243,7 @@ impl KinesisSplitReader {
                 .set_timestamp(starting_timestamp)
                 .send()
                 .await
-                .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+                .context("failed to get kinesis shard iterator")?;
 
             if let Some(iter) = resp.shard_iterator() {
                 Ok(iter.to_owned())
