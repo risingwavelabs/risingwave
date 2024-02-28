@@ -87,7 +87,7 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        if source.can_backfill() {
+        if source.can_backfill() && self.ctx().session_ctx().config().enable_reusable_source() {
             Ok(LogicalSourceBackfill::new(Rc::new(source.catalog), self.ctx())?.into())
         } else {
             Ok(LogicalSource::with_catalog(
