@@ -933,23 +933,20 @@ impl SessionManager for SessionManagerImpl {
         user_name: &str,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
-        let database_id = {
-            let catalog_reader = self.env.catalog_reader().read_guard();
-            catalog_reader
-                .get_database_by_name(database)
-                .map_err(|_| {
-                    Box::new(Error::new(
-                        ErrorKind::InvalidInput,
-                        format!("database \"{}\" does not exist", database),
-                    ))
-                })?
-                .id()
-        };
-        let user = {
-            let user_reader = self.env.user_info_reader().read_guard();
-            user_reader.get_user_by_name(user_name).cloned()
-        };
-        if let Some(user) = user {
+        let catalog_reader = self.env.catalog_reader();
+        let reader = catalog_reader.read_guard();
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("database \"{}\" does not exist", database),
+                ))
+            })?
+            .id();
+        let user_reader = self.env.user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(user) = reader.get_user_by_name(user_name) {
             if !user.can_login {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
