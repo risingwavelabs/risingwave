@@ -39,11 +39,11 @@ insert into stream values
 query II rowsort
 select a1, a2 from v;
 ----
+1 1
+1 1
+1 1
 1 NULL
 2 NULL
-1 1
-1 1
-1 1
 2 NULL
 
 statement ok
