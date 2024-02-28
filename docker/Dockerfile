@@ -5,6 +5,13 @@ ENV LANG en_US.utf8
 RUN apt-get update \
   && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
 
+# Install Python 3.12
+RUN apt-get -y install software-properties-common
+RUN add-apt-repository ppa:deadsnakes/ppa -y && \
+    apt-get update -yy && \
+    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
+ENV PYO3_PYTHON=python3.12
+
 FROM base AS dashboard-builder
 
 RUN apt-get update && apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
@@ -20,13 +27,6 @@ RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_mod
 FROM base AS rust-base
 
 RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
-
-# Install Python 3.12
-RUN apt-get -y install software-properties-common
-RUN add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
-ENV PYO3_PYTHON=python3.12
 
 SHELL ["/bin/bash", "-c"]
 
