@@ -156,19 +156,6 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
-
-    // Record the partition corresponding to the table in each group (accepting delays)
-    // The compactor will refer to this structure to determine how to cut the boundaries of sst.
-    // Currently, we update it in a couple of scenarios
-    // 1. throughput and size are checked periodically and calculated according to the rules
-    // 2. A new group is created (split)
-    // 3. split_weight_by_vnode is modified for an existing group. (not supported yet)
-    // Tips:
-    // 1. When table_id does not exist in the current structure, compactor will not cut the boundary
-    // 2. When partition count <=1, compactor will still use table_id as the cutting boundary of sst
-    // 3. Modify the special configuration item hybrid_vnode_count = 0 to remove the table_id in hybrid cg and no longer perform alignment cutting.
-    group_to_table_vnode_partition:
-        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<TableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -408,7 +395,6 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
-            group_to_table_vnode_partition: parking_lot::RwLock::new(HashMap::default()),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -865,14 +851,6 @@ impl HummockManager {
             .get_all_table_options()
             .await
             .map_err(|err| Error::MetaStore(err.into()))?;
-        let mut table_to_vnode_partition = match self
-            .group_to_table_vnode_partition
-            .read()
-            .get(&compaction_group_id)
-        {
-            Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
-            None => BTreeMap::default(),
-        };
 
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
@@ -958,6 +936,8 @@ impl HummockManager {
             }
             Some(task) => task,
         };
+        let compact_task_size =
+            compact_task.input.select_input_size + compact_task.input.target_input_size;
 
         let target_level_id = compact_task.input.target_level as u32;
 
@@ -1053,17 +1033,61 @@ impl HummockManager {
                 compact_task.input_ssts
             );
         } else {
-            table_to_vnode_partition
-                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
             if group_config.compaction_config.split_weight_by_vnode > 0 {
                 for table_id in &compact_task.existing_table_ids {
-                    table_to_vnode_partition
+                    compact_task
+                        .table_vnode_partition
                         .entry(*table_id)
                         .or_insert(vnode_partition_count);
                 }
+            } else {
+                let existing_table_ids = HashSet::<u32>::from_iter(
+                    compact_task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|level| level.table_infos.iter())
+                        .flat_map(|sst| sst.table_ids.iter())
+                        .cloned(),
+                )
+                .into_iter()
+                .collect_vec();
+
+                if existing_table_ids.len() == 1 {
+                    let hybrid_vnode_count = self.env.opts.hybird_partition_vnode_count;
+                    let default_partition_count = self.env.opts.partition_vnode_count;
+                    if compact_task_size > group_config.compaction_config.max_compaction_bytes / 2 {
+                        compact_task
+                            .table_vnode_partition
+                            .insert(existing_table_ids[0], default_partition_count);
+                    } else if compact_task_size
+                        > group_config.compaction_config.max_bytes_for_level_base / 2
+                    {
+                        compact_task
+                            .table_vnode_partition
+                            .insert(existing_table_ids[0], hybrid_vnode_count);
+                    }
+                } else {
+                    let params = self.env.system_params_reader().await;
+                    let barrier_interval_ms = params.barrier_interval_ms() as u64;
+                    let checkpoint_secs = std::cmp::max(
+                        1,
+                        params.checkpoint_frequency() * barrier_interval_ms / 1000,
+                    );
+                    let history_table_throughput = self.history_table_throughput.read();
+                    for table_id in &existing_table_ids {
+                        let write_throughput = history_table_throughput
+                            .get(table_id)
+                            .map(|que| que.back().cloned().unwrap_or(0))
+                            .unwrap_or(0);
+                        if write_throughput
+                            > checkpoint_secs * self.env.opts.min_table_split_write_throughput
+                        {
+                            compact_task.table_vnode_partition.insert(*table_id, 1);
+                        }
+                    }
+                }
             }
 
-            compact_task.table_vnode_partition = table_to_vnode_partition;
             compact_task.table_watermarks =
                 current_version.safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
@@ -2613,77 +2637,26 @@ impl HummockManager {
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
-        const SPLIT_BY_TABLE: u32 = 1;
 
-        let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.read().clone();
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
 
-            let mut table_vnode_partition_mappoing = group_to_table_vnode_partition
-                .entry(group.group_id)
-                .or_default();
-
             for (table_id, table_size) in &group.table_statistic {
-                let rule = self
-                    .calculate_table_align_rule(
-                        &table_write_throughput,
-                        table_id,
-                        table_size,
-                        !created_tables.contains(table_id),
-                        checkpoint_secs,
-                        group.group_id,
-                        group.group_size,
-                    )
-                    .await;
-
-                match rule {
-                    TableAlignRule::NoOptimization => {
-                        table_vnode_partition_mappoing.remove(table_id);
-                        continue;
-                    }
-
-                    TableAlignRule::SplitByTable(table_id) => {
-                        if self.env.opts.hybird_partition_vnode_count > 0 {
-                            table_vnode_partition_mappoing.insert(table_id, SPLIT_BY_TABLE);
-                        } else {
-                            table_vnode_partition_mappoing.remove(&table_id);
-                        }
-                    }
-
-                    TableAlignRule::SplitByVnode((table_id, vnode)) => {
-                        if self.env.opts.hybird_partition_vnode_count > 0 {
-                            table_vnode_partition_mappoing.insert(table_id, vnode);
-                        } else {
-                            table_vnode_partition_mappoing.remove(&table_id);
-                        }
-                    }
-
-                    TableAlignRule::SplitToDedicatedCg((
-                        new_group_id,
-                        table_vnode_partition_count,
-                    )) => {
-                        let _ = table_vnode_partition_mappoing; // drop
-                        group_to_table_vnode_partition
-                            .insert(new_group_id, table_vnode_partition_count);
-
-                        table_vnode_partition_mappoing = group_to_table_vnode_partition
-                            .entry(group.group_id)
-                            .or_default();
-                    }
-                }
+                self.calculate_table_align_rule(
+                    &table_write_throughput,
+                    table_id,
+                    table_size,
+                    !created_tables.contains(table_id),
+                    checkpoint_secs,
+                    group.group_id,
+                    group.group_size,
+                )
+                .await;
             }
         }
-
-        tracing::trace!(
-            "group_to_table_vnode_partition {:?}",
-            group_to_table_vnode_partition
-        );
-
-        // batch update group_to_table_vnode_partition
-        *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
     pub fn compaction_event_loop(
@@ -2902,11 +2875,10 @@ impl HummockManager {
         checkpoint_secs: u64,
         parent_group_id: u64,
         group_size: u64,
-    ) -> TableAlignRule {
+    ) {
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
-        let hybrid_vnode_count: u32 = self.env.opts.hybird_partition_vnode_count;
         let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
 
         let mut is_high_write_throughput = false;
@@ -2934,21 +2906,6 @@ impl HummockManager {
         }
 
         let state_table_size = *table_size;
-        let result = {
-            // When in a hybrid compaction group, data from multiple state tables may exist in a single sst, and in order to make the data in the sub level more aligned, a proactive cut is made for the data.
-            // https://github.com/risingwavelabs/risingwave/issues/13037
-            // 1. In some scenario (like backfill), the creating state_table / mv may have high write throughput (creating table ). Therefore, we relax the limit of `is_low_write_throughput` and partition the table with high write throughput by vnode to improve the parallel efficiency of compaction.
-            // Add: creating table is not allowed to be split
-            // 2. For table with low throughput, partition by table_id to minimize amplification.
-            // 3. When the write mode is changed (the above conditions are not met), the default behavior is restored
-            if !is_low_write_throughput {
-                TableAlignRule::SplitByVnode((*table_id, hybrid_vnode_count))
-            } else if state_table_size > self.env.opts.cut_table_size_limit {
-                TableAlignRule::SplitByTable(*table_id)
-            } else {
-                TableAlignRule::NoOptimization
-            }
-        };
 
         // 1. Avoid splitting a creating table
         // 2. Avoid splitting a is_low_write_throughput creating table
@@ -2957,7 +2914,7 @@ impl HummockManager {
             || (is_low_write_throughput)
             || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
         {
-            return result;
+            return;
         }
 
         // do not split a large table and a small table because it would increase IOPS
@@ -2967,7 +2924,7 @@ impl HummockManager {
             if rest_group_size < state_table_size
                 && rest_group_size < self.env.opts.min_table_split_size
             {
-                return result;
+                return;
             }
         }
 
@@ -2982,10 +2939,6 @@ impl HummockManager {
         match ret {
             Ok((new_group_id, table_vnode_partition_count)) => {
                 tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
-                return TableAlignRule::SplitToDedicatedCg((
-                    new_group_id,
-                    table_vnode_partition_count,
-                ));
             }
             Err(e) => {
                 tracing::info!(
@@ -2996,8 +2949,6 @@ impl HummockManager {
                 )
             }
         }
-
-        TableAlignRule::NoOptimization
     }
 
     async fn initial_compaction_group_config_after_load(
@@ -3078,14 +3029,6 @@ impl HummockManager {
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
         tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
-
-        {
-            // 2. Restore the memory data structure according to the memory of the compaction group config.
-            let mut group_to_table_vnode_partition = self.group_to_table_vnode_partition.write();
-            for (cg_id, table_vnode_partition) in restore_cg_to_partition_vnode {
-                group_to_table_vnode_partition.insert(cg_id, table_vnode_partition);
-            }
-        }
 
         Ok(())
     }

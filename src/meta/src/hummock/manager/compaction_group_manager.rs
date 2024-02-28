@@ -462,9 +462,6 @@ impl HummockManager {
         let result = self
             .move_state_table_to_compaction_group(parent_group_id, table_ids, None, 0)
             .await?;
-        self.group_to_table_vnode_partition
-            .write()
-            .insert(result.0, result.1);
 
         Ok(result.0)
     }
