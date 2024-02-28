@@ -40,9 +40,9 @@ cargo fmt --all -- --check
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS="--features rw-dynamic-link --no-default-features"
+    RISINGWAVE_FEATURE_FLAGS="--features rw-dynamic-link embedded-python-udf --no-default-features"
 else
-    RISINGWAVE_FEATURE_FLAGS="--features rw-static-link"
+    RISINGWAVE_FEATURE_FLAGS="--features rw-static-link embedded-python-udf"
 fi
 
 cargo build \
