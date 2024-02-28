@@ -80,18 +80,18 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
 
     #[tokio::test]
     async fn test_epoch_ok() {
-        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(2, false);
         tx.push_barrier(3, false);
         tx.push_barrier(4, false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 1);
@@ -104,14 +104,15 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_bad() {
-        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_barrier(100, false);
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(514, false);
         tx.push_barrier(514, false);
         tx.push_barrier(114, false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100);
@@ -125,11 +126,12 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_first_not_barrier() {
-        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
         tx.push_barrier(114, false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -137,9 +139,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty() {
-        let (_, mut source) = MockSource::channel(Default::default(), vec![]);
-        source = source.stop_on_finish(false);
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let (_, source) = MockSource::channel();
+        let source = source
+            .stop_on_finish(false)
+            .into_executor(Default::default(), vec![]);
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         assert!(checked.next().await.transpose().unwrap().is_none());

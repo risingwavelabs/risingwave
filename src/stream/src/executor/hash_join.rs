@@ -22,7 +22,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd};
@@ -43,8 +42,7 @@ use super::join::{JoinTypePrimitive, SideTypePrimitive, *};
 use super::monitor::StreamingMetrics;
 use super::watermark::*;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndicesRef, Watermark,
+    ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::executor::expect_first_barrier_from_aligned_stream;
@@ -144,9 +142,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     info: ExecutorInfo,
 
     /// Left input executor
-    input_l: Option<BoxedExecutor>,
+    input_l: Option<Executor>,
     /// Right input executor
-    input_r: Option<BoxedExecutor>,
+    input_r: Option<Executor>,
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
@@ -192,21 +190,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute for HashJoinExecutor<K, S, T> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -228,8 +214,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
-        input_l: BoxedExecutor,
-        input_r: BoxedExecutor,
+        input_l: Executor,
+        input_r: Executor,
         params_l: JoinParams,
         params_r: JoinParams,
         null_safe: Vec<bool>,
@@ -1140,8 +1126,10 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.into_executor(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.into_executor(schema, vec![1]);
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
         let cond = with_condition.then(|| create_cond(condition_text));
@@ -1184,8 +1172,8 @@ mod tests {
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::for_test(123),
             info,
-            Box::new(source_l),
-            Box::new(source_r),
+            source_l,
+            source_r,
             params_l,
             params_r,
             vec![null_safe],
@@ -1201,7 +1189,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
         );
-        (tx_l, tx_r, Box::new(executor).execute())
+        (tx_l, tx_r, executor.boxed().execute())
     }
 
     async fn create_classical_executor<const T: JoinTypePrimitive>(
@@ -1222,8 +1210,10 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![0]);
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.into_executor(schema.clone(), vec![0]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.into_executor(schema, vec![0]);
         let params_l = JoinParams::new(vec![0, 1], vec![]);
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(|| create_cond(None));
@@ -1274,8 +1264,8 @@ mod tests {
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             ActorContext::for_test(123),
             info,
-            Box::new(source_l),
-            Box::new(source_r),
+            source_l,
+            source_r,
             params_l,
             params_r,
             vec![false],
@@ -1291,7 +1281,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
         );
-        (tx_l, tx_r, Box::new(executor).execute())
+        (tx_l, tx_r, executor.boxed().execute())
     }
 
     #[tokio::test]

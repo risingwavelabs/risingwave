@@ -16,11 +16,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::epoch::Epoch;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
+use crate::error::{ErrorCode, Result};
 use crate::scheduler::ReadSnapshot;
 use crate::user::user_service::UserInfoWriter;
 

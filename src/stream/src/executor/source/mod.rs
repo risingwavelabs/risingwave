@@ -71,7 +71,7 @@ pub fn get_split_offset_col_idx(
     let mut split_idx = None;
     let mut offset_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
-        match column.additional_column_type {
+        match column.additional_column {
             AdditionalColumn {
                 column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
             } => {

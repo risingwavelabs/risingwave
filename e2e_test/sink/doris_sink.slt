@@ -1,0 +1,34 @@
+statement ok
+CREATE TABLE t6 (v1 int primary key, v2 smallint, v3 bigint, v4 real, v5 float, v6 varchar, v7 date, v8 timestamp, v9 boolean);
+
+statement ok
+CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
+
+statement ok
+CREATE SINK s6
+FROM
+    mv6 WITH (
+    connector = 'doris',
+    type = 'append-only',
+    doris.url = 'http://doris-fe-server:8030',
+    doris.user = 'users',
+    doris.password = '123456',
+    doris.database = 'demo',
+    doris.table='demo_bhv_table',
+    force_append_only='true'
+);
+
+statement ok
+INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01' , false);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s6;
+
+statement ok
+DROP MATERIALIZED VIEW mv6;
+
+statement ok
+DROP TABLE t6;

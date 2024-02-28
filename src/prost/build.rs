@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "task_service",
+        "telemetry",
         "user",
     ];
     let protos: Vec<String> = proto_files

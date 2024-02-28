@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store()).await?;
+        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store()).await?;
+        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
 
         Ok(Self {
             env,
@@ -858,6 +858,22 @@ impl FragmentManager {
         actor_maps
     }
 
+    pub async fn node_actor_count(&self) -> HashMap<WorkerId, usize> {
+        let mut actor_count = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for actor_status in fragments.actor_status.values() {
+                if let Some(pu) = &actor_status.parallel_unit {
+                    let e = actor_count.entry(pu.worker_node_id).or_insert(0);
+                    *e += 1;
+                }
+            }
+        }
+
+        actor_count
+    }
+
     // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
     // return the actor_ids to be applied
     pub async fn update_source_rate_limit_by_source_id(
@@ -1490,5 +1506,9 @@ impl FragmentManager {
             .read()
             .await
             .running_fragment_parallelisms(id_filter)
+    }
+
+    pub async fn count_streaming_job(&self) -> usize {
+        self.core.read().await.table_fragments().len()
     }
 }

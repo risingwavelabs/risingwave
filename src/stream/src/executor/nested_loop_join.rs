@@ -23,7 +23,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
@@ -37,23 +36,21 @@ use super::join::builder::JoinStreamChunkBuilder;
 use super::join::*;
 use super::test_utils::prelude::StateTable;
 use super::watermark::BufferedWatermarks;
-use super::{Executor, ExecutorInfo, Message, StreamExecutorError, StreamExecutorResult};
+use super::{Execute, Executor, Message, StreamExecutorError, StreamExecutorResult};
 use crate::executor::barrier_align::{barrier_align, AlignedMessage};
 use crate::executor::join::SideType;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier_from_aligned_stream, ActorContextRef, BoxedExecutor, JoinType, Watermark,
+    expect_first_barrier_from_aligned_stream, ActorContextRef, JoinType, Watermark,
 };
 use crate::task::AtomicU64Ref;
 
 pub struct NestedLoopJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
-
     /// Left input executor
-    input_l: Option<BoxedExecutor>,
+    input_l: Option<Executor>,
     /// Right input executor (broadcast side)
-    input_r: Option<BoxedExecutor>,
+    input_r: Option<Executor>,
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
@@ -164,9 +161,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input_l: BoxedExecutor,
-        input_r: BoxedExecutor,
+        input_l: Executor,
+        input_r: Executor,
         output_indices: Vec<usize>,
         cond: Option<NonStrictExpression>,
         state_table_l: StateTable<S>,
@@ -212,7 +208,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
 
         Self {
             ctx: ctx.clone(),
-            info,
             input_l: Some(input_l),
             input_r: Some(input_r),
             actual_output_data_types,
@@ -516,20 +511,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> Executor for NestedLoopJoinExecutor<S, T> {
+impl<S: StateStore, const T: JoinTypePrimitive> Execute for NestedLoopJoinExecutor<S, T> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }

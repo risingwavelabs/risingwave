@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::StreamCdcScanNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{CdcBackfillExecutor, ExternalStorageTable, FlowControlExecutor};
+use crate::executor::{CdcBackfillExecutor, Executor, ExternalStorageTable, FlowControlExecutor};
 
 pub struct StreamCdcScanExecutorBuilder;
 
@@ -34,7 +34,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let output_indices = node
@@ -44,6 +44,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .collect_vec();
 
         let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
+        let disable_backfill = node.disable_backfill;
 
         let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
         assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
@@ -94,9 +95,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .map(|x| std::cmp::min(x as usize, chunk_size))
             .unwrap_or(chunk_size);
 
-        let executor = CdcBackfillExecutor::new(
+        let exec = CdcBackfillExecutor::new(
             params.actor_context.clone(),
-            params.info,
             external_table,
             upstream,
             output_indices,
@@ -104,14 +104,16 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             params.executor_stats,
             state_table,
             backfill_chunk_size,
-        )
-        .boxed();
+            disable_backfill,
+        );
+        let mut info = params.info.clone();
+        info.identity = format!("{} (flow controlled)", info.identity);
 
-        Ok(FlowControlExecutor::new(
-            executor,
+        let exec = FlowControlExecutor::new(
+            (info, exec).into(),
             params.actor_context,
             node.rate_limit.map(|x| x as _),
-        )
-        .boxed())
+        );
+        Ok((params.info, exec).into())
     }
 }

@@ -34,7 +34,7 @@ use risingwave_connector::sink::{
 use thiserror_ext::AsReport;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices};
+use super::{Execute, Executor, ExecutorInfo, Message, PkIndices};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedMessageStream, MessageStream, Mutation,
 };
@@ -43,7 +43,7 @@ use crate::task::ActorId;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
-    input: BoxedExecutor,
+    input: Executor,
     sink: SinkImpl,
     input_columns: Vec<ColumnCatalog>,
     sink_param: SinkParam,
@@ -83,18 +83,28 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     pub async fn new(
         actor_context: ActorContextRef,
         info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         sink_writer_param: SinkWriterParam,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
         let sink = build_sink(sink_param.clone())?;
-        let input_schema: Schema = columns
+        let sink_input_schema: Schema = columns
             .iter()
             .map(|column| Field::from(&column.column_desc))
             .collect();
-        assert_eq!(input_schema.data_types(), info.schema.data_types());
+
+        if let Some(col_dix) = sink_writer_param.extra_partition_col_idx {
+            // Remove the partition column from the schema.
+            assert_eq!(sink_input_schema.data_types(), {
+                let mut data_type = info.schema.data_types();
+                data_type.remove(col_dix);
+                data_type
+            });
+        } else {
+            assert_eq!(sink_input_schema.data_types(), info.schema.data_types());
+        }
 
         Ok(Self {
             actor_context,
@@ -191,6 +201,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .init(epoch_pair, barrier.is_pause_on_startup())
             .await?;
 
+        let mut is_paused = false;
+
         // Propagate the first barrier
         yield Message::Barrier(barrier);
 
@@ -199,21 +211,29 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    assert!(!is_paused, "Should not receive any data after pause");
                     log_writer.write_chunk(chunk.clone()).await?;
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    log_writer
+                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                        .await?;
+
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            Mutation::Pause => log_writer.pause()?,
-                            Mutation::Resume => log_writer.resume()?,
+                            Mutation::Pause => {
+                                log_writer.pause()?;
+                                is_paused = true;
+                            }
+                            Mutation::Resume => {
+                                log_writer.resume()?;
+                                is_paused = false;
+                            }
                             _ => (),
                         }
                     }
 
-                    log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
-                        .await?;
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_id) {
                         log_writer.update_vnode_bitmap(vnode_bitmap).await?;
                     }
@@ -402,21 +422,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 }
 
-impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
+impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -465,28 +473,25 @@ mod test {
             .collect();
         let pk_indices = vec![0];
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk_indices.clone(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 3 2 1",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    "  I I I
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                "  I I I
                     U- 3 2 1
                     U+ 3 4 1
                      + 5 6 7",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     - 5 6 7",
-                ))),
-            ],
-        );
+            ))),
+        ])
+        .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -512,7 +517,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
@@ -521,7 +526,7 @@ mod test {
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         executor.next().await.unwrap().unwrap();
@@ -588,32 +593,29 @@ mod test {
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            vec![0, 1],
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 1 10",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 3 30",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     + 1 2 20
                     - 1 2 20",
-                ))),
-                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
-                    " I I I
+            ))),
+            Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                " I I I
                     - 1 1 10",
-                ))),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+            ))),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .into_executor(schema.clone(), vec![0, 1]);
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -639,7 +641,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
@@ -648,7 +650,7 @@ mod test {
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         executor.next().await.unwrap().unwrap();
@@ -729,15 +731,12 @@ mod test {
             .collect();
         let pk_indices = vec![0];
 
-        let mock = MockSource::with_messages(
-            schema.clone(),
-            pk_indices.clone(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -763,7 +762,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             ActorContext::for_test(0),
             info,
-            Box::new(mock),
+            source,
             SinkWriterParam::for_test(),
             sink_param,
             columns,
@@ -772,7 +771,7 @@ mod test {
         .await
         .unwrap();
 
-        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+        let mut executor = sink_executor.boxed().execute();
 
         // Barrier message.
         assert_eq!(

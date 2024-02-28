@@ -216,8 +216,6 @@ derive_from_json_struct!(
 );
 derive_from_json_struct!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
-derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
-
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_json_struct!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
@@ -227,3 +225,11 @@ derive_from_json_struct!(
     FragmentVnodeMapping,
     risingwave_pb::common::ParallelUnitMapping
 );
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]
+pub enum StreamingParallelism {
+    Adaptive,
+    Fixed(usize),
+}
+
+impl Eq for StreamingParallelism {}

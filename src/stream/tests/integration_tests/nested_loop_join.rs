@@ -2,7 +2,7 @@ use itertools::Itertools;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    ExecutorInfo, JoinType, JoinTypePrimitive, NestedLoopJoinExecutor, StreamExecutorResult,
+    JoinType, JoinTypePrimitive, NestedLoopJoinExecutor, StreamExecutorResult,
 };
 
 use crate::prelude::*;
@@ -47,8 +47,10 @@ async fn create_executor<const T: JoinTypePrimitive>(
             Field::unnamed(DataType::Int64),
         ],
     };
-    let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
-    let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+    let (tx_l, source_l) = MockSource::channel();
+    let source_l = source_l.into_executor(schema.clone(), vec![1]);
+    let (tx_r, source_r) = MockSource::channel();
+    let source_r = source_r.into_executor(schema.clone(), vec![1]);
     let cond = with_condition.then(|| create_cond(condition_text));
 
     let mem_state = MemoryStateStore::new();
@@ -76,17 +78,11 @@ async fn create_executor<const T: JoinTypePrimitive>(
         .into_iter()
         .collect();
     let schema_len = schema.len();
-    let info = ExecutorInfo {
-        schema,
-        pk_indices: vec![1],
-        identity: "NestedLoopJoinExecutor".to_string(),
-    };
 
     let executor = NestedLoopJoinExecutor::<MemoryStateStore, T>::new(
         ActorContext::for_test(123),
-        info,
-        Box::new(source_l),
-        Box::new(source_r),
+        source_l,
+        source_r,
         (0..schema_len).collect_vec(),
         cond,
         state_l,

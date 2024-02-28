@@ -80,7 +80,6 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
-
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;
@@ -93,9 +92,9 @@ pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
 // The single source of truth of the pg parameters, Used in ConfigMap and current_cluster_version.
 // The version of PostgreSQL that Risingwave claims to be.
-pub const PG_VERSION: &str = "9.5.0";
+pub const PG_VERSION: &str = "13.14.0";
 /// The version of PostgreSQL that Risingwave claims to be.
-pub const SERVER_VERSION_NUM: i32 = 90500;
+pub const SERVER_VERSION_NUM: i32 = 130014;
 /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time. It is also the default value of `client_encoding`.
 pub const SERVER_ENCODING: &str = "UTF8";
 /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>

@@ -31,7 +31,7 @@ pub enum NotificationVersionGenerator {
 // TODO: add pre-allocation if necessary
 impl NotificationVersionGenerator {
     pub async fn new(
-        meta_store: MetaStoreRef,
+        meta_store: Option<MetaStoreRef>,
         meta_store_sql: Option<SqlMetaStore>,
     ) -> MetaResult<Self> {
         if let Some(sql) = meta_store_sql {
@@ -41,17 +41,18 @@ impl NotificationVersionGenerator {
                 .await?;
             let current_version = model.as_ref().map(|m| m.version).unwrap_or(1) as u64;
             if model.is_none() {
-                catalog_version::ActiveModel {
+                CatalogVersion::insert(catalog_version::ActiveModel {
                     name: Set(VersionCategory::Notification),
                     version: Set(1),
-                }
-                .insert(&txn)
+                })
+                .exec(&txn)
                 .await?;
                 txn.commit().await?;
             }
 
             Ok(Self::SqlGenerator(current_version, sql.conn))
         } else {
+            let meta_store = meta_store.unwrap();
             let current_version = NotificationModelV1::new(&meta_store).await;
             Ok(Self::KvGenerator(current_version, meta_store))
         }

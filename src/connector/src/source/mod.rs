@@ -31,6 +31,7 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
+pub mod iceberg;
 mod manager;
 pub mod reader;
 pub mod test_source;
