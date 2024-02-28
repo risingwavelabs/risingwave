@@ -46,7 +46,7 @@ use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMod
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
-use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -927,16 +927,16 @@ pub struct SessionManagerImpl {
 impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
-    async fn connect(
+    fn connect(
         &self,
-        database: String,
-        user_name: String,
+        database: &str,
+        user_name: &str,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let database_id = {
             let catalog_reader = self.env.catalog_reader().read_guard();
             catalog_reader
-                .get_database_by_name(&database)
+                .get_database_by_name(database)
                 .map_err(|_| {
                     Box::new(Error::new(
                         ErrorKind::InvalidInput,
@@ -947,7 +947,7 @@ impl SessionManager for SessionManagerImpl {
         };
         let user = {
             let user_reader = self.env.user_info_reader().read_guard();
-            user_reader.get_user_by_name(&user_name).cloned()
+            user_reader.get_user_by_name(user_name).cloned()
         };
         if let Some(user) = user {
             if !user.can_login {
@@ -981,13 +981,19 @@ impl SessionManager for SessionManagerImpl {
                             salt,
                         }
                     } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        let reader = self
+                        let oauth_jwks_url = self
                             .env
-                            .meta_client()
-                            .get_system_params()
-                            .await
-                            .map_err(|e| PsqlError::StartupError(e.into()))?;
-                        let oauth_jwks_url = reader.oauth_jwks_url().to_string();
+                            .system_params_manager
+                            .get_params()
+                            .load()
+                            .oauth_jwks_url()
+                            .to_string();
+                        if oauth_jwks_url.is_empty() {
+                            return Err(Box::new(Error::new(
+                                ErrorKind::PermissionDenied,
+                                "OAuth JWKS URL is not set",
+                            )));
+                        }
                         UserAuthenticator::OAuth(oauth_jwks_url)
                     } else {
                         return Err(Box::new(Error::new(
@@ -1100,10 +1106,6 @@ impl Session for SessionImpl {
 
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
-    }
-
-    async fn get_system_params(&self) -> std::result::Result<SystemParamsReader, BoxedError> {
-        Ok(self.env.meta_client.get_system_params().await?)
     }
 
     fn id(&self) -> SessionId {

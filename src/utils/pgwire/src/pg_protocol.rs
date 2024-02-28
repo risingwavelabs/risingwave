@@ -386,7 +386,7 @@ where
 
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
-            FeMessage::Startup(msg) => self.process_startup_msg(msg).await?,
+            FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
@@ -469,7 +469,7 @@ where
         Ok(())
     }
 
-    async fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
+    fn process_startup_msg(&mut self, msg: FeStartupMessage) -> PsqlResult<()> {
         let db_name = msg
             .config
             .get("database")
@@ -483,8 +483,7 @@ where
 
         let session = self
             .session_mgr
-            .connect(db_name, user_name, self.peer_addr.clone())
-            .await
+            .connect(&db_name, &user_name, self.peer_addr.clone())
             .map_err(PsqlError::StartupError)?;
 
         let application_name = msg.config.get("application_name");

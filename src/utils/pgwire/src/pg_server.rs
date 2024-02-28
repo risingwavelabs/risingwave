@@ -23,7 +23,6 @@ use std::time::Instant;
 use bytes::Bytes;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
-use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use serde::Deserialize;
@@ -50,10 +49,10 @@ pub trait SessionManager: Send + Sync + 'static {
 
     fn connect(
         &self,
-        database: String,
-        user_name: String,
+        database: &str,
+        user_name: &str,
         peer_addr: AddressRef,
-    ) -> impl Future<Output = Result<Arc<Self::Session>, BoxedError>> + Send;
+    ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -111,10 +110,6 @@ pub trait Session: Send + Sync {
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
 
     fn user_authenticator(&self) -> &UserAuthenticator;
-
-    fn get_system_params(
-        &self,
-    ) -> impl Future<Output = Result<SystemParamsReader, BoxedError>> + Send;
 
     fn id(&self) -> SessionId;
 
@@ -288,7 +283,6 @@ mod tests {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
-    use risingwave_common::system_param::reader::SystemParamsReader;
     use risingwave_common::types::DataType;
     use risingwave_sqlparser::ast::Statement;
     use tokio_postgres::NoTls;
@@ -310,10 +304,10 @@ mod tests {
     impl SessionManager for MockSessionManager {
         type Session = MockSession;
 
-        async fn connect(
+        fn connect(
             &self,
-            _database: String,
-            _user_name: String,
+            _database: &str,
+            _user_name: &str,
             _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
@@ -409,10 +403,6 @@ mod tests {
 
         fn user_authenticator(&self) -> &UserAuthenticator {
             &UserAuthenticator::None
-        }
-
-        async fn get_system_params(&self) -> Result<SystemParamsReader, BoxedError> {
-            Ok(SystemParamsReader::new(Default::default()))
         }
 
         fn id(&self) -> SessionId {
