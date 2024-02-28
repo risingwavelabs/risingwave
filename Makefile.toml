@@ -35,6 +35,7 @@ is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -63,6 +64,11 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_python_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-python-udf"
 end
 
 if ${is_hummock_trace}
