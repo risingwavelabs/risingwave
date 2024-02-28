@@ -377,16 +377,22 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
+            let chunk_size = (source_info.split_info().unwrap().len() as f32
+                / TASK_SCHEDULING_PARALLELISM as f32)
+                .ceil() as usize;
+            for (id, split) in source_info
+                .split_info()
+                .unwrap()
+                .chunks(chunk_size)
+                .enumerate()
+            {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
                     task_id: id as u32,
                 };
-                let plan_fragment = self.create_plan_fragment(
-                    id as u32,
-                    Some(PartitionInfo::Source(vec![split.clone()])),
-                );
+                let plan_fragment = self
+                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.to_vec())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -983,11 +989,11 @@ impl StageRunner {
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();
                 };
+
                 let partition = partition
                     .expect("no partition info for seq scan")
                     .into_source()
                     .expect("PartitionInfo should be SourcePartitionInfo");
-
                 source_node.split = partition
                     .into_iter()
                     .map(|split| split.encode_to_bytes().into())

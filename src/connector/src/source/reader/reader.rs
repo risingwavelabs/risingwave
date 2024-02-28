@@ -146,7 +146,6 @@ impl SourceReader {
                 vec![reader]
             } else {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
-
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
                     tracing::debug!(?splits, ?prop, "spawning connector split reader");
                     let props = prop.clone();

@@ -473,9 +473,9 @@ impl LocalQueryExecution {
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
                             source_node.split = partition
-                            .into_iter()
-                            .map(|split| split.encode_to_bytes().into())
-                            .collect_vec();
+                                .into_iter()
+                                .map(|split| split.encode_to_bytes().into())
+                                .collect_vec();
                         }
                     }
                     _ => unreachable!(),

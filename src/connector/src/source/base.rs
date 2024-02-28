@@ -106,6 +106,7 @@ pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
     columns: Option<Vec<Column>>,
 ) -> Result<P::SplitReader> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
+
     P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
 }
 
@@ -436,6 +437,10 @@ impl ConnectorProperties {
 
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
+    }
+
+    pub fn is_file_source(&self) -> bool {
+        matches!(self, ConnectorProperties::OpendalS3(_))
     }
 }
 
