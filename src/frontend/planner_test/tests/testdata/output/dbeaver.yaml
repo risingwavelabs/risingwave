@@ -98,6 +98,8 @@
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_subscriptions.id, rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id] }
+              │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         ├─BatchProject { exprs: [rw_materialized_views.id, rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id] }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         │ └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │         └─BatchProject { exprs: [rw_views.id, rw_views.name, 'view':Varchar, rw_views.schema_id] }
@@ -121,6 +123,7 @@
               │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id], distribution: Single }
+              │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │       ├─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   │       └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id], distribution: Single }
               │   │ │ │   │   │   │   │   │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
@@ -142,6 +145,7 @@
               │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name], distribution: Single }
               │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name], distribution: Single }
               │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name], distribution: Single }
+              │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name], distribution: Single }
               │   │ │ │   │   │   │   │       ├─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name], distribution: Single }
               │   │ │ │   │   │   │   │       └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name], distribution: Single }
               │   │ │ │   │   │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
@@ -155,6 +159,7 @@
               │   │ │ │   │       ├─BatchScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id], distribution: Single }
               │   │ │ │   │       ├─BatchScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.schema_id], distribution: Single }
               │   │ │ │   │       ├─BatchScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id], distribution: Single }
+              │   │ │ │   │       ├─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id], distribution: Single }
               │   │ │ │   │       ├─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id], distribution: Single }
               │   │ │ │   │       └─BatchScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id], distribution: Single }
               │   │ │ │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }

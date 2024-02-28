@@ -157,7 +157,7 @@ WHERE
     AND pg_namespace.nspname != 'information_schema'
     AND pg_class.relname = 'subscription';
 ----
-sink user1
+subscription user1
 
 statement ok
 CREATE DATABASE d;

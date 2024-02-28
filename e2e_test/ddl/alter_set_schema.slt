@@ -114,7 +114,7 @@ statement ok
 DROP SINK test_schema.test_sink;
 
 statement ok
-DROP SUBSCRIPTION test_subscription;
+DROP SUBSCRIPTION test_schema.test_subscription;
 
 statement ok
 DROP SOURCE test_schema.test_source;

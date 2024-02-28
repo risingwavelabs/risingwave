@@ -905,6 +905,11 @@ impl Catalog {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("view", relation_name.to_string()))
+        } else if schema.get_subscription_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "subscription",
+                relation_name.to_string(),
+            ))
         } else {
             Ok(())
         }
