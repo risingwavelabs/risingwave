@@ -604,7 +604,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         #[for_await]
                         for chunk in st1 {
                             let chunk = chunk?;
-                            let new_chunk = Self::apply_indices_map(chunk, &self.output_indices);
+                            let new_chunk = if let Some(ref cond) = self.condition {
+                                let (data_chunk, ops) = chunk.into_parts();
+                                let passed_bitmap = cond.eval_infallible(&data_chunk).await;
+                                let ArrayImpl::Bool(passed_bitmap) = &*passed_bitmap else {
+                                    panic!("unmatched type: filter expr returns a non-null array");
+                                };
+                                let passed_bitmap = passed_bitmap.to_bitmap();
+                                let (columns, vis) = data_chunk.into_parts();
+                                let new_vis = vis & passed_bitmap;
+                                let new_chunk = StreamChunk::with_visibility(ops, columns, new_vis);
+                                new_chunk
+                            } else {
+                                chunk
+                            };
+                            let new_chunk =
+                                Self::apply_indices_map(new_chunk, &self.output_indices);
                             yield Message::Chunk(new_chunk);
                         }
                     } else if let Some(ref cond) = self.condition {
