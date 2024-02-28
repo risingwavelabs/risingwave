@@ -5,5 +5,5 @@ set -euo pipefail
 
 # Don't remove the `--quiet` option since poetry has a bug when printing output, see
 # https://github.com/python-poetry/poetry/issues/3412
-poetry update --quiet
-poetry run python main.py
+/opt/poetry/bin/poetry update --quiet
+/opt/poetry/bin/poetry run python main.py
