@@ -515,9 +515,13 @@ impl From<&DecimalArray> for arrow_array::LargeBinaryArray {
 }
 
 // This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
-impl From<&arrow_array::Decimal128Array> for DecimalArray {
-    fn from(array: &arrow_array::Decimal128Array) -> Self {
-        assert!(array.scale() >= 0, "todo: support negative scale");
+impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::Decimal128Array) -> Result<Self, Self::Error> {
+        if array.scale() < 0 {
+            bail!("support negative scale for arrow decimal")
+        }
         let from_arrow = |value| {
             const NAN: i128 = i128::MIN + 1;
             match value {
@@ -530,7 +534,7 @@ impl From<&arrow_array::Decimal128Array> for DecimalArray {
                 )),
             }
         };
-        array.iter().map(|o| o.map(from_arrow)).collect()
+        Ok(array.iter().map(|o| o.map(from_arrow)).collect())
     }
 }
 

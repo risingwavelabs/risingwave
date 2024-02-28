@@ -1202,7 +1202,7 @@ pub fn try_matches_arrow_schema_for_iceberg_source(
 ) -> Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
-            "Schema length not match, ours is {}, and iceberg is {}",
+            "Schema length not match, risingwave is {}, and iceberg is {}",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
         );
