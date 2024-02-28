@@ -14,7 +14,7 @@
 
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -79,8 +79,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         if matches!(T::source_type(), CdcSourceType::Citus)
             && let Some(server_addr) = split.server_addr()
         {
-            let host_addr = HostAddr::from_str(&server_addr)
-                .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
+            let host_addr =
+                HostAddr::from_str(&server_addr).context("invalid server address for cdc split")?;
             properties.insert("hostname".to_string(), host_addr.host);
             properties.insert("port".to_string(), host_addr.port.to_string());
             // rewrite table name with suffix to capture all shards in the split
@@ -218,7 +218,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                     GLOBAL_ERROR_METRICS.cdc_source_error.report([
                         source_type.as_str_name().into(),
                         source_id.clone(),
-                        e.to_string(),
+                        e.to_report_string(),
                     ]);
                     Err(e)?;
                 }

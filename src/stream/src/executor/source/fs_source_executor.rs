@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::error::ConnectorError;
@@ -50,7 +49,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source  for external
     stream_source_core: StreamSourceCore<S>,
@@ -71,7 +69,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -80,7 +77,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -481,21 +477,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for FsSourceExecutor<S> {
+impl<S: StateStore> Execute for FsSourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -504,7 +488,6 @@ impl<S: StateStore> Debug for FsSourceExecutor<S> {
         f.debug_struct("FsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }

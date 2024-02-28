@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
@@ -112,6 +112,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 self.broker_address
             )
         })?;
+
         let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
         let mut start_offsets = self
             .fetch_start_offset(topic_partitions.as_ref(), &watermarks)

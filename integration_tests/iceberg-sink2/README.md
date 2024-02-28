@@ -1,7 +1,15 @@
-Use following steps to run:
+# How to run the test
 
-1. ./risedev d full-iceberg-bench
-2. cd docker; docker compose up -d
-3. poetry update
-4. poetry run python init.py
-5. poetry run python check.py
+Run following command to run the test:
+
+```bash
+cd python
+poetry update
+poetry run python main.py
+```
+
+# How to override risingwave image version:
+
+```bash
+export RW_IMAGE=<your version>
+```

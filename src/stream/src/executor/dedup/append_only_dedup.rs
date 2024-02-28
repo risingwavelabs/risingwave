@@ -19,7 +19,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
@@ -29,39 +28,39 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
 /// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
 /// messages. It only accepts append-only input, and its output will be append-only as well.
 pub struct AppendOnlyDedupExecutor<S: StateStore> {
-    input: Option<BoxedExecutor>,
+    ctx: ActorContextRef,
+
+    input: Option<Executor>,
+    dedup_cols: Vec<usize>,
     state_table: StateTable<S>,
     cache: DedupCache<OwnedRow>,
-
-    info: ExecutorInfo,
-    ctx: ActorContextRef,
 }
 
 impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     pub fn new(
-        input: BoxedExecutor,
-        state_table: StateTable<S>,
-        info: ExecutorInfo,
         ctx: ActorContextRef,
+        input: Executor,
+        dedup_cols: Vec<usize>,
+        state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let metrics_info =
             MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
         Self {
+            ctx,
             input: Some(input),
+            dedup_cols,
             state_table,
             cache: DedupCache::new(watermark_epoch, metrics_info),
-            info,
-            ctx,
         }
     }
 
@@ -90,7 +89,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         .data_chunk()
                         .rows_with_holes()
                         .map(|row_ref| {
-                            row_ref.map(|row| row.project(self.pk_indices()).to_owned_row())
+                            row_ref.map(|row| row.project(&self.dedup_cols).to_owned_row())
                         })
                         .collect_vec();
 
@@ -185,21 +184,9 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for AppendOnlyDedupExecutor<S> {
+impl<S: StateStore> Execute for AppendOnlyDedupExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -230,7 +217,8 @@ mod tests {
             Field::unnamed(DataType::Int64),
             Field::unnamed(DataType::Int64),
         ]);
-        let pk_indices = vec![0];
+        let dedup_col_indices = vec![0];
+        let pk_indices = dedup_col_indices.clone();
         let order_types = vec![OrderType::ascending()];
 
         let state_store = MemoryStateStore::new();
@@ -243,20 +231,17 @@ mod tests {
         )
         .await;
 
-        let (mut tx, input) = MockSource::channel(schema.clone(), pk_indices.clone());
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "AppendOnlyDedupExecutor".to_string(),
-        };
-        let mut dedup_executor = Box::new(AppendOnlyDedupExecutor::new(
-            Box::new(input),
-            state_table,
-            info,
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, pk_indices);
+        let mut dedup_executor = AppendOnlyDedupExecutor::new(
             ActorContext::for_test(123),
+            source,
+            dedup_col_indices,
+            state_table,
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
-        ))
+        )
+        .boxed()
         .execute();
 
         tx.push_barrier(1, false);
