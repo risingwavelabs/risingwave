@@ -36,7 +36,8 @@ macro_rules! for_all_classified_sources {
                 { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
                 { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },
                 { PosixFs, $crate::source::filesystem::opendal_source::PosixFsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalPosixFs> },
-                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
+                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit},
+                { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit}
             }
             $(
                 ,$extra_args
@@ -167,12 +168,12 @@ macro_rules! impl_split {
 
         $(
             impl TryFrom<SplitImpl> for $split {
-                type Error = anyhow::Error;
+                type Error = $crate::error::ConnectorError;
 
                 fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
                     match split {
                         SplitImpl::$variant_name(inner) => Ok(inner),
-                        other => Err(anyhow::anyhow!("expect {} but get {:?}", stringify!($split), other))
+                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($split), other),
                     }
                 }
             }

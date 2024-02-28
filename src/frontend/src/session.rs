@@ -82,11 +82,14 @@ use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
 use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
 use crate::handler::privilege::ObjectCheckItem;
+use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
+use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -103,7 +106,6 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
@@ -1259,18 +1261,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             object: show_object,
             ..
         } => Ok(infer_show_object(&show_object)),
-        Statement::ShowCreateObject { .. } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::ShowCreateObject { .. } => Ok(infer_show_create_object()),
         Statement::ShowTransactionIsolationLevel => {
             let name = "transaction_isolation";
             Ok(infer_show_variable(name))
@@ -1279,28 +1270,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))
         }
-        Statement::Describe { name: _ } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Type".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Is Hidden".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Description".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::Describe { name: _ } => Ok(infer_describe()),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),

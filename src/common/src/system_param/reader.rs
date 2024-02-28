@@ -161,13 +161,6 @@ where
             .unwrap_or_else(default::enable_tracing)
     }
 
-    fn wasm_storage_url(&self) -> &str {
-        self.inner()
-            .wasm_storage_url
-            .as_ref()
-            .unwrap_or(&default::WASM_STORAGE_URL)
-    }
-
     fn oauth_jwks_url(&self) -> &str {
         self.inner().oauth_jwks_url.as_ref().unwrap()
     }

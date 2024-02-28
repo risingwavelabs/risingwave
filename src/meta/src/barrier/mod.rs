@@ -50,7 +50,7 @@ use self::notifier::Notifier;
 use self::progress::TrackingCommand;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::BarrierInfo;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::BarrierRpcManager;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
@@ -152,7 +152,7 @@ pub struct GlobalBarrierManagerContext {
 
     sink_manager: SinkCoordinatorManager,
 
-    metrics: Arc<MetaMetrics>,
+    pub(super) metrics: Arc<MetaMetrics>,
 
     stream_rpc_manager: StreamRpcManager,
 
@@ -196,76 +196,34 @@ struct CheckpointControl {
     /// Save the state and message of barrier in order.
     command_ctx_queue: VecDeque<EpochNode>,
 
-    metrics: Arc<MetaMetrics>,
-
-    /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
-    finished_jobs: Vec<TrackingJob>,
+    context: GlobalBarrierManagerContext,
 }
 
 impl CheckpointControl {
-    fn new(metrics: Arc<MetaMetrics>) -> Self {
+    fn new(context: GlobalBarrierManagerContext) -> Self {
         Self {
             command_ctx_queue: Default::default(),
-            metrics,
-            finished_jobs: Default::default(),
+            context,
         }
-    }
-
-    /// Stash a command to finish later.
-    fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
-        self.finished_jobs.push(finished_job);
-    }
-
-    /// Finish stashed jobs.
-    /// If checkpoint, means all jobs can be finished.
-    /// If not checkpoint, jobs which do not require checkpoint can be finished.
-    ///
-    /// Returns whether there are still remaining stashed jobs to finish.
-    async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
-        for job in self
-            .finished_jobs
-            .extract_if(|job| checkpoint || !job.is_checkpoint_required())
-        {
-            // The command is ready to finish. We can now call `pre_finish`.
-            job.pre_finish().await?;
-            job.notify_finished();
-        }
-        Ok(!self.finished_jobs.is_empty())
-    }
-
-    fn cancel_command(&mut self, cancelled_job: TrackingJob) {
-        if let TrackingJob::New(cancelled_command) = cancelled_job {
-            if let Some(index) = self.command_ctx_queue.iter().position(|x| {
-                x.command_ctx.prev_epoch.value() == cancelled_command.context.prev_epoch.value()
-            }) {
-                self.command_ctx_queue.remove(index);
-            }
-        } else {
-            // Recovered jobs do not need to be cancelled since only `RUNNING` actors will get recovered.
-        }
-    }
-
-    fn cancel_stashed_command(&mut self, id: TableId) {
-        self.finished_jobs
-            .retain(|x| x.table_to_create() != Some(id));
     }
 
     /// Update the metrics of barrier nums.
     fn update_barrier_nums_metrics(&self) {
-        self.metrics.in_flight_barrier_nums.set(
+        self.context.metrics.in_flight_barrier_nums.set(
             self.command_ctx_queue
                 .iter()
                 .filter(|x| matches!(x.state, InFlight))
                 .count() as i64,
         );
-        self.metrics
+        self.context
+            .metrics
             .all_barrier_nums
             .set(self.command_ctx_queue.len() as i64);
     }
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
     fn enqueue_command(&mut self, command_ctx: Arc<CommandContext>, notifiers: Vec<Notifier>) {
-        let timer = self.metrics.barrier_latency.start_timer();
+        let timer = self.context.metrics.barrier_latency.start_timer();
 
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -285,7 +243,11 @@ impl CheckpointControl {
         result: Vec<BarrierCompleteResponse>,
     ) -> Vec<EpochNode> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
-        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
+        let wait_commit_timer = self
+            .context
+            .metrics
+            .barrier_wait_commit_latency
+            .start_timer();
         if let Some(node) = self
             .command_ctx_queue
             .iter_mut()
@@ -340,11 +302,6 @@ impl CheckpointControl {
         self.command_ctx_queue
             .iter()
             .any(|x| x.command_ctx.prev_epoch.value().0 == epoch)
-    }
-
-    /// We need to make sure there are no changes when doing recovery
-    pub fn clear_changes(&mut self) {
-        self.finished_jobs.clear();
     }
 }
 
@@ -401,7 +358,6 @@ impl GlobalBarrierManager {
             InflightActorInfo::default(),
             None,
         );
-        let checkpoint_control = CheckpointControl::new(metrics.clone());
 
         let active_streaming_nodes = ActiveStreamingWorkerNodes::uninitialized();
 
@@ -419,6 +375,8 @@ impl GlobalBarrierManager {
             stream_rpc_manager,
             env: env.clone(),
         };
+
+        let checkpoint_control = CheckpointControl::new(context.clone());
 
         let rpc_manager = BarrierRpcManager::new(context.clone());
 
@@ -650,7 +608,9 @@ impl GlobalBarrierManager {
         };
 
         // Tracing related stuff
-        tracing::info!(target: "rw_tracing", parent: prev_epoch.span(), epoch = curr_epoch.value().0, "new barrier enqueued");
+        prev_epoch.span().in_scope(|| {
+            tracing::info!(target: "rw_tracing", epoch = curr_epoch.value().0, "new barrier enqueued");
+        });
         span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
@@ -738,7 +698,6 @@ impl GlobalBarrierManager {
         err: MetaError,
         fail_nodes: impl IntoIterator<Item = EpochNode>,
     ) {
-        self.checkpoint_control.clear_changes();
         self.rpc_manager.clear();
 
         for node in fail_nodes {
@@ -833,20 +792,13 @@ impl GlobalBarrierManager {
                     notifier.notify_collected();
                 });
 
-                // Save `cancelled_command` for Create MVs.
-                let actors_to_cancel = node.command_ctx.actors_to_cancel();
-                let cancelled_command = if !actors_to_cancel.is_empty() {
-                    let mut tracker = self.context.tracker.lock().await;
-                    tracker.find_cancelled_command(actors_to_cancel)
-                } else {
-                    None
-                };
+                // Notify about collected.
+                let version_stats = self.context.hummock_manager.get_version_stats().await;
+                let mut tracker = self.context.tracker.lock().await;
 
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {
                     let mut commands = vec![];
-                    let version_stats = self.context.hummock_manager.get_version_stats().await;
-                    let mut tracker = self.context.tracker.lock().await;
                     // Add the command to tracker.
                     if let Some(command) = tracker.add(
                         TrackingCommand {
@@ -872,21 +824,16 @@ impl GlobalBarrierManager {
                 };
 
                 for command in finished_commands {
-                    self.checkpoint_control.stash_command_to_finish(command);
+                    tracker.stash_command_to_finish(command);
                 }
 
-                if let Some(command) = cancelled_command {
-                    self.checkpoint_control.cancel_command(command);
-                } else if let Some(table_id) = node.command_ctx.table_to_cancel() {
+                if let Some(table_id) = node.command_ctx.table_to_cancel() {
                     // the cancelled command is possibly stashed in `finished_commands` and waiting
                     // for checkpoint, we should also clear it.
-                    self.checkpoint_control.cancel_stashed_command(table_id);
+                    tracker.cancel_command(table_id);
                 }
 
-                let remaining = self
-                    .checkpoint_control
-                    .finish_jobs(kind.is_checkpoint())
-                    .await?;
+                let remaining = tracker.finish_jobs(kind.is_checkpoint()).await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
                 if remaining {

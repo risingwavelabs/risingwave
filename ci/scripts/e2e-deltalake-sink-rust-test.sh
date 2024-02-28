@@ -32,8 +32,7 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
-mkdir -p .risingwave/log
-cargo make ci-start ci-deltalake-test
+cargo make ci-start ci-sink-test
 sleep 1
 
 # prepare minio deltalake sink
