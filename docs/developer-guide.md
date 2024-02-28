@@ -98,7 +98,7 @@ Then you'll be able to compile and start RiseDev!
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
 > [!INFO]
-> 
+>
 > If you want to build RisingWave with `embedded-python-udf` feature, you need to install Python 3.12.
 >
 > To install Python 3.12 on macOS, run:
