@@ -129,6 +129,8 @@ RUN apt-get update && apt-get -y install linux-tools-generic \
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
+RUN mkdir -p /opt/poetry
+
 RUN curl -sSL https://install.python-poetry.org | POETRY_HOME=/opt/poetry POETRY_VERSION=1.8.0 python3 -
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
