@@ -118,7 +118,7 @@ impl BackfillState {
 pub struct KafkaBackfillExecutor<S: StateStore> {
     pub inner: KafkaBackfillExecutorInner<S>,
     /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
-    pub input: Box<dyn Executor>,
+    pub input: Executor,
 }
 
 pub struct KafkaBackfillExecutorInner<S: StateStore> {
@@ -222,7 +222,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(mut self, input: BoxedExecutor) {
+    async fn execute(mut self, input: Executor) {
         let mut input = input.execute();
 
         // Poll the upstream to get the first barrier.
@@ -805,21 +805,9 @@ fn compare_kafka_offset(a: &str, b: &str) -> Ordering {
     a.cmp(&b)
 }
 
-impl<S: StateStore> Executor for KafkaBackfillExecutor<S> {
+impl<S: StateStore> Execute for KafkaBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 

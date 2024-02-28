@@ -37,7 +37,7 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         // let (sender, barrier_receiver) = unbounded_channel();
@@ -103,6 +103,7 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
 
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: params.env.config().developer.chunk_size,
+            rate_limit: None,
         };
 
         let source_column_ids: Vec<_> = source_columns
@@ -140,6 +141,10 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
             params.env.connector_params(),
             backfill_state_table,
         );
-        Ok(KafkaBackfillExecutor { inner: exec, input }.boxed())
+        Ok((
+            params.info,
+            KafkaBackfillExecutor { inner: exec, input }.boxed(),
+        )
+            .into())
     }
 }
