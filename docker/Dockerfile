@@ -129,6 +129,8 @@ RUN apt-get update && apt-get -y install linux-tools-generic \
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install gdb libpam-krb5 krb5-user telnet kafkacat \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
+RUN curl -sSL https://install.python-poetry.org | python3 -
+
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
