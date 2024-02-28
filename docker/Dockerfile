@@ -21,6 +21,13 @@ FROM base AS rust-base
 
 RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
 
+# Install Python 3.12
+RUN apt-get -y install software-properties-common
+RUN add-apt-repository ppa:deadsnakes/ppa -y && \
+    apt-get update -yy && \
+    DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
+ENV PYO3_PYTHON=python3.12
+
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
@@ -70,7 +77,7 @@ COPY ./ /risingwave
 WORKDIR /risingwave
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-python-udf && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
