@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::{join_all, BoxFuture};
+use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -239,9 +239,8 @@ impl GlobalStreamManager {
 
         let stream_manager = self.clone();
         let fut = async move {
-            let mut revert_funcs = vec![];
             let res = stream_manager
-                .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
+                .create_streaming_job_impl(table_fragments, ctx)
                 .await;
             match res {
                 Ok(_) => {
@@ -251,9 +250,6 @@ impl GlobalStreamManager {
                         .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
                 }
                 Err(err) => {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
                     let _ = sender
                         .send(CreatingState::Failed {
                             reason: err.clone(),
@@ -387,7 +383,6 @@ impl GlobalStreamManager {
 
     async fn create_streaming_job_impl(
         &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         table_fragments: TableFragments,
         CreateStreamingJobContext {
             dispatchers,
@@ -419,13 +414,6 @@ impl GlobalStreamManager {
             registered_table_ids.len(),
             table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
         );
-        revert_funcs.push(Box::pin(async move {
-            if create_type == CreateType::Foreground {
-                hummock_manager_ref
-                    .unregister_table_ids_fail_fast(&registered_table_ids)
-                    .await;
-            }
-        }));
 
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
@@ -557,7 +545,7 @@ impl GlobalStreamManager {
     pub async fn drop_streaming_jobs_v2(
         &self,
         removed_actors: Vec<ActorId>,
-        state_table_ids: Vec<StateTableId>,
+        _state_table_ids: Vec<StateTableId>,
     ) {
         if !removed_actors.is_empty() {
             let _ = self
@@ -567,10 +555,6 @@ impl GlobalStreamManager {
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
-
-            self.hummock_manager
-                .unregister_table_ids_fail_fast(&state_table_ids)
-                .await;
         }
     }
 
@@ -602,11 +586,6 @@ impl GlobalStreamManager {
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
-
-        // Unregister from compaction group afterwards.
-        self.hummock_manager
-            .unregister_table_fragments_vec(&table_fragments_vec)
-            .await;
 
         Ok(())
     }

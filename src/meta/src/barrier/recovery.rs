@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::State;
@@ -88,32 +87,14 @@ impl GlobalBarrierManagerContext {
                     .drop_table_fragments_vec(&to_drop_streaming_ids)
                     .await?;
 
-                // unregister compaction group for dirty table fragments.
-                self.hummock_manager
-                    .unregister_table_fragments_vec(&to_drop_table_fragments)
-                    .await;
-
                 // clean up source connector dirty changes.
                 self.source_manager
                     .drop_source_fragments(&to_drop_table_fragments)
                     .await;
             }
             MetadataManager::V2(mgr) => {
-                let ReleaseContext {
-                    state_table_ids,
-                    source_ids,
-                    ..
-                } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
-
-                // unregister compaction group for cleaned state tables.
-                self.hummock_manager
-                    .unregister_table_ids_fail_fast(
-                        &state_table_ids
-                            .into_iter()
-                            .map(|id| id as StateTableId)
-                            .collect_vec(),
-                    )
-                    .await;
+                let ReleaseContext { source_ids, .. } =
+                    mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister cleaned sources.
                 self.source_manager

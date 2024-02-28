@@ -797,29 +797,11 @@ impl CommandContext {
             Command::CancelStreamingJob(table_fragments) => {
                 tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
                 self.clean_up(table_fragments.actor_ids()).await?;
-
-                // NOTE(kwannoel): At this point, meta has already registered the table ids.
-                // We should unregister them.
-                // This is required for background ddl, for foreground ddl this is a no-op.
-                // Foreground ddl is handled entirely by stream manager, so it will unregister
-                // the table ids on failure.
-                // On the other hand background ddl could be handled by barrier manager.
-                // It won't clean the tables on failure,
-                // since the failure could be recoverable.
-                // As such it needs to be handled here.
                 let table_id = table_fragments.table_id().table_id;
-                let mut table_ids = table_fragments.internal_table_ids();
-                table_ids.push(table_id);
-                self.barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids_fail_fast(&table_ids)
-                    .await;
-
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
                         // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                         // We need to cleanup the table state. So we can do it here.
-                        // The logic is the same as above, for hummock_manager.unregister_table_ids.
                         if let Err(e) = mgr
                             .catalog_manager
                             .cancel_create_table_procedure(

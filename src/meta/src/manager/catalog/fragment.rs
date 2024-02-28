@@ -559,7 +559,9 @@ impl FragmentManager {
 
         let mut dirty_sink_into_table_upstream_fragment_id = HashSet::new();
         let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
+            table_ids_to_unregister_from_hummock.extend(table_fragment.all_table_ids());
             table_fragments.remove(table_fragment.table_id());
             let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
@@ -626,6 +628,13 @@ impl FragmentManager {
             commit_meta_with_trx!(self, trx, table_fragments)?;
             guard.table_revision = next_revision;
         }
+
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                table_ids_to_unregister_from_hummock,
+            ))
+            .await;
 
         for table_fragments in to_delete_table_fragments {
             if table_fragments.state() != State::Initial {

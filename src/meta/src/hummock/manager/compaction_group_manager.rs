@@ -139,6 +139,7 @@ impl HummockManager {
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
+    #[cfg(test)]
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments_vec(&self, table_fragments: &[TableFragments]) {
         self.unregister_table_ids_fail_fast(
@@ -389,8 +390,6 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Prefer using `unregister_table_fragments_vec`.
-    /// Only use `unregister_table_ids_fail_fast` when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
         self.unregister_table_ids(table_ids)
