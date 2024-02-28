@@ -187,18 +187,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         old_kv
     }
 
-    pub fn pop<Q>(&mut self, k: &Q) -> Option<(K, V)>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        let popped_kv = self.inner.pop_entry(k);
-        if let Some((key, val)) = &popped_kv {
-            self.kv_heap_size_dec(key.estimated_size() + val.estimated_size());
-        }
-        popped_kv
-    }
-
     pub fn contains<Q>(&self, k: &Q) -> bool
     where
         K: Borrow<Q>,
