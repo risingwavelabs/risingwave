@@ -9224,6 +9224,7 @@ dependencies = [
  "itertools 0.12.0",
  "linkme",
  "madsim-tokio",
+ "md5",
  "moka",
  "num-traits",
  "openssl",
@@ -9231,7 +9232,6 @@ dependencies = [
  "paste",
  "risingwave_common",
  "risingwave_expr_macro",
- "risingwave_object_store",
  "risingwave_pb",
  "risingwave_udf",
  "smallvec",
@@ -9240,6 +9240,7 @@ dependencies = [
  "thiserror-ext",
  "tracing",
  "workspace-hack",
+ "zstd 0.13.0",
 ]
 
 [[package]]
@@ -9368,6 +9369,7 @@ dependencies = [
  "tracing",
  "uuid",
  "workspace-hack",
+ "zstd 0.13.0",
 ]
 
 [[package]]
@@ -13865,6 +13867,7 @@ dependencies = [
  "madsim-tokio",
  "md-5",
  "mio",
+ "moka",
  "nom",
  "num-bigint",
  "num-integer",

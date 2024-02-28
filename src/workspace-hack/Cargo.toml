@@ -81,6 +81,7 @@ madsim-rdkafka = { version = "0.3", features = ["cmake-build", "gssapi", "ssl-ve
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
