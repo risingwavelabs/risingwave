@@ -943,7 +943,7 @@ impl HummockManager {
         let selector_timer = self
             .metrics
             .hummock_manager_latency
-            .with_label_values(&["type", "level_selector"])
+            .with_label_values(&["level_selector"])
             .start_timer();
 
         let compact_task = compact_status.get_compact_task(
@@ -1236,7 +1236,7 @@ impl HummockManager {
         let _report_timer = self
             .metrics
             .hummock_manager_latency
-            .with_label_values(&["type", "get_compact_task"])
+            .with_label_values(&["get_compact_task"])
             .start_timer();
         while let Some(task) = self
             .get_compact_task_impl(compaction_group_id, selector)
@@ -1360,7 +1360,7 @@ impl HummockManager {
         let version_timer = self
             .metrics
             .hummock_manager_latency
-            .with_label_values(&["type", "apply_version_delta"])
+            .with_label_values(&["apply_version_delta"])
             .start_timer();
         {
             // The compaction task is finished.
@@ -1646,7 +1646,7 @@ impl HummockManager {
         let commit_version_timer = self
             .metrics
             .hummock_manager_latency
-            .with_label_values(&["type", "commit_version"])
+            .with_label_values(&["commit_version"])
             .start_timer();
         let mut branched_ssts = create_trx_wrapper!(
             self.sql_meta_store(),
@@ -2366,7 +2366,7 @@ impl HummockManager {
                                     let _timer = hummock_manager
                                         .metrics
                                         .hummock_manager_latency
-                                        .with_label_values(&["type", "report_heatbeat"])
+                                        .with_label_values(&["report_heatbeat"])
                                         .start_timer();
                                     let (
                                         current_version,
@@ -2532,7 +2532,7 @@ impl HummockManager {
         let _timer = self
             .metrics
             .hummock_manager_latency
-            .with_label_values(&["type", "check_dead_task"])
+            .with_label_values(&["check_dead_task"])
             .start_timer();
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
@@ -2633,7 +2633,7 @@ impl HummockManager {
         let _split_check_timer = self
             .metrics
             .hummock_manager_latency
-            .with_label_values(&["type", "split_check"])
+            .with_label_values(&["split_check"])
             .start_timer();
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
