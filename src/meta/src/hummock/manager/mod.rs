@@ -860,6 +860,7 @@ impl HummockManager {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
+        let _timer = start_measure_real_process_timer!(self);
         let all_table_id_to_option = self
             .metadata_manager
             .get_all_table_options()
@@ -939,6 +940,11 @@ impl HummockManager {
             .into_iter()
             .filter(|(table_id, _)| member_table_ids.contains(table_id))
             .collect();
+        let selector_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["type", "level_selector"])
+            .start_timer();
 
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
@@ -952,6 +958,7 @@ impl HummockManager {
             )),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
+        selector_timer.observe_duration();
         let compact_task = match compact_task {
             None => {
                 return Ok(None);
@@ -1226,7 +1233,11 @@ impl HummockManager {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
-
+        let _report_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["type", "get_compact_task"])
+            .start_timer();
         while let Some(task) = self
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
@@ -1282,6 +1293,7 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
+        let _timer = start_measure_real_process_timer!(self);
         self.report_compact_task_impl(
             task_id,
             None,
@@ -1345,7 +1357,11 @@ impl HummockManager {
 
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
-
+        let version_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["type", "apply_version_delta"])
+            .start_timer();
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1437,6 +1453,7 @@ impl HummockManager {
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
                 current_version.apply_version_delta(&version_delta);
+                version_timer.observe_duration();
                 commit_multi_var!(
                     self.env.meta_store(),
                     self.sql_meta_store(),
@@ -1456,6 +1473,7 @@ impl HummockManager {
                     self.notify_last_version_delta(versioning);
                 }
             } else {
+                version_timer.observe_duration();
                 // The compaction task is cancelled or failed.
                 commit_multi_var!(
                     self.env.meta_store(),
@@ -1625,6 +1643,11 @@ impl HummockManager {
             }
         }
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
+        let commit_version_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["type", "commit_version"])
+            .start_timer();
         let mut branched_ssts = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapTransactionWrapper,
@@ -1726,6 +1749,7 @@ impl HummockManager {
         )?;
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
+        commit_version_timer.observe_duration();
 
         let snapshot = HummockSnapshot {
             committed_epoch: epoch,
@@ -2339,6 +2363,11 @@ impl HummockManager {
                                 }
 
                                 HummockTimerEvent::Report => {
+                                    let _timer = hummock_manager
+                                        .metrics
+                                        .hummock_manager_latency
+                                        .with_label_values(&["type", "report_heatbeat"])
+                                        .start_timer();
                                     let (
                                         current_version,
                                         id_to_config,
@@ -2500,6 +2529,11 @@ impl HummockManager {
 
     #[named]
     pub async fn check_dead_task(&self) {
+        let _timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["type", "check_dead_task"])
+            .start_timer();
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
         let (groups, configs) = {
@@ -2596,6 +2630,11 @@ impl HummockManager {
     ///   increase it size of base-level.
     async fn on_handle_check_split_multi_group(&self) {
         let params = self.env.system_params_reader().await;
+        let _split_check_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["type", "split_check"])
+            .start_timer();
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
         let checkpoint_secs = std::cmp::max(
             1,
@@ -2730,16 +2769,9 @@ impl HummockManager {
                     compactor_request_streams.push(future);
                 };
 
-            let mut event_loop_iteration_now = Instant::now();
-
             loop {
                 let shutdown_rx_shared = shutdown_rx_shared.clone();
                 let hummock_manager = hummock_manager.clone();
-                hummock_manager
-                    .metrics
-                    .compaction_event_loop_iteration_latency
-                    .observe(event_loop_iteration_now.elapsed().as_millis() as _);
-                event_loop_iteration_now = Instant::now();
 
                 tokio::select! {
                     _ = shutdown_rx_shared => { return; },
@@ -2834,7 +2866,7 @@ impl HummockManager {
                             }
 
                             e @ (RequestEvent::PullTask(_) | RequestEvent::ReportTask(_)) => {
-                                let _ = tx.send((context_id, e));
+                                let _ = tx.send((context_id, Instant::now(), e));
                             }
                         }
 
@@ -3094,7 +3126,7 @@ impl HummockManager {
     #[named]
     async fn compact_task_dedicated_event_handler(
         hummock_manager: Arc<HummockManager>,
-        mut rx: UnboundedReceiver<(u32, subscribe_compaction_event_request::Event)>,
+        mut rx: UnboundedReceiver<(u32, Instant, subscribe_compaction_event_request::Event)>,
         shutdown_rx_shared: Shared<OneShotReceiver<()>>,
     ) {
         let mut compaction_selectors = init_selectors();
@@ -3103,7 +3135,12 @@ impl HummockManager {
             _ = shutdown_rx_shared => {}
 
             _ = async {
-                while let Some((context_id, event)) = rx.recv().await {
+                while let Some((context_id, create_time, event)) = rx.recv().await {
+                    hummock_manager
+                    .metrics
+                    .compaction_event_loop_iteration_latency
+                    .observe(create_time.elapsed().as_millis() as _);
+
                     match event {
                         RequestEvent::PullTask(PullTask { pull_task_count }) => {
                             assert_ne!(0, pull_task_count);

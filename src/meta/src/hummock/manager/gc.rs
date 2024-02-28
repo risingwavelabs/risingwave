@@ -30,7 +30,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{
     commit_multi_var, create_trx_wrapper, read_lock, write_lock, ResponseEvent,
 };
-use crate::hummock::HummockManager;
+use crate::hummock::{start_measure_real_process_timer, HummockManager};
 use crate::manager::MetadataManager;
 use crate::model::{BTreeMapTransaction, BTreeMapTransactionWrapper, ValTransaction};
 use crate::storage::MetaStore;
@@ -145,7 +145,9 @@ impl HummockManager {
     /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
+    #[named]
     pub fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
+        let _timer = start_measure_real_process_timer!(self);
         self.metrics.full_gc_trigger_count.inc();
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
         let sst_retention_time = cmp::max(
