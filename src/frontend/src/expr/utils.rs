@@ -630,7 +630,7 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
                 if is_null_or_not_null(func_call.func_type()) {
                     return;
                 }
-                for sub_expr in func_call.inputs().iter() {
+                for sub_expr in func_call.inputs() {
                     extract_column(sub_expr.clone(), columns);
                 }
             }
