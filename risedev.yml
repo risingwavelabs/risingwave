@@ -1142,6 +1142,8 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
+    scrape-interval: 15s
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -1232,6 +1234,8 @@ template:
 
     # gRPC listen port of the OTLP collector
     otlp-port: 4317
+
+    max-bytes-per-trace: 5000000
 
   opendal:
     id: opendal
