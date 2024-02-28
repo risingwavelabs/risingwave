@@ -63,30 +63,14 @@ impl JavaVmWrapper {
         } else {
             tracing::info!("environment variable CONNECTOR_LIBS_PATH is not specified, use default path `./libs` instead");
             std::env::current_exe()
-                .and_then(|p| p.fs_err_canonicalize())
+                .and_then(|p| p.fs_err_canonicalize()) // resolve symlink of the current executable
                 .context("unable to get path of the executable")?
                 .parent()
                 .expect("not root")
                 .join("libs")
         };
 
-        let libs_path = libs_path
-            .fs_err_canonicalize()
-            .context("invalid path for connector libs")?;
-
-        if !libs_path.exists() {
-            bail!(
-                "CONNECTOR_LIBS_PATH \"{}\" does not exist",
-                libs_path.display()
-            );
-        }
-        if !libs_path.is_dir() {
-            bail!(
-                "CONNECTOR_LIBS_PATH \"{}\" is not a directory",
-                libs_path.display()
-            );
-        }
-
+        // No need to validate the path now, as it will be further checked when calling `fs::read_dir` later.
         Ok(libs_path)
     }
 
