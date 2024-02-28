@@ -17,7 +17,7 @@ use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, Context};
 use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
@@ -33,21 +33,28 @@ use crate::call_method;
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
 pub static JVM: JavaVmWrapper = JavaVmWrapper;
-static JVM_RESULT: OnceLock<anyhow::Result<JavaVM>> = OnceLock::new();
+static INSTANCE: OnceLock<JavaVM> = OnceLock::new();
 
 pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
+    /// Get the initialized JVM instance. If JVM is not initialized, initialize it first.
+    /// If JVM cannot be initialized, return an error.
     pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
-        match JVM_RESULT.get_or_init(Self::inner_new) {
+        match INSTANCE.get_or_try_init(Self::inner_new) {
             Ok(jvm) => Ok(jvm),
             Err(e) => {
                 error!(error = %e.as_report(), "jvm not initialized properly");
-                // Note: anyhow!(e) doesn't preserve source
-                // https://github.com/dtolnay/anyhow/issues/341
-                Err(anyhow!(e.to_report_string()).context("jvm not initialized properly"))
+                Err(e.context("jvm not initialized properly"))
             }
         }
+    }
+
+    /// Get the initialized JVM instance. If JVM is not initialized, return None.
+    ///
+    /// Generally `get_or_init` should be preferred.
+    fn get(&self) -> Option<&'static JavaVM> {
+        INSTANCE.get()
     }
 
     fn locate_libs_path() -> anyhow::Result<PathBuf> {
@@ -187,8 +194,8 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
 /// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize,
 /// return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
-    match JVM_RESULT.get() {
-        Some(Ok(jvm)) => {
+    match JVM.get() {
+        Some(jvm) => {
             let result: Result<(usize, usize), jni::errors::Error> = try {
                 let mut env = jvm.attach_current_thread()?;
 
