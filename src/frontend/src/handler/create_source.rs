@@ -17,12 +17,10 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::{anyhow, Context};
-use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema};
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail;
 use risingwave_common::catalog::{
     is_column_ids_dedup, ColumnCatalog, ColumnDesc, Schema, TableId, INITIAL_SOURCE_VERSION_ID,
     KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -1190,57 +1188,11 @@ pub async fn check_iceberg_source(
         .collect::<Vec<_>>();
     let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
-    try_matches_arrow_schema_for_iceberg_source(&schema, &new_iceberg_schema)?;
-
-    Ok(())
-}
-
-/// Try to match our schema with iceberg schema.
-pub fn try_matches_arrow_schema_for_iceberg_source(
-    rw_schema: &Schema,
-    arrow_schema: &ArrowSchema,
-) -> Result<()> {
-    if rw_schema.fields.len() != arrow_schema.fields().len() {
-        bail!(
-            "Schema length not match, risingwave is {}, and iceberg is {}",
-            rw_schema.fields.len(),
-            arrow_schema.fields.len()
-        );
-    }
-
-    let mut schema_fields = HashMap::new();
-    rw_schema.fields.iter().for_each(|field| {
-        let res = schema_fields.insert(&field.name, &field.data_type);
-        // This assert is to make sure there is no duplicate field name in the schema.
-        assert!(res.is_none())
-    });
-
-    for arrow_field in &arrow_schema.fields {
-        let our_field_type = schema_fields
-            .get(arrow_field.name())
-            .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
-
-        // Iceberg source should be able to read iceberg decimal type.
-        // Since the arrow type default conversion is used by udf, in udf, decimal is converted to
-        // large binary type which is not compatible with iceberg decimal type,
-        // so we need to convert it to decimal type manually.
-        let converted_arrow_data_type = if matches!(our_field_type, DataType::Decimal) {
-            // RisingWave decimal type cannot specify precision and scale, so we use the default value.
-            ArrowDataType::Decimal128(38, 0)
-        } else {
-            ArrowDataType::try_from(*our_field_type).map_err(|e| anyhow!(e))?
-        };
-
-        let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
-            (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
-            (left, right) => left == right,
-        };
-        if !compatible {
-            bail!("Field {}'s type not compatible, risingwave converted data type {}, iceberg's data type: {}",
-                    arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
-                );
-        }
-    }
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
+        &schema,
+        &new_iceberg_schema,
+        true,
+    )?;
 
     Ok(())
 }
