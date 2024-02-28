@@ -2948,15 +2948,21 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                             ),
                             [50, 99, "max"],
                         ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Hummock Manager Operation Time",
+                    "",
+                    [
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(irate({metric('storage_manager_version_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {TYPE_LABEL}))",
-                                f"hummock version operation latency p{legend}"
+                                f"hummock manager operation latency p{legend}"
                                 + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, TYPE_LABEL),
                                 ),
                             [50, 99],
                         ),
-                    ],
+                    ]
                 ),
                 panels.timeseries_count(
                     "Move State Table Count",
