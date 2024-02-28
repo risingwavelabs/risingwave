@@ -8834,6 +8834,7 @@ dependencies = [
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
+ "risingwave_expr",
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_meta_node",
