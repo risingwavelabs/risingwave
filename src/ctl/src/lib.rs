@@ -22,6 +22,7 @@ use cmd_impl::hummock::SstDumpArgs;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -550,11 +551,14 @@ pub enum ProfileCommands {
     },
 }
 
-pub async fn start(opts: CliOpts) -> Result<()> {
+pub async fn start(opts: CliOpts) {
     let context = CtlContext::default();
     let result = start_impl(opts, &context).await;
     context.try_close().await;
-    result
+    if let Err(e) = result {
+        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+        std::process::exit(1);
+    }
 }
 
 pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
