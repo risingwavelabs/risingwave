@@ -192,11 +192,11 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let poped_kv = self.inner.pop_entry(k);
-        if let Some((key, val)) = &poped_kv {
+        let popped_kv = self.inner.pop_entry(k);
+        if let Some((key, val)) = &popped_kv {
             self.kv_heap_size_dec(key.estimated_size() + val.estimated_size());
         }
-        poped_kv
+        popped_kv
     }
 
     pub fn contains<Q>(&self, k: &Q) -> bool
