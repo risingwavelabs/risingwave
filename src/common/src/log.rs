@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use governor::Quota;
@@ -46,10 +46,13 @@ impl LogSuppresser {
 
     /// Check if the log should be suppressed.
     /// If the log should be suppressed, return `Err(LogSuppressed)`.
-    /// Otherwise, return `Ok(usize)` with count of suppressed messages before.
-    pub fn check(&self) -> core::result::Result<usize, LogSuppressed> {
+    /// Otherwise, return `Ok(Some(..))` with count of suppressed messages since last check,
+    /// or `Ok(None)` if there's none.
+    pub fn check(&self) -> core::result::Result<Option<NonZeroUsize>, LogSuppressed> {
         match self.rate_limiter.check() {
-            Ok(()) => Ok(self.suppressed_count.swap(0, Ordering::Relaxed)),
+            Ok(()) => Ok(NonZeroUsize::new(
+                self.suppressed_count.swap(0, Ordering::Relaxed),
+            )),
             Err(_) => {
                 self.suppressed_count.fetch_add(1, Ordering::Relaxed);
                 Err(LogSuppressed)
@@ -86,7 +89,7 @@ mod tests {
             });
 
             if let Ok(suppressed_count) = RATE_LIMITER.check() {
-                println!("failed to foo bar. suppressed_count = {}", suppressed_count);
+                println!("failed to foo bar. suppressed_count = {:?}", suppressed_count);
             }
         }
     }
