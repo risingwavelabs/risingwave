@@ -14,11 +14,12 @@
 
 use core::option::Option::Some;
 use std::ffi::c_void;
-use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Context};
+use fs_err as fs;
+use fs_err::PathExt;
 use jni::objects::{JObject, JString};
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIEnv, JNIVersion, JavaVM, NativeMethod};
@@ -49,40 +50,53 @@ impl JavaVmWrapper {
         }
     }
 
-    fn inner_new() -> anyhow::Result<JavaVM> {
+    fn locate_libs_path() -> anyhow::Result<PathBuf> {
         let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
-            libs_path
+            PathBuf::from(libs_path)
         } else {
-            tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
-            let path = std::env::current_exe()
-                .context("unable to get path of current_exe")?
+            tracing::info!("environment variable CONNECTOR_LIBS_PATH is not specified, use default path `./libs` instead");
+            std::env::current_exe()
+                .and_then(|p| p.fs_err_canonicalize())
+                .context("unable to get path of the executable")?
                 .parent()
                 .expect("not root")
-                .join("./libs");
-            path.to_str().expect("should be able to cast").into()
+                .join("libs")
         };
 
-        tracing::info!("libs_path = {}", libs_path);
+        let libs_path = libs_path
+            .fs_err_canonicalize()
+            .context("invalid path for connector libs")?;
 
-        let dir = Path::new(&libs_path);
-
-        if !dir.is_dir() {
-            bail!("CONNECTOR_LIBS_PATH \"{}\" is not a directory", libs_path);
+        if !libs_path.exists() {
+            bail!(
+                "CONNECTOR_LIBS_PATH \"{}\" does not exist",
+                libs_path.display()
+            );
         }
+        if !libs_path.is_dir() {
+            bail!(
+                "CONNECTOR_LIBS_PATH \"{}\" is not a directory",
+                libs_path.display()
+            );
+        }
+
+        Ok(libs_path)
+    }
+
+    fn inner_new() -> anyhow::Result<JavaVM> {
+        let libs_path = Self::locate_libs_path().context("failed to locate connector libs")?;
+        tracing::info!(path = %libs_path.display(), "located connector libs");
 
         let mut class_vec = vec![];
 
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let entry_path = entry.path();
-                if entry_path.file_name().is_some() {
-                    let path = std::fs::canonicalize(entry_path)
-                        .expect("valid entry_path obtained from fs::read_dir");
-                    class_vec.push(path.to_str().unwrap().to_string());
-                }
+        let entries = fs::read_dir(&libs_path).context("failed to read connector libs")?;
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if entry_path.file_name().is_some() {
+                let path = fs::canonicalize(entry_path)
+                    .expect("invalid entry_path obtained from fs::read_dir");
+                class_vec.push(path.to_str().unwrap().to_string());
             }
-        } else {
-            bail!("failed to read CONNECTOR_LIBS_PATH \"{}\"", libs_path);
         }
 
         let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {

@@ -9590,6 +9590,7 @@ dependencies = [
  "cfg-or-panic",
  "chrono",
  "expect-test",
+ "fs-err",
  "futures",
  "itertools 0.12.0",
  "jni",
