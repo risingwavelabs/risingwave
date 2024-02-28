@@ -317,7 +317,8 @@ macro_rules! impl_set_system_param {
                 $(
                     key_of!($field) => {
                         let v = if let Some(v) = value {
-                            v.as_ref().parse().map_err(|_| format!("cannot parse parameter value"))?
+                            #[allow(rw::format_error)]
+                            v.as_ref().parse().map_err(|e| format!("cannot parse parameter value: {e}"))?
                         } else {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };

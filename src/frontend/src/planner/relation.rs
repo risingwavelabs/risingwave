@@ -92,7 +92,9 @@ impl Planner {
                 "Should not create MATERIALIZED VIEW directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
             .into())
-        } else if source.can_backfill() {
+        } else if source.can_backfill()
+            && self.ctx().session_ctx().config().enable_reusable_source()
+        {
             Ok(LogicalSourceBackfill::new(Rc::new(source.catalog), self.ctx())?.into())
         } else {
             Ok(LogicalSource::with_catalog(

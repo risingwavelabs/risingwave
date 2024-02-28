@@ -243,6 +243,10 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     background_ddl: bool,
 
+    /// Run DDL statements in background
+    #[parameter(default = false)]
+    enable_reusable_source: bool,
+
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,
