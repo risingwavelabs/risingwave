@@ -39,7 +39,7 @@ use crate::executor::*;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
