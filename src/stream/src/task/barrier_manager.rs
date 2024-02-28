@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::stream::FuturesUnordered;
@@ -212,6 +213,8 @@ pub(super) struct LocalBarrierWorker {
     barrier_event_rx: UnboundedReceiver<LocalBarrierEvent>,
 
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
+
+    root_failure: Option<StreamError>,
 }
 
 impl LocalBarrierWorker {
@@ -239,6 +242,7 @@ impl LocalBarrierWorker {
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
+            root_failure: None,
         }
     }
 
@@ -260,7 +264,7 @@ impl LocalBarrierWorker {
                 },
                 failure = self.actor_failure_rx.recv() => {
                     let (actor_id, err) = failure.unwrap();
-                    self.notify_failure(actor_id, err);
+                    self.notify_failure(actor_id, err).await;
                 },
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
@@ -451,7 +455,8 @@ impl LocalBarrierWorker {
                 // The failure actors could exit before the barrier is issued, while their
                 // up-downstream actors could be stuck somehow. Return error directly to trigger the
                 // recovery.
-                return Err(e.clone());
+                // try_find_root_failure is not used merely because it requires async.
+                return Err(self.root_failure.clone().unwrap_or(e.clone()));
             }
         }
 
@@ -538,22 +543,42 @@ impl LocalBarrierWorker {
 
     /// When a actor exit unexpectedly, it should report this event using this function, so meta
     /// will notice actor's exit while collecting.
-    fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+    async fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+        self.add_failure(actor_id, err.clone());
+        let root_err = self.try_find_root_failure(err).await;
+        for fail_epoch in self.state.epochs_await_on_actor(actor_id) {
+            if let Some(result_sender) = self.epoch_result_sender.remove(&fail_epoch) {
+                if result_sender.send(Err(root_err.clone())).is_err() {
+                    warn!(fail_epoch, actor_id, err = %root_err.as_report(), "fail to notify actor failure");
+                }
+            }
+        }
+    }
+
+    fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
         let err = err.into_unexpected_exit(actor_id);
-        if let Some(prev_err) = self.failure_actors.insert(actor_id, err.clone()) {
+        if let Some(prev_err) = self.failure_actors.insert(actor_id, err) {
             warn!(
                 actor_id,
                 prev_err = %prev_err.as_report(),
                 "actor error overwritten"
             );
         }
-        for fail_epoch in self.state.epochs_await_on_actor(actor_id) {
-            if let Some(result_sender) = self.epoch_result_sender.remove(&fail_epoch) {
-                if result_sender.send(Err(err.clone())).is_err() {
-                    warn!(fail_epoch, actor_id, err = %err.as_report(), "fail to notify actor failure");
-                }
-            }
+    }
+
+    async fn try_find_root_failure(&mut self, default_err: StreamError) -> StreamError {
+        if let Some(root_failure) = &self.root_failure {
+            return root_failure.clone();
         }
+        // fetch more actor errors within a timeout
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some((actor_id, error)) = self.actor_failure_rx.recv().await {
+                self.add_failure(actor_id, error);
+            }
+        })
+        .await;
+        self.root_failure = try_find_root_actor_failure(self.failure_actors.values());
+        self.root_failure.clone().unwrap_or(default_err)
     }
 }
 
@@ -679,6 +704,33 @@ impl LocalBarrierManager {
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
         let _ = self.actor_failure_sender.send((actor_id, err));
     }
+}
+
+/// Tries to find the root cause of actor failures, based on hard-coded rules.
+pub fn try_find_root_actor_failure<'a>(
+    actor_errors: impl IntoIterator<Item = &'a StreamError>,
+) -> Option<StreamError> {
+    use crate::executor::StreamExecutorError;
+    let stream_executor_error_score = |e: &StreamExecutorError| {
+        use crate::executor::error::ErrorKind;
+        match e.inner() {
+            ErrorKind::ChannelClosed(_) => 0,
+            ErrorKind::Internal(_) => 1,
+            _ => 999,
+        }
+    };
+    let stream_error_score = |e: &&StreamError| {
+        use crate::error::ErrorKind;
+        match e.inner() {
+            ErrorKind::Internal(_) => 1000,
+            ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
+            _ => 3000,
+        }
+    };
+    actor_errors
+        .into_iter()
+        .max_by_key(stream_error_score)
+        .cloned()
 }
 
 #[cfg(test)]

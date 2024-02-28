@@ -293,8 +293,10 @@ pub async fn handle_create_sql_function(
         language,
         identifier: None,
         body: Some(body),
+        compressed_binary: None,
         link: None,
         owner: session.user_id(),
+        always_retry_on_network_error: false,
     };
 
     let catalog_writer = session.catalog_writer()?;

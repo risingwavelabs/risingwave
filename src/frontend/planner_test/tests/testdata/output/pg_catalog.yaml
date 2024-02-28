@@ -2,19 +2,9 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |-
-    LogicalProject { exprs: [rw_types.id, rw_types.name, rw_types.typelem, rw_types.typarray, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
-    └─LogicalShare { id: 3 }
-      └─LogicalProject { exprs: [rw_types.id, rw_types.name, rw_types.typelem, rw_types.typarray, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
-        └─LogicalJoin { type: Inner, on: (rw_schemas.name = 'pg_catalog':Varchar), output: all }
-          ├─LogicalSysScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid, rw_types.typelem, rw_types.typarray] }
-          └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-  batch_plan: |-
-    BatchProject { exprs: [rw_types.id, rw_types.name, rw_types.typelem, rw_types.typarray, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
-    └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-      ├─BatchScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid, rw_types.typelem, rw_types.typarray], distribution: Single }
-      └─BatchProject { exprs: [rw_schemas.id] }
-        └─BatchFilter { predicate: (rw_schemas.name = 'pg_catalog':Varchar) }
-          └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+    LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
+    └─LogicalSysScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
+  batch_plan: 'BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |-
