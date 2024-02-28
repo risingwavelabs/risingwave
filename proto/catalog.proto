@@ -176,6 +176,9 @@ message Subscription {
   optional uint64 created_at_epoch = 15;
   uint32 owner = 16;
   StreamJobStatus stream_job_status = 17;
+
+  optional string initialized_at_cluster_version = 22;
+  optional string created_at_cluster_version = 23;
 }
 
 message Connection {

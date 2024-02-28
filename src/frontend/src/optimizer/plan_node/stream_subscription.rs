@@ -77,7 +77,7 @@ impl StreamSubscription {
         user_id: UserId,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (input, sink) = Self::derive_subscription_catalog(
+        let (input, subscription) = Self::derive_subscription_catalog(
             database_id,
             schema_id,
             dependent_relations,
@@ -92,7 +92,7 @@ impl StreamSubscription {
             properties,
             user_id,
         )?;
-        Ok(Self::new(input, sink))
+        Ok(Self::new(input, subscription))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -121,7 +121,7 @@ impl StreamSubscription {
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let sink_desc = SubscriptionCatalog {
+        let subscription_desc = SubscriptionCatalog {
             database_id,
             schema_id,
             dependent_relations: dependent_relations.into_iter().collect(),
@@ -135,8 +135,12 @@ impl StreamSubscription {
             distribution_key,
             properties: properties.into_inner(),
             owner: user_id,
+            initialized_at_epoch: None,
+            created_at_epoch: None,
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         };
-        Ok((input, sink_desc))
+        Ok((input, subscription_desc))
     }
 
     /// The table schema is: | epoch | seq id | row op | sink columns |

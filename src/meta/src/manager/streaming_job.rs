@@ -94,6 +94,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.created_at_epoch = created_at_epoch;
+                subscription.created_at_cluster_version = created_at_cluster_version;
             }
         }
     }
@@ -129,6 +130,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.initialized_at_epoch = initialized_at_epoch;
+                subscription.initialized_at_cluster_version = initialized_at_cluster_version;
             }
         }
     }

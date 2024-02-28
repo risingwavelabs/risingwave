@@ -1,0 +1,41 @@
+statement ok
+create table ddl_t (v1 int);
+
+statement ok
+create materialized view ddl_mv as select v1 from ddl_t;
+
+statement ok
+create subscription ddl_subscription_table from ddl_t with(retention = '1D');
+
+statement ok
+create subscription ddl_subscription_mv from ddl_mv with(retention = '1D');
+
+statement error
+create subscription ddl_subscription_table from ddl_t with(retention = '1D');
+
+statement error
+create subscription ddl_subscription_mv from ddl_mv with(retention = '1D');
+
+statement ok
+create subscription if not exists ddl_subscription_table from ddl_t with(retention = '1D');
+
+statement ok
+create subscription if not exists ddl_subscription_mv from ddl_mv with(retention = '1D');
+
+statement ok
+drop subscription ddl_subscription_table;
+
+statement ok
+drop subscription ddl_subscription_mv;
+
+statement error
+drop subscription ddl_subscription_table;
+
+statement error
+drop subscription ddl_subscription_mv;
+
+statement ok
+drop subscription if exists ddl_subscription_table;
+
+statement ok
+drop subscription if exists ddl_subscription_mv;

@@ -512,6 +512,12 @@ pub fn handle_show_create_object(
         ShowCreateType::Function => {
             bail_not_implemented!("show create on: {}", show_create_type);
         }
+        ShowCreateType::Subscription => {
+            let subscription = schema
+                .get_subscription_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("subscription", name.to_string()))?;
+            subscription.create_sql()
+        }
     };
     let name = format!("{}.{}", schema_name, object_name);
 

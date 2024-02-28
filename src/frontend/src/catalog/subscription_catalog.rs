@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
 
@@ -63,6 +64,12 @@ pub struct SubscriptionCatalog {
 
     /// The user id
     pub owner: UserId,
+
+    pub initialized_at_epoch: Option<Epoch>,
+    pub created_at_epoch: Option<Epoch>,
+
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -94,6 +101,10 @@ impl SubscriptionCatalog {
         self
     }
 
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
+    }
+
     pub fn to_proto(&self) -> PbSubscription {
         assert!(!self.dependent_relations.is_empty());
         PbSubscription {
@@ -117,10 +128,12 @@ impl SubscriptionCatalog {
                 .iter()
                 .map(|k| k.table_id)
                 .collect_vec(),
-            initialized_at_epoch: None,
-            created_at_epoch: None,
+            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
+            created_at_epoch: self.created_at_epoch.map(|e| e.0),
             owner: self.owner.into(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
         }
     }
 }
@@ -153,6 +166,10 @@ impl From<&PbSubscription> for SubscriptionCatalog {
                 .map(|k| TableId::new(*k))
                 .collect_vec(),
             owner: prost.owner.into(),
+            created_at_epoch: prost.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
+            created_at_cluster_version: prost.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
         }
     }
 }

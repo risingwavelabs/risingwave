@@ -42,6 +42,7 @@ mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
 mod rw_streaming_parallelism;
+mod rw_subscriptions;
 mod rw_system_tables;
 mod rw_table_fragments;
 mod rw_table_stats;
