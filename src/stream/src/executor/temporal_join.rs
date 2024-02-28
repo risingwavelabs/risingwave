@@ -424,6 +424,7 @@ mod phase1 {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn handle_chunk<'a, K: HashKey, S: StateStore, E: Phase1Evaluation>(
         chunk_size: usize,
         right_size: usize,
@@ -449,7 +450,7 @@ mod phase1 {
                 continue;
             };
             let mut matched = false;
-            if key.null_bitmap().is_subset(&null_matched)
+            if key.null_bitmap().is_subset(null_matched)
                 && let join_entry = right_table.force_peek(&key)
                 && !join_entry.is_empty()
             {
