@@ -20,7 +20,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use arrow_schema::{Field, Fields, Schema};
-use arrow_udf_js::{CallMode, Runtime as JsRuntime};
+use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
@@ -63,6 +64,7 @@ enum UdfImpl {
     External(Arc<ArrowFlightUdfClient>),
     Wasm(Arc<WasmRuntime>),
     JavaScript(JsRuntime),
+    Python(PythonRuntime),
 }
 
 #[async_trait::async_trait]
@@ -108,6 +110,7 @@ impl UserDefinedFunction {
         let arrow_output: arrow_array::RecordBatch = match &self.imp {
             UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+            UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
@@ -202,10 +205,21 @@ impl Build for UserDefinedFunction {
                 rt.add_function(
                     identifier,
                     arrow_schema::DataType::try_from(&return_type)?,
-                    CallMode::CalledOnNullInput,
+                    JsCallMode::CalledOnNullInput,
                     &body,
                 )?;
                 UdfImpl::JavaScript(rt)
+            }
+            "python" if udf.body.is_some() => {
+                let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+                let body = udf.get_body()?;
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    PythonCallMode::CalledOnNullInput,
+                    body,
+                )?;
+                UdfImpl::Python(rt)
             }
             #[cfg(not(madsim))]
             _ => {
