@@ -24,7 +24,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
@@ -146,7 +146,7 @@ async fn compact_shared_buffer(
         ret
     });
 
-    let total_key_count = payload.iter().map(|imm| imm.kv_count()).sum::<usize>();
+    let total_key_count = payload.iter().map(|imm| imm.key_count()).sum::<usize>();
     let (splits, sub_compaction_sstable_size, split_weight_by_vnode) =
         generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
@@ -291,8 +291,10 @@ pub async fn merge_imms_in_memory(
     let max_imm_id = imms[0].batch_id();
 
     let mut imm_iters = Vec::with_capacity(imms.len());
+    let key_count = imms.iter().map(|imm| imm.key_count()).sum();
+    let value_count = imms.iter().map(|imm| imm.value_count()).sum();
     for imm in imms {
-        assert!(imm.kv_count() > 0, "imm should not be empty");
+        assert!(imm.key_count() > 0, "imm should not be empty");
         assert_eq!(
             table_id,
             imm.table_id(),
@@ -313,8 +315,13 @@ pub async fn merge_imms_in_memory(
 
     let first_item_key = mi.current_key_entry().key.clone();
 
-    let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::new();
-    let mut values: Vec<VersionedSharedBufferValue> = Vec::new();
+    let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::with_capacity(key_count);
+    let mut values: Vec<VersionedSharedBufferValue> = Vec::with_capacity(value_count);
+
+    merged_entries.push(SharedBufferKeyEntry {
+        key: first_item_key.clone(),
+        value_offset: 0,
+    });
 
     // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
     let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
@@ -382,7 +389,7 @@ fn generate_splits(
     for imm in payload {
         let data_size = {
             // calculate encoded bytes of key var length
-            (imm.kv_count() * 8 + imm.size()) as u64
+            (imm.value_count() * EPOCH_LEN + imm.size()) as u64
         };
         compact_data_size += data_size;
         size_and_start_user_keys.push((data_size, imm.start_user_key()));

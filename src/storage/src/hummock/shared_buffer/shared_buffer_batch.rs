@@ -288,7 +288,11 @@ impl SharedBufferBatch {
         *self.inner.epochs.last().unwrap()
     }
 
-    pub fn kv_count(&self) -> usize {
+    pub fn key_count(&self) -> usize {
+        self.inner.entries.len()
+    }
+
+    pub fn value_count(&self) -> usize {
         self.inner.new_values.len()
     }
 
