@@ -143,7 +143,7 @@ impl<S: StateStore> JoinSide<S> {
     #[allow(clippy::unused_async)]
     pub async fn insert_row(&mut self, value: impl Row) -> StreamExecutorResult<()> {
         // Update the flush buffer.
-        if matches!(self.write_singleton, Some(true)) {
+        if matches!(self.write_singleton, Some(true) | None) {
             self.state.insert(value);
         }
         Ok(())
@@ -153,7 +153,7 @@ impl<S: StateStore> JoinSide<S> {
     /// Used when the side does not need to update degree.
     pub fn delete_row(&mut self, value: impl Row) -> StreamExecutorResult<()> {
         // If no cache maintained, only update the state table.
-        if matches!(self.write_singleton, Some(true)) {
+        if matches!(self.write_singleton, Some(true) | None) {
             self.state.delete(value);
         }
         Ok(())
@@ -200,9 +200,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
         let state_all_data_types_l = input_l.schema().data_types();
         let state_all_data_types_r = input_r.schema().data_types();
 
-        let (left_to_output, right_to_output) = 
-            JoinStreamChunkBuilder::get_i2o_mapping(&output_indices, state_all_data_types_l.len(), state_all_data_types_r.len())
-        ;
+        let (left_to_output, right_to_output) = JoinStreamChunkBuilder::get_i2o_mapping(
+            &output_indices,
+            state_all_data_types_l.len(),
+            state_all_data_types_r.len(),
+        );
 
         let watermark_buffers = BTreeMap::new();
 
@@ -391,7 +393,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
             side_match.i2o_mapping.clone(),
         );
 
-
         let join_matched_join_keys = ctx
             .streaming_metrics
             .join_matched_join_keys
@@ -417,7 +418,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                     for matched_row in rows {
                         matched_rows_cnt += 1;
                         let matched_row = matched_row?;
-                        dbg!(matched_row);
                         // TODO(yuhao-su): We should find a better way to eval the expression
                         // without concat two rows.
                         // if there are non-equi expressions
@@ -436,10 +436,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopJoinExecutor<S, T> {
                         } else {
                             true
                         };
-                        dbg!(check_join_condition);
                         if check_join_condition {
-                         dbg!("fuck");
-
                             if let Some(chunk) =
                                 join_chunk_builder.append_row(Op::Insert, row, &matched_row)
                             {
@@ -534,180 +531,5 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for NestedLoopJoinExecu
 
     fn identity(&self) -> &str {
         &self.info.identity
-    }
-}
-
-#[cfg(test)]
-mod test{
-    use std::sync::atomic::AtomicU64;
-
-    use super::*;
-    use crate::executor::test_utils::*;
-    use risingwave_common::{array::StreamChunkTestExt, catalog::{ColumnDesc, ColumnId, Field, TableId}, util::sort_util::OrderType};
-    use risingwave_storage::memory::MemoryStateStore;
-    use crate::executor::test_utils::expr::build_from_pretty;
-    use crate::executor::{BoxedMessageStream, ActorContext};
-
-    async fn create_in_memory_state_table(
-        mem_state: MemoryStateStore,
-        data_types: &[DataType],
-        order_types: &[OrderType],
-        pk_indices: &[usize],
-        table_id: u32,
-    ) -> StateTable<MemoryStateStore>  {
-        let column_descs = data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
-            .collect_vec();
-        StateTable::new_without_distribution(
-            mem_state.clone(),
-            TableId::new(table_id),
-            column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
-        )
-        .await
-
-    }
-    
-    fn create_cond(condition_text: Option<String>) -> NonStrictExpression {
-        build_from_pretty(
-            condition_text
-                .as_deref()
-                .unwrap_or("(less_than:boolean $1:int8 $3:int8)"),
-        )
-    }
-
-    async fn create_executor<const T: JoinTypePrimitive>(
-        with_condition: bool,
-        condition_text: Option<String>,
-    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64), // join key
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
-        let cond = with_condition.then(|| create_cond(condition_text));
-
-        let mem_state = MemoryStateStore::new();
-
-        let state_l = create_in_memory_state_table(
-            mem_state.clone(),
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
-            &[0, 1],
-            0,
-        )
-        .await;
-
-        let state_r= create_in_memory_state_table(
-            mem_state,
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
-            &[0, 1],
-            2,
-        )
-        .await;
-
-        let schema: Schema = 
-            [source_l.schema().fields(), source_r.schema().fields()]
-                .concat()
-                .into_iter()
-                .collect();
-        let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "NestedLoopJoinExecutor".to_string(),
-        };
-
-        let executor = NestedLoopJoinExecutor::<MemoryStateStore, T>::new(
-            ActorContext::for_test(123),
-            info,
-            Box::new(source_l),
-            Box::new(source_r),
-            (0..schema_len).collect_vec(),
-            cond,
-            state_l,
-            state_r,
-            Arc::new(AtomicU64::new(0)),
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-        );
-        (tx_l, tx_r, Box::new(executor).execute())
-    }
-
-    #[tokio::test]
-    async fn test_streaming_nested_loop_inner_join() -> StreamExecutorResult<()> {
-        let chunk_l1 = StreamChunk::from_pretty(
-            "  I I
-             + 1 4
-             + 2 5
-             + 3 6",
-        );
-        let chunk_l2 = StreamChunk::from_pretty(
-            "  I I
-             + 3 8
-             - 3 8",
-        );
-        let chunk_r1 = StreamChunk::from_pretty(
-            "  I I
-             + 2 7
-             + 4 8
-             + 6 9",
-        );
-        let chunk_r2 = StreamChunk::from_pretty(
-            "  I  I
-             + 3 10
-             + 6 11",
-        );
-        let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ JoinType::Inner }>(true, None).await;
-
-        // push the init barrier for left and right
-        tx_l.push_barrier(1, false);
-        tx_r.push_barrier(1, false);
-        hash_join.next_unwrap_ready_barrier()?;
-
-        // push the 1st left chunk
-        tx_l.push_chunk(chunk_l1);
-        hash_join.next_unwrap_pending();
-
-        // push the init barrier for left and right
-        tx_l.push_barrier(2, false);
-        tx_r.push_barrier(2, false);
-        hash_join.next_unwrap_ready_barrier()?;
-
-        // push the 2nd left chunk
-        tx_l.push_chunk(chunk_l2);
-        hash_join.next_unwrap_pending();
-
-        // push the 1st right chunk
-        tx_r.push_chunk(chunk_r1);
-        let chunk = hash_join.next_unwrap_ready_chunk()?;
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                " I I I I
-                + 2 5 2 7"
-            )
-        );
-
-        // push the 2nd right chunk
-        tx_r.push_chunk(chunk_r2);
-        let chunk = hash_join.next_unwrap_ready_chunk()?;
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                " I I I I
-                + 3 6 3 10"
-            )
-        );
-
-        Ok(())
     }
 }

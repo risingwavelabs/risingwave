@@ -18,6 +18,7 @@ risingwave_expr_impl::enable!();
 mod eowc_over_window;
 mod hash_agg;
 mod hop_window;
+mod nested_loop_join;
 mod over_window;
 mod project_set;
 
