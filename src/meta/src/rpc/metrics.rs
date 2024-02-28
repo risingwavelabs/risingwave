@@ -176,6 +176,8 @@ pub struct MetaMetrics {
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
+
+    pub hummock_manager_latency: HistogramVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -619,6 +621,14 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let opts = histogram_opts!(
+            "storage_manager_version_latency",
+            "gRPC latency of meta services",
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+        );
+        let hummock_manager_latency =
+            register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -682,6 +692,7 @@ impl MetaMetrics {
             branched_sst_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            hummock_manager_latency,
         }
     }
 
