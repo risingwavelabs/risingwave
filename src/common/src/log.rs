@@ -75,10 +75,16 @@ mod tests {
     use std::sync::LazyLock;
     use std::time::Duration;
 
+    use tracing_subscriber::util::SubscriberInitExt;
+
     use super::*;
 
     #[tokio::test]
     async fn demo() {
+        let _logger = tracing_subscriber::fmt::Subscriber::builder()
+            .with_max_level(tracing::Level::ERROR)
+            .set_default();
+
         let mut interval = tokio::time::interval(Duration::from_millis(100));
         for _ in 0..100 {
             interval.tick().await;
@@ -89,7 +95,7 @@ mod tests {
             });
 
             if let Ok(suppressed_count) = RATE_LIMITER.check() {
-                println!("failed to foo bar. suppressed_count = {:?}", suppressed_count);
+                tracing::error!(suppressed_count, "failed to foo bar");
             }
         }
     }
