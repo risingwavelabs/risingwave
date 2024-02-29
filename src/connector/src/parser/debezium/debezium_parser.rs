@@ -39,7 +39,7 @@ pub struct DebeziumParser {
     props: DebeziumProps,
 }
 
-const DEBEZIUM_IGNORE_KEY: &str = "ignore_key";
+pub const DEBEZIUM_IGNORE_KEY: &str = "ignore_key";
 
 #[derive(Debug, Clone, Default)]
 pub struct DebeziumProps {

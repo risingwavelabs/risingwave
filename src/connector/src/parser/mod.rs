@@ -77,6 +77,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+pub use debezium::DEBEZIUM_IGNORE_KEY;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
