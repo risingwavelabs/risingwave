@@ -17,15 +17,15 @@ use std::fmt::Debug;
 use anyhow::Context;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
-use simd_json::prelude::MutableObject;
-use simd_json::BorrowedValue;
 
 use crate::error::ConnectorResult;
-use crate::only_parse_payload;
-use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjection};
-use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
+use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter};
+use crate::parser::{
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, JsonProperties, ParserFormat,
+    SourceStreamChunkRowWriter,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -34,6 +34,17 @@ pub struct DebeziumMongoJsonParser {
     id_column: SourceColumnDesc,
     payload_column: SourceColumnDesc,
     source_ctx: SourceContextRef,
+    key_builder: AccessBuilderImpl,
+    payload_builder: AccessBuilderImpl,
+}
+
+fn build_accessor_builder(config: EncodingProperties) -> anyhow::Result<AccessBuilderImpl> {
+    match config {
+        EncodingProperties::MongoJson(_) => Ok(AccessBuilderImpl::DebeziumMongoJson(
+            DebeziumMongoJsonAccessBuilder::new()?,
+        )),
+        _ => bail!("unsupported encoding for DEBEZIUM_MONGO format"),
+    }
 }
 
 impl DebeziumMongoJsonParser {
@@ -65,36 +76,38 @@ impl DebeziumMongoJsonParser {
             bail!("Debezium Mongo needs no more columns except `_id` and `payload` in table");
         }
 
+        // encodings are fixed to MongoJson
+        let key_builder =
+            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
+        let payload_builder =
+            build_accessor_builder(EncodingProperties::MongoJson(JsonProperties::default()))?;
+
         Ok(Self {
             rw_columns,
             id_column,
             payload_column,
-
             source_ctx,
+            key_builder,
+            payload_builder,
         })
     }
 
-    #[allow(clippy::unused_async)]
     pub async fn parse_inner(
-        &self,
-        mut payload: Vec<u8>,
+        &mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .context("failed to parse debezium mongo json payload")?;
-
-        // Event can be configured with and without the "payload" field present.
-        // See https://github.com/risingwavelabs/risingwave/issues/10178
-        let payload = if let Some(payload) = event.get_mut("payload") {
-            std::mem::take(payload)
-        } else {
-            event
+        let key_accessor = match key {
+            None => None,
+            Some(data) => Some(self.key_builder.generate_accessor(data).await?),
+        };
+        let payload_accessor = match payload {
+            None => None,
+            Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
         };
 
-        let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
-
-        let row_op = DebeziumChangeEvent::with_value(MongoProjection::new(accessor));
-
+        let row_op = DebeziumChangeEvent::new_mongodb_event(key_accessor, payload_accessor);
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)
     }
 }
@@ -114,11 +127,11 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        _key: Option<Vec<u8>>,
+        key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> ConnectorResult<()> {
-        only_parse_payload!(self, payload, writer)
+        self.parse_inner(key, payload, writer).await
     }
 }
 
@@ -155,13 +168,40 @@ mod tests {
         let a = extract_bson_id(&DataType::Varchar, &pld).unwrap();
         assert_eq!(a, Some(ScalarImpl::Utf8("5d505646cf6d4fe581014ab2".into())));
     }
-    fn get_columns() -> Vec<SourceColumnDesc> {
-        let descs = vec![
-            SourceColumnDesc::simple("_id", DataType::Int64, ColumnId::from(0)),
+
+    #[tokio::test]
+    async fn test_parse_delete_message() {
+        let (key, payload) = (
+            // key
+            br#"{"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}"#.to_vec(),
+            // payload
+            br#"{"schema":null,"payload":{"before":null,"after":null,"updateDescription":null,"source":{"version":"2.4.2.Final","connector":"mongodb","name":"RW_CDC_3001","ts_ms":1706968217000,"snapshot":"false","db":"dev","sequence":null,"rs":"rs0","collection":"test","ord":2,"lsid":null,"txnNumber":null,"wallTime":null},"op":"d","ts_ms":1706968217377,"transaction":null}}"#.to_vec()
+        );
+
+        let columns = vec![
+            SourceColumnDesc::simple("_id", DataType::Varchar, ColumnId::from(0)),
             SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
         ];
+        let mut parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
+        let writer = builder.row_writer();
+        parser
+            .parse_inner(Some(key), Some(payload), writer)
+            .await
+            .unwrap();
+        let chunk = builder.finish();
+        let mut rows = chunk.rows();
 
-        descs
+        let (op, row) = rows.next().unwrap();
+        assert_eq!(op, Op::Delete);
+        // oid
+        assert_eq!(
+            row.datum_at(0).to_owned_datum(),
+            (Some(ScalarImpl::Utf8("65bc9fb6c485f419a7a877fe".into())))
+        );
+
+        // payload should be null
+        assert_eq!(row.datum_at(1).to_owned_datum(), None);
     }
 
     #[tokio::test]
@@ -172,14 +212,18 @@ mod tests {
             // data without payload and schema field
             br#"{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1004\"},\"first_name\": \"Anne\",\"last_name\": \"Kretchmar\",\"email\": \"annek@noanswer.org\"}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"last","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}"#.to_vec()];
 
-        let columns = get_columns();
+        let columns = vec![
+            SourceColumnDesc::simple("_id", DataType::Int64, ColumnId::from(0)),
+            SourceColumnDesc::simple("payload", DataType::Jsonb, ColumnId::from(1)),
+        ];
         for data in input {
-            let parser = DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let mut parser =
+                DebeziumMongoJsonParser::new(columns.clone(), Default::default()).unwrap();
 
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
 
             let writer = builder.row_writer();
-            parser.parse_inner(data, writer).await.unwrap();
+            parser.parse_inner(None, Some(data), writer).await.unwrap();
             let chunk = builder.finish();
             let mut rows = chunk.rows();
             let (op, row) = rows.next().unwrap();

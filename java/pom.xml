@@ -84,6 +84,9 @@
         <datastax.version>4.15.0</datastax.version>
         <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.17.6</testcontainers.version>
+        <postgresql.version>42.5.1</postgresql.version>
+        <mysql.connector.java.version>8.0.28</mysql.connector.java.version>
+        <mongodb.driver.sync.version>4.11.1</mongodb.driver.sync.version>
         <sqlite.version>3.45.0.0</sqlite.version>
         <aws.version>2.21.42</aws.version>
         <hive.version>3.1.3</hive.version>
@@ -98,7 +101,7 @@
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
-                <artifactId>log4j-slf4j-impl</artifactId>
+                <artifactId>log4j-slf4j2-impl</artifactId>
                 <version>${log4j.version}</version>
             </dependency>
             <dependency>
@@ -165,14 +168,24 @@
                 <version>${debezium.version}</version>
             </dependency>
             <dependency>
+                <groupId>io.debezium</groupId>
+                <artifactId>debezium-connector-mongodb</artifactId>
+                <version>${debezium.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
-                <version>42.5.1</version>
+                <version>${postgresql.version}</version>
             </dependency>
             <dependency>
                 <groupId>mysql</groupId>
                 <artifactId>mysql-connector-java</artifactId>
-                <version>8.0.28</version>
+                <version>${mysql.connector.java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mongodb</groupId>
+                <artifactId>mongodb-driver-sync</artifactId>
+                <version>${mongodb.driver.sync.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.elasticsearch</groupId>
@@ -393,6 +406,12 @@
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>postgresql</artifactId>
+                <version>${testcontainers.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>mongodb</artifactId>
                 <version>${testcontainers.version}</version>
                 <scope>test</scope>
             </dependency>

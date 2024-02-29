@@ -71,7 +71,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     depends_on:
       - mysql
       - db
@@ -81,7 +81,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     depends_on:
       - mysql
       - db
@@ -96,26 +96,14 @@ services:
     volumes:
       - ..:/risingwave
 
-  sink-doris-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20231109
-    depends_on:
-      - doris-fe-server
-      - doris-be-server
-    volumes:
-      - ..:/risingwave
-    command: >
-      sh -c "sudo sysctl -w vm.max_map_count=2000000"
-    networks:
-      mynetwork:
-        ipv4_address: 172.121.0.4
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -126,7 +114,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     depends_on:
       db:
         condition: service_healthy
@@ -188,39 +176,6 @@ services:
       interval: 5s
       timeout: 30s
       retries: 50
-
-  doris-fe-server:
-    platform: linux/amd64
-    image: apache/doris:2.0.0_alpha-fe-x86_64
-    hostname: doris-fe-server
-    command: >
-      sh -c "sudo sysctl -w vm.max_map_count=2000000"
-    environment:
-     - FE_SERVERS=fe1:172.121.0.2:9010
-     - FE_ID=1
-    ports:
-      - "8030:8030"
-      - "9030:9030"
-    networks:
-      mynetwork:
-        ipv4_address: 172.121.0.2
-
-  doris-be-server:
-    platform: linux/amd64
-    image: apache/doris:2.0.0_alpha-be-x86_64
-    hostname: doris-be-server
-    command: >
-      sh -c "sudo sysctl -w vm.max_map_count=2000000"
-    environment:
-     - FE_SERVERS=fe1:172.121.0.2:9010
-     - BE_ADDR=172.121.0.3:9050
-    depends_on:
-      - doris-fe-server
-    ports:
-      - "9050:9050"
-    networks:
-      mynetwork:
-        ipv4_address: 172.121.0.3
 
   cassandra-server:
     container_name: cassandra-server
@@ -319,9 +274,3 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-networks:
-  mynetwork:
-    ipam:
-      config:
-        - subnet: 172.121.80.0/16
-  default:
