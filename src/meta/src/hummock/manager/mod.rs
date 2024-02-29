@@ -1357,14 +1357,14 @@ impl HummockManager {
 
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
-        let version_timer = self
-            .metrics
-            .hummock_manager_latency
-            .with_label_values(&["apply_version_delta"])
-            .start_timer();
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
+            let version_timer = self
+                .metrics
+                .hummock_manager_latency
+                .with_label_values(&["apply_version_delta"])
+                .start_timer();
             let versioning = versioning_guard.deref_mut();
             let mut current_version = versioning.current_version.clone();
             // purge stale compact_status
@@ -1477,6 +1477,7 @@ impl HummockManager {
                     self.notify_last_version_delta(versioning);
                 }
             } else {
+                version_timer.observe_duration();
                 // The compaction task is cancelled or failed.
                 commit_multi_var!(
                     self.env.meta_store(),
@@ -1486,7 +1487,6 @@ impl HummockManager {
                 )?;
             }
         }
-        version_timer.observe_duration();
 
         let task_status = compact_task.task_status();
         let task_status_label = task_status.as_str_name();
