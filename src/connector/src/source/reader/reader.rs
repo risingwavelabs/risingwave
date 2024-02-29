@@ -162,45 +162,6 @@ impl SourceReader {
             Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
         })
     }
-
-    pub async fn to_stream_for_file_source(
-        &self,
-        state: ConnectorState,
-        column_ids: Vec<ColumnId>,
-        source_ctx: Arc<SourceContext>,
-    ) -> Result<BoxChunkSourceStream> {
-        let Some(splits) = state else {
-            return Ok(pending().boxed());
-        };
-        let config = self.config.clone();
-        let columns = self.get_target_columns(column_ids)?;
-
-        let data_gen_columns = Some(
-            columns
-                .iter()
-                .map(|col| Column {
-                    name: col.name.clone(),
-                    data_type: col.data_type.clone(),
-                    is_visible: col.is_visible(),
-                })
-                .collect_vec(),
-        );
-
-        let parser_config = ParserConfig {
-            specific: self.parser_config.clone(),
-            common: CommonParserConfig {
-                rw_columns: columns,
-            },
-        };
-
-        dispatch_source_prop!(config, prop, {
-            let reader =
-                create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
-                    .await?;
-
-            Ok(reader.into_stream().boxed())
-        })
-    }
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]

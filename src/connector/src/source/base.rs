@@ -436,10 +436,8 @@ impl ConnectorProperties {
 
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
-    }
-
-    pub fn is_file_source(&self) -> bool {
-        matches!(self, ConnectorProperties::OpendalS3(_))
+            || matches!(self, ConnectorProperties::OpendalS3(_))
+            || matches!(self, ConnectorProperties::Gcs(_))
     }
 }
 

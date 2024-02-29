@@ -262,8 +262,6 @@ pub enum SourceScanInfo {
     Complete(Vec<SplitImpl>),
 }
 
-const CHUNK_SIZE: usize = 1024;
-
 impl SourceScanInfo {
     pub fn new(fetch_info: SourceFetchInfo) -> Self {
         Self::Incomplete(fetch_info)
@@ -307,7 +305,7 @@ impl SourceScanInfo {
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
                 let stream = build_opendal_fs_list_for_batch(lister);
-                let batch_res: Vec<_> = stream.take(CHUNK_SIZE).try_collect().await?;
+                let batch_res: Vec<_> = stream.try_collect().await?;
                 let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
