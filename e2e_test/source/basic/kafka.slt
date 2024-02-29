@@ -479,6 +479,18 @@ create table source_with_rdkafka_props (v1 int, v2 varchar) with (
 ) FORMAT PLAIN ENCODE JSON
 
 statement ok
+CREATE TABLE debezium_ignore_key (
+  order_id int primary key
+) with (
+  connector = 'kafka',
+  topic = 'test1',
+  kafka.brokers = 'message_queue:29092',
+  kafka.scan.startup.mode = 'earliest')
+FORMAT DEBEZIUM ENCODE JSON (
+  ignore_key = 'true'
+)
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -799,6 +811,11 @@ select * from s27
 ----
 (9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
 
+query I
+select count(order_id) from debezium_ignore_key
+----
+3
+
 statement ok
 drop materialized view source_mv1
 
@@ -888,3 +905,5 @@ drop table dbz_ignore_case_json;
 
 statement ok
 drop table source_with_rdkafka_props;
+statement ok
+drop table debezium_ignore_key;
