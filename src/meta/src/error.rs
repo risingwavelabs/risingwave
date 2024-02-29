@@ -141,6 +141,7 @@ impl From<etcd_client::Error> for MetaError {
     }
 }
 
+#[cfg(feature = "private-link")]
 impl<E> From<aws_sdk_ec2::error::SdkError<E>> for MetaError
 where
     E: std::error::Error + Sync + Send + 'static,

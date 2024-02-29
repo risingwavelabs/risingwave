@@ -13,16 +13,12 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
-use risingwave_pb::catalog::connection::private_link_service::{
-    PbPrivateLinkProvider, PrivateLinkProvider,
-};
+use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Comment, Connection, CreateType};
@@ -33,13 +29,22 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{ConnectionId, MetaSrvEnv, StreamingJob};
-use crate::rpc::cloud_provider::AwsEc2Client;
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
-use crate::{MetaError, MetaResult};
+use crate::MetaError;
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "private_link")] {
+        use crate::rpc::cloud_provider::AwsEc2Client;
+        use crate::manager::ConnectionId;
+        use anyhow::anyhow;
+        use std::sync::Arc;
+        use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
+    }
+}
 
 #[derive(Clone)]
 pub struct DdlServiceImpl {
@@ -48,6 +53,7 @@ pub struct DdlServiceImpl {
     metadata_manager: MetadataManager,
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
+    #[cfg(feature = "private_link")]
     aws_client: Arc<Option<AwsEc2Client>>,
 }
 
@@ -55,13 +61,14 @@ impl DdlServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         env: MetaSrvEnv,
-        aws_client: Option<AwsEc2Client>,
+        #[cfg(feature = "private_link")] aws_client: Option<AwsEc2Client>,
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
     ) -> Self {
+        #[cfg(feature = "private_link")]
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -69,15 +76,17 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
+            #[cfg(feature = "private_link")]
             aws_cli_ref.clone(),
         )
         .await;
         Self {
             env,
             metadata_manager,
-            ddl_controller,
-            aws_client: aws_cli_ref,
             sink_manager,
+            ddl_controller,
+            #[cfg(feature = "private_link")]
+            aws_client: aws_cli_ref,
         }
     }
 
@@ -189,8 +198,14 @@ impl DdlService for DdlServiceImpl {
         let source = req.get_source()?.clone();
 
         // validate connection before starting the DDL procedure
+        #[allow(unused_variables)]
         if let Some(connection_id) = source.connection_id {
+            #[cfg(feature = "private_link")]
             self.validate_connection(connection_id).await?;
+            #[cfg(not(feature = "private_link"))]
+            return Err(Status::from(MetaError::unavailable(
+                "RisingWave is not compiled with feature `private_link`",
+            )));
         }
 
         match req.fragment_graph {
@@ -255,8 +270,14 @@ impl DdlService for DdlServiceImpl {
         let affected_table_change = req.get_affected_table_change().cloned().ok();
 
         // validate connection before starting the DDL procedure
+        #[allow(unused_variables)]
         if let Some(connection_id) = sink.connection_id {
+            #[cfg(feature = "private_link")]
             self.validate_connection(connection_id).await?;
+            #[cfg(not(feature = "private_link"))]
+            return Err(Status::from(MetaError::unavailable(
+                "RisingWave is not compiled with feature `private_link`",
+            )));
         }
 
         let stream_job = match &affected_table_change {
@@ -693,6 +714,7 @@ impl DdlService for DdlServiceImpl {
                         dns_entries: HashMap::new(),
                     },
                     PbPrivateLinkProvider::Aws => {
+                        #[cfg(feature = "private_link")]
                         if let Some(aws_cli) = self.aws_client.as_ref() {
                             let tags_env = self
                                 .env
@@ -716,6 +738,10 @@ impl DdlService for DdlServiceImpl {
                                 "AWS client is not configured",
                             )));
                         }
+                        #[cfg(not(feature = "private_link"))]
+                        return Err(Status::from(MetaError::unavailable(
+                            "RisingWave is not compiled with feature `private_link`",
+                        )));
                     }
                     PbPrivateLinkProvider::Unspecified => {
                         return Err(Status::invalid_argument("Privatelink provider unspecified"));
@@ -852,7 +878,8 @@ impl DdlService for DdlServiceImpl {
 }
 
 impl DdlServiceImpl {
-    async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
+    #[cfg(feature = "private_link")]
+    async fn validate_connection(&self, connection_id: ConnectionId) -> crate::MetaResult<()> {
         let connection = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 mgr.catalog_manager

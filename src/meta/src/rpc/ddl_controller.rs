@@ -72,6 +72,7 @@ use crate::manager::{
     StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
+#[cfg(feature = "private_link")]
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -175,6 +176,7 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
 
+    #[cfg(feature = "private_link")]
     aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -245,7 +247,7 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
-        aws_client: Arc<Option<AwsEc2Client>>,
+        #[cfg(feature = "private_link")] aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -254,6 +256,7 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
+            #[cfg(feature = "private_link")]
             aws_client,
             creating_streaming_job_permits,
         }
@@ -582,11 +585,13 @@ impl DdlController {
         }
     }
 
+    #[allow(clippy::unused_async)]
     pub(crate) async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
             && svc.get_provider()? == PbPrivateLinkProvider::Aws
         {
+            #[cfg(feature = "private_link")]
             if let Some(aws_cli) = self.aws_client.as_ref() {
                 aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
             } else {
@@ -595,13 +600,20 @@ impl DdlController {
                     svc.endpoint_id
                 );
             }
+            #[cfg(not(feature = "private_link"))]
+            warn!(
+                "RisingWave is not compiled with feature `private_link`, skip deleting vpc endpoint {}",
+                svc.endpoint_id
+            );
         }
         Ok(())
     }
 
+    #[allow(clippy::unused_async)]
     pub(crate) async fn delete_vpc_endpoint_v2(&self, svc: PrivateLinkService) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if svc.get_provider()? == PbPrivateLinkProvider::Aws {
+            #[cfg(feature = "private_link")]
             if let Some(aws_cli) = self.aws_client.as_ref() {
                 aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
             } else {
@@ -610,6 +622,11 @@ impl DdlController {
                     svc.endpoint_id
                 );
             }
+            #[cfg(not(feature = "private_link"))]
+            warn!(
+                "RisingWave is not compiled with feature `private_link`, skip deleting vpc endpoint {}",
+                svc.endpoint_id
+            );
         }
         Ok(())
     }

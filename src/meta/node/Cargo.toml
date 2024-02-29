@@ -13,8 +13,15 @@ ignored = ["workspace-hack"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 
+[features]
+private-link = [
+    "risingwave_meta/private-link",
+    "risingwave_meta_service/private-link",
+]
+
 [dependencies]
 anyhow = "1"
+cfg-if = "1"
 clap = { version = "4", features = ["derive", "env"] }
 either = "1"
 etcd-client = { workspace = true }

@@ -19,9 +19,10 @@ arc-swap = "1"
 assert_matches = "1"
 async-trait = "0.1"
 aws-config = { workspace = true }
-aws-sdk-ec2 = { workspace = true }
+aws-sdk-ec2 = { workspace = true, optional = true }
 base64-url = { version = "2.0.0" }
 bytes = { version = "1", features = ["serde"] }
+cfg-if = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 comfy-table = "7"
@@ -103,6 +104,7 @@ risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }
 
 [features]
+private-link = ["aws-sdk-ec2"]
 test = []
 failpoints = ["fail/failpoints"]
 

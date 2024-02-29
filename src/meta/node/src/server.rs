@@ -92,7 +92,6 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
 };
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
 use crate::rpc::election::sql::{
     MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
@@ -605,16 +604,21 @@ pub async fn start_service_as_election_leader(
         compactor_manager.clone(),
     ));
 
-    let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id
-        && let Some(security_group_id) = &env.opts.security_group_id
-    {
-        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
-        aws_cli = Some(cli);
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "private_link")] {
+            let mut aws_cli = None;
+            if let Some(my_vpc_id) = &env.opts.vpc_id
+                && let Some(security_group_id) = &env.opts.security_group_id
+            {
+                let cli = crate::rpc::cloud_provider::AwsEc2Client::new(my_vpc_id, security_group_id).await;
+                aws_cli = Some(cli);
+            }
+        }
     }
 
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
+        #[cfg(feature = "private_link")]
         aws_cli.clone(),
         metadata_manager.clone(),
         stream_manager.clone(),
@@ -663,7 +667,11 @@ pub async fn start_service_as_election_leader(
     );
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
+    #[cfg(feature = "private_link")]
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
+    #[cfg(not(feature = "private_link"))]
+    let cloud_srv = CloudServiceImpl;
+
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {

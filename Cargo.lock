@@ -9630,6 +9630,7 @@ dependencies = [
  "axum",
  "base64-url",
  "bytes",
+ "cfg-if",
  "chrono",
  "clap",
  "comfy-table",
@@ -9717,6 +9718,7 @@ name = "risingwave_meta_node"
 version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
+ "cfg-if",
  "clap",
  "either",
  "futures",
@@ -9750,6 +9752,7 @@ version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "cfg-if",
  "either",
  "futures",
  "itertools 0.12.0",

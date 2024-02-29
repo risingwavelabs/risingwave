@@ -13,9 +13,13 @@ ignored = ["workspace-hack"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 
+[features]
+private-link = ["risingwave_meta/private-link"]
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+cfg-if = "1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.12"
