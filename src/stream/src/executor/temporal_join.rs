@@ -24,7 +24,7 @@ use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::{for_await, try_stream};
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
-use risingwave_common::array::{ArrayImpl, Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, NullBitmap};
@@ -607,10 +607,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             let new_chunk = if let Some(ref cond) = self.condition {
                                 let (data_chunk, ops) = chunk.into_parts();
                                 let passed_bitmap = cond.eval_infallible(&data_chunk).await;
-                                let ArrayImpl::Bool(passed_bitmap) = &*passed_bitmap else {
-                                    panic!("unmatched type: filter expr returns a non-null array");
-                                };
-                                let passed_bitmap = passed_bitmap.to_bitmap();
+                                let passed_bitmap =
+                                    Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
                                 let (columns, vis) = data_chunk.into_parts();
                                 let new_vis = vis & passed_bitmap;
                                 StreamChunk::with_visibility(ops, columns, new_vis)
@@ -639,10 +637,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             let chunk = chunk?;
                             let (data_chunk, ops) = chunk.into_parts();
                             let passed_bitmap = cond.eval_infallible(&data_chunk).await;
-                            let ArrayImpl::Bool(passed_bitmap) = &*passed_bitmap else {
-                                panic!("unmatched type: filter expr returns a non-null array");
-                            };
-                            let passed_bitmap = passed_bitmap.to_bitmap();
+                            let passed_bitmap =
+                                Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
                             let (columns, vis) = data_chunk.into_parts();
                             let mut new_vis = BitmapBuilder::with_capacity(vis.len());
                             for (passed, not_match_end) in
