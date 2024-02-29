@@ -18,7 +18,6 @@ use std::vec;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::generic::GenericPlanRef;
@@ -27,6 +26,7 @@ use super::{
     BatchValues, ColPrunable, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, StreamValues, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;

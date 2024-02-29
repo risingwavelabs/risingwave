@@ -12,45 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
-pub const RW_USERS: BuiltinTable = BuiltinTable {
-    name: "rw_users",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "name"),
-        (DataType::Boolean, "is_super"),
-        (DataType::Boolean, "create_db"),
-        (DataType::Boolean, "create_user"),
-        (DataType::Boolean, "can_login"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwUser {
+    #[primary_key]
+    id: i32,
+    name: String,
+    is_super: bool,
+    create_db: bool,
+    create_user: bool,
+    can_login: bool,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_rw_user_info(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.user_info_reader.read_guard();
-        let users = reader.get_all_users();
+#[system_catalog(table, "rw_catalog.rw_users")]
+fn read_rw_user_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser>> {
+    let reader = reader.user_info_reader.read_guard();
+    let users = reader.get_all_users();
 
-        Ok(users
-            .into_iter()
-            .map(|user| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(user.id as i32)),
-                    Some(ScalarImpl::Utf8(user.name.into())),
-                    Some(ScalarImpl::Bool(user.is_super)),
-                    Some(ScalarImpl::Bool(user.can_create_db)),
-                    Some(ScalarImpl::Bool(user.can_create_user)),
-                    Some(ScalarImpl::Bool(user.can_login)),
-                ])
-            })
-            .collect_vec())
-    }
+    Ok(users
+        .into_iter()
+        .map(|user| RwUser {
+            id: user.id as i32,
+            name: user.name,
+            is_super: user.is_super,
+            create_db: user.can_create_db,
+            create_user: user.can_create_user,
+            can_login: user.can_login,
+        })
+        .collect())
 }

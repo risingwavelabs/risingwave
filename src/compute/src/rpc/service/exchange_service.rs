@@ -38,7 +38,7 @@ const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
-    stream_mgr: Arc<LocalStreamManager>,
+    stream_mgr: LocalStreamManager,
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
@@ -106,8 +106,8 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .context()
-            .take_receiver((up_actor_id, down_actor_id))?;
+            .take_receiver((up_actor_id, down_actor_id))
+            .await?;
 
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
@@ -128,7 +128,7 @@ impl ExchangeService for ExchangeServiceImpl {
 impl ExchangeServiceImpl {
     pub fn new(
         mgr: Arc<BatchManager>,
-        stream_mgr: Arc<LocalStreamManager>,
+        stream_mgr: LocalStreamManager,
         metrics: Arc<ExchangeServiceMetrics>,
     ) -> Self {
         ExchangeServiceImpl {

@@ -30,13 +30,6 @@ pub(crate) static MAGIC_BYTES: MagicBytes = 0x484D5452; // HMTR
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<usize>;
     fn flush(&mut self) -> Result<()>;
-    fn write_all(&mut self, records: Vec<Record>) -> Result<usize> {
-        let mut total_size = 0;
-        for r in records {
-            total_size += self.write(r)?
-        }
-        Ok(total_size)
-    }
 }
 
 /// Serializer serializes a record to std write.

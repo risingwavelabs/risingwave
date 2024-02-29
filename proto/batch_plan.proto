@@ -241,6 +241,7 @@ message ExchangeSource {
 
 message ExchangeNode {
   repeated ExchangeSource sources = 1;
+  // sequential means each tasks of the exchange node will be executed sequentially.
   bool sequential = 2;
   repeated plan_common.Field input_schema = 3;
 }

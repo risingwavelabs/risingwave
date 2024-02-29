@@ -48,7 +48,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
@@ -57,10 +56,12 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use crate::error::ConnectorError;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -270,6 +271,11 @@ pub struct SinkWriterParam {
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
     pub sink_metrics: SinkMetrics,
+    // The val has two effect:
+    // 1. Indicates that the sink will accpect the data chunk with extra partition value column.
+    // 2. The index of the extra partition value column.
+    // More detail of partition value column, see `PartitionComputeInfo`
+    pub extra_partition_col_idx: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -303,6 +309,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            extra_partition_col_idx: Default::default(),
         }
     }
 }
@@ -526,40 +533,40 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
+    ),
 }
 
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
-        SinkError::Iceberg(anyhow_error!("{}", value))
+        SinkError::Iceberg(anyhow!(value))
     }
 }
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(anyhow_error!("{}", value))
+        SinkError::Remote(anyhow!(value))
     }
 }
 
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(format!("{}", value))
+        SinkError::ClickHouse(value.to_report_string())
     }
 }
 
 impl From<DeltaTableError> for SinkError {
     fn from(value: DeltaTableError) -> Self {
-        SinkError::DeltaLake(anyhow_error!("{}", value))
+        SinkError::DeltaLake(anyhow!(value))
     }
 }
 
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
-        SinkError::Redis(format!("{}", value))
-    }
-}
-
-impl From<SinkError> for RwError {
-    fn from(e: SinkError) -> Self {
-        ErrorCode::SinkError(Box::new(e)).into()
+        SinkError::Redis(value.to_report_string())
     }
 }

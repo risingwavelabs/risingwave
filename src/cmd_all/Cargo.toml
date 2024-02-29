@@ -10,6 +10,7 @@ repository = { workspace = true }
 [features]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
+embedded-python-udf = ["risingwave_expr/embedded-python-udf"]
 default = ["rw-static-link"]
 
 [package.metadata.cargo-machete]
@@ -23,12 +24,14 @@ anyhow = "1"
 clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
 const-str = "0.5"
+home = "0.5"
 prometheus = { version = "0.13" }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 risingwave_ctl = { workspace = true }
+risingwave_expr = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
@@ -57,6 +60,7 @@ workspace-hack = { path = "../workspace-hack" }
 expect-test = "1"
 
 [build-dependencies]
+thiserror-ext = { workspace = true }
 vergen = { version = "8", default-features = false, features = [
     "build",
     "git",

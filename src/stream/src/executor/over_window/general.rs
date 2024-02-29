@@ -23,6 +23,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{DataType, DefaultOrdered};
@@ -44,9 +45,10 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::over_window::over_partition::AffectedRange;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
-    StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, Execute, Executor, Message, StreamExecutorError,
+    StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
@@ -56,14 +58,14 @@ use crate::task::AtomicU64Ref;
 /// - State table schema = output schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
 pub struct OverWindowExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     calls: Vec<WindowFuncCall>,
     partition_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
@@ -97,21 +99,9 @@ struct ExecutionStats {
     cache_lookup: u64,
 }
 
-impl<S: StateStore> Executor for OverWindowExecutor<S> {
+impl<S: StateStore> Execute for OverWindowExecutor<S> {
     fn execute(self: Box<Self>) -> crate::executor::BoxedMessageStream {
         self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> crate::executor::PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
@@ -144,10 +134,10 @@ impl<S: StateStore> ExecutorInner<S> {
 
 pub struct OverWindowExecutorArgs<S: StateStore> {
     pub actor_ctx: ActorContextRef,
-    pub info: ExecutorInfo,
 
-    pub input: BoxedExecutor,
+    pub input: Executor,
 
+    pub schema: Schema,
     pub calls: Vec<WindowFuncCall>,
     pub partition_key_indices: Vec<usize>,
     pub order_key_indices: Vec<usize>,
@@ -163,7 +153,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
 impl<S: StateStore> OverWindowExecutor<S> {
     pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
-        let input_info = args.input.info();
+        let input_info = args.input.info().clone();
         let input_schema = &input_info.schema;
 
         let has_unbounded_frame = args
@@ -181,7 +171,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let order_key_data_types = args
             .order_key_indices
             .iter()
-            .map(|i| input_schema.fields()[*i].data_type.clone())
+            .map(|i| input_schema[*i].data_type())
             .collect();
 
         let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
@@ -194,7 +184,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: args.info,
+                schema: args.schema,
                 calls: args.calls,
                 partition_key_indices: args.partition_key_indices,
                 order_key_indices: args.order_key_indices,
@@ -327,8 +317,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         // `input pk` => `Record`
         let mut key_change_update_buffer: BTreeMap<DefaultOrdered<OwnedRow>, Record<OwnedRow>> =
             BTreeMap::new();
-        let mut chunk_builder =
-            StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
+        let mut chunk_builder = StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
         // Prepare things needed by metrics.
         let actor_id = this.actor_ctx.id.to_string();
@@ -491,7 +480,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
 
-        for (first_frame_start, first_curr_key, last_curr_key, last_frame_end) in affected_ranges {
+        for AffectedRange {
+            first_frame_start,
+            first_curr_key,
+            last_curr_key,
+            last_frame_end,
+        } in affected_ranges
+        {
             assert!(first_frame_start <= first_curr_key);
             assert!(first_curr_key <= last_curr_key);
             assert!(last_curr_key <= last_frame_end);

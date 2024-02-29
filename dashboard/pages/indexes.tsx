@@ -20,7 +20,7 @@ import {
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
-import { getIndexes } from "./api/streaming"
+import { getIndexes } from "../lib/api/streaming"
 
 export default function Indexes() {
   return Relations("Indexes", getIndexes, [

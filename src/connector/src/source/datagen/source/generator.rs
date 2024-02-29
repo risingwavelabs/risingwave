@@ -13,16 +13,15 @@
 // limitations under the License.
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
+use crate::error::ConnectorResult;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
@@ -61,7 +60,7 @@ impl DatagenEventGenerator {
         split_id: SplitId,
         split_num: u64,
         split_index: u64,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         let partition_rows_per_second = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
@@ -78,7 +77,7 @@ impl DatagenEventGenerator {
         })
     }
 
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     pub async fn into_msg_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
@@ -158,7 +157,7 @@ impl DatagenEventGenerator {
         }
     }
 
-    #[try_stream(ok = StreamChunk, error = RwError)]
+    #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
     pub async fn into_native_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;

@@ -15,7 +15,6 @@
 use std::io;
 use std::marker::{Send, Sync};
 
-use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStreamError;
@@ -28,7 +27,7 @@ use tokio::sync::oneshot::error::RecvError;
 #[derive(Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
 #[thiserror_ext(newtype(name = ObjectError, backtrace, report_debug))]
 pub enum ObjectErrorInner {
-    #[error("s3 error: {}", DisplayErrorContext(&**.0))]
+    #[error("s3 error: {0}")]
     S3(#[source] BoxedError),
     #[error("disk error: {msg}")]
     Disk {
@@ -43,6 +42,9 @@ pub enum ObjectErrorInner {
     #[error("Internal error: {0}")]
     #[construct(skip)]
     Internal(String),
+    #[cfg(madsim)]
+    #[error(transparent)]
+    Sim(#[from] crate::object::sim::SimError),
 }
 
 impl ObjectError {
@@ -80,6 +82,10 @@ impl ObjectError {
             ObjectErrorInner::Mem(e) => {
                 return e.is_object_not_found_error();
             }
+            #[cfg(madsim)]
+            ObjectErrorInner::Sim(e) => {
+                return e.is_object_not_found_error();
+            }
             _ => {}
         };
         false
@@ -105,6 +111,13 @@ impl From<RecvError> for ObjectError {
 impl From<ByteStreamError> for ObjectError {
     fn from(e: ByteStreamError) -> Self {
         ObjectErrorInner::Internal(e.to_report_string()).into()
+    }
+}
+
+#[cfg(madsim)]
+impl From<std::io::Error> for ObjectError {
+    fn from(e: std::io::Error) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
     }
 }
 

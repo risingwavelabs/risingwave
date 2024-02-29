@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_not_implemented, not_implemented};
@@ -26,7 +25,9 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -386,11 +387,19 @@ impl Binder {
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
         // Special check for sql udf
-        // Note: This is specific to anonymous sql udf, since the
+        // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
-            return Ok(expr.clone());
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
+                return Ok(expr.clone());
+            }
+            // Same as `bind_column`, the error message here
+            // help with hint display when invalid definition occurs
+            return Err(ErrorCode::BindError(format!(
+                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
+            ))
+            .into());
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
@@ -469,6 +478,60 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// The optimization check for the following case-when expression pattern
+    /// e.g., select case 1 when (...) then (...) else (...) end;
+    fn check_constant_case_when_optimization(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        operand: Option<Box<Expr>>,
+        fallback: Option<ExprImpl>,
+        constant_case_when_eval_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        // The operand value to be compared later
+        let operand_value;
+
+        if let Some(operand) = operand {
+            let Ok(operand) = self.bind_expr_inner(*operand) else {
+                return false;
+            };
+            if !operand.is_const() {
+                return false;
+            }
+            operand_value = operand;
+        } else {
+            return false;
+        }
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::Value(_) = condition.clone() {
+                let Ok(res) = self.bind_expr_inner(condition.clone()) else {
+                    return false;
+                };
+                // Found a match
+                if res == operand_value {
+                    constant_case_when_eval_inputs.push(result);
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        // Otherwise this will eventually go through fallback arm
+        debug_assert!(
+            constant_case_when_eval_inputs.is_empty(),
+            "expect `inputs` to be empty"
+        );
+
+        let Some(fallback) = fallback else {
+            return false;
+        };
+
+        constant_case_when_eval_inputs.push(fallback);
+        true
+    }
+
     /// The helper function to check if the current case-when
     /// expression in `bind_case` could be optimized
     /// into `ConstantLookupExpression`
@@ -491,6 +554,12 @@ impl Binder {
             let Ok(operand) = self.bind_expr_inner(*operand) else {
                 return false;
             };
+            // This optimization should be done in subsequent optimization phase
+            // if the operand is const
+            // e.g., select case 1 when 1 then 114514 else 1919810 end;
+            if operand.is_const() {
+                return false;
+            }
             constant_lookup_inputs.push(operand);
         } else {
             return false;
@@ -504,7 +573,7 @@ impl Binder {
                 constant_lookup_inputs.push(input);
             } else {
                 // If at least one condition is not in the simple form / not constant,
-                // we can NOT do the subsequent optimization then
+                // we can NOT do the subsequent optimization pass
                 return false;
             }
 
@@ -536,6 +605,27 @@ impl Binder {
             .transpose()?;
 
         let mut constant_lookup_inputs = Vec::new();
+        let mut constant_case_when_eval_inputs = Vec::new();
+
+        let constant_case_when_flag = self.check_constant_case_when_optimization(
+            conditions.clone(),
+            results_expr.clone(),
+            operand.clone(),
+            else_result_expr.clone(),
+            &mut constant_case_when_eval_inputs,
+        );
+
+        if constant_case_when_flag {
+            // Sanity check
+            if constant_case_when_eval_inputs.len() != 1 {
+                return Err(ErrorCode::BindError(
+                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_string()
+                )
+                .into());
+            }
+            // Directly return the first element of the vector
+            return Ok(constant_case_when_eval_inputs[0].take());
+        }
 
         // See if the case-when expression can be optimized
         let optimize_flag = self.check_bind_case_optimization(
@@ -610,23 +700,9 @@ impl Binder {
         match &data_type {
             // Casting to Regclass type means getting the oid of expr.
             // See https://www.postgresql.org/docs/current/datatype-oid.html.
-            // Currently only string liter expr is supported since we cannot handle subquery in join
-            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
-            // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                match input.return_type() {
-                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new_unchecked(
-                            ExprType::CastRegclass,
-                            vec![input],
-                            DataType::Int32,
-                        ),
-                    ))),
-                    DataType::Int32 => Ok(input),
-                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
-                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-                }
+                Ok(input.cast_to_regclass()?)
             }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;
@@ -701,7 +777,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
-        additional_columns: AdditionalColumn { column_type: None },
+        additional_column: AdditionalColumn { column_type: None },
         version: ColumnDescVersion::Pr13707,
     })
 }

@@ -15,7 +15,6 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use anyhow::anyhow;
 use apache_avro::schema::{DecimalSchema, RecordSchema};
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
@@ -23,14 +22,15 @@ use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use super::{Access, AccessError, AccessResult};
+use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
+use crate::error::ConnectorResult;
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
@@ -136,26 +136,25 @@ impl<'a> AvroParseOptions<'a> {
                         .iter()
                         .find(|field| field.0 == field_name)
                         .map(|field| &field.1)
+                        .ok_or_else(|| {
+                            uncategorized!("`{field_name}` field not found in VariableScaleDecimal")
+                        })
                 };
-                let scale = match find_in_records("scale").ok_or_else(|| {
-                    AccessError::Other(anyhow!("scale field not found in VariableScaleDecimal"))
-                })? {
-                    Value::Int(scale) => Ok(*scale),
-                    avro_value => Err(AccessError::Other(anyhow!(
+                let scale = match find_in_records("scale")? {
+                    Value::Int(scale) => *scale,
+                    avro_value => bail_uncategorized!(
                         "scale field in VariableScaleDecimal is not int, got {:?}",
                         avro_value
-                    ))),
-                }?;
+                    ),
+                };
 
-                let value: BigInt = match find_in_records("value").ok_or_else(|| {
-                    AccessError::Other(anyhow!("value field not found in VariableScaleDecimal"))
-                })? {
-                    Value::Bytes(bytes) => Ok(BigInt::from_signed_bytes_be(bytes)),
-                    avro_value => Err(AccessError::Other(anyhow!(
+                let value: BigInt = match find_in_records("value")? {
+                    Value::Bytes(bytes) => BigInt::from_signed_bytes_be(bytes),
+                    avro_value => bail_uncategorized!(
                         "value field in VariableScaleDecimal is not bytes, got {:?}",
                         avro_value
-                    ))),
-                }?;
+                    ),
+                };
 
                 let negative = value.sign() == Sign::Minus;
                 let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1)?;
@@ -196,9 +195,9 @@ impl<'a> AvroParseOptions<'a> {
             // ---- TimestampTz -----
             (Some(DataType::Timestamptz) | None, Value::TimestampMillis(ms)) => {
                 Timestamptz::from_millis(*ms)
-                    .ok_or(AccessError::Other(anyhow!(
-                        "timestamptz with milliseconds {ms} * 1000 is out of range",
-                    )))?
+                    .ok_or_else(|| {
+                        uncategorized!("timestamptz with milliseconds {ms} * 1000 is out of range")
+                    })?
                     .into()
             }
             (Some(DataType::Timestamptz) | None, Value::TimestampMicros(us)) => {
@@ -336,7 +335,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     _precision: usize,
     scale: usize,
-) -> RwResult<rust_decimal::Decimal> {
+) -> AccessResult<rust_decimal::Decimal> {
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
@@ -350,7 +349,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)> {
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
     match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
@@ -383,11 +382,11 @@ pub(crate) fn extract_decimal(bytes: Vec<u8>) -> anyhow::Result<(u32, u32, u32)>
             let lo = u32::from_be_bytes(bytes[mid_end..].to_owned().try_into().unwrap());
             Ok((lo, mid, hi))
         }
-        _ => Err(anyhow!("decimal bytes len: {:?} > 12", bytes.len())),
+        _ => bail_uncategorized!("invalid decimal bytes length {}", bytes.len()),
     }
 }
 
-pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
+pub fn avro_schema_skip_union(schema: &Schema) -> ConnectorResult<&Schema> {
     match schema {
         Schema::Union(union_schema) => {
             let inner_schema = union_schema
@@ -406,7 +405,7 @@ pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
 pub fn avro_extract_field_schema<'a>(
     schema: &'a Schema,
     name: Option<&'a str>,
-) -> anyhow::Result<&'a Schema> {
+) -> ConnectorResult<&'a Schema> {
     match schema {
         Schema::Record(RecordSchema { fields, lookup, .. }) => {
             let name =
@@ -421,7 +420,7 @@ pub fn avro_extract_field_schema<'a>(
         }
         Schema::Array(schema) => Ok(schema),
         Schema::Union(_) => avro_schema_skip_union(schema),
-        _ => Err(anyhow::format_err!("avro schema is not a record or array")),
+        _ => bail!("avro schema is not a record or array"),
     }
 }
 
@@ -432,7 +431,6 @@ pub(crate) fn unix_epoch_days() -> i32 {
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::error::{ErrorCode, RwError};
     use risingwave_common::types::{Decimal, Timestamptz};
 
     use super::*;
@@ -485,13 +483,13 @@ mod tests {
         value: Value,
         value_schema: &Schema,
         shape: &DataType,
-    ) -> RwResult<Datum> {
+    ) -> crate::error::ConnectorResult<Datum> {
         AvroParseOptions {
             schema: Some(value_schema),
             relax_numeric: true,
         }
         .parse(&value, Some(shape))
-        .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{:?}", err))))
+        .map_err(Into::into)
     }
 
     #[test]

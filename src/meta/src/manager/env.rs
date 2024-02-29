@@ -45,13 +45,13 @@ use crate::MetaResult;
 #[derive(Clone)]
 pub struct MetaSrvEnv {
     /// id generator manager.
-    id_gen_manager: IdGeneratorManagerRef,
+    id_gen_manager: Option<IdGeneratorManagerRef>,
 
     /// sql id generator manager.
     sql_id_gen_manager: Option<SqlIdGeneratorManagerRef>,
 
     /// meta store.
-    meta_store: MetaStoreRef,
+    meta_store: Option<MetaStoreRef>,
 
     /// sql meta store.
     meta_store_sql: Option<SqlMetaStore>,
@@ -68,16 +68,13 @@ pub struct MetaSrvEnv {
     event_log_manager: EventLogMangerRef,
 
     /// system param manager.
-    system_params_manager: SystemParamsManagerRef,
+    system_params_manager: Option<SystemParamsManagerRef>,
 
     /// system param controller.
     system_params_controller: Option<SystemParamsControllerRef>,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
-
-    /// Whether the cluster is launched for the first time.
-    cluster_first_launch: bool,
 
     /// Client to connector node. `None` if endpoint unspecified or unable to connect.
     connector_client: Option<ConnectorClient>,
@@ -94,11 +91,8 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
-    /// Whether to enable the scale-in feature when compute-node is removed.
-    pub enable_scale_in_when_recovery: bool,
-    /// Whether to enable the auto-scaling feature when compute-node is joined.
-    /// The semantics of this configuration will be expanded in the future to control the automatic scaling of the entire cluster.
-    pub enable_automatic_parallelism_control: bool,
+    /// Whether to disable the auto-scaling feature.
+    pub disable_automatic_parallelism_control: bool,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -226,8 +220,7 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            enable_scale_in_when_recovery: false,
-            enable_automatic_parallelism_control: false,
+            disable_automatic_parallelism_control: false,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
@@ -280,38 +273,50 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         init_system_params: SystemParams,
-        meta_store: MetaStoreRef,
+        meta_store: Option<MetaStoreRef>,
         meta_store_sql: Option<SqlMetaStore>,
     ) -> MetaResult<Self> {
-        // change to sync after refactor `IdGeneratorManager::new` sync.
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
+        let notification_manager =
+            Arc::new(NotificationManager::new(meta_store.clone(), meta_store_sql.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let (mut cluster_id, cluster_first_launch) =
-            if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
-                (id, false)
-            } else {
-                (ClusterId::new(), true)
-            };
-        let system_params_manager = Arc::new(
-            SystemParamsManager::new(
-                meta_store.clone(),
-                notification_manager.clone(),
-                init_system_params.clone(),
-                cluster_first_launch,
-            )
-            .await?,
-        );
-        // TODO: remove `cluster_first_launch` and check equality of cluster id stored in hummock to
-        // make sure the data dir of hummock is not used by another cluster.
+        let stream_client_pool = Arc::new(StreamClientPool::default());
+
+        let (id_gen_manager, mut cluster_id, system_params_manager) = match meta_store.clone() {
+            Some(meta_store) => {
+                // change to sync after refactor `IdGeneratorManager::new` sync.
+                let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+                let (cluster_id, cluster_first_launch) =
+                    if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
+                        (id, false)
+                    } else {
+                        (ClusterId::new(), true)
+                    };
+                let system_params_manager = Arc::new(
+                    SystemParamsManager::new(
+                        meta_store.clone(),
+                        notification_manager.clone(),
+                        init_system_params.clone(),
+                        cluster_first_launch,
+                    )
+                    .await?,
+                );
+                (
+                    Some(id_gen_manager),
+                    Some(cluster_id),
+                    Some(system_params_manager),
+                )
+            }
+            None => (None, None, None),
+        };
         let system_params_controller = match &meta_store_sql {
             Some(store) => {
-                cluster_id = Cluster::find()
-                    .one(&store.conn)
-                    .await?
-                    .map(|c| c.cluster_id.to_string().into())
-                    .unwrap();
+                cluster_id = Some(
+                    Cluster::find()
+                        .one(&store.conn)
+                        .await?
+                        .map(|c| c.cluster_id.to_string().into())
+                        .unwrap(),
+                );
                 Some(Arc::new(
                     SystemParamsController::new(
                         store.clone(),
@@ -349,8 +354,7 @@ impl MetaSrvEnv {
             event_log_manager,
             system_params_manager,
             system_params_controller,
-            cluster_id,
-            cluster_first_launch,
+            cluster_id: cluster_id.unwrap(),
             connector_client,
             opts: opts.into(),
             hummock_seq,
@@ -358,23 +362,23 @@ impl MetaSrvEnv {
     }
 
     pub fn meta_store_ref(&self) -> MetaStoreRef {
-        self.meta_store.clone()
+        self.meta_store.clone().unwrap()
     }
 
-    pub fn meta_store(&self) -> &MetaStoreRef {
-        &self.meta_store
+    pub fn meta_store_checked(&self) -> &MetaStoreRef {
+        self.meta_store.as_ref().unwrap()
+    }
+
+    pub fn meta_store(&self) -> Option<&MetaStoreRef> {
+        self.meta_store.as_ref()
     }
 
     pub fn sql_meta_store(&self) -> Option<SqlMetaStore> {
         self.meta_store_sql.clone()
     }
 
-    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef {
-        self.id_gen_manager.clone()
-    }
-
     pub fn id_gen_manager(&self) -> &IdGeneratorManager {
-        self.id_gen_manager.deref()
+        self.id_gen_manager.as_ref().unwrap()
     }
 
     pub fn sql_id_gen_manager_ref(&self) -> Option<SqlIdGeneratorManagerRef> {
@@ -401,15 +405,19 @@ impl MetaSrvEnv {
         if let Some(system_ctl) = &self.system_params_controller {
             return system_ctl.get_params().await;
         }
-        self.system_params_manager.get_params().await
+        self.system_params_manager
+            .as_ref()
+            .unwrap()
+            .get_params()
+            .await
     }
 
-    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef {
+    pub fn system_params_manager_ref(&self) -> Option<SystemParamsManagerRef> {
         self.system_params_manager.clone()
     }
 
-    pub fn system_params_manager(&self) -> &SystemParamsManager {
-        self.system_params_manager.deref()
+    pub fn system_params_manager(&self) -> Option<&SystemParamsManagerRef> {
+        self.system_params_manager.as_ref()
     }
 
     pub fn system_params_controller_ref(&self) -> Option<SystemParamsControllerRef> {
@@ -432,10 +440,6 @@ impl MetaSrvEnv {
         &self.cluster_id
     }
 
-    pub fn cluster_first_launch(&self) -> bool {
-        self.cluster_first_launch
-    }
-
     pub fn connector_client(&self) -> Option<ConnectorClient> {
         self.connector_client.clone()
     }
@@ -455,18 +459,19 @@ impl MetaSrvEnv {
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         use crate::manager::event_log::EventLogManger;
 
-        // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         #[cfg(madsim)]
         let meta_store_sql: Option<SqlMetaStore> = None;
         #[cfg(not(madsim))]
         let meta_store_sql = Some(SqlMetaStore::for_test().await);
 
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
+        let id_gen_manager = Some(Arc::new(IdGeneratorManager::new(meta_store.clone()).await));
+        let notification_manager = Arc::new(
+            NotificationManager::new(Some(meta_store.clone()), meta_store_sql.clone()).await,
+        );
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
-        let (cluster_id, cluster_first_launch) = (ClusterId::new(), true);
+        let cluster_id = ClusterId::new();
         let system_params_manager = Arc::new(
             SystemParamsManager::new(
                 meta_store.clone(),
@@ -506,16 +511,15 @@ impl MetaSrvEnv {
         Self {
             id_gen_manager,
             sql_id_gen_manager,
-            meta_store,
+            meta_store: Some(meta_store),
             meta_store_sql,
             notification_manager,
             stream_client_pool,
             idle_manager,
             event_log_manager,
-            system_params_manager,
+            system_params_manager: Some(system_params_manager),
             system_params_controller,
             cluster_id,
-            cluster_first_launch,
             connector_client: None,
             opts,
             hummock_seq,

@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_s3::types::Object;
 use bytes::Bytes;
@@ -25,8 +25,9 @@ use futures::Stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorSuppressor, RwError};
+use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
@@ -34,6 +35,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
+use thiserror_ext::AsReport;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -44,6 +46,7 @@ use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
@@ -68,7 +71,9 @@ pub trait TryFromHashmap: Sized + UnknownFields {
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
 pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
-    type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
+    type Split: SplitMetaData
+        + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
+        + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
@@ -84,16 +89,16 @@ pub trait UnknownFields {
 
 impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
     fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
-        let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-        let res = serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))?;
+        let json_value = serde_json::to_value(props)?;
+        let res = serde_json::from_value::<P>(json_value)?;
 
         if !deny_unknown_fields || res.unknown_fields().is_empty() {
             Ok(res)
         } else {
-            Err(anyhow!(
+            bail!(
                 "Unknown fields in the WITH clause: {:?}",
                 res.unknown_fields()
-            ))
+            )
         }
     }
 }
@@ -132,12 +137,15 @@ pub struct SourceCtrlOpts {
     // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
     // in batch scenario
     pub chunk_size: usize,
+    /// Rate limit of source
+    pub rate_limit: Option<u32>,
 }
 
 impl Default for SourceCtrlOpts {
     fn default() -> Self {
         Self {
             chunk_size: MAX_CHUNK_SIZE,
+            rate_limit: None,
         }
     }
 }
@@ -149,7 +157,7 @@ pub struct SourceEnumeratorContext {
     pub connector_client: Option<ConnectorClient>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
@@ -172,6 +180,7 @@ impl SourceContext {
         source_ctrl_opts: SourceCtrlOpts,
         connector_client: Option<ConnectorClient>,
         connector_props: ConnectorProperties,
+        source_name: String,
     ) -> Self {
         Self {
             connector_client,
@@ -179,6 +188,7 @@ impl SourceContext {
                 actor_id,
                 source_id: table_id,
                 fragment_id,
+                source_name,
             },
             metrics,
             source_ctrl_opts,
@@ -196,6 +206,7 @@ impl SourceContext {
         connector_client: Option<ConnectorClient>,
         error_suppressor: Arc<Mutex<ErrorSuppressor>>,
         connector_props: ConnectorProperties,
+        source_name: String,
     ) -> Self {
         let mut ctx = Self::new(
             actor_id,
@@ -205,16 +216,17 @@ impl SourceContext {
             source_ctrl_opts,
             connector_client,
             connector_props,
+            source_name,
         );
         ctx.error_suppressor = Some(error_suppressor);
         ctx
     }
 
-    pub(crate) fn report_user_source_error(&self, e: RwError) {
+    pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
         if self.source_info.fragment_id == u32::MAX {
             return;
         }
-        let mut err_str = e.inner().to_string();
+        let mut err_str = e.to_report_string();
         if let Some(suppressor) = &self.error_suppressor
             && suppressor.lock().suppress_error(&err_str)
         {
@@ -235,12 +247,13 @@ impl SourceContext {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
+    pub source_name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -248,6 +261,7 @@ pub enum SourceFormat {
     #[default]
     Invalid,
     Native,
+    None,
     Debezium,
     DebeziumMongo,
     Maxwell,
@@ -261,6 +275,7 @@ pub enum SourceEncode {
     #[default]
     Invalid,
     Native,
+    None,
     Avro,
     Csv,
     Protobuf,
@@ -304,8 +319,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         };
         return Ok(SourceStruct::new(format, encode));
     }
-    let source_format = info.get_format().map_err(|e| anyhow!("{e:?}"))?;
-    let source_encode = info.get_row_encode().map_err(|e| anyhow!("{e:?}"))?;
+    let source_format = info.get_format()?;
+    let source_encode = info.get_row_encode()?;
     let (format, encode) = match (source_format, source_encode) {
         (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Protobuf) => {
@@ -321,6 +336,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
         (PbFormatType::Debezium, PbEncodeType::Avro) => {
             (SourceFormat::Debezium, SourceEncode::Avro)
         }
@@ -331,21 +347,22 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
         (format, encode) => {
-            return Err(anyhow!(
+            bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
                 format,
                 encode
-            ));
+            );
         }
     };
     Ok(SourceStruct::new(format, encode))
 }
 
-pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
-pub trait ChunkSourceStream = Stream<Item = Result<StreamChunk, RwError>> + Send + 'static;
-pub type BoxChunkSourceStream = BoxStream<'static, Result<StreamChunk, RwError>>;
-pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
+pub trait ChunkSourceStream =
+    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -361,7 +378,7 @@ pub trait SplitReader: Sized + Send {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>;
+    ) -> crate::error::ConnectorResult<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
 }
@@ -417,7 +434,7 @@ impl ConnectorProperties {
             PropType,
             PropType::try_from_hashmap(with_properties, deny_unknown_fields)
                 .map(ConnectorProperties::from),
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 
@@ -455,7 +472,7 @@ impl From<&SplitImpl> for ConnectorSplit {
 }
 
 impl TryFrom<&ConnectorSplit> for SplitImpl {
-    type Error = anyhow::Error;
+    type Error = crate::error::ConnectorError;
 
     fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
         match_source_name_str!(
@@ -467,7 +484,7 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
                 )
                 .map(Into::into)
             },
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 }
@@ -496,7 +513,7 @@ impl SplitImpl {
             split_type.to_lowercase().as_str(),
             PropType,
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 }
@@ -614,7 +631,7 @@ pub trait SplitMetaData: Sized {
 
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()>;
+    fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -715,8 +732,11 @@ mod tests {
 
         let props = ConnectorProperties::extract(props, true).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            assert!(k.common.broker_rewrite_map.is_some());
-            println!("{:?}", k.common.broker_rewrite_map);
+            let hashmap: HashMap<String, String> = hashmap! {
+                "b-1:9092".to_string() => "dns-1".to_string(),
+                "b-2:9092".to_string() => "dns-2".to_string(),
+            };
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
         } else {
             panic!("extract kafka config failed");
         }

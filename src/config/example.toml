@@ -25,8 +25,7 @@ enable_hummock_data_archive = false
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
-enable_scale_in_when_recovery = false
-enable_automatic_parallelism_control = false
+disable_automatic_parallelism_control = false
 meta_leader_lease_secs = 30
 default_parallelism = "Full"
 enable_compaction_deterministic = false
@@ -125,7 +124,7 @@ check_compaction_result = false
 max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
-mem_table_spill_threshold = 0
+mem_table_spill_threshold = 4194304
 
 [storage.data_file_cache]
 dir = ""
@@ -196,5 +195,4 @@ block_size_kb = 64
 bloom_false_positive = 0.001
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
-wasm_storage_url = "fs://.risingwave/data"
 enable_tracing = false

@@ -43,7 +43,7 @@ fn main() {
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
             let test_case_name = file_name.split('.').next().unwrap().to_string();
 
-            tests.push(Trial::test(format!("{test_case_name}_test"), move || {
+            tests.push(Trial::test(test_case_name, move || {
                 let path = test_data_dir().join("input").join(file_name);
 
                 let file_content = std::fs::read_to_string(&path).unwrap();

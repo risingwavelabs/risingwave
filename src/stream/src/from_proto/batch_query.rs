@@ -30,12 +30,12 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         if node.table_desc.is_none() {
             // used in sharing cdc source backfill as a dummy batch plan node
             let mut info = params.info;
             info.identity = "DummyBatchQueryExecutor".to_string();
-            return Ok(Box::new(DummyExecutor::new(info)));
+            return Ok((info, DummyExecutor).into());
         }
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
@@ -55,9 +55,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         );
         assert_eq!(table.schema().data_types(), params.info.schema.data_types());
 
-        let executor =
-            BatchQueryExecutor::new(table, params.env.config().developer.chunk_size, params.info);
-
-        Ok(executor.boxed())
+        let exec = BatchQueryExecutor::new(
+            table,
+            params.env.config().developer.chunk_size,
+            params.info.schema.clone(),
+        );
+        Ok((params.info, exec).into())
     }
 }

@@ -22,6 +22,7 @@ use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
+use crate::error::ConnectorResult;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -42,11 +43,11 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
     async fn new(
         properties: Src::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Src::new_enumerator(properties)
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Src>>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
 
         Ok(vec![empty_split])
@@ -54,7 +55,7 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
-    pub async fn list(&self) -> anyhow::Result<ObjectMetadataIter> {
+    pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
         let prefix = match &self.prefix {
             Some(prefix) => prefix,
             None => "",
@@ -100,5 +101,4 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         &self.matcher
     }
 }
-
-pub type ObjectMetadataIter = BoxStream<'static, anyhow::Result<FsPageItem>>;
+pub type ObjectMetadataIter = BoxStream<'static, ConnectorResult<FsPageItem>>;

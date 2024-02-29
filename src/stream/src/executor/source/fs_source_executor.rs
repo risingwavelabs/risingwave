@@ -22,9 +22,9 @@ use anyhow::anyhow;
 use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
@@ -49,7 +49,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source  for external
     stream_source_core: StreamSourceCore<S>,
@@ -70,7 +69,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -79,7 +77,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -107,6 +104,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             None,
             self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
+            self.stream_source_core.source_name.clone(),
         );
         source_desc
             .source
@@ -148,7 +146,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let mut target_state: Vec<SplitImpl> = Vec::new();
         let mut no_change_flag = true;
         for sc in rhs {
-            if let Some(s) = core.state_cache.get(&sc.id()) {
+            if let Some(s) = core.updated_splits_in_epoch.get(&sc.id()) {
                 let fs = s
                     .as_fs()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", s));
@@ -172,7 +170,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     sc
                 };
 
-                core.state_cache
+                core.updated_splits_in_epoch
                     .entry(state.id())
                     .or_insert_with(|| state.clone());
                 target_state.push(state);
@@ -200,7 +198,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error);
         stream.replace_data_stream(reader);
 
-        self.stream_source_core.stream_source_splits = target_state
+        self.stream_source_core.latest_split_info = target_state
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
@@ -214,7 +212,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
         let incompleted = core
-            .state_cache
+            .updated_splits_in_epoch
             .values()
             .filter(|split| {
                 let fs = split
@@ -226,7 +224,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .collect_vec();
 
         let completed = core
-            .state_cache
+            .updated_splits_in_epoch
             .values()
             .filter(|split| {
                 let fs = split
@@ -239,7 +237,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         if !incompleted.is_empty() {
             tracing::debug!(actor_id = self.actor_ctx.id, incompleted = ?incompleted, "take snapshot");
-            core.split_state_store.take_snapshot(incompleted).await?
+            core.split_state_store.set_states(incompleted).await?
         }
 
         if !completed.is_empty() {
@@ -249,7 +247,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // commit anyway, even if no message saved
         core.split_state_store.state_store.commit(epoch).await?;
 
-        core.state_cache.clear();
+        core.updated_splits_in_epoch.clear();
         Ok(())
     }
 
@@ -402,6 +400,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .with_label_values(&[
                                 self.actor_ctx.id.to_string().as_str(),
                                 self.stream_source_core.source_id.to_string().as_ref(),
+                                self.actor_ctx.fragment_id.to_string().as_str(),
                             ])
                             .inc_by(metric_row_per_barrier);
                         metric_row_per_barrier = 0;
@@ -437,17 +436,18 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         let state: Vec<(SplitId, SplitImpl)> = mapping
                             .iter()
                             .flat_map(|(id, offset)| {
-                                let origin_split =
-                                    self.stream_source_core.stream_source_splits.get_mut(id);
-
-                                origin_split.map(|split| {
-                                    split.update_in_place(offset.clone())?;
-                                    Ok::<_, anyhow::Error>((id.clone(), split.clone()))
-                                })
+                                self.stream_source_core.latest_split_info.get_mut(id).map(
+                                    |origin_split| {
+                                        origin_split.update_in_place(offset.clone())?;
+                                        Ok::<_, ConnectorError>((id.clone(), origin_split.clone()))
+                                    },
+                                )
                             })
                             .try_collect()?;
 
-                        self.stream_source_core.state_cache.extend(state);
+                        self.stream_source_core
+                            .updated_splits_in_epoch
+                            .extend(state);
                     }
 
                     self.metrics
@@ -456,6 +456,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             self.stream_source_core.source_id.to_string().as_ref(),
                             self.stream_source_core.source_name.as_ref(),
                             self.actor_ctx.id.to_string().as_str(),
+                            self.actor_ctx.fragment_id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
 
@@ -476,21 +477,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for FsSourceExecutor<S> {
+impl<S: StateStore> Execute for FsSourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -499,7 +488,6 @@ impl<S: StateStore> Debug for FsSourceExecutor<S> {
         f.debug_struct("FsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }

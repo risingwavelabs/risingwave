@@ -133,6 +133,7 @@ macro_rules! converts_generic {
             fn try_from(array: &ArrayImpl) -> Result<Self, Self::Error> {
                 match array {
                     $($ArrayImplPattern(a) => Ok(Arc::new(<$ArrowType>::try_from(a)?)),)*
+                    ArrayImpl::Timestamptz(a) => Ok(Arc::new(arrow_array::TimestampMicrosecondArray::try_from(a)?. with_timezone_utc())),
                     _ => todo!("unsupported array"),
                 }
             }
@@ -152,6 +153,21 @@ macro_rules! converts_generic {
                             .unwrap()
                             .try_into()?,
                     )),)*
+                    Timestamp(Microsecond, Some(_)) => Ok(ArrayImpl::Timestamptz(
+                        array
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampMicrosecondArray>()
+                            .unwrap()
+                            .try_into()?,
+                    )),
+                    // This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
+                    Decimal128(_, _) => Ok(ArrayImpl::Decimal(
+                        array
+                            .as_any()
+                            .downcast_ref::<arrow_array::Decimal128Array>()
+                            .unwrap()
+                            .try_into()?,
+                    )),
                     t => Err(ArrayError::from_arrow(format!("unsupported data type: {t:?}"))),
                 }
             }
@@ -173,7 +189,6 @@ converts_generic! {
     { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, None), ArrayImpl::Timestamp },
-    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, Some(_)), ArrayImpl::Timestamptz },
     { arrow_array::Time64MicrosecondArray, Time64(Microsecond), ArrayImpl::Time },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
@@ -496,6 +511,30 @@ impl From<&DecimalArray> for arrow_array::LargeBinaryArray {
             builder.append_option(value.map(|d| d.to_string()));
         }
         builder.finish()
+    }
+}
+
+// This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
+impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::Decimal128Array) -> Result<Self, Self::Error> {
+        if array.scale() < 0 {
+            bail!("support negative scale for arrow decimal")
+        }
+        let from_arrow = |value| {
+            const NAN: i128 = i128::MIN + 1;
+            match value {
+                NAN => Decimal::NaN,
+                i128::MAX => Decimal::PositiveInf,
+                i128::MIN => Decimal::NegativeInf,
+                _ => Decimal::Normalized(rust_decimal::Decimal::from_i128_with_scale(
+                    value,
+                    array.scale() as u32,
+                )),
+            }
+        };
+        Ok(array.iter().map(|o| o.map(from_arrow)).collect())
     }
 }
 

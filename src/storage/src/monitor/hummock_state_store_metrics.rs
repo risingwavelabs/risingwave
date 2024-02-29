@@ -291,11 +291,6 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let spill_task_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            spill_task_counts,
-            metric_level,
-        );
 
         let spill_task_size = register_int_counter_vec_with_registry!(
             "state_store_spill_task_size",
@@ -304,11 +299,6 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let spill_task_size = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            spill_task_size,
-            metric_level,
-        );
 
         let uploader_uploading_task_size = GenericGauge::new(
             "state_store_uploader_uploading_task_size",
@@ -327,10 +317,11 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let read_req_bloom_filter_positive_counts =
-            RelabeledGuardedIntCounterVec::with_metric_level(
+            RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
                 MetricLevel::Info,
                 read_req_bloom_filter_positive_counts,
                 metric_level,
+                1,
             );
 
         let read_req_positive_but_non_exist_counts = register_guarded_int_counter_vec_with_registry!(

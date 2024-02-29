@@ -26,11 +26,12 @@ use itertools::Itertools;
 use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
-use risingwave_common::error::RwError;
+use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
+use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
@@ -47,6 +48,7 @@ use uuid::Uuid;
 use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
+use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
@@ -133,11 +135,7 @@ pub struct BatchPlanFragmenter {
     worker_node_manager: WorkerNodeSelector,
     catalog_reader: CatalogReader,
 
-    /// if batch_parallelism is None, it means no limit, we will use the available nodes count as
-    /// parallelism.
-    /// if batch_parallelism is Some(num), we will use the min(num, the available
-    /// nodes count) as parallelism.
-    batch_parallelism: Option<NonZeroU64>,
+    batch_parallelism: usize,
 
     stage_graph_builder: Option<StageGraphBuilder>,
     stage_graph: Option<StageGraph>,
@@ -158,13 +156,28 @@ impl BatchPlanFragmenter {
         batch_parallelism: Option<NonZeroU64>,
         batch_node: PlanRef,
     ) -> SchedulerResult<Self> {
+        // if batch_parallelism is None, it means no limit, we will use the available nodes count as
+        // parallelism.
+        // if batch_parallelism is Some(num), we will use the min(num, the available
+        // nodes count) as parallelism.
+        let batch_parallelism = if let Some(num) = batch_parallelism {
+            // can be 0 if no available serving worker
+            min(
+                num.get() as usize,
+                worker_node_manager.schedule_unit_count(),
+            )
+        } else {
+            // can be 0 if no available serving worker
+            worker_node_manager.schedule_unit_count()
+        };
+
         let mut plan_fragmenter = Self {
             query_id: Default::default(),
-            stage_graph_builder: Some(StageGraphBuilder::new()),
             next_stage_id: 0,
             worker_node_manager,
             catalog_reader,
             batch_parallelism,
+            stage_graph_builder: Some(StageGraphBuilder::new(batch_parallelism)),
             stage_graph: None,
         };
         plan_fragmenter.split_into_stage(batch_node)?;
@@ -267,7 +280,7 @@ impl SourceScanInfo {
         Self::Incomplete(fetch_info)
     }
 
-    pub async fn complete(self) -> SchedulerResult<Self> {
+    pub async fn complete(self, batch_parallelism: usize) -> SchedulerResult<Self> {
         let fetch_info = match self {
             SourceScanInfo::Incomplete(fetch_info) => fetch_info,
             SourceScanInfo::Complete(_) => {
@@ -309,6 +322,20 @@ impl SourceScanInfo {
                 let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
 
                 Ok(SourceScanInfo::Complete(res))
+            }
+            ConnectorProperties::Iceberg(prop) => {
+                let iceberg_enumerator =
+                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
+                        .await?;
+
+                let split_info = iceberg_enumerator
+                    .list_splits_batch(batch_parallelism)
+                    .await?
+                    .into_iter()
+                    .map(SplitImpl::Iceberg)
+                    .collect_vec();
+
+                Ok(SourceScanInfo::Complete(split_info))
             }
             _ => Err(SchedulerError::Internal(anyhow!(
                 "Unsupported to query directly from this source"
@@ -577,6 +604,8 @@ pub struct StageGraph {
     child_edges: HashMap<StageId, HashSet<StageId>>,
     /// Traverse from down to top. Used in schedule each stage.
     parent_edges: HashMap<StageId, HashSet<StageId>>,
+
+    batch_parallelism: usize,
 }
 
 impl StageGraph {
@@ -625,6 +654,7 @@ impl StageGraph {
             stages: complete_stages,
             child_edges: self.child_edges,
             parent_edges: self.parent_edges,
+            batch_parallelism: self.batch_parallelism,
         })
     }
 
@@ -654,7 +684,7 @@ impl StageGraph {
                 .as_ref()
                 .unwrap()
                 .clone()
-                .complete()
+                .complete(self.batch_parallelism)
                 .await?;
 
             let complete_stage = Arc::new(stage.clone_with_exchange_info_and_complete_source_info(
@@ -700,14 +730,16 @@ struct StageGraphBuilder {
     stages: HashMap<StageId, QueryStageRef>,
     child_edges: HashMap<StageId, HashSet<StageId>>,
     parent_edges: HashMap<StageId, HashSet<StageId>>,
+    batch_parallelism: usize,
 }
 
 impl StageGraphBuilder {
-    pub fn new() -> Self {
+    pub fn new(batch_parallelism: usize) -> Self {
         Self {
             stages: HashMap::new(),
             child_edges: HashMap::new(),
             parent_edges: HashMap::new(),
+            batch_parallelism,
         }
     }
 
@@ -717,6 +749,7 @@ impl StageGraphBuilder {
             stages: self.stages,
             child_edges: self.child_edges,
             parent_edges: self.parent_edges,
+            batch_parallelism: self.batch_parallelism,
         }
     }
 
@@ -821,15 +854,8 @@ impl BatchPlanFragmenter {
                     lookup_join_parallelism
                 } else if source_info.is_some() {
                     0
-                } else if let Some(num) = self.batch_parallelism {
-                    // can be 0 if no available serving worker
-                    min(
-                        num.get() as usize,
-                        self.worker_node_manager.schedule_unit_count(),
-                    )
                 } else {
-                    // can be 0 if no available serving worker
-                    self.worker_node_manager.schedule_unit_count()
+                    self.batch_parallelism
                 }
             }
         };
@@ -981,7 +1007,8 @@ impl BatchPlanFragmenter {
             let vnode_mapping = self
                 .worker_node_manager
                 .fragment_mapping(table_catalog.fragment_id)?;
-            let partitions = derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
+            let partitions =
+                derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)?;
             let info = TableScanInfo::new(name, partitions);
             Ok(Some(info))
         } else {
@@ -1046,12 +1073,12 @@ fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
     vnode_mapping: &ParallelUnitMapping,
-) -> HashMap<ParallelUnitId, TablePartitionInfo> {
+) -> SchedulerResult<HashMap<ParallelUnitId, TablePartitionInfo>> {
     let num_vnodes = vnode_mapping.len();
     let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
-        return vnode_mapping
+        return Ok(vnode_mapping
             .to_bitmaps()
             .into_iter()
             .map(|(k, vnode_bitmap)| {
@@ -1063,14 +1090,16 @@ fn derive_partitions(
                     },
                 )
             })
-            .collect();
+            .collect());
     }
 
+    let table_distribution = TableDistribution::new_from_storage_table_desc(
+        Some(TableDistribution::all_vnodes()),
+        &table_desc.try_to_protobuf()?,
+    );
+
     for scan_range in scan_ranges {
-        let vnode = scan_range.try_compute_vnode(
-            &table_desc.distribution_key,
-            &table_desc.order_column_indices(),
-        );
+        let vnode = scan_range.try_compute_vnode(&table_distribution);
         match vnode {
             None => {
                 // put this scan_range to all partitions
@@ -1099,7 +1128,7 @@ fn derive_partitions(
         }
     }
 
-    partitions
+    Ok(partitions
         .into_iter()
         .map(|(k, (bitmap, scan_ranges))| {
             (
@@ -1110,7 +1139,7 @@ fn derive_partitions(
                 },
             )
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
