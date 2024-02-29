@@ -28,7 +28,7 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Run clippy check (release)"
-cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
+cargo clippy --release --all-targets --features "rw-static-link,enable_test_epoch_in_release" --locked -- -D warnings
 
 echo "--- Show sccache stats"
 sccache --show-stats
