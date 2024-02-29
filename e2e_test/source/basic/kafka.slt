@@ -905,5 +905,6 @@ drop table dbz_ignore_case_json;
 
 statement ok
 drop table source_with_rdkafka_props;
+
 statement ok
 drop table debezium_ignore_key;
