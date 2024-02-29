@@ -95,6 +95,7 @@ drop function series;
 # inlined rust function
 statement ok
 create function gcd(int, int) returns int language rust as $$
+    #[arrow_udf::function("gcd(int, int) -> int")]
     fn gcd(mut a: i32, mut b: i32) -> i32 {
         while b != 0 {
             let t = b;
