@@ -250,3 +250,46 @@
   expected_outputs:
   - logical_plan
   - batch_plan
+- id: case_when_optimizable_pattern_basic
+  before:
+  - create_table
+  sql: |
+    select
+      case
+        when c1 = 1 then 'one'
+        when c1 = 2 then 'two'
+        when c1 = 3 then 'three'
+        when c1 = 4 then 'four'
+        when c1 = 5 then 'five'
+        when c1 = 6 then 'six'
+        when c1 = 7 then 'seven'
+        when c1 = 8 then 'eight'
+        when c1 = 9 then 'nine'
+        when c1 = 10 then 'ten'
+        when c1 = 11 then 'eleven'
+        when c1 = 12 then 'twelve'
+        when c1 = 13 then 'thirteen'
+        when c1 = 14 then 'fourteen'
+        when c1 = 15 then 'fifteen'
+        when c1 = 16 then 'sixteen'
+        when c1 = 17 then 'seventeen'
+        when c1 = 18 then 'eighteen'
+        when c1 = 19 then 'nineteen'
+        when c1 = 20 then 'twenty'
+        when c1 = 21 then 'twenty-one'
+        when c1 = 22 then 'twenty-two'
+        when c1 = 23 then 'twenty-three'
+        when c1 = 24 then 'twenty-four'
+        when c1 = 25 then 'twenty-five'
+        when c1 = 26 then 'twenty-six'
+        when c1 = 27 then 'twenty-seven'
+        when c1 = 28 then 'twenty-eight'
+        when c1 = 29 then 'twenty-nine'
+        when c1 = 30 then 'thirty'
+        when c1 = 31 then 'thirty-one'
+        else 'other'
+      end 
+    from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
