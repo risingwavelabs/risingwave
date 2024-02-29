@@ -658,6 +658,8 @@ dependencies = [
 [[package]]
 name = "arrow-udf-wasm"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a225a8c4c3ef83e4e5268a3954d5f483f167f39d9476d58e6abbbffafd833815"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -13979,7 +13981,6 @@ dependencies = [
  "ring 0.16.20",
  "rust_decimal",
  "rustc-hash",
- "rustix 0.38.31",
  "scopeguard",
  "sea-orm",
  "sea-query",
