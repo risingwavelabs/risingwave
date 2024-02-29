@@ -901,6 +901,11 @@ impl HummockManager {
             &group_config.compaction_config,
         )
         .await?;
+        let selector_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["level_selector"])
+            .start_timer();
 
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
@@ -940,11 +945,6 @@ impl HummockManager {
             .into_iter()
             .filter(|(table_id, _)| member_table_ids.contains(table_id))
             .collect();
-        let selector_timer = self
-            .metrics
-            .hummock_manager_latency
-            .with_label_values(&["level_selector"])
-            .start_timer();
 
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
@@ -1453,7 +1453,11 @@ impl HummockManager {
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
                 current_version.apply_version_delta(&version_delta);
-                version_timer.observe_duration();
+                let _commit_timer = self
+                    .metrics
+                    .hummock_manager_latency
+                    .with_label_values(&["commit_version_delta"])
+                    .start_timer();
                 commit_multi_var!(
                     self.env.meta_store(),
                     self.sql_meta_store(),
@@ -1473,7 +1477,6 @@ impl HummockManager {
                     self.notify_last_version_delta(versioning);
                 }
             } else {
-                version_timer.observe_duration();
                 // The compaction task is cancelled or failed.
                 commit_multi_var!(
                     self.env.meta_store(),
@@ -1483,6 +1486,7 @@ impl HummockManager {
                 )?;
             }
         }
+        version_timer.observe_duration();
 
         let task_status = compact_task.task_status();
         let task_status_label = task_status.as_str_name();
@@ -1575,6 +1579,11 @@ impl HummockManager {
         for s in &mut sstables {
             add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
+        let commit_version_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["commit_version"])
+            .start_timer();
 
         let old_version = &versioning.current_version;
         let mut new_version_delta = create_trx_wrapper!(
@@ -1643,11 +1652,6 @@ impl HummockManager {
             }
         }
         let mut new_sst_id = next_sstable_object_id(&self.env, new_sst_id_number).await?;
-        let commit_version_timer = self
-            .metrics
-            .hummock_manager_latency
-            .with_label_values(&["commit_version"])
-            .start_timer();
         let mut branched_ssts = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapTransactionWrapper,
@@ -1741,12 +1745,18 @@ impl HummockManager {
                 .with_label_values(&[table_id_str.as_str()])
                 .inc_by(stats_value as u64);
         }
+        let commit_etcd_timer = self
+            .metrics
+            .hummock_manager_latency
+            .with_label_values(&["commit_etcd"])
+            .start_timer();
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
             new_version_delta,
             version_stats
         )?;
+        commit_etcd_timer.observe_duration();
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
         commit_version_timer.observe_duration();
