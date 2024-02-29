@@ -36,11 +36,10 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
-    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
@@ -983,6 +982,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 CITUS_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
                 ),
+                MONGODB_CDC_CONNECTOR => hashmap!(
+                    Format::DebeziumMongo => vec![Encode::Json],
+                ),
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
                 ),
@@ -1158,17 +1160,7 @@ pub async fn check_iceberg_source(
         )));
     };
 
-    let iceberg_config = IcebergConfig {
-        database_name: properties.database_name,
-        table_name: properties.table_name,
-        catalog_type: Some(properties.catalog_type),
-        path: properties.warehouse_path,
-        endpoint: Some(properties.endpoint),
-        access_key: properties.s3_access,
-        secret_key: properties.s3_secret,
-        region: Some(properties.region_name),
-        ..Default::default()
-    };
+    let iceberg_config = properties.to_iceberg_config();
 
     let schema = Schema {
         fields: columns
@@ -1203,7 +1195,11 @@ pub async fn check_iceberg_source(
         .collect::<Vec<_>>();
     let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
-    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
+        &schema,
+        &new_iceberg_schema,
+        true,
+    )?;
 
     Ok(())
 }

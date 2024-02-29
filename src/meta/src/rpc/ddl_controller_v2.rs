@@ -95,6 +95,15 @@ impl DdlController {
             Ok(version) => Ok(version),
             Err(err) => {
                 tracing::error!(id = job_id, error = ?err.as_report(), "failed to create streaming job");
+                let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
+                    id: streaming_job.id(),
+                    name: streaming_job.name(),
+                    definition: streaming_job.definition(),
+                    error: err.as_report().to_string(),
+                };
+                self.env.event_log_manager_ref().add_event_logs(vec![
+                    risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
+                ]);
                 let aborted = mgr
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id as _, false)

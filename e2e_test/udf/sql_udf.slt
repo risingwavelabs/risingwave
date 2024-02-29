@@ -280,23 +280,109 @@ $1 + 114514 + $1
 
 # Named sql udf with invalid parameter in body definition
 # Will be rejected at creation time
-statement error failed to find named parameter aa
+statement error
 create function unknown_parameter(a INT) returns int language sql as 'select a + aa + a';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter aa
+In SQL UDF definition: `select a + aa + a`
+                                   ^^
+
+
+# With unnamed parameter
+statement error
+create function unnamed_param_hint(INT, INT) returns int language sql as 'select $1 + $3 + $2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find unnamed parameter $3
+In SQL UDF definition: `select $1 + $3 + $2`
+                                    ^^
+
+
+# A mixture of both
+statement error
+create function mix_hint(INT, aa INT, INT) returns int language sql as 'select $1 + aa + a + $2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter a
+In SQL UDF definition: `select $1 + aa + a + $2`
+                                         ^
+
+
+# Long invalid parameter
+statement error
+create function long_invalid_param(i_am_valid INT) returns int language sql as
+  'select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_
+In SQL UDF definition: `select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid`
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# sql udf with non-existent function
+statement error
+create function call_non_existent_function(INT) returns int language sql as 'select 1 + non_existent(1) + 1';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+function non_existent(integer) does not exist
+In SQL UDF definition: `select 1 + non_existent(1) + 1`
+                                   ^^^^^^^^^^^^
+
+
+# First display invalid parameter
+# if not found, try displaying non-existent functions
+# if still not found, display default error message without hint
+statement error
+create function param_func_mix(a INT, b INT) returns int language sql as 'select a + b + c + not_be_displayed(c)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter c
+In SQL UDF definition: `select a + b + c + not_be_displayed(c)`
+                                       ^
+
 
 statement error Expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
 
 # Recursive definition can NOT be accepted at present due to semantic check
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error
 create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+function recursive(integer, integer) does not exist
+In SQL UDF definition: `select recursive($1, $2) + recursive($1, $2)`
+                               ^^^^^^^^^
+
 
 # Complex but error-prone definition, recursive & normal sql udfs interleaving
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error Failed to conduct semantic check
 create function recursive_non_recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + sub($1, $2)';
 
 # Create a valid recursive function
 # Please note we do NOT support actual running the recursive sql udf at present
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error Failed to conduct semantic check
 create function fib(INT) returns int
  language sql as 'select case
         when $1 = 0 then 0
@@ -307,7 +393,7 @@ create function fib(INT) returns int
       end;';
 
 # Calling a non-existent function
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error Failed to conduct semantic check
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
 
 # Try to create an sql udf with unnamed parameters whose return type mismatches with the sql body definition

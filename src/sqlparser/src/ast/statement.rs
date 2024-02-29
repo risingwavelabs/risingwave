@@ -219,12 +219,16 @@ impl Parser {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
+        // FIXME: parse input `connector` to enum type instead using string here
         if connector.contains("-cdc") {
             let expected = if cdc_source_job {
                 ConnectorSchema::plain_json()
+            } else if connector.contains("mongodb") {
+                ConnectorSchema::debezium_mongo_json()
             } else {
                 ConnectorSchema::debezium_json()
             };
+
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
@@ -306,6 +310,14 @@ impl ConnectorSchema {
     pub const fn debezium_json() -> Self {
         ConnectorSchema {
             format: Format::Debezium,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
+    pub const fn debezium_mongo_json() -> Self {
+        ConnectorSchema {
+            format: Format::DebeziumMongo,
             row_encode: Encode::Json,
             row_options: Vec::new(),
         }
