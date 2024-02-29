@@ -240,7 +240,8 @@ lto = 'off'
 [profile.release]
 debug = "full"
 split-debuginfo = "packed"
-lto = "thin"
+# lto = "thin"
+lto = 'off'
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to

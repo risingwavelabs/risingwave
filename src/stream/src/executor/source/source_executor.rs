@@ -85,7 +85,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
-    async fn build_stream_source_reader(
+    pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
