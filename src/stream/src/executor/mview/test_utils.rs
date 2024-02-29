@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_storage::memory::MemoryStateStore;
@@ -50,7 +50,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         vec![0],
         vec![0, 1, 2],
     );
-    let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     for idx in 0..row_count {

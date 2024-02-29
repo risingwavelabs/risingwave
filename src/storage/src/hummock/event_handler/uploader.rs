@@ -30,6 +30,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
@@ -1145,7 +1146,7 @@ mod tests {
     use futures::FutureExt;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
+    use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
@@ -1237,12 +1238,12 @@ mod tests {
         let start_full_key = FullKey::new(
             TEST_TABLE_ID,
             TableKey(dummy_table_key()),
-            EpochWithGap::new_for_test(start_epoch).as_u64_for_test(),
+            test_epoch(start_epoch),
         );
         let end_full_key = FullKey::new(
             TEST_TABLE_ID,
             TableKey(dummy_table_key()),
-            EpochWithGap::new_for_test(end_epoch).as_u64_for_test(),
+            test_epoch(end_epoch),
         );
         let gen_sst_object_id = (start_epoch << 8) + end_epoch;
         vec![LocalSstableInfo::for_test(SstableInfo {
@@ -1608,7 +1609,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let imm1 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items1.clone()),
             epoch,
@@ -1628,7 +1629,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
         ];
-        let epoch = EpochWithGap::new_for_test(2).as_u64_for_test();
+        let epoch = test_epoch(2);
         let imm2 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items2.clone()),
             epoch,
@@ -1649,7 +1650,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value33")),
             ),
         ];
-        let epoch = EpochWithGap::new_for_test(3).as_u64_for_test();
+        let epoch = test_epoch(3);
         let imm3 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items3.clone()),
             epoch,

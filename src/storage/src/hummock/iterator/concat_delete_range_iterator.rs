@@ -185,7 +185,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::is_max_epoch;
+    use risingwave_common::util::epoch::{is_max_epoch, test_epoch};
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -259,28 +259,19 @@ mod tests {
             test_user_key(b"aaaa").as_ref()
         );
         concat_iterator.next().await.unwrap();
-        assert_eq!(
-            concat_iterator.current_epoch(),
-            EpochWithGap::new_for_test(10).as_u64_for_test()
-        );
+        assert_eq!(concat_iterator.current_epoch(), test_epoch(10));
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"bbbb").as_ref()
         );
         concat_iterator.next().await.unwrap();
-        assert_eq!(
-            concat_iterator.current_epoch(),
-            EpochWithGap::new_for_test(10).as_u64_for_test()
-        );
+        assert_eq!(concat_iterator.current_epoch(), test_epoch(10));
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"dddd").as_ref()
         );
         concat_iterator.next().await.unwrap();
-        assert_eq!(
-            concat_iterator.current_epoch(),
-            EpochWithGap::new_for_test(12).as_u64_for_test()
-        );
+        assert_eq!(concat_iterator.current_epoch(), test_epoch(12));
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"eeee").as_ref()

@@ -176,6 +176,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
@@ -236,7 +237,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
 
         // Init barrier
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -286,7 +287,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -321,7 +322,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
 
         // Init barrier
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -343,7 +344,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -353,7 +354,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(EpochWithGap::new_for_test(3).as_u64_for_test(), false);
+        recovered_tx.push_barrier(test_epoch(3), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

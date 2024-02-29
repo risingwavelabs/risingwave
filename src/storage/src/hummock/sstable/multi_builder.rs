@@ -436,6 +436,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::PointRange;
     use risingwave_hummock_sdk::{can_concat, EpochWithGap};
 
@@ -481,7 +482,7 @@ mod tests {
                 .add_full_key_for_test(
                     FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
-                        EpochWithGap::new_for_test((table_capacity - i) as u64).as_u64_for_test(),
+                        test_epoch((table_capacity - i) as u64),
                     ),
                     HummockValue::put(b"value"),
                     true,
@@ -595,7 +596,7 @@ mod tests {
         let full_key = FullKey::for_test(
             table_id,
             [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
-            EpochWithGap::new_for_test(1).as_u64_for_test(),
+            test_epoch(1),
         );
         let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
@@ -735,7 +736,7 @@ mod tests {
             .await
             .unwrap();
         let v = vec![5u8; 220];
-        let epoch = EpochWithGap::new_for_test(12).as_u64_for_test();
+        let epoch = test_epoch(12);
         builder
             .add_full_key(
                 FullKey::from_user_key(UserKey::for_test(table_id, b"bbbb"), epoch),
@@ -758,7 +759,7 @@ mod tests {
                     UserKey::for_test(table_id, b"eeee".to_vec()),
                     false,
                 ),
-                new_epoch: EpochWithGap::new_for_test(11).as_u64_for_test(),
+                new_epoch: test_epoch(11),
             })
             .await
             .unwrap();
@@ -768,7 +769,7 @@ mod tests {
                     UserKey::for_test(table_id, b"ffff".to_vec()),
                     false,
                 ),
-                new_epoch: EpochWithGap::new_for_test(10).as_u64_for_test(),
+                new_epoch: test_epoch(10),
             })
             .await
             .unwrap();

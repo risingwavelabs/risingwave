@@ -896,7 +896,9 @@ mod tests {
     use std::ops::Bound::{Excluded, Included};
 
     use risingwave_common::must_match;
-    use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS};
+    use risingwave_common::util::epoch::{
+        test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS,
+    };
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -907,7 +909,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_basic() {
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let shared_buffer_items: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(0),
@@ -1020,7 +1022,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_seek() {
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let shared_buffer_items = vec![
             (
                 iterator_test_table_key_of(1),
@@ -1076,11 +1078,9 @@ mod tests {
 
         // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();
-        iter.seek(
-            iterator_test_key_of_epoch(2, EpochWithGap::new_for_test(2).as_u64_for_test()).to_ref(),
-        )
-        .await
-        .unwrap();
+        iter.seek(iterator_test_key_of_epoch(2, test_epoch(2)).to_ref())
+            .await
+            .unwrap();
         for item in &shared_buffer_items[1..] {
             assert!(iter.is_valid());
             assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
@@ -1091,11 +1091,9 @@ mod tests {
 
         // FORWARD: Seek to 2nd key with old epoch, expect last item to return
         let mut iter = shared_buffer_batch.clone().into_forward_iter();
-        iter.seek(
-            iterator_test_key_of_epoch(2, EpochWithGap::new_for_test(0).as_u64_for_test()).to_ref(),
-        )
-        .await
-        .unwrap();
+        iter.seek(iterator_test_key_of_epoch(2, test_epoch(0)).to_ref())
+            .await
+            .unwrap();
         let item = shared_buffer_items.last().unwrap();
         assert!(iter.is_valid());
         assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
@@ -1138,11 +1136,9 @@ mod tests {
 
         // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
-        iter.seek(
-            iterator_test_key_of_epoch(2, EpochWithGap::new_for_test(2).as_u64_for_test()).to_ref(),
-        )
-        .await
-        .unwrap();
+        iter.seek(iterator_test_key_of_epoch(2, test_epoch(2)).to_ref())
+            .await
+            .unwrap();
         assert!(iter.is_valid());
         let item = shared_buffer_items.first().unwrap();
         assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
@@ -1166,7 +1162,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_delete_range() {
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let delete_ranges = vec![
             (
                 Bound::Included(Bytes::from(b"aaa".to_vec())),
@@ -1216,7 +1212,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn test_invalid_table_id() {
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let shared_buffer_batch = SharedBufferBatch::for_test(vec![], epoch, Default::default());
         // Seeking to non-current epoch should panic
         let mut iter = shared_buffer_batch.into_forward_iter();
@@ -1286,7 +1282,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let imm1 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items1.clone()),
             epoch,
@@ -1306,7 +1302,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
         ];
-        let epoch = EpochWithGap::new_for_test(2).as_u64_for_test();
+        let epoch = test_epoch(2);
         let imm2 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items2.clone()),
             epoch,
@@ -1327,7 +1323,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value33")),
             ),
         ];
-        let epoch = EpochWithGap::new_for_test(3).as_u64_for_test();
+        let epoch = test_epoch(3);
         let imm3 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items3.clone()),
             epoch,
@@ -1352,14 +1348,14 @@ mod tests {
                     merged_imm
                         .get(
                             TableKey(key.as_slice()),
-                            EpochWithGap::new_for_test(i as u64 + 1).as_u64_for_test(),
+                            test_epoch(i as u64 + 1),
                             &ReadOptions::default()
                         )
                         .unwrap()
                         .0,
                     value.clone(),
                     "epoch: {}, key: {:?}",
-                    EpochWithGap::new_for_test(i as u64 + 1).as_u64_for_test(),
+                    test_epoch(i as u64 + 1),
                     String::from_utf8(key.clone())
                 );
             }
@@ -1367,7 +1363,7 @@ mod tests {
         assert_eq!(
             merged_imm.get(
                 TableKey(iterator_test_table_key_of(4).as_slice()),
-                EpochWithGap::new_for_test(1).as_u64_for_test(),
+                test_epoch(1),
                 &ReadOptions::default()
             ),
             None
@@ -1375,7 +1371,7 @@ mod tests {
         assert_eq!(
             merged_imm.get(
                 TableKey(iterator_test_table_key_of(5).as_slice()),
-                EpochWithGap::new_for_test(1).as_u64_for_test(),
+                test_epoch(1),
                 &ReadOptions::default()
             ),
             None
@@ -1383,7 +1379,7 @@ mod tests {
 
         // Forward iterator
         for snapshot_epoch in 1..=3 {
-            let snapshot_epoch = EpochWithGap::new_for_test(snapshot_epoch).as_u64_for_test();
+            let snapshot_epoch = test_epoch(snapshot_epoch);
             let mut iter = merged_imm.clone().into_forward_iter();
             iter.rewind().await.unwrap();
             let mut output = vec![];
@@ -1447,7 +1443,7 @@ mod tests {
     #[tokio::test]
     async fn test_merge_imms_delete_range() {
         let table_id = TableId { table_id: 1004 };
-        let epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
+        let epoch = test_epoch(1);
         let delete_ranges = vec![
             (
                 Bound::Included(Bytes::from(b"111".to_vec())),
@@ -1489,7 +1485,7 @@ mod tests {
             None,
         );
 
-        let epoch = EpochWithGap::new_for_test(2).as_u64_for_test();
+        let epoch = test_epoch(2);
         let delete_ranges = vec![
             (
                 Bound::Included(Bytes::from(b"444".to_vec())),
@@ -1539,26 +1535,22 @@ mod tests {
         let merged_imm = merge_imms_in_memory(table_id, 0, imms, None).await.unwrap();
 
         assert_eq!(
-            EpochWithGap::new_for_test(1).as_u64_for_test(),
+            test_epoch(1),
             merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"111")))
         );
         assert_eq!(
-            EpochWithGap::new_for_test(1).as_u64_for_test(),
+            test_epoch(1),
             merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"555")))
         );
         assert_eq!(
-            EpochWithGap::new_for_test(2).as_u64_for_test(),
+            test_epoch(2),
             merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"888")))
         );
 
         assert_eq!(
             HummockValue::put(Bytes::from("value12")),
             merged_imm
-                .get(
-                    TableKey(b"111"),
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                    &ReadOptions::default()
-                )
+                .get(TableKey(b"111"), test_epoch(2), &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1567,11 +1559,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(
-                    TableKey(b"555"),
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                    &ReadOptions::default()
-                )
+                .get(TableKey(b"555"), test_epoch(1), &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1580,11 +1568,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value52")),
             merged_imm
-                .get(
-                    TableKey(b"555"),
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                    &ReadOptions::default()
-                )
+                .get(TableKey(b"555"), test_epoch(2), &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1593,11 +1577,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(
-                    TableKey(b"666"),
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                    &ReadOptions::default()
-                )
+                .get(TableKey(b"666"), test_epoch(2), &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1605,11 +1585,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(
-                    TableKey(b"888"),
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                    &ReadOptions::default()
-                )
+                .get(TableKey(b"888"), test_epoch(2), &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1618,11 +1594,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value8")),
             merged_imm
-                .get(
-                    TableKey(b"888"),
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                    &ReadOptions::default()
-                )
+                .get(TableKey(b"888"), test_epoch(1), &ReadOptions::default())
                 .unwrap()
                 .0
         );

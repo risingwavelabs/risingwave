@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use risingwave_common::util::epoch::{test_epoch, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
 };
@@ -134,10 +134,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
         self.latest_offset = TruncateOffset::Barrier {
-            epoch: epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
+            epoch: epoch - test_epoch(1),
         };
         self.truncate_offset = TruncateOffset::Barrier {
-            epoch: epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
+            epoch: epoch - test_epoch(1),
         };
         Ok(())
     }
@@ -322,11 +322,10 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::Op;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::sink::log_store::{
         LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::common::StreamChunkBuilder;
@@ -336,9 +335,9 @@ mod tests {
         let factory = BoundedInMemLogStoreFactory::new(4);
         let (mut reader, mut writer) = factory.build().await;
 
-        let init_epoch = EpochWithGap::new_for_test(1).as_u64_for_test();
-        let epoch1 = EpochWithGap::new_for_test(2).as_u64_for_test();
-        let epoch2 = EpochWithGap::new_for_test(3).as_u64_for_test();
+        let init_epoch = test_epoch(1);
+        let epoch1 = test_epoch(2);
+        let epoch2 = test_epoch(3);
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
         let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);

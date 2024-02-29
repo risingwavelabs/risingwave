@@ -279,6 +279,7 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{self, Expression, ValueImpl};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -331,7 +332,7 @@ mod tests {
         ));
         let mut project = project.execute();
 
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
         let barrier = project.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
@@ -359,7 +360,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), true);
+        tx.push_barrier(test_epoch(2), true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 
@@ -425,7 +426,7 @@ mod tests {
         ));
         let mut project = project.execute();
 
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_int64_watermark(0, 100);
 
         project.expect_barrier().await;
@@ -469,7 +470,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(2), false);
         let w3 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -481,7 +482,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(EpochWithGap::new_for_test(3).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(3), false);
         let w4 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -489,7 +490,7 @@ mod tests {
         assert!(w3.val.default_cmp(&w4.val).is_le());
 
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(EpochWithGap::new_for_test(4).as_u64_for_test(), true);
+        tx.push_barrier(test_epoch(4), true);
 
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }

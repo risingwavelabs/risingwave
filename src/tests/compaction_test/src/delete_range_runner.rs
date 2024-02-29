@@ -30,7 +30,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
-use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
+use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::EpochWithGap;
@@ -305,9 +305,7 @@ async fn run_compare_result(
     test_count: u64,
     test_delete_ratio: u32,
 ) -> Result<(), String> {
-    let init_epoch =
-        EpochWithGap::new_for_test(hummock.get_pinned_version().max_committed_epoch() + 1)
-            .as_u64_for_test();
+    let init_epoch = test_epoch(hummock.get_pinned_version().max_committed_epoch() + 1);
 
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;

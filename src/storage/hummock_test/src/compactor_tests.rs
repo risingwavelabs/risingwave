@@ -26,7 +26,7 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
-    use risingwave_common::util::epoch::{Epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::{test_epoch, Epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
@@ -1587,24 +1587,15 @@ pub(crate) mod tests {
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let mut data = Vec::with_capacity(KEY_COUNT);
-        let mut last_epoch = EpochWithGap::new_for_test(400).as_u64_for_test();
+        let mut last_epoch = test_epoch(400);
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (
-                    last_k + 2000,
-                    EpochWithGap::new_for_test(400).as_u64_for_test(),
-                )
+                (last_k + 2000, test_epoch(400))
             } else if rand_v < 5 {
-                (
-                    last_k,
-                    last_epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )
+                (last_k, last_epoch - test_epoch(1))
             } else {
-                (
-                    last_k + 1,
-                    EpochWithGap::new_for_test(400).as_u64_for_test(),
-                )
+                (last_k + 1, test_epoch(400))
             };
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
@@ -1625,10 +1616,7 @@ pub(crate) mod tests {
         let mut data3 = Vec::with_capacity(KEY_COUNT);
         let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
-        let max_epoch = std::cmp::min(
-            EpochWithGap::new_for_test(300).as_u64_for_test(),
-            last_epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
-        );
+        let max_epoch = std::cmp::min(test_epoch(300), last_epoch - test_epoch(1));
         last_epoch = max_epoch;
 
         for _ in 0..KEY_COUNT * 4 {
@@ -1636,10 +1624,7 @@ pub(crate) mod tests {
             let (k, epoch) = if rand_v == 0 {
                 (last_k + 1000, max_epoch)
             } else if rand_v < 5 {
-                (
-                    last_k,
-                    last_epoch - EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )
+                (last_k, last_epoch - test_epoch(1))
             } else {
                 (last_k + 1, max_epoch)
             };
@@ -1746,7 +1731,7 @@ pub(crate) mod tests {
                 None,
             );
             let mut last_k: u64 = 1;
-            let init_epoch = EpochWithGap::new_for_test(100 * object_id).as_u64_for_test();
+            let init_epoch = test_epoch(100 * object_id);
             let mut last_epoch = init_epoch;
 
             for idx in 0..KEY_COUNT {

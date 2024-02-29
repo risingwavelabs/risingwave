@@ -313,6 +313,7 @@ mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -405,7 +406,7 @@ mod tests {
                 format!("key_aaaa_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            EpochWithGap::new_for_test(233).as_u64_for_test(),
+            test_epoch(233),
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
@@ -419,7 +420,7 @@ mod tests {
                 format!("key_zzzz_{:05}", 0).as_bytes(),
             ]
             .concat(),
-            EpochWithGap::new_for_test(233).as_u64_for_test(),
+            test_epoch(233),
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());

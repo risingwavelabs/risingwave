@@ -145,6 +145,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -160,17 +161,11 @@ mod tests {
             vec![0],
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ],
         )
         .stop_on_finish(false);
@@ -179,13 +174,9 @@ mod tests {
             vec![0],
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ],
         )
         .stop_on_finish(false);
@@ -194,13 +185,9 @@ mod tests {
             vec![0],
             vec![
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(2).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ],
         )
         .stop_on_finish(false);
@@ -223,19 +210,13 @@ mod tests {
                 Message::Chunk(StreamChunk::from_pretty("I\n + 21")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 11")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test()
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 22")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 12")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(2).as_u64_for_test()
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test()
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ]
         );
     }

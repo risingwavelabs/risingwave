@@ -320,6 +320,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::aggregate::AggCall;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
@@ -344,15 +345,15 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
-        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
+        tx.push_barrier(test_epoch(2), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(EpochWithGap::new_for_test(3).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(3), false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -360,7 +361,7 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(EpochWithGap::new_for_test(4).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(4), false);
 
         let agg_calls = vec![
             AggCall::from_pretty("(count:int8)"),

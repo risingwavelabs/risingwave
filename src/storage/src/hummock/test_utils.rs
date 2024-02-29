@@ -23,6 +23,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -345,9 +346,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(
-            EpochWithGap::new_for_test(1).as_u64_for_test(),
-        ),
+        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
     }
 }
 
@@ -409,7 +408,7 @@ pub mod delete_range {
         ) {
             let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
             let batch = SharedBufferBatch::build_shared_buffer_batch(
-                EpochWithGap::new_for_test(epoch).as_u64_for_test(),
+                test_epoch(epoch),
                 0,
                 vec![],
                 size,

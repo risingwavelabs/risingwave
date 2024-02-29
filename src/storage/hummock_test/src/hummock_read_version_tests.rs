@@ -19,7 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
+use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -164,14 +164,8 @@ async fn test_read_version_basic() {
                     object_id: 1,
                     sst_id: 1,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(
-                            iterator_test_user_key_of(1).encode(),
-                            EpochWithGap::new_for_test(1).as_u64_for_test(),
-                        ),
-                        right: key_with_epoch(
-                            iterator_test_user_key_of(2).encode(),
-                            EpochWithGap::new_for_test(2).as_u64_for_test(),
-                        ),
+                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), test_epoch(1)),
+                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), test_epoch(2)),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -186,14 +180,8 @@ async fn test_read_version_basic() {
                     object_id: 2,
                     sst_id: 2,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(
-                            iterator_test_user_key_of(3).encode(),
-                            EpochWithGap::new_for_test(3).as_u64_for_test(),
-                        ),
-                        right: key_with_epoch(
-                            iterator_test_user_key_of(3).encode(),
-                            EpochWithGap::new_for_test(3).as_u64_for_test(),
-                        ),
+                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
+                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -251,10 +239,7 @@ async fn test_read_version_basic() {
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
 
-        assert_eq!(
-            EpochWithGap::new_for_test(4).as_u64_for_test(),
-            staging_imm[0].min_epoch()
-        );
+        assert_eq!(test_epoch(4), staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -279,10 +264,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(
-            EpochWithGap::new_for_test(4).as_u64_for_test(),
-            staging_imm[0].min_epoch()
-        );
+        assert_eq!(test_epoch(4), staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());

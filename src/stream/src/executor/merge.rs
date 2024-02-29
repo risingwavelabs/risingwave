@@ -449,6 +449,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
@@ -494,11 +495,9 @@ mod tests {
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
                     if epoch % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(
-                            EpochWithGap::new_for_test(epoch).as_u64_for_test(),
-                        )))
-                        .await
-                        .unwrap();
+                        tx.send(Message::Chunk(build_test_chunk(test_epoch(epoch))))
+                            .await
+                            .unwrap();
                     } else {
                         tx.send(Message::Watermark(Watermark {
                             col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
@@ -508,15 +507,15 @@ mod tests {
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(Barrier::new_test_barrier(
-                        EpochWithGap::new_for_test(epoch).as_u64_for_test(),
-                    )))
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(
+                        epoch,
+                    ))))
                     .await
                     .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new_test_barrier(EpochWithGap::new_for_test(1000).as_u64_for_test())
+                    Barrier::new_test_barrier(test_epoch(1000))
                         .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
@@ -531,7 +530,7 @@ mod tests {
             if epoch % 20 == 0 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                        assert_eq!(chunk.ops().len() as u64, EpochWithGap::new_for_test(epoch).as_u64_for_test());
+                        assert_eq!(chunk.ops().len() as u64, test_epoch(epoch));
                     });
                 }
             } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
@@ -543,7 +542,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-                assert_eq!(barrier_epoch.curr, EpochWithGap::new_for_test(epoch).as_u64_for_test());
+                assert_eq!(barrier_epoch.curr, test_epoch(epoch));
             });
         }
         assert_matches!(
@@ -651,15 +650,16 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
-            .with_mutation(Mutation::Update(UpdateMutation {
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
                 dispatchers: Default::default(),
                 merges: merge_updates,
                 vnode_bitmaps: Default::default(),
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
-            }));
+            },
+        ));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
@@ -710,8 +710,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier =
-                Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test());
+            let barrier = Barrier::new_test_barrier(test_epoch(1));
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -776,7 +775,7 @@ mod tests {
             assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-            assert_eq!(barrier_epoch.curr, EpochWithGap::new_for_test(1).as_u64_for_test());
+            assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
         assert!(rpc_called.load(Ordering::SeqCst));
 

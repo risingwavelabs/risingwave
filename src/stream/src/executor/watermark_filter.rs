@@ -384,6 +384,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableDesc};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::Date;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::catalog::Table;
@@ -528,7 +529,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the init barrier
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
         executor.next().await.unwrap().unwrap();
 
         macro_rules! watermark {
@@ -558,7 +559,7 @@ mod tests {
         );
 
         // push the 2nd barrier
-        tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(2), false);
         executor.next().await.unwrap().unwrap();
 
         // push the 2nd chunk
@@ -581,7 +582,7 @@ mod tests {
         );
 
         // push the 3nd barrier
-        tx.push_barrier(EpochWithGap::new_for_test(3).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(3), false);
         executor.next().await.unwrap().unwrap();
 
         // Drop executor
@@ -592,7 +593,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(EpochWithGap::new_for_test(4).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(4), false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

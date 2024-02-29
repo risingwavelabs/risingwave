@@ -126,6 +126,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -134,13 +135,7 @@ mod tests {
     #[test]
     fn test_ttl_u32() {
         let mut ttl_filter = TtlCompactionFilter::new(HashMap::from_iter([(1, 4000000000)]), 1);
-        ttl_filter.should_delete(
-            FullKey::new(
-                TableId::new(1),
-                TableKey(vec![]),
-                EpochWithGap::new_for_test(1).as_u64_for_test(),
-            )
-            .to_ref(),
-        );
+        ttl_filter
+            .should_delete(FullKey::new(TableId::new(1), TableKey(vec![]), test_epoch(1)).to_ref());
     }
 }

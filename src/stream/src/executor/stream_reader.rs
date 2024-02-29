@@ -143,6 +143,7 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::StreamChunkWithState;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_source::TableDmlHandle;
@@ -198,9 +199,7 @@ mod tests {
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
         barrier_tx
-            .send(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(1).as_u64_for_test(),
-            ))
+            .send(Barrier::new_test_barrier(test_epoch(1)))
             .unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
@@ -209,9 +208,7 @@ mod tests {
 
         // Write a barrier.
         barrier_tx
-            .send(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(2).as_u64_for_test(),
-            ))
+            .send(Barrier::new_test_barrier(test_epoch(2)))
             .unwrap();
         // Then write a chunk.
         write_handle2.begin().unwrap();

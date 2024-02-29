@@ -299,6 +299,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -364,7 +365,7 @@ mod tests {
         );
 
         // The first barrier
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
         let msg = dml_executor.next().await.unwrap().unwrap();
         assert!(matches!(msg, Message::Barrier(_)));
 
@@ -388,7 +389,7 @@ mod tests {
         tokio::spawn(async move {
             write_handle.end().await.unwrap();
             // a barrier to trigger batch group flush
-            tx.push_barrier(EpochWithGap::new_for_test(2).as_u64_for_test(), false);
+            tx.push_barrier(test_epoch(2), false);
         });
 
         // Consume the 1st message from upstream executor

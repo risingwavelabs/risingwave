@@ -713,6 +713,7 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 #[cfg(test)]
 mod tests {
 
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -765,7 +766,7 @@ mod tests {
                 ],
                 vec![],
                 WriteOptions {
-                    epoch: EpochWithGap::new_for_test(1).as_u64_for_test(),
+                    epoch: test_epoch(1),
                     table_id: Default::default(),
                 },
             )
@@ -823,19 +824,15 @@ mod tests {
                         Bound::Included(TableKey(Bytes::from("a"))),
                         Bound::Included(TableKey(Bytes::from("b"))),
                     ),
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
+                    test_epoch(1),
                     TableId::default(),
                     None,
                 )
                 .unwrap(),
             vec![(
-                FullKey::for_test(
-                    Default::default(),
-                    b"a".to_vec(),
-                    EpochWithGap::new_for_test(1).as_u64_for_test()
-                )
-                .encode()
-                .into(),
+                FullKey::for_test(Default::default(), b"a".to_vec(), test_epoch(1))
+                    .encode()
+                    .into(),
                 b"v2".to_vec().into()
             )]
         );
@@ -872,7 +869,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::copy_from_slice(b"a")),
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
+                    test_epoch(1),
                     ReadOptions::default(),
                 )
                 .await
@@ -883,7 +880,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::from("b")),
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
+                    test_epoch(1),
                     ReadOptions::default(),
                 )
                 .await
@@ -894,7 +891,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::from("c")),
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
+                    test_epoch(1),
                     ReadOptions::default()
                 )
                 .await

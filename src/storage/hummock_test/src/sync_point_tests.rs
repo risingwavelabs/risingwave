@@ -22,6 +22,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -263,10 +264,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
-    local
-        .init_for_test(EpochWithGap::new_for_test(100).as_u64_for_test())
-        .await
-        .unwrap();
+    local.init_for_test(test_epoch(100)).await.unwrap();
     let mut start_key = b"aaa".to_vec();
     for _ in 0..10 {
         local
@@ -301,15 +299,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(
-        EpochWithGap::new_for_test(101).as_u64_for_test(),
+        test_epoch(101),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(
-        &hummock_meta_client,
-        &storage,
-        EpochWithGap::new_for_test(100).as_u64_for_test(),
-    )
-    .await;
+    flush_and_commit(&hummock_meta_client, &storage, test_epoch(100)).await;
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
@@ -340,15 +333,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await
         .unwrap();
     local.seal_current_epoch(
-        EpochWithGap::new_for_test(102).as_u64_for_test(),
+        test_epoch(102),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(
-        &hummock_meta_client,
-        &storage,
-        EpochWithGap::new_for_test(101).as_u64_for_test(),
-    )
-    .await;
+    flush_and_commit(&hummock_meta_client, &storage, test_epoch(101)).await;
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
@@ -379,15 +367,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await
         .unwrap();
     local.seal_current_epoch(
-        EpochWithGap::new_for_test(103).as_u64_for_test(),
+        test_epoch(103),
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(
-        &hummock_meta_client,
-        &storage,
-        EpochWithGap::new_for_test(102).as_u64_for_test(),
-    )
-    .await;
+    flush_and_commit(&hummock_meta_client, &storage, test_epoch(102)).await;
     // move this two file to the same level.
     compact_once(
         hummock_manager_ref.clone(),
@@ -416,12 +399,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         u64::MAX,
         risingwave_storage::store::SealCurrentEpochOptions::for_test(),
     );
-    flush_and_commit(
-        &hummock_meta_client,
-        &storage,
-        EpochWithGap::new_for_test(103).as_u64_for_test(),
-    )
-    .await;
+    flush_and_commit(&hummock_meta_client, &storage, test_epoch(103)).await;
     // move this two file to the same level.
     compact_once(
         hummock_manager_ref.clone(),
@@ -457,7 +435,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
-            EpochWithGap::new_for_test(120).as_u64_for_test(),
+            test_epoch(120),
             read_options.clone(),
         )
         .await
@@ -466,7 +444,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
-            EpochWithGap::new_for_test(120).as_u64_for_test(),
+            test_epoch(120),
             read_options.clone(),
         )
         .await
@@ -475,7 +453,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
-            EpochWithGap::new_for_test(120).as_u64_for_test(),
+            test_epoch(120),
             read_options.clone(),
         )
         .await
@@ -484,7 +462,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"aab"),
-            EpochWithGap::new_for_test(120).as_u64_for_test(),
+            test_epoch(120),
             read_options.clone(),
         )
         .await
@@ -501,7 +479,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
-            risingwave_hummock_sdk::EpochWithGap::new_for_test(120).as_u64_for_test(),
+            risingwave_hummock_sdk::test_epoch(120),
             read_options.clone(),
         )
         .await

@@ -299,6 +299,7 @@ impl BlockIterator {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -463,10 +464,6 @@ mod tests {
         table_key: &[u8],
         epoch: u64,
     ) -> FullKey<&[u8]> {
-        FullKey::for_test(
-            TableId::new(table_id),
-            table_key,
-            EpochWithGap::new_for_test(epoch).as_u64_for_test(),
-        )
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(epoch))
     }
 }

@@ -296,7 +296,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ListValue};
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_hummock_sdk::EpochWithGap;
@@ -386,7 +386,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -486,7 +486,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -583,7 +583,7 @@ mod tests {
         )
         .await;
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
 
@@ -705,7 +705,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -788,7 +788,7 @@ mod tests {
         )
         .await;
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         let order_columns = vec![
@@ -910,7 +910,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -1023,7 +1023,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
 
         {
@@ -1108,7 +1108,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         table.init_epoch(epoch);
         {
             let chunk = create_chunk(

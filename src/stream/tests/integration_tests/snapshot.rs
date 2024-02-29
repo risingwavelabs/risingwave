@@ -20,7 +20,7 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::{DataType, DefaultOrdered, ToText};
-use risingwave_common::util::epoch::EPOCH_INC_MIN_STEP_FOR_TEST;
+use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_stream::executor::test_utils::MessageSender;
 use risingwave_stream::executor::{BoxedMessageStream, Message};
@@ -148,7 +148,7 @@ where
     for mut event in inputs {
         match &mut event {
             SnapshotEvent::Barrier(epoch) => {
-                tx.push_barrier(EpochWithGap::new_for_test(*epoch).as_u64_for_test(), false);
+                tx.push_barrier(test_epoch(*epoch), false);
             }
             SnapshotEvent::Noop => unreachable!(),
             SnapshotEvent::Recovery => {

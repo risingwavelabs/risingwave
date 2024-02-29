@@ -114,7 +114,7 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
     mut state_table: TestStateTable<USE_WATERMARK_CACHE>,
     rows: Vec<OwnedRow>,
 ) {
-    let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
     for row in rows {
         state_table.insert(row);
@@ -174,7 +174,7 @@ async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
     mut state_table: TestStateTable<USE_WATERMARK_CACHE>,
     chunks: Vec<StreamChunk>,
 ) {
-    let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state_table.init_epoch(epoch);
     for chunk in chunks {
         state_table.write_chunk(chunk);

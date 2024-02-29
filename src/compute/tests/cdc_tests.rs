@@ -26,7 +26,7 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
-use risingwave_common::array::{Array, ArrayBuilder, DataChunk, Op, StreamChunk, Utf8ArrayBuilder};
+use risingwave_common::{array::{Array, ArrayBuilder, DataChunk, Op, StreamChunk, Utf8ArrayBuilder}, util::epoch::test_epoch};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};

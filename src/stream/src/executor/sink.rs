@@ -423,6 +423,7 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
 #[cfg(test)]
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -470,16 +471,12 @@ mod test {
             schema.clone(),
             pk_indices.clone(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
                     + 3 2 1",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     "  I I I
                     U- 3 2 1
@@ -597,16 +594,12 @@ mod test {
             schema.clone(),
             vec![0, 1],
             vec![
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
                     + 1 1 10",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
                     + 1 3 30",
@@ -620,9 +613,7 @@ mod test {
                     " I I I
                     - 1 1 10",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ],
         );
 
@@ -744,15 +735,9 @@ mod test {
             schema.clone(),
             pk_indices.clone(),
             vec![
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(1).as_u64_for_test(),
-                )),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test(),
-                )),
-                Message::Barrier(Barrier::new_test_barrier(
-                    EpochWithGap::new_for_test(3).as_u64_for_test(),
-                )),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ],
         );
 
@@ -794,25 +779,19 @@ mod test {
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(1).as_u64_for_test()
-            ))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))
         );
 
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(3).as_u64_for_test()
-            ))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
         );
 
         // The last barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(3).as_u64_for_test()
-            ))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
         );
     }
 }

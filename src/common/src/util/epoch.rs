@@ -160,11 +160,15 @@ impl EpochPair {
         self.curr += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
-
     pub fn new_test_epoch(curr: u64) -> Self {
         assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
         Self::new(curr, curr - EPOCH_INC_MIN_STEP_FOR_TEST)
     }
+}
+/// As most unit tests initializ a new epoch from a random value (e.g. 1, 2, 233 etc.), but the correct epoch in the system is a u64 with the last `EPOCH_AVAILABLE_BITS` bits set to 0.
+/// This method is to turn a a random epoch into a well shifted value.
+pub fn test_epoch(value: u64) -> u64 {
+    value << EPOCH_AVAILABLE_BITS
 }
 
 /// Task-local storage for the epoch pair.

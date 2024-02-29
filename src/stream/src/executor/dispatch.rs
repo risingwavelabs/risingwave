@@ -1003,6 +1003,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_hummock_sdk::EpochWithGap;
@@ -1202,15 +1203,16 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b1 = Barrier::new_test_barrier(EpochWithGap::new_for_test(1).as_u64_for_test())
-            .with_mutation(Mutation::Update(UpdateMutation {
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
                 dispatchers: dispatcher_updates,
                 merges: Default::default(),
                 vnode_bitmaps: Default::default(),
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
-            }));
+            },
+        ));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1227,11 +1229,9 @@ mod tests {
         try_recv!(old_simple).unwrap().as_barrier().unwrap(); // Untouched.
 
         // 6. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(
-            EpochWithGap::new_for_test(2).as_u64_for_test(),
-        )))
-        .await
-        .unwrap();
+        tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(2))))
+            .await
+            .unwrap();
         executor.next().await.unwrap().unwrap();
 
         // 7. Check downstream.
@@ -1257,15 +1257,16 @@ mod tests {
                 hash_mapping: Default::default(),
             }]
         };
-        let b3 = Barrier::new_test_barrier(EpochWithGap::new_for_test(3).as_u64_for_test())
-            .with_mutation(Mutation::Update(UpdateMutation {
+        let b3 = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Update(
+            UpdateMutation {
                 dispatchers: dispatcher_updates,
                 merges: Default::default(),
                 vnode_bitmaps: Default::default(),
                 dropped_actors: Default::default(),
                 actor_splits: Default::default(),
                 actor_new_dispatchers: Default::default(),
-            }));
+            },
+        ));
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
@@ -1276,11 +1277,9 @@ mod tests {
         try_recv!(new_simple).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
 
         // 11. Send another barrier.
-        tx.send(Message::Barrier(Barrier::new_test_barrier(
-            EpochWithGap::new_for_test(4).as_u64_for_test(),
-        )))
-        .await
-        .unwrap();
+        tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(4))))
+            .await
+            .unwrap();
         executor.next().await.unwrap().unwrap();
 
         // 12. Check downstream.

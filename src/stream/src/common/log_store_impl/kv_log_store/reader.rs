@@ -27,6 +27,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -187,9 +188,10 @@ impl<S: StateStore> KvLogStoreReader<S> {
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
-            Included(self.serde.serialize_epoch(
-                last_persisted_epoch + EpochWithGap::new_for_test(1).as_u64_for_test(),
-            ))
+            Included(
+                self.serde
+                    .serialize_epoch(last_persisted_epoch + test_epoch(1)),
+            )
         } else {
             Unbounded
         };
@@ -476,9 +478,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             let persisted_epoch =
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => {
-                            epoch - EpochWithGap::new_for_test(1).as_u64_for_test()
-                        }
+                        TruncateOffset::Chunk { epoch, .. } => epoch - test_epoch(1),
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);

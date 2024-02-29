@@ -151,6 +151,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -182,7 +183,7 @@ mod tests {
         let mut row_id_gen_executor = row_id_gen_executor.execute();
 
         // Init barrier
-        tx.push_barrier(EpochWithGap::new_for_test(1).as_u64_for_test(), false);
+        tx.push_barrier(test_epoch(1), false);
         row_id_gen_executor.next().await.unwrap().unwrap();
 
         // Insert operation

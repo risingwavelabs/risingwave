@@ -37,7 +37,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::SourceCtrlOpts;
@@ -463,7 +463,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0, 1, 2],
     );
 
-    let mut epoch = EpochPair::new_test_epoch(EpochWithGap::new_for_test(1).as_u64_for_test());
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

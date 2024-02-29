@@ -22,6 +22,7 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_storage::memory::MemoryStateStore;
@@ -106,17 +107,11 @@ async fn create_arrangement(
         schema,
         vec![0],
         vec![
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(2).as_u64_for_test(),
-            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(3).as_u64_for_test(),
-            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(4).as_u64_for_test(),
-            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ],
     );
 
@@ -174,17 +169,11 @@ fn create_source() -> Box<dyn Executor + Send> {
         schema,
         PkIndices::new(),
         vec![
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(2).as_u64_for_test(),
-            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(chunk1),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(3).as_u64_for_test(),
-            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Chunk(chunk2),
-            Message::Barrier(Barrier::new_test_barrier(
-                EpochWithGap::new_for_test(4).as_u64_for_test(),
-            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ],
     );
 

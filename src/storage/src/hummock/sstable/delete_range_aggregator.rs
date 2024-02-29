@@ -122,6 +122,7 @@ impl CompactionDeleteRangeIterator {
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockResult<HummockEpoch> {
+        use risingwave_common::util::epoch::test_epoch;
         use risingwave_hummock_sdk::EpochWithGap;
 
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
@@ -133,7 +134,7 @@ impl CompactionDeleteRangeIterator {
         {
             self.inner.next().await?;
         }
-        Ok(self.earliest_delete_since(EpochWithGap::new_for_test(epoch).as_u64_for_test()))
+        Ok(self.earliest_delete_since(test_epoch(epoch)))
     }
 
     pub fn key(&self) -> PointRange<&[u8]> {
@@ -260,7 +261,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::is_max_epoch;
+    use risingwave_common::util::epoch::{is_max_epoch, test_epoch};
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -339,25 +340,25 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 11)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(12).as_u64_for_test()
+            test_epoch(12)
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(9).as_u64_for_test()
+            test_epoch(9)
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbaaa").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(9).as_u64_for_test()
+            test_epoch(9)
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbccd").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(9).as_u64_for_test()
+            test_epoch(9)
         );
 
         assert_eq!(
@@ -383,13 +384,13 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"eeeeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(8).as_u64_for_test()
+            test_epoch(8)
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"gggggg").as_ref(), 8)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(9).as_u64_for_test()
+            test_epoch(9)
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"hhhhhh").as_ref(), 6)
@@ -401,7 +402,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"iiiiii").as_ref(), 6)
                 .await
                 .unwrap(),
-            EpochWithGap::new_for_test(7).as_u64_for_test()
+            test_epoch(7)
         );
     }
 
