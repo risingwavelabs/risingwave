@@ -483,7 +483,7 @@ CREATE TABLE debezium_ignore_key (
   order_id int primary key
 ) with (
   connector = 'kafka',
-  topic = 'test1',
+  topic = 'debezium_mess_key',
   kafka.brokers = 'message_queue:29092',
   kafka.scan.startup.mode = 'earliest')
 FORMAT DEBEZIUM ENCODE JSON (
