@@ -77,7 +77,7 @@ COPY ./ /risingwave
 WORKDIR /risingwave
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-python-udf && \
+  cargo build -p risingwave_cmd_all --release --features rw-static-link --features embedded-python-udf --features private-link && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \

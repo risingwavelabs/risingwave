@@ -63,8 +63,8 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
-cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
-cargo build --bin risectl --features "rw-static-link" --profile release
+cargo build -p risingwave_cmd_all --features rw-static-link --features private-link --profile release
+cargo build --bin risectl --features rw-static-link --profile release
 cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"
