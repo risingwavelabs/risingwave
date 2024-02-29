@@ -642,7 +642,7 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
     }
 
     /// Try wrapping inner expression with `IsNotNull`
-    /// Note: only column (i.e., `InputRef`) will be extracted and connected via `AND`
+    /// Note: only columns (i.e., `InputRef`) will be extracted and connected via `AND`
     fn try_wrap_inner_expression(expr: ExprImpl) -> Option<ExprImpl> {
         let mut columns = vec![];
 
