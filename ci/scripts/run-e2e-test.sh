@@ -103,6 +103,7 @@ pkill java
 
 echo "--- e2e, $mode, embedded udf"
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
 
