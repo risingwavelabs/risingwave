@@ -156,12 +156,14 @@ message SinkCoordinatorStreamResponse {
 /* Source Service */
 
 message CdcMessage {
+  // The value of the Debezium message
   string payload = 1;
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
   bool is_transaction_meta = 6;
+  // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
 }
 
