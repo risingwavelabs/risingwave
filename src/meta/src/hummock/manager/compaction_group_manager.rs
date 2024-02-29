@@ -170,8 +170,6 @@ impl HummockManager {
         self.unregister_table_ids_fail_fast(&to_unregister).await;
     }
 
-    /// Prefer using `register_table_fragments`.
-    /// Use `register_table_ids` only when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn register_table_ids(
