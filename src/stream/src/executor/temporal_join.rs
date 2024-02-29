@@ -613,8 +613,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 let passed_bitmap = passed_bitmap.to_bitmap();
                                 let (columns, vis) = data_chunk.into_parts();
                                 let new_vis = vis & passed_bitmap;
-                                let new_chunk = StreamChunk::with_visibility(ops, columns, new_vis);
-                                new_chunk
+                                StreamChunk::with_visibility(ops, columns, new_vis)
                             } else {
                                 chunk
                             };
