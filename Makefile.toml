@@ -341,7 +341,6 @@ category = "RiseDev - Build"
 description = "Copy RisngWave binaries to bin"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 dependencies = [
-  "link-standalone-binaries",
   "link-all-in-one-binaries",
   "link-user-bin",
   "codesign-binaries",
