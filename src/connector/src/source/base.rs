@@ -106,7 +106,6 @@ pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
     columns: Option<Vec<Column>>,
 ) -> Result<P::SplitReader> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
-
     P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
 }
 

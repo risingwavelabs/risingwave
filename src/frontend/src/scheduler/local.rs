@@ -55,7 +55,7 @@ use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
-
+const TASK_SCHEDULING_PARALLELISM: usize = 10;
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
@@ -355,12 +355,19 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
-                    for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
-                        // todo(wcy-fdu): convert split to split vec
+                    let chunk_size = (source_info.split_info().unwrap().len() as f32
+                        / TASK_SCHEDULING_PARALLELISM as f32)
+                        .ceil() as usize;
+                    for (id, split) in source_info
+                        .split_info()
+                        .unwrap()
+                        .chunks(chunk_size)
+                        .enumerate()
+                    {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
-                            Some(PartitionInfo::Source(vec![split.clone()])),
+                            Some(PartitionInfo::Source(split.to_vec())),
                             next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {

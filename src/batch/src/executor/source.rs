@@ -153,16 +153,14 @@ impl SourceExecutor {
             None,
             ConnectorProperties::default(),
         ));
-
         let stream = self
             .source
-            .to_stream(Some(self.split_list), self.column_ids, source_ctx)
+            .to_stream_for_file_source(Some(self.split_list), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]
         for chunk in stream {
             let chunk = chunk.map_err(BatchError::connector)?;
-
             let data_chunk = covert_stream_chunk_to_batch_chunk(chunk)?;
             if data_chunk.capacity() > 0 {
                 yield data_chunk;

@@ -377,15 +377,10 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            let chunk_size = (source_info.split_info().unwrap().len() as f32
+            let _chunk_size = (source_info.split_info().unwrap().len() as f32
                 / TASK_SCHEDULING_PARALLELISM as f32)
                 .ceil() as usize;
-            for (id, split) in source_info
-                .split_info()
-                .unwrap()
-                .chunks(chunk_size)
-                .enumerate()
-            {
+            for (id, split) in source_info.split_info().unwrap().chunks(1).enumerate() {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
