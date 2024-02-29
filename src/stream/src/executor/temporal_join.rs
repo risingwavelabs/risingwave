@@ -24,13 +24,12 @@ use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::{for_await, try_stream};
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
-use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-use risingwave_common::array::{ArrayImpl, Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
@@ -310,6 +309,170 @@ async fn align_input(left: Executor, right: Executor) {
     }
 }
 
+mod phase1 {
+    use futures_async_stream::try_stream;
+    use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::hash::{HashKey, NullBitmap};
+    use risingwave_common::row::{self, Row, RowExt};
+    use risingwave_common::types::{DataType, DatumRef};
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_storage::StateStore;
+
+    use super::{StreamExecutorError, TemporalSide};
+
+    pub(super) trait Phase1Evaluation {
+        /// Called when a matched row is found.
+        #[must_use = "consume chunk if produced"]
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk>;
+
+        /// Called when all matched rows of a join key are appended.
+        #[must_use = "consume chunk if produced"]
+        fn match_end(
+            builder: &mut StreamChunkBuilder,
+            op: Op,
+            left_row: impl Row,
+            right_size: usize,
+            matched: bool,
+        ) -> Option<StreamChunk>;
+    }
+
+    pub(super) struct Inner;
+    pub(super) struct LeftOuter;
+    pub(super) struct LeftOuterWithCond;
+
+    impl Phase1Evaluation for Inner {
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk> {
+            builder.append_row(op, left_row.chain(right_row))
+        }
+
+        fn match_end(
+            _builder: &mut StreamChunkBuilder,
+            _op: Op,
+            _left_row: impl Row,
+            _right_size: usize,
+            _matched: bool,
+        ) -> Option<StreamChunk> {
+            None
+        }
+    }
+
+    impl Phase1Evaluation for LeftOuter {
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk> {
+            builder.append_row(op, left_row.chain(right_row))
+        }
+
+        fn match_end(
+            builder: &mut StreamChunkBuilder,
+            op: Op,
+            left_row: impl Row,
+            right_size: usize,
+            matched: bool,
+        ) -> Option<StreamChunk> {
+            if !matched {
+                // If no rows matched, a marker row should be inserted.
+                builder.append_row(
+                    op,
+                    left_row.chain(row::repeat_n(DatumRef::None, right_size)),
+                )
+            } else {
+                None
+            }
+        }
+    }
+
+    impl Phase1Evaluation for LeftOuterWithCond {
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk> {
+            builder.append_row(op, left_row.chain(right_row))
+        }
+
+        fn match_end(
+            builder: &mut StreamChunkBuilder,
+            op: Op,
+            left_row: impl Row,
+            right_size: usize,
+            _matched: bool,
+        ) -> Option<StreamChunk> {
+            // A marker row should always be inserted and mark as invisible for non-lookup filters evaluation.
+            // The row will be converted to visible in the further steps if no rows matched after all filters evaluated.
+            builder.append_row_invisible(
+                op,
+                left_row.chain(row::repeat_n(DatumRef::None, right_size)),
+            )
+        }
+    }
+
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn handle_chunk<'a, K: HashKey, S: StateStore, E: Phase1Evaluation>(
+        chunk_size: usize,
+        right_size: usize,
+        full_schema: Vec<DataType>,
+        epoch: HummockEpoch,
+        left_join_keys: &'a [usize],
+        right_table: &'a mut TemporalSide<K, S>,
+        null_matched: &'a K::Bitmap,
+        chunk: StreamChunk,
+    ) {
+        let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+        let keys = K::build(left_join_keys, chunk.data_chunk())?;
+        let to_fetch_keys = chunk
+            .visibility()
+            .iter()
+            .zip_eq_debug(keys.iter())
+            .filter_map(|(vis, key)| if vis { Some(key) } else { None });
+        right_table
+            .fetch_or_promote_keys(to_fetch_keys, epoch)
+            .await?;
+        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+            let Some((op, left_row)) = r else {
+                continue;
+            };
+            let mut matched = false;
+            if key.null_bitmap().is_subset(null_matched)
+                && let join_entry = right_table.force_peek(&key)
+                && !join_entry.is_empty()
+            {
+                matched = true;
+                for right_row in join_entry.cached.values() {
+                    if let Some(chunk) =
+                        E::append_matched_row(op, &mut builder, left_row, right_row)
+                    {
+                        yield chunk;
+                    }
+                }
+            }
+            if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
+                yield chunk;
+            }
+        }
+        if let Some(chunk) = builder.take() {
+            yield chunk;
+        }
+    }
+}
+
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<K, S, T> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -369,6 +532,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         }
     }
 
+    fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> StreamChunk {
+        let (data_chunk, ops) = chunk.into_parts();
+        let (columns, vis) = data_chunk.into_parts();
+        let output_columns = indices
+            .iter()
+            .cloned()
+            .map(|idx| columns[idx].clone())
+            .collect();
+        StreamChunk::with_visibility(ops, output_columns, vis)
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let right_size = self.right.schema().len();
@@ -387,6 +561,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
         let mut prev_epoch = None;
 
+        let table_id_str = self.right_table.source.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         let full_schema: Vec<_> = self
             .left
             .schema()
@@ -395,9 +572,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             .chain(self.right.schema().data_types().into_iter())
             .collect();
 
-        let table_id_str = self.right_table.source.table_id().to_string();
-        let actor_id_str = self.ctx.id.to_string();
-        let fragment_id_str = self.ctx.fragment_id.to_string();
         #[for_await]
         for msg in align_input(self.left, self.right) {
             self.right_table.cache.evict();
@@ -412,117 +586,106 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    // Joined result without evaluating non-lookup conditions.
-                    let st1 = {
-                        #[try_stream]
-                        async {
-                            #[allow(unreachable_code)]
-                            #[allow(clippy::diverging_sub_expression)]
-                            if false {
-                                return unreachable!("type hints only") as StreamExecutorResult<_>;
-                            }
-                            let mut builder =
-                                StreamChunkBuilder::new(self.chunk_size, full_schema.clone());
-                            // The bitmap is aligned with `builder`. The bit is set if the record is matched.
-                            // TODO: Consider adding the bitmap to `builder`.
-                            let mut row_matched_bitmap_builder =
-                                BitmapBuilder::with_capacity(self.chunk_size);
-                            let epoch =
-                                prev_epoch.expect("Chunk data should come after some barrier.");
-                            let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
-                            let to_fetch_keys = chunk
-                                .visibility()
-                                .iter()
-                                .zip_eq_debug(keys.iter())
-                                .filter_map(|(vis, key)| if vis { Some(key) } else { None });
-                            self.right_table
-                                .fetch_or_promote_keys(to_fetch_keys, epoch)
-                                .await?;
-                            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
-                                let Some((op, left_row)) = r else {
-                                    continue;
-                                };
-                                if key.null_bitmap().is_subset(&null_matched)
-                                    && let join_entry = self.right_table.force_peek(&key)
-                                    && !join_entry.is_empty()
-                                {
-                                    for right_row in join_entry.cached.values() {
-                                        row_matched_bitmap_builder.append(true);
-                                        if let Some(chunk) =
-                                            builder.append_row(op, left_row.chain(right_row))
-                                        {
-                                            let row_matched =
-                                                std::mem::take(&mut row_matched_bitmap_builder)
-                                                    .finish();
-                                            yield (chunk, row_matched);
-                                        }
-                                    }
-                                } else if T == JoinType::LeftOuter {
-                                    row_matched_bitmap_builder.append(false);
-                                    if let Some(chunk) = builder.append_row(
-                                        op,
-                                        left_row.chain(risingwave_common::row::repeat_n(
-                                            DatumRef::None,
-                                            right_size,
-                                        )),
-                                    ) {
-                                        let row_matched =
-                                            std::mem::take(&mut row_matched_bitmap_builder)
-                                                .finish();
-                                        yield (chunk, row_matched);
-                                    }
-                                }
-                            }
-                            if let Some(chunk) = builder.take() {
-                                let row_matched =
-                                    std::mem::take(&mut row_matched_bitmap_builder).finish();
-                                yield (chunk, row_matched);
-                            }
-                        }
-                    };
+                    let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
 
-                    #[for_await]
-                    for item in st1 {
-                        let (chunk, row_matched) = item?;
-                        // check non-lookup join conditions
-                        if !row_matched.is_empty()
-                            && let Some(ref cond) = self.condition
-                        {
-                            // All chunks are newly created in the previous phase, so no holes should exist.
-                            assert!(chunk.visibility().all());
-                            // For non matched row, we shouldn't evaluate on it.
-                            // So we treat `row_matched` as visibility here.
-                            let chunk = chunk.clone_with_vis(row_matched.clone());
-                            let (data_chunk, ops) = chunk.into_parts();
-                            let filter = cond.eval_infallible(&data_chunk).await;
-                            let ArrayImpl::Bool(bool_array) = &*filter else {
-                                panic!("unmatched type: filter expr returns a non-null array");
+                    let full_schema = full_schema.clone();
+
+                    if T == JoinType::Inner {
+                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner>(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            epoch,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &null_matched,
+                            chunk,
+                        );
+                        #[for_await]
+                        for chunk in st1 {
+                            let chunk = chunk?;
+                            let new_chunk = if let Some(ref cond) = self.condition {
+                                let (data_chunk, ops) = chunk.into_parts();
+                                let passed_bitmap = cond.eval_infallible(&data_chunk).await;
+                                let passed_bitmap =
+                                    Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
+                                let (columns, vis) = data_chunk.into_parts();
+                                let new_vis = vis & passed_bitmap;
+                                StreamChunk::with_visibility(ops, columns, new_vis)
+                            } else {
+                                chunk
                             };
-                            let new_vis = bool_array.to_bitmap() | (!row_matched);
-                            let (columns, _) = data_chunk.into_parts();
-                            // apply output indices.
-                            let output_columns = self
-                                .output_indices
-                                .iter()
-                                .cloned()
-                                .map(|idx| columns[idx].clone())
-                                .collect();
                             let new_chunk =
-                                StreamChunk::with_visibility(ops, output_columns, new_vis);
+                                Self::apply_indices_map(new_chunk, &self.output_indices);
                             yield Message::Chunk(new_chunk);
-                        } else {
+                        }
+                    } else if let Some(ref cond) = self.condition {
+                        // Joined result without evaluating non-lookup conditions.
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond>(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            epoch,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &null_matched,
+                            chunk,
+                        );
+                        let mut matched_count = 0usize;
+                        #[for_await]
+                        for chunk in st1 {
+                            let chunk = chunk?;
                             let (data_chunk, ops) = chunk.into_parts();
+                            let passed_bitmap = cond.eval_infallible(&data_chunk).await;
+                            let passed_bitmap =
+                                Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
                             let (columns, vis) = data_chunk.into_parts();
-                            // apply output indices.
-                            let output_columns = self
-                                .output_indices
-                                .iter()
-                                .cloned()
-                                .map(|idx| columns[idx].clone())
-                                .collect();
-                            let new_chunk = StreamChunk::with_visibility(ops, output_columns, vis);
+                            let mut new_vis = BitmapBuilder::with_capacity(vis.len());
+                            for (passed, not_match_end) in
+                                passed_bitmap.iter().zip_eq_debug(vis.iter())
+                            {
+                                let is_match_end = !not_match_end;
+                                let vis = if is_match_end && matched_count == 0 {
+                                    // Nothing is matched, so the marker row should be visible.
+                                    true
+                                } else if is_match_end {
+                                    // reset the count
+                                    matched_count = 0;
+                                    // rows found, so the marker row should be invisible.
+                                    false
+                                } else {
+                                    if passed {
+                                        matched_count += 1;
+                                    }
+                                    passed
+                                };
+                                new_vis.append(vis);
+                            }
+                            let new_chunk = Self::apply_indices_map(
+                                StreamChunk::with_visibility(ops, columns, new_vis.finish()),
+                                &self.output_indices,
+                            );
                             yield Message::Chunk(new_chunk);
-                        };
+                        }
+                        // The last row should always be marker row,
+                        assert_eq!(matched_count, 0);
+                    } else {
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter>(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            epoch,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &null_matched,
+                            chunk,
+                        );
+                        #[for_await]
+                        for chunk in st1 {
+                            let chunk = chunk?;
+                            let new_chunk = Self::apply_indices_map(chunk, &self.output_indices);
+                            yield Message::Chunk(new_chunk);
+                        }
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
