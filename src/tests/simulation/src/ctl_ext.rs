@@ -394,9 +394,9 @@ impl Cluster {
                 }
 
                 let opts = risingwave_ctl::CliOpts::parse_from(v);
-                risingwave_ctl::start(opts).await
+                risingwave_ctl::start(opts).await;
             })
-            .await??;
+            .await?;
 
         Ok(())
     }
@@ -407,9 +407,9 @@ impl Cluster {
         self.ctl
             .spawn(async move {
                 let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "pause"]);
-                risingwave_ctl::start(opts).await
+                risingwave_ctl::start(opts).await;
             })
-            .await??;
+            .await?;
 
         Ok(())
     }
@@ -420,9 +420,9 @@ impl Cluster {
         self.ctl
             .spawn(async move {
                 let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "resume"]);
-                risingwave_ctl::start(opts).await
+                risingwave_ctl::start(opts).await;
             })
-            .await??;
+            .await?;
 
         Ok(())
     }
@@ -442,9 +442,9 @@ impl Cluster {
                     command.push(rate_limit.to_string());
                 }
                 let opts = risingwave_ctl::CliOpts::parse_from(command);
-                risingwave_ctl::start(opts).await
+                risingwave_ctl::start(opts).await;
             })
-            .await??;
+            .await?;
         Ok(())
     }
 

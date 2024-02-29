@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::v2::AsReport as _;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
