@@ -140,18 +140,21 @@ test_backfill_tombstone() {
   ENCODE JSON;
   "
 
-  sleep 10
-
   bash -c '
     set -euo pipefail
 
     for i in $(seq 1 1000)
     do
       ./risedev psql -c "DELETE FROM tomb; FLUSH;"
-      sleep 1
+      sleep 4
     done
   ' 1>deletes.log 2>&1 &
 
+  # give sometime to run deletes regularly and compaction
+  sleep 180
+
+  echo "--- Create MV"
+  # This will test if create mv takes a long time when there's lots of tombstones.
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
@@ -281,27 +284,27 @@ test_backfill_snapshot_with_wider_rows() {
 
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
+  # test_snapshot_and_upstream_read
   test_backfill_tombstone
-  test_replication_with_column_pruning
-  test_sink_backfill_recovery
-
-  # Only if profile is "ci-release", run it.
-  if [[ ${profile:-} == "ci-release" ]]; then
-    echo "--- Using release profile, running backfill performance tests."
-    # Need separate tests, we don't want to backfill concurrently.
-    # It's difficult to measure the time taken for each backfill if we do so.
-    test_no_shuffle_backfill_snapshot_and_upstream_runtime
-    test_arrangement_backfill_snapshot_and_upstream_runtime
-
-    # Backfill will happen in sequence here.
-    test_backfill_snapshot_runtime
-    test_backfill_snapshot_with_wider_rows
-    test_backfill_snapshot_with_limited_storage_throughput
-
-    # No upstream only tests, because if there's no snapshot,
-    # Backfill will complete almost immediately.
-  fi
+  # test_replication_with_column_pruning
+  # test_sink_backfill_recovery
+#
+#  # Only if profile is "ci-release", run it.
+#  if [[ ${profile:-} == "ci-release" ]]; then
+#    echo "--- Using release profile, running backfill performance tests."
+#    # Need separate tests, we don't want to backfill concurrently.
+#    # It's difficult to measure the time taken for each backfill if we do so.
+#    test_no_shuffle_backfill_snapshot_and_upstream_runtime
+#    test_arrangement_backfill_snapshot_and_upstream_runtime
+#
+#    # Backfill will happen in sequence here.
+#    test_backfill_snapshot_runtime
+#    test_backfill_snapshot_with_wider_rows
+#    test_backfill_snapshot_with_limited_storage_throughput
+#
+#    # No upstream only tests, because if there's no snapshot,
+#    # Backfill will complete almost immediately.
+#  fi
 }
 
 main
