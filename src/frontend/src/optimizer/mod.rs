@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::num::NonZeroU32;
 use std::ops::DerefMut;
 
 pub mod plan_node;
@@ -525,6 +526,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -726,6 +728,7 @@ impl PlanRoot {
             pk_column_indices,
             row_id_index,
             version,
+            retention_seconds,
         )
     }
 
@@ -749,6 +752,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            None,
         )
     }
 
@@ -757,6 +761,7 @@ impl PlanRoot {
         &mut self,
         index_name: String,
         definition: String,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
@@ -771,6 +776,7 @@ impl PlanRoot {
             definition,
             TableType::Index,
             cardinality,
+            retention_seconds,
         )
     }
 

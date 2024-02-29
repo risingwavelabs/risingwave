@@ -1188,7 +1188,11 @@ pub async fn check_iceberg_source(
         .collect::<Vec<_>>();
     let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
 
-    risingwave_connector::sink::iceberg::try_matches_arrow_schema(&schema, &new_iceberg_schema)?;
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
+        &schema,
+        &new_iceberg_schema,
+        true,
+    )?;
 
     Ok(())
 }

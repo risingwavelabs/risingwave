@@ -33,7 +33,7 @@ easy-ext = "1"
 educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
-fancy-regex = "0.11.0"
+fancy-regex = "0.13.0"
 fixedbitset = "0.4.2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
@@ -93,6 +93,7 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
 uuid = "1"
+zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

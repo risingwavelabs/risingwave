@@ -103,13 +103,6 @@ impl WithOptions {
         Self { inner }
     }
 
-    /// Get the subset of the options for internal table catalogs.
-    ///
-    /// Currently only `retention_seconds` is included.
-    pub fn internal_table_subset(&self) -> Self {
-        self.subset([options::RETENTION_SECONDS])
-    }
-
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
         if let Some(inner_val) = self.inner.get(key) {
             if inner_val.eq_ignore_ascii_case(val) {

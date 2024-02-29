@@ -241,7 +241,10 @@ message Function {
   string language = 7;
   optional string link = 8;
   optional string identifier = 10;
+  // The source code of the function.
   optional string body = 14;
+  // The zstd-compressed binary of the function.
+  optional bytes compressed_binary = 17;
   bool always_retry_on_network_error = 16;
 
   oneof kind {

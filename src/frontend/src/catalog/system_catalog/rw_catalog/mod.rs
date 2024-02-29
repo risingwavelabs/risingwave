@@ -47,7 +47,7 @@ mod rw_system_tables;
 mod rw_table_fragments;
 mod rw_table_stats;
 mod rw_tables;
-mod rw_types;
+pub(super) mod rw_types;
 mod rw_user_secrets;
 mod rw_users;
 mod rw_views;

@@ -3047,17 +3047,18 @@ mod tests {
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
-        let return_type = risingwave_pb::data::DataType {
+        let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
         };
+        let arg_types = vec![test_data_type.clone()];
         let pb_function = PbFunction {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
             name: "test_function".to_string(),
             owner: TEST_OWNER_ID as _,
-            arg_types: vec![],
-            return_type: Some(return_type.clone()),
+            arg_types,
+            return_type: Some(test_data_type.clone()),
             language: "python".to_string(),
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
@@ -3078,7 +3079,8 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        assert_eq!(function.return_type.0, return_type);
+        assert_eq!(function.return_type.0, test_data_type);
+        assert_eq!(function.arg_types.into_inner().len(), 1);
         assert_eq!(function.language, "python");
 
         mgr.drop_function(function.function_id).await?;

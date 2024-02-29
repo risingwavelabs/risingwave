@@ -33,6 +33,7 @@ pub struct FunctionCatalog {
     pub identifier: Option<String>,
     pub body: Option<String>,
     pub link: Option<String>,
+    pub compressed_binary: Option<Vec<u8>>,
     pub always_retry_on_network_error: bool,
 }
 
@@ -69,6 +70,7 @@ impl From<&PbFunction> for FunctionCatalog {
             identifier: prost.identifier.clone(),
             body: prost.body.clone(),
             link: prost.link.clone(),
+            compressed_binary: prost.compressed_binary.clone(),
             always_retry_on_network_error: prost.always_retry_on_network_error,
         }
     }
