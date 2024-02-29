@@ -21,7 +21,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};

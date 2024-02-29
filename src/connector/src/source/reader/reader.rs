@@ -215,7 +215,7 @@ pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: Opendal
             }
             Err(err) => {
                 tracing::error!("list object fail, err {}", err);
-                return Err(err.into());
+                return Err(err);
             }
         }
     }
