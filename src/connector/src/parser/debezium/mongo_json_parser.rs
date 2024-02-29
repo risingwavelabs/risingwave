@@ -20,6 +20,7 @@ use risingwave_common::types::DataType;
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
+use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjection};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
@@ -39,7 +40,7 @@ impl DebeziumMongoJsonParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let id_column = rw_columns
             .iter()
             .find(|desc| {
@@ -78,8 +79,9 @@ impl DebeziumMongoJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<()> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)?;
+    ) -> ConnectorResult<()> {
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
+            .context("failed to parse debezium mongo json payload")?;
 
         // Event can be configured with and without the "payload" field present.
         // See https://github.com/risingwavelabs/risingwave/issues/10178
@@ -115,7 +117,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

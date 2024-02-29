@@ -36,7 +36,6 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
@@ -62,6 +61,7 @@ use risingwave_sqlparser::ast::{
     ProtobufSchema, SourceWatermark,
 };
 use risingwave_sqlparser::parser::IncludeOption;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -1081,7 +1081,7 @@ pub(super) async fn check_source_schema(
     } else if connector == ICEBERG_CONNECTOR {
         Ok(check_iceberg_source(props, columns)
             .await
-            .map_err(|err| ProtocolError(err.to_string()))?)
+            .map_err(|err| ProtocolError(err.to_report_string()))?)
     } else {
         Ok(())
     }
@@ -1153,17 +1153,7 @@ pub async fn check_iceberg_source(
         )));
     };
 
-    let iceberg_config = IcebergConfig {
-        database_name: properties.database_name,
-        table_name: properties.table_name,
-        catalog_type: Some(properties.catalog_type),
-        path: properties.warehouse_path,
-        endpoint: Some(properties.endpoint),
-        access_key: properties.s3_access,
-        secret_key: properties.s3_secret,
-        region: Some(properties.region_name),
-        ..Default::default()
-    };
+    let iceberg_config = properties.to_iceberg_config();
 
     let schema = Schema {
         fields: columns

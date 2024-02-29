@@ -32,6 +32,7 @@ aws-smithy-types = { version = "1", default-features = false, features = ["byte-
 axum = { version = "0.6" }
 base64 = { version = "0.21", features = ["alloc"] }
 bigdecimal = { version = "0.4" }
+bit-set = { version = "0.5" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 byteorder = { version = "1" }
@@ -83,6 +84,7 @@ madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "i
 md-5 = { version = "0.10" }
 memchr = { version = "2" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }

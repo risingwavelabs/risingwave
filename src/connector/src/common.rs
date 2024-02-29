@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Ok};
+use anyhow::{anyhow, Context};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
@@ -35,6 +35,7 @@ use with_options::WithOptions;
 
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
+use crate::error::ConnectorResult;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
@@ -72,7 +73,7 @@ pub struct AwsAuthProps {
 }
 
 impl AwsAuthProps {
-    async fn build_region(&self) -> anyhow::Result<Region> {
+    async fn build_region(&self) -> ConnectorResult<Region> {
         if let Some(region_name) = &self.region {
             Ok(Region::new(region_name.clone()))
         } else {
@@ -85,11 +86,11 @@ impl AwsAuthProps {
                 .build()
                 .region()
                 .await
-                .ok_or_else(|| anyhow::format_err!("region should be provided"))?)
+                .context("region should be provided")?)
         }
     }
 
-    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
+    fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
         if self.access_key.is_some() && self.secret_key.is_some() {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
@@ -99,16 +100,14 @@ impl AwsAuthProps {
                 ),
             ))
         } else {
-            Err(anyhow!(
-                "Both \"access_key\" and \"secret_access\" are required."
-            ))
+            bail!("Both \"access_key\" and \"secret_access\" are required.")
         }
     }
 
     async fn with_role_provider(
         &self,
         credential: SharedCredentialsProvider,
-    ) -> anyhow::Result<SharedCredentialsProvider> {
+    ) -> ConnectorResult<SharedCredentialsProvider> {
         if let Some(role_name) = &self.arn {
             let region = self.build_region().await?;
             let mut role = AssumeRoleProvider::builder(role_name)
@@ -124,7 +123,7 @@ impl AwsAuthProps {
         }
     }
 
-    pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
+    pub async fn build_config(&self) -> ConnectorResult<SdkConfig> {
         let region = self.build_region().await?;
         let credentials_provider = self
             .with_role_provider(self.build_credential_provider()?)
@@ -386,12 +385,19 @@ pub struct PulsarOauthCommon {
     pub scope: Option<String>,
 }
 
+fn create_credential_temp_file(credentials: &[u8]) -> std::io::Result<NamedTempFile> {
+    let mut f = NamedTempFile::new()?;
+    f.write_all(credentials)?;
+    f.as_file().sync_all()?;
+    Ok(f)
+}
+
 impl PulsarCommon {
     pub(crate) async fn build_client(
         &self,
         oauth: &Option<PulsarOauthCommon>,
         aws_auth_props: &AwsAuthProps,
-    ) -> anyhow::Result<Pulsar<TokioExecutor>> {
+    ) -> ConnectorResult<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut temp_file = None;
         if let Some(oauth) = oauth.as_ref() {
@@ -399,10 +405,10 @@ impl PulsarCommon {
             match url.scheme() {
                 "s3" => {
                     let credentials = load_file_descriptor_from_s3(&url, aws_auth_props).await?;
-                    let mut f = NamedTempFile::new()?;
-                    f.write_all(&credentials)?;
-                    f.as_file().sync_all()?;
-                    temp_file = Some(f);
+                    temp_file = Some(
+                        create_credential_temp_file(&credentials)
+                            .context("failed to create temp file for pulsar credentials")?,
+                    );
                 }
                 "file" => {}
                 _ => {
@@ -477,7 +483,7 @@ pub struct KinesisCommon {
 }
 
 impl KinesisCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<KinesisClient> {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<KinesisClient> {
         let config = AwsAuthProps {
             region: Some(self.stream_region.clone()),
             endpoint: self.endpoint.clone(),
@@ -539,7 +545,7 @@ pub struct NatsCommon {
 }
 
 impl NatsCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
+    pub(crate) async fn build_client(&self) -> ConnectorResult<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
         match self.connect_mode.as_str() {
             "user_and_password" => {
@@ -582,7 +588,7 @@ impl NatsCommon {
         Ok(client)
     }
 
-    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+    pub(crate) async fn build_context(&self) -> ConnectorResult<jetstream::Context> {
         let client = self.build_client().await?;
         let jetstream = async_nats::jetstream::new(client);
         Ok(jetstream)
@@ -593,7 +599,7 @@ impl NatsCommon {
         stream: String,
         split_id: String,
         start_sequence: NatsOffset,
-    ) -> anyhow::Result<
+    ) -> ConnectorResult<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
         let context = self.build_context().await?;
@@ -612,13 +618,16 @@ impl NatsCommon {
             NatsOffset::Earliest => DeliverPolicy::All,
             NatsOffset::Latest => DeliverPolicy::Last,
             NatsOffset::SequenceNumber(v) => {
-                let parsed = v.parse::<u64>()?;
+                let parsed = v
+                    .parse::<u64>()
+                    .context("failed to parse nats offset as sequence number")?;
                 DeliverPolicy::ByStartSequence {
                     start_sequence: 1 + parsed,
                 }
             }
             NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
-                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)?,
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)
+                    .context("invalid timestamp for nats offset")?,
             },
             NatsOffset::None => DeliverPolicy::All,
         };
@@ -635,7 +644,7 @@ impl NatsCommon {
         &self,
         jetstream: jetstream::Context,
         stream: String,
-    ) -> anyhow::Result<jetstream::stream::Stream> {
+    ) -> ConnectorResult<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
         let mut config = jetstream::stream::Config {
             name: stream,
@@ -662,7 +671,7 @@ impl NatsCommon {
         Ok(stream)
     }
 
-    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> ConnectorResult<String> {
         let creds = format!(
             "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
                          ************************* IMPORTANT *************************\n\

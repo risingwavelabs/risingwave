@@ -14,10 +14,11 @@
 
 use std::marker::PhantomData;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::CdcSourceTypeTrait;
 use crate::source::{SplitId, SplitMetaData};
@@ -63,7 +64,7 @@ impl MySqlCdcSplit {
         Self { inner: split }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    pub fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
             let dbz_offset: DebeziumOffset =
@@ -102,7 +103,7 @@ impl PostgresCdcSplit {
         }
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    pub fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
             let dbz_offset: DebeziumOffset =
@@ -154,11 +155,11 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         // TODO: may check T to get the specific cdc type
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &mut self.mysql_split {

@@ -29,7 +29,7 @@ use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     sink, source, streaming_job, table, user_privilege, view, ActorId, ActorUpstreamActors,
     ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, FunctionId, I32Array,
-    IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SourceId, StreamSourceInfo,
+    IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SinkId, SourceId, StreamSourceInfo,
     StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
@@ -428,9 +428,11 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let creating_job_ids: Vec<ObjectId> = streaming_job::Entity::find()
+        let creating_jobs: Vec<(ObjectId, ObjectType)> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
+            .column(object::Column::ObjType)
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .filter(
                 streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
                     streaming_job::Column::JobStatus
@@ -444,12 +446,100 @@ impl CatalogController {
 
         let changed = Self::clean_dirty_sink_downstreams(&txn).await?;
 
-        if creating_job_ids.is_empty() {
+        if creating_jobs.is_empty() {
             if changed {
                 txn.commit().await?;
             }
 
             return Ok(ReleaseContext::default());
+        }
+
+        // Record cleaned streaming jobs in event logs.
+        let mut creating_table_ids = vec![];
+        let mut creating_source_ids = vec![];
+        let mut creating_sink_ids = vec![];
+        let mut creating_job_ids = vec![];
+        for (job_id, job_type) in creating_jobs {
+            creating_job_ids.push(job_id);
+            match job_type {
+                ObjectType::Table | ObjectType::Index => creating_table_ids.push(job_id),
+                ObjectType::Source => creating_source_ids.push(job_id),
+                ObjectType::Sink => creating_sink_ids.push(job_id),
+                _ => unreachable!("unexpected streaming job type"),
+            }
+        }
+        let mut event_logs = vec![];
+        if !creating_table_ids.is_empty() {
+            let table_info: Vec<(TableId, String, String)> = Table::find()
+                .select_only()
+                .columns([
+                    table::Column::TableId,
+                    table::Column::Name,
+                    table::Column::Definition,
+                ])
+                .filter(table::Column::TableId.is_in(creating_table_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            for (table_id, name, definition) in table_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: table_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        if !creating_source_ids.is_empty() {
+            let source_info: Vec<(SourceId, String, String)> = Source::find()
+                .select_only()
+                .columns([
+                    source::Column::SourceId,
+                    source::Column::Name,
+                    source::Column::Definition,
+                ])
+                .filter(source::Column::SourceId.is_in(creating_source_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            for (source_id, name, definition) in source_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: source_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        if !creating_sink_ids.is_empty() {
+            let sink_info: Vec<(SinkId, String, String)> = Sink::find()
+                .select_only()
+                .columns([
+                    sink::Column::SinkId,
+                    sink::Column::Name,
+                    sink::Column::Definition,
+                ])
+                .filter(sink::Column::SinkId.is_in(creating_sink_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            for (sink_id, name, definition) in sink_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: sink_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
         }
 
         let associated_source_ids: Vec<SourceId> = Table::find()
@@ -490,6 +580,8 @@ impl CatalogController {
         assert!(res.rows_affected > 0);
 
         txn.commit().await?;
+
+        self.env.event_log_manager_ref().add_event_logs(event_logs);
 
         Ok(ReleaseContext {
             state_table_ids,
@@ -845,7 +937,7 @@ impl CatalogController {
             let ret = src_manager.register_source(&pb_source).await;
             if let Err(e) = ret {
                 txn.rollback().await?;
-                return Err(e.into());
+                return Err(e);
             }
         }
         txn.commit().await?;
@@ -2446,6 +2538,18 @@ impl CatalogController {
     }
 }
 
+/// `CatalogStats` is a struct to store the statistics of all catalogs.
+pub struct CatalogStats {
+    pub table_num: u64,
+    pub mview_num: u64,
+    pub index_num: u64,
+    pub source_num: u64,
+    pub sink_num: u64,
+    pub function_num: u64,
+    pub streaming_job_num: u64,
+    pub actor_num: u64,
+}
+
 impl CatalogControllerInner {
     pub async fn snapshot(&self) -> MetaResult<(Catalog, Vec<PbUserInfo>)> {
         let databases = self.list_databases().await?;
@@ -2474,6 +2578,40 @@ impl CatalogControllerInner {
             ),
             users,
         ))
+    }
+
+    pub async fn stats(&self) -> MetaResult<CatalogStats> {
+        let mut table_num_map: HashMap<_, _> = Table::find()
+            .select_only()
+            .column(table::Column::TableType)
+            .column_as(table::Column::TableId.count(), "num")
+            .group_by(table::Column::TableType)
+            .having(table::Column::TableType.ne(TableType::Internal))
+            .into_tuple::<(TableType, i64)>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|(table_type, num)| (table_type, num as u64))
+            .collect();
+
+        let source_num = Source::find().count(&self.db).await?;
+        let sink_num = Sink::find().count(&self.db).await?;
+        let function_num = Function::find().count(&self.db).await?;
+        let streaming_job_num = StreamingJob::find().count(&self.db).await?;
+        let actor_num = Actor::find().count(&self.db).await?;
+
+        Ok(CatalogStats {
+            table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
+            mview_num: table_num_map
+                .remove(&TableType::MaterializedView)
+                .unwrap_or(0),
+            index_num: table_num_map.remove(&TableType::Index).unwrap_or(0),
+            source_num,
+            sink_num,
+            function_num,
+            streaming_job_num,
+            actor_num,
+        })
     }
 
     async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
@@ -2759,17 +2897,18 @@ mod tests {
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
-        let return_type = risingwave_pb::data::DataType {
+        let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
         };
+        let arg_types = vec![test_data_type.clone()];
         let pb_function = PbFunction {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
             name: "test_function".to_string(),
             owner: TEST_OWNER_ID as _,
-            arg_types: vec![],
-            return_type: Some(return_type.clone()),
+            arg_types,
+            return_type: Some(test_data_type.clone()),
             language: "python".to_string(),
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
@@ -2790,7 +2929,8 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        assert_eq!(function.return_type.0, return_type);
+        assert_eq!(function.return_type.0, test_data_type);
+        assert_eq!(function.arg_types.into_inner().len(), 1);
         assert_eq!(function.language, "python");
 
         mgr.drop_function(function.function_id).await?;

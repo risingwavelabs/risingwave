@@ -15,12 +15,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
+use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::ActorId;
@@ -35,13 +35,14 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
 use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
+use tokio::time::timeout;
 use tracing::Instrument;
 use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::{BarrierCollectResult, GlobalBarrierManagerContext};
 use crate::manager::{MetaSrvEnv, WorkerId};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub(super) struct BarrierRpcManager {
     context: GlobalBarrierManagerContext,
@@ -294,11 +295,12 @@ impl StreamRpcManager {
     ) -> MetaResult<Vec<RSP>> {
         let pool = self.env.stream_client_pool();
         let f = &f;
-        Ok(try_join_all(request.map(|(node, input)| async move {
-            let client = pool.get(node).await?;
-            f(client, input).await
-        }))
-        .await?)
+        let iters = request.map(|(node, input)| async move {
+            let client = pool.get(node).await.map_err(|e| (node.id, e))?;
+            f(client, input).await.map_err(|e| (node.id, e))
+        });
+        let result = try_join_all_with_error_timeout(iters, Duration::from_secs(3)).await;
+        result.map_err(|results_err| merge_node_rpc_errors("merged RPC Error", results_err))
     }
 
     async fn broadcast<RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
@@ -418,4 +420,59 @@ impl StreamRpcManager {
         .await?;
         Ok(())
     }
+}
+
+/// This function is similar to `try_join_all`, but it attempts to collect as many error as possible within `error_timeout`.
+async fn try_join_all_with_error_timeout<I, RSP, E, F>(
+    iters: I,
+    error_timeout: Duration,
+) -> Result<Vec<RSP>, Vec<E>>
+where
+    I: IntoIterator<Item = F>,
+    F: Future<Output = Result<RSP, E>>,
+{
+    let stream = FuturesUnordered::from_iter(iters);
+    pin_mut!(stream);
+    let mut results_ok = vec![];
+    let mut results_err = vec![];
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(rsp) => {
+                results_ok.push(rsp);
+            }
+            Err(err) => {
+                results_err.push(err);
+                break;
+            }
+        }
+    }
+    if results_err.is_empty() {
+        return Ok(results_ok);
+    }
+    let _ = timeout(error_timeout, async {
+        while let Some(result) = stream.next().await {
+            if let Err(err) = result {
+                results_err.push(err);
+            }
+        }
+    })
+    .await;
+    Err(results_err)
+}
+
+fn merge_node_rpc_errors(
+    message: &str,
+    errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
+) -> MetaError {
+    use std::fmt::Write;
+
+    use thiserror_ext::AsReport;
+
+    let concat: String = errors
+        .into_iter()
+        .fold(format!("{message}:"), |mut s, (w, e)| {
+            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+            s
+        });
+    anyhow::anyhow!(concat).into()
 }

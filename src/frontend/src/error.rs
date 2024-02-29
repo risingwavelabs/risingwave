@@ -17,6 +17,7 @@ use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
@@ -205,6 +206,12 @@ impl From<ExprError> for RwError {
 impl From<SinkError> for RwError {
     fn from(e: SinkError) -> Self {
         ErrorCode::SinkError(Box::new(e)).into()
+    }
+}
+
+impl From<ConnectorError> for RwError {
+    fn from(e: ConnectorError) -> Self {
+        ErrorCode::ConnectorError(e.into()).into()
     }
 }
 
