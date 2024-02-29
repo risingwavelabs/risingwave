@@ -42,9 +42,13 @@
                 <include>*:risingwave-sink-es-7</include>
                 <include>*:risingwave-sink-cassandra</include>
                 <include>*:risingwave-sink-jdbc</include>
+                <include>*:risingwave-sink-iceberg</include>
                 <include>*:risingwave-sink-mock-flink-http-sink</include>
 
             </includes>
+            <excludes>
+                <exclude>org.apache.iceberg:iceberg-common</exclude>
+            </excludes>
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <useTransitiveFiltering>true</useTransitiveFiltering>
         </dependencySet>

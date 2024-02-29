@@ -286,6 +286,7 @@ message ExprNode {
     PG_GET_USERBYID = 2403;
     PG_INDEXES_SIZE = 2404;
     PG_RELATION_SIZE = 2405;
+    PG_GET_SERIAL_SEQUENCE = 2406;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -516,16 +517,18 @@ message UserDefinedFunction {
   repeated string arg_names = 8;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  // For external UDF: the link to the external function service.
-  // For WASM UDF: the link to the wasm binary file.
+  // The link to the external function service.
   optional string link = 5;
-  // An unique identifier for the function.
-  // For external UDF, it's the name of the function in the external function service.
-  // For WASM UDF, it's the name of the function in the wasm binary file.
-  // For JavaScript UDF, it's the name of the function.
+  // An unique identifier to the function.
+  // - If `link` is not empty, the name of the function in the external function service.
+  // - If `language` is `rust` or `wasm`, the name of the function in the wasm binary file.
+  // - If `language` is `javascript`, the name of the function.
   optional string identifier = 6;
-  // For JavaScript UDF, it's the body of the function.
+  // - If `language` is `javascript`, the source code of the function.
   optional string body = 7;
+  // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
+  optional bytes compressed_binary = 10;
+  bool always_retry_on_network_error = 9;
 }
 
 // Additional information for user defined table functions.
@@ -536,4 +539,5 @@ message UserDefinedTableFunction {
   optional string link = 5;
   optional string identifier = 6;
   optional string body = 7;
+  optional bytes compressed_binary = 10;
 }

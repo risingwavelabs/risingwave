@@ -62,33 +62,35 @@ public class SourceValidateHandler {
                 .build();
     }
 
-    public static void ensurePropNotBlank(Map<String, String> props, String name) {
+    private static void ensurePropNotBlank(Map<String, String> props, String name) {
         if (StringUtils.isBlank(props.get(name))) {
             throw ValidatorUtils.invalidArgument(
                     String.format("'%s' not found, please check the WITH properties", name));
         }
     }
 
-    public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
-            throws Exception {
-        var props = request.getPropertiesMap();
-
+    static void ensureRequiredProps(Map<String, String> props, boolean isMultiTableShared) {
         ensurePropNotBlank(props, DbzConnectorConfig.HOST);
         ensurePropNotBlank(props, DbzConnectorConfig.PORT);
         ensurePropNotBlank(props, DbzConnectorConfig.DB_NAME);
         ensurePropNotBlank(props, DbzConnectorConfig.USER);
         ensurePropNotBlank(props, DbzConnectorConfig.PASSWORD);
-
-        var commonParam = request.getCommonParam();
-        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
         // ensure table name is passed by user in non-sharing mode
         if (!isMultiTableShared) {
             ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
         }
+    }
+
+    public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
+            throws Exception {
+        var props = request.getPropertiesMap();
+        var commonParam = request.getCommonParam();
+        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
+                ensureRequiredProps(props, isMultiTableShared);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
@@ -100,6 +102,7 @@ public class SourceValidateHandler {
                 break;
 
             case CITUS:
+                ensureRequiredProps(props, isMultiTableShared);
                 ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
@@ -128,10 +131,17 @@ public class SourceValidateHandler {
 
                 break;
             case MYSQL:
+                ensureRequiredProps(props, isMultiTableShared);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 try (var validator = new MySqlValidator(props, tableSchema)) {
                     validator.validateAll(isMultiTableShared);
                 }
+                break;
+            case MONGODB:
+                ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
+                ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
+                var validator = new MongoDbValidator(props);
+                validator.validateDbConfig();
                 break;
             default:
                 LOG.warn("Unknown source type");

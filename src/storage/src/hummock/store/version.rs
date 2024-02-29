@@ -23,6 +23,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
@@ -192,6 +193,10 @@ impl StagingVersion {
             });
         (overlapped_imms, overlapped_ssts)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.imm.is_empty() && self.sst.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -212,6 +217,10 @@ pub struct HummockReadVersion {
     is_replicated: bool,
 
     table_watermarks: Option<TableWatermarksIndex>,
+
+    // Vnode bitmap corresponding to the read version
+    // It will be initialized after local state store init
+    vnodes: Option<Arc<Bitmap>>,
 }
 
 impl HummockReadVersion {
@@ -238,6 +247,7 @@ impl HummockReadVersion {
             committed: committed_version,
 
             is_replicated,
+            vnodes: None,
         }
     }
 
@@ -498,6 +508,10 @@ impl HummockReadVersion {
 
     pub fn is_replicated(&self) -> bool {
         self.is_replicated
+    }
+
+    pub fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Option<Arc<Bitmap>> {
+        self.vnodes.replace(vnodes)
     }
 }
 

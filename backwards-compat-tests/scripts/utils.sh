@@ -49,6 +49,23 @@ kill_zookeeper() {
   wait_zookeeper_exit
 }
 
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
+        sleep 1
+    done
+}
+
+wait_all_process_exit() {
+  wait_for_process meta-node
+  wait_for_process compute-node
+  wait_for_process frontend
+  wait_for_process compactor
+  echo "All processes has exited."
+}
+
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
@@ -75,6 +92,7 @@ kill_cluster() {
 
   tmux kill-session -t risedev
   test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
+  wait_all_process_exit
 }
 
 run_sql () {
