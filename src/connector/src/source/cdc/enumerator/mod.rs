@@ -29,8 +29,7 @@ use risingwave_pb::connector_service::{
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, CdcSplitBase, Citus, DebeziumCdcSplit, MySqlCdcSplit, Mysql,
-    Postgres, PostgresCdcSplit,
+    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -133,15 +132,11 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
-        let split = MySqlCdcSplit {
-            inner: CdcSplitBase::new(self.source_id, None),
-        };
-        let dbz_split = DebeziumCdcSplit {
-            mysql_split: Some(split),
-            pg_split: None,
-            _phantom: PhantomData,
-        };
-        vec![dbz_split]
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
     }
 }
 
@@ -149,16 +144,12 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
     type CdcSourceType = Postgres;
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        let split = PostgresCdcSplit {
-            inner: CdcSplitBase::new(self.source_id, None),
-            server_addr: None,
-        };
-        let dbz_split = DebeziumCdcSplit {
-            mysql_split: None,
-            pg_split: Some(split),
-            _phantom: Default::default(),
-        };
-        vec![dbz_split]
+        // CDC source only supports single split
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
     }
 }
 
@@ -170,16 +161,24 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
             .iter()
             .enumerate()
             .map(|(id, addr)| {
-                let split = PostgresCdcSplit {
-                    inner: CdcSplitBase::new(id as u32, None),
-                    server_addr: Some(addr.to_string()),
-                };
-                DebeziumCdcSplit {
-                    mysql_split: None,
-                    pg_split: Some(split),
-                    _phantom: Default::default(),
-                }
+                DebeziumCdcSplit::<Self::CdcSourceType>::new(
+                    id as u32,
+                    None,
+                    Some(addr.to_string()),
+                )
             })
             .collect_vec()
+    }
+}
+impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
+    type CdcSourceType = Mongodb;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        // CDC source only supports single split
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
     }
 }
