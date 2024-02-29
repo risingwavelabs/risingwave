@@ -177,19 +177,12 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
 }
 
 impl StreamChunkCompactor {
-    pub fn new(stream_key: Vec<usize>) -> Self {
-        Self {
-            stream_key,
-            chunks: vec![],
-        }
+    pub fn new(stream_key: Vec<usize>, chunks: Vec<StreamChunk>) -> Self {
+        Self { chunks, stream_key }
     }
 
     pub fn into_inner(self) -> (Vec<StreamChunk>, Vec<usize>) {
         (self.chunks, self.stream_key)
-    }
-
-    pub fn push_chunk(&mut self, c: StreamChunk) {
-        self.chunks.push(c);
     }
 
     /// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT
@@ -287,8 +280,7 @@ impl StreamChunkCompactor {
 }
 
 pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> StreamChunk {
-    let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
-    compactor.push_chunk(stream_chunk);
+    let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), vec![stream_chunk]);
     compactor.into_compacted_chunks().next().unwrap()
 }
 
@@ -301,27 +293,29 @@ mod tests {
     #[test]
     fn test_merge_chunk_row() {
         let pk_indices = [0, 1];
-        let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
-        compactor.push_chunk(StreamChunk::from_pretty(
-            " I I I
-            - 1 1 1
-            + 1 1 2
-            + 2 5 7
-            + 4 9 2
-            - 2 5 7
-            + 2 5 5
-            - 6 6 9
-            + 6 6 9
-            - 9 9 1",
-        ));
-        compactor.push_chunk(StreamChunk::from_pretty(
-            " I I I
-            - 6 6 9
-            + 9 9 9
-            - 9 9 4
-            + 2 2 2
-            + 9 9 1",
-        ));
+        let chunks = vec![
+            StreamChunk::from_pretty(
+                " I I I
+                - 1 1 1
+                + 1 1 2
+                + 2 5 7
+                + 4 9 2
+                - 2 5 7
+                + 2 5 5
+                - 6 6 9
+                + 6 6 9
+                - 9 9 1",
+            ),
+            StreamChunk::from_pretty(
+                " I I I
+                - 6 6 9
+                + 9 9 9
+                - 9 9 4
+                + 2 2 2
+                + 9 9 1",
+            ),
+        ];
+        let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
         let mut iter = compactor.into_compacted_chunks();
         assert_eq!(
             iter.next().unwrap().compact(),
@@ -348,9 +342,9 @@ mod tests {
     #[test]
     fn test_compact_chunk_row() {
         let pk_indices = [0, 1];
-        let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
-        compactor.push_chunk(StreamChunk::from_pretty(
-            " I I I
+        let chunks = vec![
+            StreamChunk::from_pretty(
+                " I I I
             - 1 1 1
             + 1 1 2
             + 2 5 7
@@ -360,15 +354,18 @@ mod tests {
             - 6 6 9
             + 6 6 9
             - 9 9 1",
-        ));
-        compactor.push_chunk(StreamChunk::from_pretty(
-            " I I I
+            ),
+            StreamChunk::from_pretty(
+                " I I I
             - 6 6 9
             + 9 9 9
             - 9 9 4
             + 2 2 2
             + 9 9 1",
-        ));
+            ),
+        ];
+        let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
+
         let chunks = compactor.reconstructed_compacted_chunks(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],

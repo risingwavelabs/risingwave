@@ -105,6 +105,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
+        let input_data_types = input_executor.info().schema.data_types();
+        let chunk_size = params.env.config().developer.chunk_size;
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
@@ -202,6 +204,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     sink_param,
                     columns,
                     factory,
+                    chunk_size,
+                    input_data_types,
                 )
                 .await?
                 .boxed()
@@ -237,6 +241,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     sink_param,
                     columns,
                     factory,
+                    chunk_size,
+                    input_data_types,
                 )
                 .await?
                 .boxed()
