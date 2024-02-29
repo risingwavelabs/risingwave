@@ -140,6 +140,7 @@ test_backfill_tombstone() {
   ENCODE JSON;
   "
 
+  echo "--- Start Gen Tombstone process"
   bash -c '
     set -euo pipefail
 
@@ -150,12 +151,25 @@ test_backfill_tombstone() {
     done
   ' 1>deletes.log 2>&1 &
 
+  # Regularly create and drop mv
+  echo "--- Start Create MV process"
+  bash -c '
+    set -euo pipefail
+
+    for i in $(seq 1 1000)
+    do
+      ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+      sleep 2
+      ./risedev psql -c "DROP MATERIALIZED VIEW m1;"
+      sleep 2
+    done
+  ' 1>mv.log 2>&1 &
+  mv_pid=$!
+
   # give sometime to run deletes regularly and compaction
   sleep 180
 
-  echo "--- Create MV"
   # This will test if create mv takes a long time when there's lots of tombstones.
-  ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
   wait
