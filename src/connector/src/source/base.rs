@@ -261,6 +261,7 @@ pub enum SourceFormat {
     #[default]
     Invalid,
     Native,
+    None,
     Debezium,
     DebeziumMongo,
     Maxwell,
@@ -274,6 +275,7 @@ pub enum SourceEncode {
     #[default]
     Invalid,
     Native,
+    None,
     Avro,
     Csv,
     Protobuf,
@@ -334,6 +336,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
         (PbFormatType::Debezium, PbEncodeType::Avro) => {
             (SourceFormat::Debezium, SourceEncode::Avro)
         }

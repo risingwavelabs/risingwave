@@ -60,7 +60,7 @@ impl Catalog for JniCatalog {
 
             let metadata_location = resp.metadata_location.clone().ok_or_else(|| {
                 icelake::Error::new(
-                    icelake::ErrorKind::IcebergFeatureUnsupported,
+                    ErrorKind::IcebergFeatureUnsupported,
                     "Loading uncommitted table is not supported!",
                 )
             })?;
@@ -155,8 +155,8 @@ impl JniCatalog {
                 JObject::null(),
             )?;
             for (i, (key, value)) in java_catalog_props.iter().enumerate() {
-                let key_j_str = env.new_string(key).unwrap();
-                let value_j_str = env.new_string(value).unwrap();
+                let key_j_str = env.new_string(key)?;
+                let value_j_str = env.new_string(value)?;
                 env.set_object_array_element(&props, i as i32 * 2, key_j_str)?;
                 env.set_object_array_element(&props, i as i32 * 2 + 1, value_j_str)?;
             }
@@ -165,18 +165,15 @@ impl JniCatalog {
                 .call_static_method(
                     "com/risingwave/connector/catalog/JniCatalogWrapper",
                     "create",
-                    "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V",
+                    "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)Lcom/risingwave/connector/catalog/JniCatalogWrapper;",
                     &[
                         (&env.new_string(name.to_string()).unwrap()).into(),
                         (&env.new_string(catalog_impl.to_string()).unwrap()).into(),
                         (&props).into(),
                     ],
-                )
-                .unwrap();
+                )?;
 
-            let jni_catalog = env
-                .new_global_ref(jni_catalog_wrapper.l().unwrap())
-                .unwrap();
+            let jni_catalog = env.new_global_ref(jni_catalog_wrapper.l().unwrap())?;
 
             Ok(Arc::new(Self {
                 java_catalog: jni_catalog,
