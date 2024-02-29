@@ -7358,6 +7358,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_sqlparser",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "thiserror-ext",

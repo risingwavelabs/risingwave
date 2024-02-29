@@ -16,12 +16,11 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::result::Result;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
@@ -184,6 +183,7 @@ async fn fetch_jwks(url: &str) -> Result<Jwks, reqwest::Error> {
 async fn validate_jwt(
     jwt: &str,
     jwks_url: &str,
+    issuer: &str,
     meta_data: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
@@ -197,12 +197,14 @@ async fn validate_jwt(
         .ok_or("kid not found in jwks")?;
 
     let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
-    let validation = Validation::new(Algorithm::from_str(&jwk.alg)?);
-    let token_data = decode::<HashMap<String, String>>(jwt, &decoding_key, &validation)?;
+    let mut validation = Validation::new(header.alg);
+    validation.set_issuer(&[issuer]);
+    validation.set_required_spec_claims(&["exp", "iss"]);
+    let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
-    Ok(meta_data
-        .iter()
-        .all(|(k, v)| token_data.claims.get(k) == Some(v)))
+    Ok(meta_data.iter().all(
+        |(k, v)| matches!(token_data.claims.get(k), Some(serde_json::Value::String(s)) if s == v),
+    ))
 }
 
 impl UserAuthenticator {
@@ -216,9 +218,15 @@ impl UserAuthenticator {
             UserAuthenticator::OAuth(meta_data) => {
                 let mut meta_data = meta_data.clone();
                 let jwks_url = meta_data.remove("jwks_url").unwrap();
-                validate_jwt(&String::from_utf8_lossy(password), &jwks_url, &meta_data)
-                    .await
-                    .map_err(PsqlError::StartupError)?
+                let issuer = meta_data.remove("issuer").unwrap();
+                validate_jwt(
+                    &String::from_utf8_lossy(password),
+                    &jwks_url,
+                    &issuer,
+                    &meta_data,
+                )
+                .await
+                .map_err(PsqlError::StartupError)?
             }
         };
         if !success {

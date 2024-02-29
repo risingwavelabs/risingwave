@@ -19,6 +19,8 @@ use risingwave_pb::user::AuthInfo;
 use risingwave_sqlparser::ast::SqlOption;
 use sha2::{Digest, Sha256};
 
+use crate::WithOptions;
+
 // SHA-256 is not supported in PostgreSQL protocol. We need to implement SCRAM-SHA-256 instead
 // if necessary.
 const SHA256_ENCRYPTED_PREFIX: &str = "SHA-256:";
@@ -33,9 +35,10 @@ pub const OAUTH_ISSUER_KEY: &str = "issuer";
 /// Build `AuthInfo` for `OAuth`.
 #[inline(always)]
 pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
-    let meta_data: HashMap<String, String> = options
-        .iter()
-        .map(|opt| (opt.name.real_value(), opt.value.to_string()))
+    let meta_data: HashMap<String, String> = WithOptions::try_from(options.as_slice())
+        .ok()?
+        .into_inner()
+        .into_iter()
         .collect();
     if !meta_data.contains_key(OAUTH_JWKS_URL_KEY) || !meta_data.contains_key(OAUTH_ISSUER_KEY) {
         return None;
