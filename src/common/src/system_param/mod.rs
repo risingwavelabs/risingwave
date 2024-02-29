@@ -87,7 +87,6 @@ macro_rules! for_all_params {
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
-            { oauth_jwks_url,                           String, Some("".to_string()),                       true,   "Url to get JSON Web Key Set(JWKS) for oauth authentication.", },
         }
     };
 }
@@ -376,7 +375,6 @@ macro_rules! impl_system_params_for_test {
             ret.state_store = Some("hummock+memory".to_string());
             ret.backup_storage_url = Some("memory".into());
             ret.backup_storage_directory = Some("backup".into());
-            ret.oauth_jwks_url = Some("https://auth-static.confluent.io/jwks".into());
             ret
         }
     };
@@ -442,7 +440,6 @@ mod tests {
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
             (ENABLE_TRACING_KEY, "true"),
-            (OAUTH_JWKS_URL_KEY, "a"),
             ("a_deprecated_param", "foo"),
         ];
 

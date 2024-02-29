@@ -159,7 +159,7 @@ pub enum UserAuthenticator {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
-    OAuth(String),
+    OAuth(HashMap<String, String>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,7 +181,11 @@ async fn fetch_jwks(url: &str) -> Result<Jwks, reqwest::Error> {
     Ok(resp)
 }
 
-async fn validate_jwt(jwt: &str, jwks_url: &str) -> Result<bool, BoxedError> {
+async fn validate_jwt(
+    jwt: &str,
+    jwks_url: &str,
+    meta_data: &HashMap<String, String>,
+) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
     let jwks = fetch_jwks(jwks_url).await?;
 
@@ -194,8 +198,11 @@ async fn validate_jwt(jwt: &str, jwks_url: &str) -> Result<bool, BoxedError> {
 
     let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
     let validation = Validation::new(Algorithm::from_str(&jwk.alg)?);
+    let token_data = decode::<HashMap<String, String>>(jwt, &decoding_key, &validation)?;
 
-    Ok(decode::<HashMap<String, String>>(jwt, &decoding_key, &validation).is_ok())
+    Ok(meta_data
+        .iter()
+        .all(|(k, v)| token_data.claims.get(k) == Some(v)))
 }
 
 impl UserAuthenticator {
@@ -206,8 +213,10 @@ impl UserAuthenticator {
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
-            UserAuthenticator::OAuth(oauth_jwks_url) => {
-                validate_jwt(&String::from_utf8_lossy(password), oauth_jwks_url)
+            UserAuthenticator::OAuth(meta_data) => {
+                let mut meta_data = meta_data.clone();
+                let jwks_url = meta_data.remove("jwks_url").unwrap();
+                validate_jwt(&String::from_utf8_lossy(password), &jwks_url, &meta_data)
                     .await
                     .map_err(PsqlError::StartupError)?
             }

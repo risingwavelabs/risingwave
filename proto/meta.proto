@@ -557,7 +557,6 @@ message SystemParams {
   optional bool pause_on_next_bootstrap = 13;
   optional string wasm_storage_url = 14 [deprecated = true];
   optional bool enable_tracing = 15;
-  optional string oauth_jwks_url = 16;
 }
 
 message GetSystemParamsRequest {}

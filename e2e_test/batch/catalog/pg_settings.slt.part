@@ -13,7 +13,6 @@ postmaster  barrier_interval_ms
 postmaster  checkpoint_frequency
 postmaster  enable_tracing
 postmaster  max_concurrent_creating_streaming_jobs
-postmaster  oauth_jwks_url
 postmaster  pause_on_next_bootstrap
 user        application_name
 user        background_ddl

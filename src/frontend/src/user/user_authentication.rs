@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::AuthInfo;
+use risingwave_sqlparser::ast::SqlOption;
 use sha2::{Digest, Sha256};
 
 // SHA-256 is not supported in PostgreSQL protocol. We need to implement SCRAM-SHA-256 instead
@@ -24,12 +27,23 @@ const MD5_ENCRYPTED_PREFIX: &str = "md5";
 const VALID_SHA256_ENCRYPTED_LEN: usize = SHA256_ENCRYPTED_PREFIX.len() + 64;
 const VALID_MD5_ENCRYPTED_LEN: usize = MD5_ENCRYPTED_PREFIX.len() + 32;
 
+pub const OAUTH_JWKS_URL_KEY: &str = "jwks_url";
+pub const OAUTH_ISSUER_KEY: &str = "issuer";
+
 /// Build `AuthInfo` for `OAuth`.
 #[inline(always)]
-pub fn build_oauth_info() -> Option<AuthInfo> {
+pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
+    let meta_data: HashMap<String, String> = options
+        .iter()
+        .map(|opt| (opt.name.real_value(), opt.value.to_string()))
+        .collect();
+    if !meta_data.contains_key(OAUTH_JWKS_URL_KEY) || !meta_data.contains_key(OAUTH_ISSUER_KEY) {
+        return None;
+    }
     Some(AuthInfo {
         encryption_type: EncryptionType::Oauth as i32,
         encrypted_value: Vec::new(),
+        meta_data,
     })
 }
 
@@ -62,11 +76,13 @@ pub fn encrypted_password(name: &str, password: &str) -> Option<AuthInfo> {
         Some(AuthInfo {
             encryption_type: EncryptionType::Sha256 as i32,
             encrypted_value: password.trim_start_matches(SHA256_ENCRYPTED_PREFIX).into(),
+            meta_data: HashMap::new(),
         })
     } else if valid_md5_password(password) {
         Some(AuthInfo {
             encryption_type: EncryptionType::Md5 as i32,
             encrypted_value: password.trim_start_matches(MD5_ENCRYPTED_PREFIX).into(),
+            meta_data: HashMap::new(),
         })
     } else {
         Some(encrypt_default(name, password))
@@ -79,6 +95,7 @@ fn encrypt_default(name: &str, password: &str) -> AuthInfo {
     AuthInfo {
         encryption_type: EncryptionType::Md5 as i32,
         encrypted_value: md5_hash(name, password),
+        meta_data: HashMap::new(),
     }
 }
 
@@ -166,15 +183,18 @@ mod tests {
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: md5_hash(user_name, password),
+                meta_data: HashMap::new(),
             }),
             None,
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: md5_hash(user_name, password),
+                meta_data: HashMap::new(),
             }),
             Some(AuthInfo {
                 encryption_type: EncryptionType::Sha256 as i32,
                 encrypted_value: sha256_hash(user_name, password),
+                meta_data: HashMap::new(),
             }),
         ];
         let output_passwords = input_passwords

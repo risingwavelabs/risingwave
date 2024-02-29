@@ -46,7 +46,6 @@ use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMod
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -978,20 +977,7 @@ impl SessionManager for SessionManagerImpl {
                             salt,
                         }
                     } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        let oauth_jwks_url = self
-                            .env
-                            .system_params_manager
-                            .get_params()
-                            .load()
-                            .oauth_jwks_url()
-                            .to_string();
-                        if oauth_jwks_url.is_empty() {
-                            return Err(Box::new(Error::new(
-                                ErrorKind::PermissionDenied,
-                                "OAuth JWKS URL is not set",
-                            )));
-                        }
-                        UserAuthenticator::OAuth(oauth_jwks_url)
+                        UserAuthenticator::OAuth(auth_info.meta_data.clone())
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,
