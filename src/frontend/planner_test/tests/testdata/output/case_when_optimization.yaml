@@ -312,7 +312,7 @@
         when c1 = 30 then 'thirty'
         when c1 = 31 then 'thirty-one'
         else 'other'
-      end 
+      end
     from t1;
   logical_plan: |-
     LogicalProject { exprs: [ConstantLookup(t1.c1, 1:Int32, 'one':Varchar, 2:Int32, 'two':Varchar, 3:Int32, 'three':Varchar, 4:Int32, 'four':Varchar, 5:Int32, 'five':Varchar, 6:Int32, 'six':Varchar, 7:Int32, 'seven':Varchar, 8:Int32, 'eight':Varchar, 9:Int32, 'nine':Varchar, 10:Int32, 'ten':Varchar, 11:Int32, 'eleven':Varchar, 12:Int32, 'twelve':Varchar, 13:Int32, 'thirteen':Varchar, 14:Int32, 'fourteen':Varchar, 15:Int32, 'fifteen':Varchar, 16:Int32, 'sixteen':Varchar, 17:Int32, 'seventeen':Varchar, 18:Int32, 'eighteen':Varchar, 19:Int32, 'nineteen':Varchar, 20:Int32, 'twenty':Varchar, 21:Int32, 'twenty-one':Varchar, 22:Int32, 'twenty-two':Varchar, 23:Int32, 'twenty-three':Varchar, 24:Int32, 'twenty-four':Varchar, 25:Int32, 'twenty-five':Varchar, 26:Int32, 'twenty-six':Varchar, 27:Int32, 'twenty-seven':Varchar, 28:Int32, 'twenty-eight':Varchar, 29:Int32, 'twenty-nine':Varchar, 30:Int32, 'thirty':Varchar, 31:Int32, 'thirty-one':Varchar, 'other':Varchar) as $expr1] }

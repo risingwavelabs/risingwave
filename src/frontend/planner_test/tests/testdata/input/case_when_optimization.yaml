@@ -288,7 +288,7 @@
         when c1 = 30 then 'thirty'
         when c1 = 31 then 'thirty-one'
         else 'other'
-      end 
+      end
     from t1;
   expected_outputs:
   - logical_plan
