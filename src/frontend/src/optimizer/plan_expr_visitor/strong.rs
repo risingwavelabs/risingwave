@@ -37,18 +37,19 @@ pub struct Strong {
 }
 
 impl Strong {
-    pub fn new(null_columns: FixedBitSet) -> Self {
+    fn new(null_columns: FixedBitSet) -> Self {
         Self { null_columns }
     }
 
     // Returns whether the analyzed expression will definitely return null if
     // all of a given set of input columns are null.
+    #[allow(dead_code)]
     pub fn is_null(expr: &ExprImpl, null_columns: FixedBitSet) -> bool {
         let strong = Strong::new(null_columns);
         strong.is_null_visit(expr)
     }
 
-    pub fn is_input_ref_null(&self, input_ref: &InputRef) -> bool {
+    fn is_input_ref_null(&self, input_ref: &InputRef) -> bool {
         self.null_columns.contains(input_ref.index())
     }
 
@@ -137,22 +138,22 @@ mod tests {
     fn test_literal() {
         let null_columns = FixedBitSet::with_capacity(1);
         let expr = Literal(crate::expr::Literal::new(None, DataType::Varchar).into());
-        assert_eq!(Strong::is_null(&expr, null_columns.clone()), true);
+        assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = Literal(
             crate::expr::Literal::new(Some("test".to_string().into()), DataType::Varchar).into(),
         );
-        assert_eq!(Strong::is_null(&expr, null_columns), false);
+        assert!(!Strong::is_null(&expr, null_columns));
     }
 
     #[test]
     fn test_input_ref1() {
         let null_columns = FixedBitSet::with_capacity(2);
         let expr = InputRef::new(0, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns.clone()), false);
+        assert!(!Strong::is_null(&expr, null_columns.clone()));
 
         let expr = InputRef::new(1, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns), false);
+        assert!(!Strong::is_null(&expr, null_columns));
     }
 
     #[test]
@@ -161,10 +162,10 @@ mod tests {
         null_columns.insert(0);
         null_columns.insert(1);
         let expr = InputRef::new(0, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns.clone()), true);
+        assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = InputRef::new(1, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns), true);
+        assert!(Strong::is_null(&expr, null_columns));
     }
 
     #[test]
@@ -181,7 +182,7 @@ mod tests {
             DataType::Varchar,
         )
         .into();
-        assert_eq!(Strong::is_null(&expr, null_columns), true);
+        assert!(Strong::is_null(&expr, null_columns));
     }
 
     // generate a test case for (0.8 * sum / count) where sum is null and count is not null
@@ -201,12 +202,12 @@ mod tests {
                     ],
                     DataType::Decimal,
                 )
-                    .into()
+                .into(),
             ],
             DataType::Decimal,
         )
         .into();
-        assert_eq!(Strong::is_null(&expr, null_columns), true);
+        assert!(Strong::is_null(&expr, null_columns));
     }
 
     // generate test cases for is not null
