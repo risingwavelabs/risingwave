@@ -80,7 +80,7 @@ async fn test_state_table_update_insert() {
         None,
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     state_table.delete(OwnedRow::new(vec![
@@ -136,7 +136,7 @@ async fn test_state_table_update_insert() {
         ]))
     );
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let row6_commit = state_table
@@ -173,7 +173,7 @@ async fn test_state_table_update_insert() {
         Some(4_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
@@ -202,7 +202,7 @@ async fn test_state_table_update_insert() {
         .unwrap();
     assert_eq!(row1, None);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let row1_commit = state_table
@@ -267,7 +267,7 @@ async fn test_state_table_iter_with_prefix() {
         Some(555_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
@@ -396,7 +396,7 @@ async fn test_state_table_iter_with_pk_range() {
         Some(555_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
@@ -601,7 +601,7 @@ async fn test_state_table_iter_with_value_indices() {
         assert_eq!(&OwnedRow::new(vec![Some(666_i32.into())]), res.as_ref());
     }
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
@@ -789,7 +789,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         );
     }
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
@@ -1345,7 +1345,7 @@ async fn test_state_table_may_exist() {
     // test may_exist with data only in memtable (e1)
     check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     let e1 = epoch.prev;
 
@@ -1386,7 +1386,7 @@ async fn test_state_table_may_exist() {
     // test may_exist with data in memtable (e2), committed ssts (e1)
     check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     let e2 = epoch.prev;
 
@@ -1412,7 +1412,7 @@ async fn test_state_table_may_exist() {
     // test may_exist with data in memtable (e3), uncommitted ssts (e2), committed ssts (e1)
     check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     let e3 = epoch.prev;
 
@@ -1442,7 +1442,7 @@ async fn test_state_table_may_exist() {
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(e2).await;
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     let e4 = epoch.prev;
 
@@ -1549,7 +1549,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let cache = state_table.get_watermark_cache();
@@ -1630,7 +1630,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let watermark = Timestamptz::from_secs(0).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let inserts_1 = vec![
@@ -1739,7 +1739,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // After sync, we should scan all rows into watermark cache.
@@ -1836,7 +1836,7 @@ async fn test_state_table_watermark_cache_refill() {
     let watermark = Timestamptz::from_secs(2500).unwrap().to_scalar_value();
     state_table.update_watermark(watermark, true);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     // After the first barrier, watermark cache won't be filled.
@@ -1902,7 +1902,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
         Some(444_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
@@ -2083,7 +2083,7 @@ async fn test_replicated_state_table_replication() {
         Some(111_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
@@ -2143,7 +2143,7 @@ async fn test_replicated_state_table_replication() {
         StreamChunk::from_rows(&replicate_chunk, &[DataType::Int32, DataType::Int32]);
     replicated_state_table.write_chunk(replicate_chunk);
 
-    epoch.inc();
+    epoch.inc_for_test();
     state_table.commit(epoch).await.unwrap();
     replicated_state_table.commit(epoch).await.unwrap();
 

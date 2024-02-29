@@ -431,7 +431,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -472,7 +472,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -538,7 +538,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -614,7 +614,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -665,7 +665,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }

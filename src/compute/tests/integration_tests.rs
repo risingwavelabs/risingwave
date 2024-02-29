@@ -476,7 +476,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(8_i64.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(

@@ -155,16 +155,11 @@ impl EpochPair {
         Self { curr, prev }
     }
 
-    pub fn inc(&mut self) {
+    pub fn inc_for_test(&mut self) {
         self.prev = self.curr;
         self.curr += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
-    pub fn inc_for_test(&mut self, inc_by: u64) {
-        self.prev = self.curr;
-
-        self.curr += inc_by;
-    }
 
     pub fn new_test_epoch(curr: u64) -> Self {
         assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);

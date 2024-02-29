@@ -402,7 +402,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -420,7 +420,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -502,7 +502,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -520,7 +520,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -646,7 +646,7 @@ mod tests {
             state_1.apply_chunk(&chunk_1)?;
             state_2.apply_chunk(&chunk_2)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table_1.commit(epoch).await.unwrap();
             table_2.commit(epoch).await.unwrap();
 
@@ -720,7 +720,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -738,7 +738,7 @@ mod tests {
 
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -835,7 +835,7 @@ mod tests {
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -862,7 +862,7 @@ mod tests {
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -924,7 +924,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -944,7 +944,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -966,7 +966,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1038,7 +1038,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1055,7 +1055,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1122,7 +1122,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
@@ -1139,7 +1139,7 @@ mod tests {
             );
             state.apply_chunk(&chunk)?;
 
-            epoch.inc();
+            epoch.inc_for_test();
             table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;

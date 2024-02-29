@@ -108,7 +108,7 @@ async fn test_storage_table_value_indices() {
         Some("2222".to_string().into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -221,7 +221,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         Some(222_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -324,7 +324,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         None,
         Some(222_i32.into()),
     ]));
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -435,7 +435,7 @@ async fn test_batch_scan_with_value_indices() {
         Some(2222_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
