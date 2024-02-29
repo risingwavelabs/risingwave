@@ -61,9 +61,6 @@ ENABLE_KAFKA=true
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
 
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
@@ -93,9 +90,6 @@ ENABLE_KAFKA=true
 
 # Make sure that it builds
 ENABLE_BUILD_RUST=true
-
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
 
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
