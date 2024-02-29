@@ -55,6 +55,12 @@ impl UserManager {
             .chain(database.indexes.values().map(|index| index.owner))
             .chain(
                 database
+                    .subscriptions
+                    .values()
+                    .map(|subscriptions| subscriptions.owner),
+            )
+            .chain(
+                database
                     .tables
                     .values()
                     .filter(|table| table.table_type() != TableType::Internal)

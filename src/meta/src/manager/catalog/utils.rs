@@ -18,9 +18,9 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
-    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, Distinct, Expr, Function,
-    FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
-    TableAlias, TableFactor, TableWithJoins,
+    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
+    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem,
+    SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -77,6 +77,13 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
                 source_name: name, ..
             },
         }
+        | Statement::CreateSubscription {
+            stmt:
+                CreateSubscriptionStatement {
+                    subscription_name: name,
+                    ..
+                },
+        }
         | Statement::CreateSink {
             stmt: CreateSinkStatement {
                 sink_name: name, ..
@@ -121,7 +128,14 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                     into_table_name: None,
                     ..
                 },
-        } => replace_table_name(table_name, to),
+        }| Statement::CreateSubscription {
+            stmt:
+                CreateSubscriptionStatement {
+                    subscription_from: table_name,
+                    ..
+                },
+        }
+         => replace_table_name(table_name, to),
         Statement::CreateSink {
             stmt: CreateSinkStatement {
                 sink_from,
