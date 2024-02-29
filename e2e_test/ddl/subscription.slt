@@ -39,3 +39,9 @@ drop subscription if exists ddl_subscription_table;
 
 statement ok
 drop subscription if exists ddl_subscription_mv;
+
+statement ok
+drop materialized view ddl_mv;
+
+statement ok
+drop table ddl_t;
