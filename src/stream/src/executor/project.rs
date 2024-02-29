@@ -281,7 +281,6 @@ mod tests {
     use risingwave_common::types::{DataType, Datum};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{self, Expression, ValueImpl};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::super::test_utils::MockSource;
     use super::super::*;

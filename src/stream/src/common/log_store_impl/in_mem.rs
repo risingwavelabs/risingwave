@@ -21,7 +21,6 @@ use risingwave_common::util::epoch::{test_epoch, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
 };
-use risingwave_hummock_sdk::EpochWithGap;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };

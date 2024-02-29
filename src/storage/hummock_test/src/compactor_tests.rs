@@ -26,14 +26,16 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
-    use risingwave_common::util::epoch::{test_epoch, Epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::{
+        test_epoch, Epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST,
+    };
     use risingwave_common_service::observer_manager::NotificationClient;
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{can_concat, EpochWithGap};
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
         default_compaction_selector, ManualCompactionOption,
@@ -142,18 +144,15 @@ pub(crate) mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         key: &Bytes,
         value_size: usize,
-        epochs: Vec<EpochWithGap>,
+        epochs: Vec<u64>,
     ) {
         let mut local = storage.new_local(Default::default()).await;
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
-        local
-            .init_for_test(epochs[0].as_u64_for_test())
-            .await
-            .unwrap();
+        local.init_for_test(epochs[0]).await.unwrap();
         for (i, &e) in epochs.iter().enumerate() {
-            let epoch = e.as_u64_for_test();
-            let val_str = e.as_u64_for_test() / EPOCH_INC_MIN_STEP_FOR_TEST;
+            let epoch = e;
+            let val_str = e / EPOCH_INC_MIN_STEP_FOR_TEST;
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local
@@ -171,10 +170,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
-                local.seal_current_epoch(
-                    epochs[i + 1].as_u64_for_test(),
-                    SealCurrentEpochOptions::for_test(),
-                );
+                local.seal_current_epoch(epochs[i + 1], SealCurrentEpochOptions::for_test());
             } else {
                 local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
@@ -282,7 +278,7 @@ pub(crate) mod tests {
             &key,
             10,
             (1..SST_COUNT + 1)
-                .map(|v| EpochWithGap::new_for_test(v * 1000))
+                .map(|v| test_epoch(v * 1000))
                 .collect_vec(),
         )
         .await;
@@ -446,9 +442,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 20,
-            (1..SST_COUNT + 1)
-                .map(EpochWithGap::new_for_test)
-                .collect_vec(),
+            (1..SST_COUNT + 1).map(test_epoch).collect_vec(),
         )
         .await;
 
@@ -509,11 +503,11 @@ pub(crate) mod tests {
         }
         // 5. storage get back the correct kv after compaction
         storage.wait_version(version).await;
-        let get_epoch = EpochWithGap::new_for_test(SST_COUNT + 1);
+        let get_epoch = test_epoch(SST_COUNT + 1);
         let get_val = storage
             .get(
                 TableKey(key.clone()),
-                get_epoch.as_u64_for_test(),
+                get_epoch,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
@@ -546,7 +540,7 @@ pub(crate) mod tests {
         keys_per_epoch: usize,
     ) {
         let kv_count: u16 = 128;
-        let mut epoch = EpochWithGap::new_for_test(1);
+        let mut epoch = test_epoch(1);
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
@@ -554,10 +548,10 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
-            epoch.inc();
+            epoch.inc_epoch();
 
             if idx == 0 {
-                local.init_for_test(epoch.as_u64_for_test()).await.unwrap();
+                local.init_for_test(epoch).await.unwrap();
             }
 
             for _ in 0..keys_per_epoch {
@@ -570,12 +564,9 @@ pub(crate) mod tests {
             }
             local.flush(Vec::new()).await.unwrap();
             let next_epoch = epoch.next_epoch();
-            local.seal_current_epoch(
-                next_epoch.as_u64_for_test(),
-                SealCurrentEpochOptions::for_test(),
-            );
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
-            flush_and_commit(&hummock_meta_client, storage, epoch.as_u64_for_test()).await;
+            flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
     }
 
@@ -728,7 +719,7 @@ pub(crate) mod tests {
         let drop_table_id = 1;
         let existing_table_ids = 2;
         let kv_count: usize = 128;
-        let mut epoch: EpochWithGap = EpochWithGap::new_for_test(1);
+        let mut epoch = test_epoch(1);
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[drop_table_id, existing_table_ids],
@@ -736,17 +727,11 @@ pub(crate) mod tests {
         )
         .await;
         for index in 0..kv_count {
-            epoch.inc();
+            epoch.inc_epoch();
             let next_epoch = epoch.next_epoch();
             if index == 0 {
-                storage_1
-                    .init_for_test(epoch.as_u64_for_test())
-                    .await
-                    .unwrap();
-                storage_2
-                    .init_for_test(epoch.as_u64_for_test())
-                    .await
-                    .unwrap();
+                storage_1.init_for_test(epoch).await.unwrap();
+                storage_2.init_for_test(epoch).await.unwrap();
             }
 
             let (storage, other) = if index % 2 == 0 {
@@ -764,24 +749,15 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             storage.flush(Vec::new()).await.unwrap();
-            storage.seal_current_epoch(
-                next_epoch.as_u64_for_test(),
-                SealCurrentEpochOptions::for_test(),
-            );
-            other.seal_current_epoch(
-                next_epoch.as_u64_for_test(),
-                SealCurrentEpochOptions::for_test(),
-            );
+            storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+            other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = global_storage
-                .seal_and_sync_epoch(epoch.as_u64_for_test())
+                .seal_and_sync_epoch(epoch)
                 .await
                 .unwrap()
                 .uncommitted_ssts;
-            hummock_meta_client
-                .commit_epoch(epoch.as_u64_for_test(), ssts)
-                .await
-                .unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         // Mimic dropping table
@@ -866,7 +842,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch.inc();
+        epoch.inc_epoch();
         // to update version for hummock_storage
         global_storage.wait_version(version).await;
 
@@ -874,7 +850,7 @@ pub(crate) mod tests {
         let scan_result = global_storage
             .scan(
                 (Bound::Unbounded, Bound::Unbounded),
-                epoch.as_u64_for_test(),
+                epoch,
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
@@ -1321,8 +1297,8 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
-        let epoch = EpochWithGap::new_for_test(130);
-        local.init_for_test(epoch.as_u64_for_test()).await.unwrap();
+        let epoch = test_epoch(130);
+        local.init_for_test(epoch).await.unwrap();
         let prefix_key_range = |k: u16| {
             let key = k.to_be_bytes();
             (
@@ -1336,7 +1312,7 @@ pub(crate) mod tests {
             .unwrap();
         local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
-        flush_and_commit(&hummock_meta_client, &storage, epoch.as_u64_for_test()).await;
+        flush_and_commit(&hummock_meta_client, &storage, epoch).await;
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
@@ -1652,12 +1628,12 @@ pub(crate) mod tests {
                 .as_secs(),
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
-        let epoch1 = EpochWithGap::new_for_test(400);
+        let epoch1 = test_epoch(400);
         for start_idx in 0..3 {
             let base = start_idx * KEY_COUNT;
             for k in 0..KEY_COUNT / 3 {
                 let key = (k + base).to_be_bytes().to_vec();
-                let key = FullKey::new(TableId::new(1), TableKey(key), epoch1.as_u64_for_test());
+                let key = FullKey::new(TableId::new(1), TableKey(key), epoch1);
                 let rand_v = rng.next_u32() % 10;
                 let v = if rand_v == 1 {
                     HummockValue::delete()
@@ -1669,10 +1645,10 @@ pub(crate) mod tests {
         }
 
         let mut data2 = Vec::with_capacity(KEY_COUNT);
-        let epoch2 = EpochWithGap::new_for_test(300);
+        let epoch2 = test_epoch(300);
         for k in 0..KEY_COUNT * 4 {
             let key = k.to_be_bytes().to_vec();
-            let key = FullKey::new(TableId::new(1), TableKey(key), epoch2.as_u64_for_test());
+            let key = FullKey::new(TableId::new(1), TableKey(key), epoch2);
             let v = HummockValue::put(format!("sst2-{}", 300).into_bytes());
             data2.push((key, v));
         }

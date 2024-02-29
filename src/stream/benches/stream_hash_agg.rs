@@ -22,7 +22,6 @@ use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
-use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;

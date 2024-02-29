@@ -20,9 +20,9 @@ use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
-use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_storage::memory::MemoryStateStore;
 
@@ -196,14 +196,12 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
-    let mut epoch = EpochWithGap::new_for_test(1);
+    let mut epoch = test_epoch(1);
     input
-        .send(Message::Barrier(Barrier::new_test_barrier(
-            epoch.as_u64_for_test(),
-        )))
+        .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
         .await
         .unwrap();
-    epoch.inc();
+    epoch.inc_epoch();
     for j in 0..11 {
         let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
@@ -214,16 +212,14 @@ async fn test_merger_sum_aggr() {
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         input
-            .send(Message::Barrier(Barrier::new_test_barrier(
-                epoch.as_u64_for_test(),
-            )))
+            .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
             .await
             .unwrap();
-        epoch.inc();
+        epoch.inc_epoch();
     }
     input
         .send(Message::Barrier(
-            Barrier::new_test_barrier(epoch.as_u64_for_test())
+            Barrier::new_test_barrier(epoch)
                 .with_mutation(Mutation::Stop([0].into_iter().collect())),
         ))
         .await

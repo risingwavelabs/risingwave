@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -56,7 +57,9 @@ pub async fn add_test_tables(
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
 
-    let mut epoch = EpochWithGap::new_for_test(1);
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+
+    let mut epoch = test_epoch(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
@@ -71,10 +74,7 @@ pub async fn add_test_tables(
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(
-            epoch.as_u64_for_test(),
-            CommitEpochInfo::for_test(ssts, sst_to_worker),
-        )
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
     // Simulate a compaction and increase version by 1.
@@ -136,7 +136,7 @@ pub async fn add_test_tables(
             .remove_compactor(context_id);
     }
     // Increase version by 1.
-    epoch.inc();
+    epoch.inc_epoch();
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
@@ -150,17 +150,14 @@ pub async fn add_test_tables(
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(
-            epoch.as_u64_for_test(),
-            CommitEpochInfo::for_test(ssts, sst_to_worker),
-        )
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
 pub fn generate_test_sstables_with_table_id(
-    epoch: EpochWithGap,
+    epoch: u64,
     table_id: u32,
     sst_ids: Vec<HummockSstableObjectId>,
 ) -> Vec<SstableInfo> {
@@ -174,44 +171,41 @@ pub fn generate_test_sstables_with_table_id(
                     format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
                         .as_bytes()
                         .to_vec(),
-                    epoch.as_u64_for_test(),
+                    epoch,
                 ),
                 right: key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
                         .as_bytes()
                         .to_vec(),
-                    epoch.as_u64_for_test(),
+                    epoch,
                 ),
                 right_exclusive: false,
             }),
             file_size: 2,
             table_ids: vec![table_id],
             uncompressed_file_size: 2,
-            max_epoch: epoch.as_u64_for_test(),
+            max_epoch: epoch,
             ..Default::default()
         });
     }
     sst_info
 }
 
-pub fn generate_test_tables(
-    epoch: EpochWithGap,
-    sst_ids: Vec<HummockSstableObjectId>,
-) -> Vec<SstableInfo> {
+pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch.as_u64_for_test()),
-                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch.as_u64_for_test()),
+                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
+                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
                 right_exclusive: false,
             }),
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             uncompressed_file_size: 2,
-            max_epoch: epoch.as_u64_for_test(),
+            max_epoch: epoch,
             ..Default::default()
         });
     }
@@ -402,8 +396,7 @@ pub async fn add_ssts(
     context_id: HummockContextId,
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables =
-        generate_test_sstables_with_table_id(EpochWithGap::new_for_test(epoch), 1, table_ids);
+    let test_tables = generate_test_sstables_with_table_id(test_epoch(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()

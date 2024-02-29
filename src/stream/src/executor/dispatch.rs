@@ -1006,7 +1006,6 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_common::util::iter_util::ZipEqFast;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;

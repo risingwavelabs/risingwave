@@ -315,7 +315,6 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::assert_bytes_eq;

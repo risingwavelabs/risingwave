@@ -303,7 +303,6 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;

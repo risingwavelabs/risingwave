@@ -531,7 +531,7 @@ mod tests {
     use std::task::Poll;
 
     use futures::{FutureExt, TryFuture};
-    use risingwave_hummock_sdk::EpochWithGap;
+    use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
@@ -640,33 +640,33 @@ mod tests {
     #[tokio::test]
     async fn test_future_delivery_manager_compress_chunk() {
         let mut manager = DeliveryFutureManager::new(10);
-        let epoch1 = EpochWithGap::new_for_test(233);
+        let epoch1 = test_epoch(233);
         let chunk_id1 = 1;
         let chunk_id2 = chunk_id1 + 1;
         let chunk_id3 = chunk_id2 + 1;
         let (tx1_1, rx1_1) = oneshot::channel();
         let (tx1_2, rx1_2) = oneshot::channel();
         let (tx1_3, rx1_3) = oneshot::channel();
-        let epoch2 = EpochWithGap::new_for_test(234);
+        let epoch2 = test_epoch(234);
         let (tx2_1, rx2_1) = oneshot::channel();
         assert!(!manager
-            .start_write_chunk(epoch1.as_u64_for_test(), chunk_id1)
+            .start_write_chunk(epoch1, chunk_id1)
             .add_future_may_await(to_test_future(rx1_1))
             .await
             .unwrap());
         assert!(!manager
-            .start_write_chunk(epoch1.as_u64_for_test(), chunk_id2)
+            .start_write_chunk(epoch1, chunk_id2)
             .add_future_may_await(to_test_future(rx1_2))
             .await
             .unwrap());
         assert!(!manager
-            .start_write_chunk(epoch1.as_u64_for_test(), chunk_id3)
+            .start_write_chunk(epoch1, chunk_id3)
             .add_future_may_await(to_test_future(rx1_3))
             .await
             .unwrap());
-        manager.add_barrier(epoch1.as_u64_for_test());
+        manager.add_barrier(epoch1);
         assert!(!manager
-            .start_write_chunk(epoch2.as_u64_for_test(), chunk_id1)
+            .start_write_chunk(epoch2, chunk_id1)
             .add_future_may_await(to_test_future(rx2_1))
             .await
             .unwrap());
@@ -689,7 +689,7 @@ mod tests {
             assert_eq!(
                 next_truncate_offset.await.unwrap(),
                 TruncateOffset::Chunk {
-                    epoch: epoch1.as_u64_for_test(),
+                    epoch: epoch1,
                     chunk_id: chunk_id2
                 }
             );
@@ -707,16 +707,14 @@ mod tests {
             // Emit barrier though later chunk has finished.
             assert_eq!(
                 next_truncate_offset.await.unwrap(),
-                TruncateOffset::Barrier {
-                    epoch: epoch1.as_u64_for_test()
-                }
+                TruncateOffset::Barrier { epoch: epoch1 }
             );
         }
         assert_eq!(manager.future_count, 1);
         assert_eq!(
             manager.next_truncate_offset().await.unwrap(),
             TruncateOffset::Chunk {
-                epoch: epoch2.as_u64_for_test(),
+                epoch: epoch2,
                 chunk_id: chunk_id1
             }
         );

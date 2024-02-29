@@ -78,7 +78,6 @@ mod tests {
     use futures::{pin_mut, StreamExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::executor::test_utils::MockSource;

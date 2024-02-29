@@ -207,7 +207,6 @@ mod tests {
     mod test1 {
 
         use risingwave_common::util::epoch::test_epoch;
-        use risingwave_hummock_sdk::EpochWithGap;
 
         use super::*;
         use crate::executor::ActorContext;
@@ -717,7 +716,6 @@ mod tests {
     mod test2 {
 
         use risingwave_common::util::epoch::test_epoch;
-        use risingwave_hummock_sdk::EpochWithGap;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -1062,7 +1060,6 @@ mod tests {
     mod test_with_ties {
 
         use risingwave_common::util::epoch::test_epoch;
-        use risingwave_hummock_sdk::EpochWithGap;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;

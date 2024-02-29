@@ -744,7 +744,6 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};

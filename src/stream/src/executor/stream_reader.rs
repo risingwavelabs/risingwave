@@ -145,7 +145,6 @@ mod tests {
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::StreamChunkWithState;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 

@@ -123,7 +123,6 @@ impl CompactionDeleteRangeIterator {
         epoch: HummockEpoch,
     ) -> HummockResult<HummockEpoch> {
         use risingwave_common::util::epoch::test_epoch;
-        use risingwave_hummock_sdk::EpochWithGap;
 
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         while self.inner.is_valid()
@@ -262,7 +261,6 @@ mod tests {
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::{is_max_epoch, test_epoch};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -496,22 +494,22 @@ mod tests {
             sstable.value(),
             iterator_test_user_key_of(0).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_for_test(300).as_u64_for_test());
+        assert_eq!(ret, test_epoch(300));
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(1).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_for_test(150).as_u64_for_test());
+        assert_eq!(ret, test_epoch(150));
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(3).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_for_test(50).as_u64_for_test());
+        assert_eq!(ret, test_epoch(50));
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(6).as_ref(),
         );
-        assert_eq!(ret, EpochWithGap::new_for_test(150).as_u64_for_test());
+        assert_eq!(ret, test_epoch(150));
         let ret = get_min_delete_range_epoch_from_sstable(
             sstable.value(),
             iterator_test_user_key_of(8).as_ref(),

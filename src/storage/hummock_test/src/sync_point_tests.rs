@@ -479,7 +479,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let get_result = storage
         .get(
             gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
-            risingwave_hummock_sdk::test_epoch(120),
+            test_epoch(120),
             read_options.clone(),
         )
         .await

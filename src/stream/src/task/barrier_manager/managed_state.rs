@@ -329,7 +329,6 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
     use tokio::sync::oneshot;
 
     use crate::executor::Barrier;

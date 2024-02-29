@@ -164,7 +164,6 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl, StructType};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression, NonStrictExpression};
-    use risingwave_hummock_sdk::EpochWithGap;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;

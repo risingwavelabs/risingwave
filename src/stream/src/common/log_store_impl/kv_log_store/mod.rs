@@ -283,11 +283,11 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
     use risingwave_connector::sink::log_store::{
         ChunkId, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
-    use risingwave_hummock_sdk::{EpochWithGap, HummockReadEpoch};
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::store::SyncResult;
@@ -328,7 +328,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_for_test(
+        let epoch1 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
@@ -337,29 +337,19 @@ mod tests {
                 + 1,
         );
         writer
-            .init(EpochPair::new_test_epoch(epoch1.as_u64_for_test()), false)
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1.next_epoch();
-        writer
-            .flush_current_epoch(epoch2.as_u64_for_test(), false)
-            .await
-            .unwrap();
+        writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2.next_epoch();
-        writer
-            .flush_current_epoch(epoch3.as_u64_for_test(), true)
-            .await
-            .unwrap();
+        writer.flush_current_epoch(epoch3, true).await.unwrap();
 
-        test_env.storage.seal_epoch(epoch1.as_u64_for_test(), false);
-        test_env.storage.seal_epoch(epoch2.as_u64_for_test(), true);
-        let sync_result: SyncResult = test_env
-            .storage
-            .sync(epoch2.as_u64_for_test())
-            .await
-            .unwrap();
+        test_env.storage.seal_epoch(epoch1, false);
+        test_env.storage.seal_epoch(epoch2, true);
+        let sync_result: SyncResult = test_env.storage.sync(epoch2).await.unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
 
         reader.init().await.unwrap();
@@ -371,14 +361,14 @@ mod tests {
                     ..
                 },
             ) => {
-                assert_eq!(epoch, epoch1.as_u64_for_test());
+                assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch1.as_u64_for_test());
+                assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
             _ => unreachable!(),
@@ -391,14 +381,14 @@ mod tests {
                     ..
                 },
             ) => {
-                assert_eq!(epoch, epoch2.as_u64_for_test());
+                assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
-                assert_eq!(epoch, epoch2.as_u64_for_test());
+                assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
             _ => unreachable!(),
@@ -434,40 +424,37 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_for_test(
+        let epoch1 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 1,
-        )
-        .as_u64_for_test();
+        );
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_for_test(
+        let epoch2 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 2,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch2, false).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
-        let epoch3 = EpochWithGap::new_for_test(
+        let epoch3 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 3,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
         test_env.storage.seal_epoch(epoch1, false);
@@ -623,30 +610,28 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_for_test(
+        let epoch1 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 1,
-        )
-        .as_u64_for_test();
+        );
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
         writer.write_chunk(stream_chunk1_2.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_for_test(
+        let epoch2 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 2,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
 
@@ -712,15 +697,14 @@ mod tests {
             })
             .await
             .unwrap();
-        let epoch3 = EpochWithGap::new_for_test(
+        let epoch3 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 3,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch3, true).await.unwrap();
 
         match reader.next_item().await.unwrap() {
@@ -854,15 +838,14 @@ mod tests {
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
 
-        let epoch1 = EpochWithGap::new_for_test(
+        let epoch1 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 1,
-        )
-        .as_u64_for_test();
+        );
         writer1
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -876,15 +859,14 @@ mod tests {
         let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100);
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_for_test(
+        let epoch2 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 2,
-        )
-        .as_u64_for_test();
+        );
         writer1.flush_current_epoch(epoch2, false).await.unwrap();
         writer2.flush_current_epoch(epoch2, false).await.unwrap();
         let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100);
@@ -942,15 +924,14 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let epoch3 = EpochWithGap::new_for_test(
+        let epoch3 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 3,
-        )
-        .as_u64_for_test();
+        );
         writer1.flush_current_epoch(epoch3, true).await.unwrap();
         writer2.flush_current_epoch(epoch3, true).await.unwrap();
 
@@ -1051,29 +1032,27 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_for_test(
+        let epoch1 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 1,
-        )
-        .as_u64_for_test();
+        );
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_for_test(
+        let epoch2 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 2,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch2, true).await.unwrap();
 
         reader.init().await.unwrap();
@@ -1196,40 +1175,37 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = EpochWithGap::new_for_test(
+        let epoch1 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 1,
-        )
-        .as_u64_for_test();
+        );
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
-        let epoch2 = EpochWithGap::new_for_test(
+        let epoch2 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 2,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
-        let epoch3 = EpochWithGap::new_for_test(
+        let epoch3 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 3,
-        )
-        .as_u64_for_test();
+        );
         writer.flush_current_epoch(epoch3, true).await.unwrap();
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
         writer.flush_current_epoch(u64::MAX, true).await.unwrap();
@@ -1317,15 +1293,14 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch4 = EpochWithGap::new_for_test(
+        let epoch4 = test_epoch(
             test_env
                 .storage
                 .get_pinned_version()
                 .version()
                 .max_committed_epoch
                 + 4,
-        )
-        .as_u64_for_test();
+        );
         writer
             .init(EpochPair::new(epoch4, epoch3), false)
             .await

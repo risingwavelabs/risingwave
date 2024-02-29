@@ -186,7 +186,6 @@ mod tests {
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::{is_max_epoch, test_epoch};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;

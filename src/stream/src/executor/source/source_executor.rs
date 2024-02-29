@@ -694,7 +694,6 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
     use risingwave_source::connector_test_utils::create_source_desc_builder;

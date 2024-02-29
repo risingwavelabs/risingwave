@@ -276,7 +276,6 @@ pub(crate) mod tests {
     use risingwave_common::types::{Datum, ScalarImpl};
     use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_connector::source::kafka::KafkaSplit;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;
 

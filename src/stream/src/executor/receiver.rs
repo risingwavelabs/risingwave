@@ -233,7 +233,6 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;

@@ -299,7 +299,6 @@ mod tests {
     use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{build_append_only, AggCall};
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;

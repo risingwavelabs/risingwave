@@ -436,9 +436,9 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::key::PointRange;
-    use risingwave_hummock_sdk::{can_concat, EpochWithGap};
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -503,17 +503,14 @@ mod tests {
             mock_sstable_store(),
             opts,
         ));
-        let mut epoch = EpochWithGap::new_for_test(100);
+        let mut epoch = test_epoch(100);
 
         macro_rules! add {
             () => {
-                epoch.dec();
+                epoch.dec_epoch();
                 builder
                     .add_full_key_for_test(
-                        FullKey::from_user_key(
-                            test_user_key_of(1).as_ref(),
-                            epoch.as_u64_for_test(),
-                        ),
+                        FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
                         HummockValue::put(b"v"),
                         true,
                     )

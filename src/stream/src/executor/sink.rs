@@ -424,7 +424,6 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;

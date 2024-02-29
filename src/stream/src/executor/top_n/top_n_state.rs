@@ -321,7 +321,6 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;

@@ -87,7 +87,6 @@ impl Executor for BarrierRecvExecutor {
 mod tests {
     use futures::pin_mut;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
     use tokio::sync::mpsc;
 
     use super::*;

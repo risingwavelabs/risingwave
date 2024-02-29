@@ -386,7 +386,6 @@ mod tests {
     use risingwave_common::types::Date;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::ColumnOrder;
     use risingwave_pb::plan_common::PbColumnCatalog;

@@ -14,7 +14,6 @@
 
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::aggregate::AggCall;
-use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 
 use crate::prelude::*;

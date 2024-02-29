@@ -15,6 +15,7 @@
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
+use easy_ext::ext;
 use parse_display::Display;
 
 use crate::types::{ScalarImpl, Timestamptz};
@@ -142,7 +143,25 @@ impl From<u64> for Epoch {
         Self(epoch)
     }
 }
+// named
+#[ext(EpochExt)]
+pub impl u64 {
+    fn inc_epoch(&mut self) {
+        *self += EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
 
+    fn dec_epoch(&mut self) {
+        *self -= EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn next_epoch(self) -> u64 {
+        self + EPOCH_INC_MIN_STEP_FOR_TEST
+    }
+
+    fn prev_epoch(self) -> u64 {
+        self - EPOCH_INC_MIN_STEP_FOR_TEST
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EpochPair {
     pub curr: u64,

@@ -128,7 +128,6 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::{CompactionFilter, TtlCompactionFilter};
 

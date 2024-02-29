@@ -302,7 +302,6 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_hummock_sdk::key::prev_key;
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{

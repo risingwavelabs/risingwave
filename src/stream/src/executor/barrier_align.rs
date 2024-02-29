@@ -156,7 +156,6 @@ mod tests {
     use futures::{Stream, TryStreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
     use tokio::time::sleep;
 
     use super::*;

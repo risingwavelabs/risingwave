@@ -450,7 +450,6 @@ mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
