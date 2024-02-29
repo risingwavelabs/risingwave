@@ -197,12 +197,19 @@ pub async fn handle_create_function(
                 .as_
                 .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
                 .into_string();
+            let script = format!("use arrow_udf::{{function, types::*}};\n{}", script);
             body = Some(script.clone());
 
-            let wasm_binary =
-                tokio::task::spawn_blocking(move || arrow_udf_wasm::build::build("", &script))
-                    .await?
-                    .context("failed to build rust function")?;
+            let wasm_binary = tokio::task::spawn_blocking(move || {
+                let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+                opts.script = script;
+                // use a fixed tempdir to reuse the build cache
+                opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
+
+                arrow_udf_wasm::build::build_with(&opts)
+            })
+            .await?
+            .context("failed to build rust function")?;
 
             // below is the same as `wasm` language
             let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
