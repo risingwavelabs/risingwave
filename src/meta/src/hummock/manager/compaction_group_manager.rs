@@ -53,7 +53,7 @@ use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id}
 use crate::manager::MetaSrvEnv;
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
-    BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, TableFragments, ValTransaction,
+    BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, ValTransaction,
 };
 use crate::storage::MetaStore;
 use crate::stream::CreateStreamingJobOption;
@@ -139,8 +139,12 @@ impl HummockManager {
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
+    #[cfg(test)]
     /// Unregisters `table_fragments` from compaction groups
-    pub async fn unregister_table_fragments_vec(&self, table_fragments: &[TableFragments]) {
+    pub async fn unregister_table_fragments_vec(
+        &self,
+        table_fragments: &[crate::model::TableFragments],
+    ) {
         self.unregister_table_ids_fail_fast(
             &table_fragments
                 .iter()
@@ -389,8 +393,6 @@ impl HummockManager {
         Ok(())
     }
 
-    /// Prefer using `unregister_table_fragments_vec`.
-    /// Only use `unregister_table_ids_fail_fast` when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
         self.unregister_table_ids(table_ids)

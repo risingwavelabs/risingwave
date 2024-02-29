@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, WorkerId};
+use crate::manager::{DdlType, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -811,8 +811,11 @@ impl CommandContext {
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
                 self.barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids_fail_fast(&table_ids)
+                    .env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        table_ids,
+                    ))
                     .await;
 
                 match &self.barrier_manager_context.metadata_manager {
