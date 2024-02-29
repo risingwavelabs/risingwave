@@ -124,6 +124,15 @@ pub async fn handle_create_function(
     let mut compressed_binary = None;
 
     match language.as_str() {
+        "python" if params.using.is_none() => {
+            identifier = function_name.to_string();
+            body = Some(
+                params
+                    .as_
+                    .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                    .into_string(),
+            );
+        }
         "python" | "java" | "" => {
             let Some(CreateFunctionUsing::Link(l)) = params.using else {
                 return Err(ErrorCode::InvalidParameterValue(

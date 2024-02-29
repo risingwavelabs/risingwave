@@ -32,7 +32,6 @@ aws-smithy-types = { version = "1", default-features = false, features = ["byte-
 axum = { version = "0.6" }
 base64 = { version = "0.21", features = ["alloc"] }
 bigdecimal = { version = "0.4" }
-bit-set = { version = "0.5" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 byteorder = { version = "1" }
@@ -134,6 +133,7 @@ sqlx-sqlite = { version = "0.7", default-features = false, features = ["chrono",
 strum = { version = "0.25", features = ["derive"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
+target-lexicon = { version = "0.12", features = ["std"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
@@ -204,6 +204,7 @@ sha2 = { version = "0.10", features = ["oid"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+target-lexicon = { version = "0.12", features = ["std"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
