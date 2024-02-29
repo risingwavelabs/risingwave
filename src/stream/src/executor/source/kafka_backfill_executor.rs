@@ -253,7 +253,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut boot_state = Vec::default();
+        let mut owned_splits = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
                 Mutation::Add(AddMutation { splits, .. })
@@ -262,7 +262,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                     ..
                 }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state = splits.clone();
+                        owned_splits = splits.clone();
                     }
                 }
                 _ => {}
@@ -272,7 +272,7 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
 
         let mut backfill_states: BackfillStates = HashMap::new();
         let mut unfinished_splits = Vec::new();
-        for mut split in boot_state {
+        for mut split in owned_splits {
             let split_id = split.id();
             let backfill_state = self
                 .backfill_state_store

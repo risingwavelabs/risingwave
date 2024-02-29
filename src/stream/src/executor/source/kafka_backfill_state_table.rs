@@ -17,7 +17,7 @@ use std::ops::Bound;
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::SplitId;
 use risingwave_pb::catalog::PbTable;
@@ -79,10 +79,10 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         Ok(ret)
     }
 
-    pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
+    async fn set(&mut self, key: SplitId, state: BackfillState) -> StreamExecutorResult<()> {
         let row = [
             Some(Self::string_to_scalar(key.as_ref())),
-            Some(ScalarImpl::Jsonb(value)),
+            Some(ScalarImpl::Jsonb(state.encode_to_json())),
         ];
         match self.get(&key).await? {
             Some(prev_row) => {
@@ -105,7 +105,7 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
 
     pub async fn set_states(&mut self, states: BackfillStates) -> StreamExecutorResult<()> {
         for (split_id, state) in states {
-            self.set(split_id, state.encode_to_json()).await?;
+            self.set(split_id, state).await?;
         }
         Ok(())
     }
