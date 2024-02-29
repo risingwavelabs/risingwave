@@ -24,12 +24,17 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 ///
 /// Examples:
 ///
-/// UNKNOWN is strong in [] (definitely null)
-/// `c = 1` is strong in [c] (definitely null if and only if c is null)
+/// UNKNOWN is strong in `[]` (definitely null)
+///
+/// `c = 1` is strong in `[c]` (definitely null if and only if c is null)
+///
 /// `c IS NULL` is not strong (always returns TRUE or FALSE, nevernull)
-/// `p1 AND p2` is strong in [p1, p2] (definitely null if either p1 is null or p2 is null)
+///
+/// `p1 AND p2` is strong in `[p1, p2]` (definitely null if either p1 is null or p2 is null)
+///
 /// `p1 OR p2` is strong if p1 and p2 are strong
-/// `c1 = 1 OR c2 IS NULL` is strong in [c1] (definitely null if c1 is null)
+///
+/// `c1 = 1 OR c2 IS NULL` is strong in `[c1]` (definitely null if c1 is null)
 
 #[derive(Default)]
 pub struct Strong {
