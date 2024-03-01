@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// use fixedbitset::FixedBitSet;
+use fixedbitset::FixedBitSet;
 use risingwave_connector::source::DataType;
 
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, FunctionCall,
 };
 use crate::expr::ExprType;
-// use crate::optimizer::plan_expr_visitor::strong::Strong;
+use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
 use crate::optimizer::rule::Rule;
 use crate::optimizer::PlanRef;
@@ -40,34 +40,34 @@ impl Rule for StreamFilterExpressionSimplifyRule {
     }
 }
 
+fn is_null_or_not_null(func_type: ExprType) -> bool {
+    func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
+}
+
+/// Simply extract every possible `InputRef` out from the input `expr`
+fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
+    match expr {
+        ExprImpl::FunctionCall(func_call) => {
+            // `IsNotNull( ... )` or `IsNull( ... )` will be ignored
+            if is_null_or_not_null(func_call.func_type()) {
+                return;
+            }
+            for sub_expr in func_call.inputs() {
+                extract_column(sub_expr.clone(), columns);
+            }
+        }
+        ExprImpl::InputRef(_) => {
+            columns.push(expr);
+        }
+        _ => (),
+    }
+}
+
 /// If ever `Not (e)` and `(e)` appear together
 /// First return value indicates if the optimizable pattern exist
 /// Second return value indicates if the term `e` is either `IsNotNull` or `IsNull`
 /// If so, it will contain the actual wrapper `ExprImpl` for that; otherwise it will be `None`
-fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>, Option<usize>) {
-    fn is_null_or_not_null(func_type: ExprType) -> bool {
-        func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
-    }
-
-    /// Simply extract every possible `InputRef` out from the input `expr`
-    fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
-        match expr {
-            ExprImpl::FunctionCall(func_call) => {
-                // `IsNotNull( ... )` or `IsNull( ... )` will be ignored
-                if is_null_or_not_null(func_call.func_type()) {
-                    return;
-                }
-                for sub_expr in func_call.inputs() {
-                    extract_column(sub_expr.clone(), columns);
-                }
-            }
-            ExprImpl::InputRef(_) => {
-                columns.push(expr);
-            }
-            _ => (),
-        }
-    }
-
+fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
     /// Try wrapping inner expression with `IsNotNull`
     /// Note: only columns (i.e., `InputRef`) will be extracted and connected via `AND`
     fn try_wrap_inner_expression(expr: ExprImpl) -> Option<ExprImpl> {
@@ -77,16 +77,6 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>, Option<
         if columns.is_empty() {
             return None;
         }
-
-        // let max_col_index = *columns
-            // .iter()
-            // .map(|e| {
-            //     let ExprImpl::InputRef(input_ref) = e else {
-            //         return 0;
-            //     };
-            // })
-            // .max()
-            // .unwrap_or(&0);
 
         let mut inputs: Vec<ExprImpl> = vec![];
         // From [`c1`, `c2`, ... , `cn`] to [`IsNotNull(c1)`, ... , `IsNotNull(cn)`]
@@ -120,7 +110,7 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>, Option<
         return (false, None);
     }
     if e1_func.func_type() != ExprType::Not {
-        // (e1) [op] not(e2)
+        // (e1) [op] (Not (e2))
         if e2_func.inputs().len() != 1 {
             // `not` should only have a single operand, which is `e2` in this case
             return (false, None);
@@ -130,7 +120,7 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>, Option<
             try_wrap_inner_expression(e1),
         )
     } else {
-        // not(e1) [op] (e2)
+        // (Not (e1)) [op] (e2)
         if e1_func.inputs().len() != 1 {
             return (false, None);
         }
@@ -144,6 +134,24 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>, Option<
 struct StreamFilterExpressionSimplifyRewriter {}
 impl ExprRewriter for StreamFilterExpressionSimplifyRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
+        // Check if the input expression is *definitely* null
+        let mut columns = vec![];
+        extract_column(expr.clone(), &mut columns);
+        let max_col_index = columns
+            .iter()
+            .map(|e| {
+                let ExprImpl::InputRef(input_ref) = e else {
+                    return 0;
+                };
+                input_ref.index()
+            })
+            .max()
+            .unwrap_or(0);
+        let fixedbitset = FixedBitSet::with_capacity(max_col_index);
+        if Strong::is_null(&expr, fixedbitset) {
+            return ExprImpl::literal_bool(false);
+        }
+
         let ExprImpl::FunctionCall(func_call) = expr.clone() else {
             return expr;
         };
@@ -167,6 +175,8 @@ impl ExprRewriter for StreamFilterExpressionSimplifyRewriter {
                     }
                 }
                 // `AND` will always be false, no matter the underlying columns are null or not
+                // i.e., for `(Not (e)) AND (e)`, since this is filter simplification,
+                // whether `e` is null or not does NOT matter
                 ExprType::And => ExprImpl::literal_bool(false),
                 _ => expr,
             }

@@ -44,9 +44,9 @@ impl Strong {
         Self { null_columns }
     }
 
-    /// Returns whether the analyzed expression will definitely return null if
+    /// Returns whether the analyzed expression will *definitely* return null if
     /// all of a given set of input columns are null.
-    #[allow(dead_code)]
+    /// Note: we could not assume any null-related property for the input expression if `is_null` returns false
     pub fn is_null(expr: &ExprImpl, null_columns: FixedBitSet) -> bool {
         let strong = Strong::new(null_columns);
         strong.is_null_visit(expr)
