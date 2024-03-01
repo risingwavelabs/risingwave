@@ -55,21 +55,21 @@ pub fn trigger_version_stat(
         .version_stats
         .with_label_values(&["total", ""])
         .set(version_stats.table_stats.len() as i64);
-    for (table_id, stats) in &version_stats.table_stats {
-        let table_id = format!("{}", table_id);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_key_count"])
-            .set(stats.total_key_count);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_key_size"])
-            .set(stats.total_key_size);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_value_size"])
-            .set(stats.total_value_size);
-    }
+    // for (table_id, stats) in &version_stats.table_stats {
+    //     let table_id = format!("{}", table_id);
+    //     metrics
+    //         .version_stats
+    //         .with_label_values(&[&table_id, "total_key_count"])
+    //         .set(stats.total_key_count);
+    //     metrics
+    //         .version_stats
+    //         .with_label_values(&[&table_id, "total_key_size"])
+    //         .set(stats.total_key_size);
+    //     metrics
+    //         .version_stats
+    //         .with_label_values(&[&table_id, "total_value_size"])
+    //         .set(stats.total_value_size);
+    // }
 }
 
 pub fn trigger_mv_stat(
