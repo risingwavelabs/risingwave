@@ -47,7 +47,6 @@ deranged = { version = "0.3", default-features = false, features = ["powerfmt", 
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
-fixedbitset = { version = "0.5" }
 flate2 = { version = "1", features = ["zlib"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
@@ -169,7 +168,6 @@ cc = { version = "1", default-features = false, features = ["parallel"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.5" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }

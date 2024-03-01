@@ -13993,7 +13993,6 @@ dependencies = [
  "digest",
  "either",
  "fail",
- "fixedbitset 0.5.0",
  "flate2",
  "frunk_core",
  "futures",
