@@ -35,18 +35,18 @@ pub const OAUTH_ISSUER_KEY: &str = "issuer";
 /// Build `AuthInfo` for `OAuth`.
 #[inline(always)]
 pub fn build_oauth_info(options: &Vec<SqlOption>) -> Option<AuthInfo> {
-    let meta_data: HashMap<String, String> = WithOptions::try_from(options.as_slice())
+    let metadata: HashMap<String, String> = WithOptions::try_from(options.as_slice())
         .ok()?
         .into_inner()
         .into_iter()
         .collect();
-    if !meta_data.contains_key(OAUTH_JWKS_URL_KEY) || !meta_data.contains_key(OAUTH_ISSUER_KEY) {
+    if !metadata.contains_key(OAUTH_JWKS_URL_KEY) || !metadata.contains_key(OAUTH_ISSUER_KEY) {
         return None;
     }
     Some(AuthInfo {
         encryption_type: EncryptionType::Oauth as i32,
         encrypted_value: Vec::new(),
-        meta_data,
+        metadata,
     })
 }
 
@@ -79,13 +79,13 @@ pub fn encrypted_password(name: &str, password: &str) -> Option<AuthInfo> {
         Some(AuthInfo {
             encryption_type: EncryptionType::Sha256 as i32,
             encrypted_value: password.trim_start_matches(SHA256_ENCRYPTED_PREFIX).into(),
-            meta_data: HashMap::new(),
+            metadata: HashMap::new(),
         })
     } else if valid_md5_password(password) {
         Some(AuthInfo {
             encryption_type: EncryptionType::Md5 as i32,
             encrypted_value: password.trim_start_matches(MD5_ENCRYPTED_PREFIX).into(),
-            meta_data: HashMap::new(),
+            metadata: HashMap::new(),
         })
     } else {
         Some(encrypt_default(name, password))
@@ -98,7 +98,7 @@ fn encrypt_default(name: &str, password: &str) -> AuthInfo {
     AuthInfo {
         encryption_type: EncryptionType::Md5 as i32,
         encrypted_value: md5_hash(name, password),
-        meta_data: HashMap::new(),
+        metadata: HashMap::new(),
     }
 }
 
@@ -186,18 +186,18 @@ mod tests {
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: md5_hash(user_name, password),
-                meta_data: HashMap::new(),
+                metadata: HashMap::new(),
             }),
             None,
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: md5_hash(user_name, password),
-                meta_data: HashMap::new(),
+                metadata: HashMap::new(),
             }),
             Some(AuthInfo {
                 encryption_type: EncryptionType::Sha256 as i32,
                 encrypted_value: sha256_hash(user_name, password),
-                meta_data: HashMap::new(),
+                metadata: HashMap::new(),
             }),
         ];
         let output_passwords = input_passwords

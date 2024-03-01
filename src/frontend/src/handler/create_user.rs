@@ -171,7 +171,7 @@ mod tests {
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: b"827ccb0eea8a706c4c34a16891f84e7b".to_vec(),
-                meta_data: HashMap::new(),
+                metadata: HashMap::new(),
             })
         );
         frontend

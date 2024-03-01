@@ -234,7 +234,7 @@ mod tests {
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
                 encrypted_value: b"9f2fa6a30871a92249bdd2f1eeee4ef6".to_vec(),
-                meta_data: HashMap::new(),
+                metadata: HashMap::new(),
             })
         );
     }

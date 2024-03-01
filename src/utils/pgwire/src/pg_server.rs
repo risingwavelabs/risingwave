@@ -16,11 +16,12 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::result::Result;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use parking_lot::Mutex;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
@@ -161,34 +162,34 @@ pub enum UserAuthenticator {
     OAuth(HashMap<String, String>),
 }
 
+/// A JWK Set is a JSON object that represents a set of JWKs.
+/// The JSON object MUST have a "keys" member, with its value being an array of JWKs.
+/// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-5> for more details.
 #[derive(Debug, Deserialize)]
 struct Jwks {
     keys: Vec<Jwk>,
 }
 
-#[allow(dead_code)]
+/// A JSON Web Key (JWK) is a JSON object that represents a cryptographic key.
+/// See <https://www.rfc-editor.org/rfc/rfc7517.html#section-4> for more details.
 #[derive(Debug, Deserialize)]
 struct Jwk {
-    kid: String,
-    alg: String,
-    n: String,
-    e: String,
-}
-
-async fn fetch_jwks(url: &str) -> Result<Jwks, reqwest::Error> {
-    let resp: Jwks = reqwest::get(url).await?.json().await?;
-    Ok(resp)
+    kid: String, // Key ID
+    alg: String, // Algorithm
+    n: String,   // Modulus
+    e: String,   // Exponent
 }
 
 async fn validate_jwt(
     jwt: &str,
     jwks_url: &str,
     issuer: &str,
-    meta_data: &HashMap<String, String>,
+    metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
-    let jwks = fetch_jwks(jwks_url).await?;
+    let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
 
+    // 1. Retrieve the kid from the header to find the right JWK in the JWK Set.
     let kid = header.kid.ok_or("kid not found in jwt header")?;
     let jwk = jwks
         .keys
@@ -196,15 +197,25 @@ async fn validate_jwt(
         .find(|k| k.kid == kid)
         .ok_or("kid not found in jwks")?;
 
+    // 2. Check if the algorithms are matched.
+    if Algorithm::from_str(&jwk.alg)? != header.alg {
+        return Err("alg in jwt header does not match with alg in jwk".into());
+    }
+
+    // 3. Decode the JWT and validate the claims.
     let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
     validation.set_required_spec_claims(&["exp", "iss"]);
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
-    Ok(meta_data.iter().all(
+    // 4. Check if the metadata in the token matches.
+    if !metadata.iter().all(
         |(k, v)| matches!(token_data.claims.get(k), Some(serde_json::Value::String(s)) if s == v),
-    ))
+    ) {
+        return Err("metadata in jwt does not match with metadata declared with user".into());
+    }
+    Ok(true)
 }
 
 impl UserAuthenticator {
@@ -215,15 +226,15 @@ impl UserAuthenticator {
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
-            UserAuthenticator::OAuth(meta_data) => {
-                let mut meta_data = meta_data.clone();
-                let jwks_url = meta_data.remove("jwks_url").unwrap();
-                let issuer = meta_data.remove("issuer").unwrap();
+            UserAuthenticator::OAuth(metadata) => {
+                let mut metadata = metadata.clone();
+                let jwks_url = metadata.remove("jwks_url").unwrap();
+                let issuer = metadata.remove("issuer").unwrap();
                 validate_jwt(
                     &String::from_utf8_lossy(password),
                     &jwks_url,
                     &issuer,
-                    &meta_data,
+                    &metadata,
                 )
                 .await
                 .map_err(PsqlError::StartupError)?

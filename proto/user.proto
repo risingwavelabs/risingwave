@@ -18,7 +18,7 @@ message AuthInfo {
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
-  map<string, string> meta_data = 3;
+  map<string, string> metadata = 3;
 }
 
 // User defines a user in the system.
