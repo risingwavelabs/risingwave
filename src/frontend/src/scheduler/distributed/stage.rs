@@ -380,10 +380,6 @@ impl StageRunner {
             let chunk_size = (source_info.split_info().unwrap().len() as f32
                 / self.stage.parallelism.unwrap() as f32)
                 .ceil() as usize;
-            println!(
-                "self.stage.parallelism.unwrap() = {}",
-                self.stage.parallelism.unwrap()
-            );
             for (id, split) in source_info
                 .split_info()
                 .unwrap()

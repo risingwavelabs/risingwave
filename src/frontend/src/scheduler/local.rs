@@ -55,7 +55,6 @@ use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
-const TASK_SCHEDULING_PARALLELISM: usize = 10;
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
@@ -355,7 +354,7 @@ impl LocalQueryExecution {
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
                     let chunk_size = (source_info.split_info().unwrap().len() as f32
-                        / TASK_SCHEDULING_PARALLELISM as f32)
+                        / (self.worker_node_manager.schedule_unit_count() / 2) as f32)
                         .ceil() as usize;
                     for (id, split) in source_info
                         .split_info()
