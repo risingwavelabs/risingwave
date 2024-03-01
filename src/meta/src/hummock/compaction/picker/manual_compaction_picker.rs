@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, Level, LevelType, OverlappingLevel, SstableInfo};
+use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, OverlappingLevel, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::{
@@ -328,8 +328,10 @@ impl CompactionPicker for ManualCompactionPicker {
 pub mod tests {
     use std::collections::{HashMap, HashSet};
 
+    use bytes::Bytes;
+    use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -416,8 +418,8 @@ pub mod tests {
             let option = ManualCompactionOption {
                 level: 1,
                 key_range: KeyRange {
-                    left: iterator_test_key_of_epoch(1, 0, 1),
-                    right: iterator_test_key_of_epoch(1, 201, 1),
+                    left: Bytes::from(iterator_test_key_of_epoch(1, 0, 1)),
+                    right: Bytes::from(iterator_test_key_of_epoch(1, 201, 1)),
                     right_exclusive: false,
                 },
                 ..Default::default()
@@ -509,8 +511,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: 1,
                 key_range: KeyRange {
-                    left: iterator_test_key_of_epoch(1, 101, 1),
-                    right: iterator_test_key_of_epoch(1, 199, 1),
+                    left: Bytes::from(iterator_test_key_of_epoch(1, 101, 1)),
+                    right: Bytes::from(iterator_test_key_of_epoch(1, 199, 1)),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::from([2]),
@@ -643,8 +645,8 @@ pub mod tests {
             sst_ids: vec![1],
             level: 0,
             key_range: KeyRange {
-                left: vec![],
-                right: vec![],
+                left: Bytes::default(),
+                right: Bytes::default(),
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
@@ -669,8 +671,8 @@ pub mod tests {
             sst_ids: vec![],
             level: 0,
             key_range: KeyRange {
-                left: vec![],
-                right: vec![],
+                left: Bytes::default(),
+                right: Bytes::default(),
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
@@ -716,8 +718,8 @@ pub mod tests {
             sst_ids: vec![],
             level: 0,
             key_range: KeyRange {
-                left: iterator_test_key_of_epoch(1, 0, 2),
-                right: iterator_test_key_of_epoch(1, 200, 2),
+                left: Bytes::from(iterator_test_key_of_epoch(1, 0, 2)),
+                right: Bytes::from(iterator_test_key_of_epoch(1, 200, 2)),
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
@@ -767,8 +769,8 @@ pub mod tests {
                 sst_ids: sst_id_filter.clone(),
                 level: *input_level as _,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
@@ -808,8 +810,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // No matching internal table id.
@@ -830,8 +832,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // Include all sub level's table ids
@@ -874,8 +876,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // Only include bottom sub level's table id
@@ -917,8 +919,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // Only include partial top sub level's table id, but the whole top sub level is
@@ -961,8 +963,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // Only include bottom sub level's table id
@@ -994,8 +996,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // No matching internal table id.
@@ -1017,8 +1019,8 @@ pub mod tests {
                 sst_ids: vec![],
                 level: input_level,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 // Only include partial input level's table id
@@ -1069,8 +1071,8 @@ pub mod tests {
                 sst_ids: sst_id_filter.clone(),
                 level: *input_level as _,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
@@ -1115,8 +1117,8 @@ pub mod tests {
                 sst_ids: sst_id_filter.clone(),
                 level: *input_level as _,
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
@@ -1185,8 +1187,8 @@ pub mod tests {
             let option = ManualCompactionOption {
                 sst_ids: vec![0, 1],
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
@@ -1222,8 +1224,8 @@ pub mod tests {
             let option = ManualCompactionOption {
                 sst_ids: vec![],
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
@@ -1295,8 +1297,8 @@ pub mod tests {
             let option = ManualCompactionOption {
                 sst_ids: vec![0, 1],
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
@@ -1334,8 +1336,8 @@ pub mod tests {
             let option = ManualCompactionOption {
                 sst_ids: vec![],
                 key_range: KeyRange {
-                    left: vec![],
-                    right: vec![],
+                    left: Bytes::default(),
+                    right: Bytes::default(),
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),

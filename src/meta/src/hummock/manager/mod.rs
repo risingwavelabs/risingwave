@@ -40,7 +40,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
     BranchedSstInfo, HummockLevelsExt,
 };
-use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::{CompactTask, HummockVersionDelta, SstableInfo};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
     HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
@@ -60,9 +61,9 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
+    CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    PbCompactionGroupInfo, SubscribeCompactionEventRequest, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -971,7 +972,7 @@ impl HummockManager {
 
         let mut compact_task = CompactTask {
             input_ssts: compact_task.input.input_levels,
-            splits: vec![risingwave_pb::hummock::KeyRange::inf()],
+            splits: vec![KeyRange::inf()],
             watermark,
             sorted_output_ssts: vec![],
             task_id,
@@ -1075,7 +1076,7 @@ impl HummockManager {
             compact_task_assignment.insert(
                 compact_task.task_id,
                 CompactTaskAssignment {
-                    compact_task: Some(compact_task.clone()),
+                    compact_task: Some(compact_task.to_protobuf()),
                     context_id: META_NODE_ID, // deprecated
                 },
             );
@@ -1329,7 +1330,9 @@ impl HummockManager {
             input_task
         } else {
             match compact_task_assignment.remove(task_id) {
-                Some(compact_task) => compact_task.compact_task.unwrap(),
+                Some(compact_task) => {
+                    CompactTask::from_protobuf(&compact_task.compact_task.unwrap())
+                }
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task_id));
                     return Ok(false);
@@ -1590,7 +1593,7 @@ impl HummockManager {
             };
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
-                for table_id in sst.get_table_ids() {
+                for table_id in &sst.table_ids {
                     match try_get_compaction_group_id_by_table_id(
                         &versioning.current_version,
                         *table_id,
@@ -1605,14 +1608,13 @@ impl HummockManager {
                             tracing::warn!(
                                 "table {} in SST {} doesn't belong to any compaction group",
                                 table_id,
-                                sst.get_object_id(),
+                                sst.object_id,
                             );
                         }
                     }
                 }
                 let is_trivial_adjust = group_table_ids.len() == 1
-                    && group_table_ids.first_key_value().unwrap().1.len()
-                        == sst.get_table_ids().len();
+                    && group_table_ids.first_key_value().unwrap().1.len() == sst.table_ids.len();
                 if is_trivial_adjust {
                     *compaction_group_id = *group_table_ids.first_key_value().unwrap().0;
                     // is_sst_belong_to_group_declared = true;
@@ -1649,7 +1651,7 @@ impl HummockManager {
                     new_sst_id += 1;
                 }
                 if !branch_groups.is_empty() {
-                    branched_ssts.insert(sst.get_object_id(), branch_groups);
+                    branched_ssts.insert(sst.object_id, branch_groups);
                 }
             } else {
                 sstables.push(original_sstable);
@@ -1690,7 +1692,10 @@ impl HummockManager {
             let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
-                    inserted_table_infos: group_sstables.clone(),
+                    inserted_table_infos: group_sstables
+                        .iter()
+                        .map(|sst| sst.to_protobuf())
+                        .collect_vec(),
                     l0_sub_level_id,
                     ..Default::default()
                 })),
@@ -2089,7 +2094,7 @@ impl HummockManager {
         let compact_task_string = compact_task_to_string(&compact_task);
         // TODO: shall we need to cancel on meta ?
         compactor
-            .send_event(ResponseEvent::CompactTask(compact_task))
+            .send_event(ResponseEvent::CompactTask(compact_task.to_protobuf()))
             .with_context(|| {
                 format!(
                     "Failed to trigger compaction task for compaction_group {}",
@@ -3152,7 +3157,7 @@ impl HummockManager {
                                             Ok(Some(compact_task)) => {
                                                 let task_id = compact_task.task_id;
                                                 if let Err(e) = compactor.send_event(
-                                                    ResponseEvent::CompactTask(compact_task),
+                                                    ResponseEvent::CompactTask(compact_task.to_protobuf()),
                                                 ) {
                                                     tracing::warn!(
                                                         error = %e.as_report(),
@@ -3204,7 +3209,7 @@ impl HummockManager {
                                 .report_compact_task(
                                     task_id,
                                     TaskStatus::try_from(task_status).unwrap(),
-                                    sorted_output_ssts,
+                                    sorted_output_ssts.iter().map(|pb_sst| SstableInfo::from_protobuf(pb_sst)).collect_vec(),
                                     Some(table_stats_change),
                                 )
                                 .await
@@ -3287,7 +3292,7 @@ fn gen_version_delta<'a>(
             .table_infos
             .iter()
             .map(|sst| {
-                let object_id = sst.get_object_id();
+                let object_id = sst.object_id;
                 let sst_id = sst.get_sst_id();
                 if !trivial_move
                     && drop_sst(
@@ -3323,7 +3328,11 @@ fn gen_version_delta<'a>(
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
-            inserted_table_infos: compact_task.sorted_output_ssts.clone(),
+            inserted_table_infos: compact_task
+                .sorted_output_ssts
+                .iter()
+                .map(|sst| sst.to_protobuf())
+                .collect_vec(),
             l0_sub_level_id: compact_task.target_sub_level_id,
             vnode_partition_count: compact_task.split_weight_by_vnode,
             ..Default::default()

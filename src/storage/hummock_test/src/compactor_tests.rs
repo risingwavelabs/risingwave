@@ -31,9 +31,10 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, InputLevel, SstableInfo};
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
         default_compaction_selector, ManualCompactionOption,
@@ -44,7 +45,7 @@ pub(crate) mod tests {
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::{CompactTask, InputLevel, KeyRange, SstableInfo, TableOption};
+    use risingwave_pb::hummock::TableOption;
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{

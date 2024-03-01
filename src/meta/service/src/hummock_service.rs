@@ -18,6 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
@@ -224,6 +225,7 @@ impl HummockManagerService for HummockServiceImpl {
         &self,
         request: Request<TriggerManualCompactionRequest>,
     ) -> Result<Response<TriggerManualCompactionResponse>, Status> {
+        use bytes::Bytes;
         let request = request.into_inner();
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
@@ -234,8 +236,12 @@ impl HummockManagerService for HummockServiceImpl {
 
         // rewrite the key_range
         match request.key_range {
-            Some(key_range) => {
-                option.key_range = key_range;
+            Some(pb_key_range) => {
+                option.key_range = KeyRange {
+                    left: Bytes::from(pb_key_range.left),
+                    right: Bytes::from(pb_key_range.right),
+                    right_exclusive: pb_key_range.right_exclusive,
+                };
             }
 
             None => {

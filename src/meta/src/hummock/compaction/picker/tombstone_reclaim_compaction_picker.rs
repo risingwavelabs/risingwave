@@ -14,8 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::InputLevel;
+use risingwave_hummock_sdk::version::{InputLevel, Levels};
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::CompactionInput;
@@ -133,7 +132,7 @@ impl TombstoneReclaimCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::hummock::OverlappingLevel;
+    use risingwave_hummock_sdk::version::OverlappingLevel;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

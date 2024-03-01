@@ -18,6 +18,7 @@ use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -25,10 +26,9 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
+use risingwave_hummock_sdk::version::{CompactTask, SstableInfo};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
-use risingwave_pb::hummock::{
-    compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType, SstableInfo,
-};
+use risingwave_pb::hummock::{compact_task, LevelType};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -172,7 +172,7 @@ fn generate_splits_fast(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
     context: CompactorContext,
-) -> HummockResult<Vec<KeyRange_vec>> {
+) -> HummockResult<Vec<KeyRange>> {
     let worker_num = context.compaction_executor.worker_num();
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
 
@@ -209,13 +209,13 @@ fn generate_splits_fast(
         return Ok(vec![]);
     }
     let mut splits = vec![];
-    splits.push(KeyRange_vec::new(vec![], vec![]));
+    splits.push(KeyRange::default());
     let parallel_key_count = indexes.len() / parallelism;
     let mut last_split_key_count = 0;
     for key in indexes {
         if last_split_key_count >= parallel_key_count {
-            splits.last_mut().unwrap().right = key.clone();
-            splits.push(KeyRange_vec::new(key.clone(), vec![]));
+            splits.last_mut().unwrap().right = Bytes::from(key.clone());
+            splits.push(KeyRange::new(Bytes::from(key.clone()), Bytes::default()));
             last_split_key_count = 0;
         }
         last_split_key_count += 1;
@@ -227,7 +227,7 @@ pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
     context: CompactorContext,
-) -> HummockResult<Vec<KeyRange_vec>> {
+) -> HummockResult<Vec<KeyRange>> {
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
         if sstable_infos.len() > MAX_FILE_COUNT {
@@ -259,7 +259,7 @@ pub async fn generate_splits(
         // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
-        splits.push(KeyRange_vec::new(vec![], vec![]));
+        splits.push(KeyRange::default());
 
         let worker_num = context.compaction_executor.worker_num();
 
@@ -283,8 +283,8 @@ pub async fn generate_splits(
                     && !last_key.eq(&key)
                     && remaining_size > parallel_compact_size
                 {
-                    splits.last_mut().unwrap().right = key.clone();
-                    splits.push(KeyRange_vec::new(key.clone(), vec![]));
+                    splits.last_mut().unwrap().right = Bytes::from(key.clone());
+                    splits.push(KeyRange::new(Bytes::from(key.clone()), Bytes::default()));
                     last_buffer_size = data_size;
                 } else {
                     last_buffer_size += data_size;

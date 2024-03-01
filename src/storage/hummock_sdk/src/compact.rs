@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::compact_task::TaskType;
+use risingwave_pb::hummock::LevelType;
+
+use crate::version::{CompactTask, SstableInfo};
 
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
@@ -23,7 +26,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         "Compaction task id: {:?}, group-id: {:?}, task type: {:?}, target level: {:?}, target sub level: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
-        compact_task.task_type(),
+        TaskType::try_from(compact_task.task_type).unwrap(),
         compact_task.target_level,
         compact_task.target_sub_level_id
     )
@@ -36,12 +39,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
-    writeln!(
-        s,
-        "Compaction task status: {:?} ",
-        compact_task.task_status()
-    )
-    .unwrap();
+    writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
     writeln!(
         s,
         "Compaction task table_ids: {:?} ",
@@ -57,7 +55,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 if table.total_key_count != 0 {
                     format!(
                         "[id: {}, obj_id: {} {}KB stale_ratio {} delete_range_ratio {}]",
-                        table.get_sst_id(),
+                        table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                         (table.stale_key_count * 100 / table.total_key_count),
@@ -66,7 +64,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
                 } else {
                     format!(
                         "[id: {}, obj_id: {} {}KB]",
-                        table.get_sst_id(),
+                        table.sst_id,
                         table.object_id,
                         table.file_size / 1024,
                     )
@@ -89,12 +87,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     let left_str = if key_range.left.is_empty() {
         "-inf".to_string()
     } else {
-        hex::encode(key_range.left.as_slice())
+        hex::encode(&key_range.left)
     };
     let right_str = if key_range.right.is_empty() {
         "+inf".to_string()
     } else {
-        hex::encode(key_range.right.as_slice())
+        hex::encode(&key_range.right)
     };
 
     let stale_ratio = (sstable_info.stale_key_count * 100)
@@ -106,8 +104,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     writeln!(
         s,
         "SstableInfo: object id={}, SST id={}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={}KB, stale_ratio={}%, range_tombstone_count={} range_tombstone_ratio={}% bloom_filter_kind {:?}",
-        sstable_info.get_object_id(),
-        sstable_info.get_sst_id(),
+        sstable_info.object_id,
+        sstable_info.sst_id,
         left_str,
         right_str,
         sstable_info.table_ids,
@@ -130,8 +128,8 @@ pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
         total_file_count += level.table_infos.len() as u64;
 
         level.table_infos.iter().for_each(|sst| {
-            total_file_size += sst.get_file_size();
-            total_uncompressed_file_size += sst.get_uncompressed_file_size();
+            total_file_size += sst.file_size;
+            total_uncompressed_file_size += sst.uncompressed_file_size;
             total_key_count += sst.total_key_count;
         });
     }
@@ -173,7 +171,7 @@ pub fn estimate_memory_for_compact_task(
 
     // input
     for level in &task.input_ssts {
-        if level.level_type() == LevelType::Nonoverlapping {
+        if level.level_type == LevelType::Nonoverlapping as i32 {
             let mut cur_level_max_sst_meta_size = 0;
             for sst in &level.table_infos {
                 let meta_size = sst.file_size - sst.meta_offset;

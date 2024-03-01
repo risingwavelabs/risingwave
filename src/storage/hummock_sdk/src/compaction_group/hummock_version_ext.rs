@@ -19,13 +19,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, Level, LevelType, OverlappingLevel, PbLevelType, PbTableWatermarks,
-    SstableInfo,
+    GroupTableChange, LevelType, PbLevelType, PbTableWatermarks,
 };
 use tracing::warn;
 
@@ -34,7 +32,9 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
 use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
-use crate::version::{HummockVersion, HummockVersionDelta};
+use crate::version::{
+    HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
+};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -72,7 +72,12 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                 if !intra_level.inserted_table_infos.is_empty() {
                     insert_sst_level_id = intra_level.level_idx;
                     insert_sub_level_id = intra_level.l0_sub_level_id;
-                    insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
+                    insert_table_infos.extend(
+                        intra_level
+                            .inserted_table_infos
+                            .iter()
+                            .map(|pb_sst| SstableInfo::from_protobuf(pb_sst)),
+                    );
                 }
                 new_vnode_partition_count = intra_level.vnode_partition_count;
             }
@@ -163,7 +168,7 @@ impl HummockVersion {
                 level
                     .table_infos
                     .iter()
-                    .map(|table_info| table_info.get_object_id())
+                    .map(|table_info| table_info.object_id)
             })
             .collect_vec()
     }
@@ -210,11 +215,11 @@ impl HummockVersion {
     pub fn safe_epoch_table_watermarks(
         &self,
         existing_table_ids: &[u32],
-    ) -> BTreeMap<u32, PbTableWatermarks> {
+    ) -> BTreeMap<u32, TableWatermarks> {
         fn extract_single_table_watermark(
             table_watermarks: &TableWatermarks,
             safe_epoch: u64,
-        ) -> Option<PbTableWatermarks> {
+        ) -> Option<TableWatermarks> {
             if let Some((first_epoch, first_epoch_watermark)) = table_watermarks.watermarks.first()
             {
                 assert!(
@@ -224,15 +229,9 @@ impl HummockVersion {
                     safe_epoch
                 );
                 if *first_epoch == safe_epoch {
-                    Some(PbTableWatermarks {
-                        epoch_watermarks: vec![PbEpochNewWatermarks {
-                            watermarks: first_epoch_watermark
-                                .iter()
-                                .map(VnodeWatermark::to_protobuf)
-                                .collect(),
-                            epoch: *first_epoch,
-                        }],
-                        is_ascending: table_watermarks.direction.is_ascending(),
+                    Some(TableWatermarks {
+                        watermarks: vec![(*first_epoch, first_epoch_watermark.clone())],
+                        direction: table_watermarks.direction,
                     })
                 } else {
                     None
@@ -284,7 +283,7 @@ impl HummockVersion {
                     .flat_map(|level| level.get_table_infos())
                     .map(|sst_info| {
                         // `sst_info.table_ids` will never be empty.
-                        for table_id in sst_info.get_table_ids() {
+                        for table_id in &sst_info.table_ids {
                             if member_table_ids.contains(table_id) {
                                 return 2;
                             }
@@ -393,7 +392,7 @@ impl HummockVersion {
             cur_levels.levels[idx].table_infos.sort_by(|sst1, sst2| {
                 let a = sst1.key_range.as_ref().unwrap();
                 let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
+                a.cmp(b)
             });
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
@@ -432,8 +431,12 @@ impl HummockVersion {
                 if let DeltaType::IntraLevel(delta) = group_delta.get_delta_type().unwrap() {
                     if !delta.inserted_table_infos.is_empty() {
                         info.insert_sst_level = delta.level_idx;
-                        info.insert_sst_infos
-                            .extend(delta.inserted_table_infos.iter().cloned());
+                        info.insert_sst_infos.extend(
+                            delta
+                                .inserted_table_infos
+                                .iter()
+                                .map(|pb_sst| SstableInfo::from_protobuf(pb_sst)),
+                        );
                     }
                     if !delta.removed_table_ids.is_empty() {
                         for id in &delta.removed_table_ids {
@@ -641,7 +644,7 @@ impl HummockVersion {
                     if table_info.sst_id == table_info.object_id {
                         continue;
                     }
-                    let object_id = table_info.get_object_id();
+                    let object_id = table_info.object_id;
                     let entry: &mut BranchedSstInfo = ret.entry(object_id).or_default();
                     if let Some(exist_sst_id) = entry.get(compaction_group_id) {
                         panic!("we do not allow more than one sst with the same object id in one grou. object-id: {}, duplicated sst id: {:?} and {}", object_id, exist_sst_id, table_info.sst_id);
@@ -864,7 +867,7 @@ fn split_sst_info_for_level(
             let mut branch_table_info = sst_info.clone();
             branch_table_info.sst_id = *new_sst_id;
             *new_sst_id += 1;
-            let parent_old_sst_id = sst_info.get_sst_id();
+            let parent_old_sst_id = sst_info.sst_id;
             if is_trivial {
                 // This is a compatibility design. we only clear the table-ids for files which would
                 // be removed in later code. In the version-delta generated by new
@@ -948,7 +951,7 @@ pub fn get_compaction_group_ssts(
             level
                 .table_infos
                 .iter()
-                .map(|table_info| (table_info.get_object_id(), table_info.get_sst_id()))
+                .map(|table_info| (table_info.object_id, table_info.sst_id))
         })
 }
 
@@ -1000,7 +1003,7 @@ pub fn add_ssts_to_sub_level(
             .sort_by(|sst1, sst2| {
                 let a = sst1.key_range.as_ref().unwrap();
                 let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
+                a.cmp(b)
             });
         assert!(
             can_concat(&l0.sub_levels[sub_level_idx].table_infos),
@@ -1109,7 +1112,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     operand.table_infos.sort_by(|sst1, sst2| {
         let a = sst1.key_range.as_ref().unwrap();
         let b = sst2.key_range.as_ref().unwrap();
-        a.compare(b)
+        a.cmp(b)
     });
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
@@ -1288,15 +1291,15 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_pb::hummock::group_delta::DeltaType;
-    use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
     use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, Level,
-        LevelType, OverlappingLevel, SstableInfo,
+        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, IntraLevelDelta, LevelType,
     };
 
     use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
-    use crate::version::{HummockVersion, HummockVersionDelta};
+    use crate::version::{
+        HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
+    };
 
     #[test]
     fn test_get_sst_object_ids() {
@@ -1416,7 +1419,8 @@ mod tests {
                                     object_id: 1,
                                     sst_id: 1,
                                     ..Default::default()
-                                }],
+                                }
+                                .to_protobuf()],
                                 ..Default::default()
                             })),
                         }],

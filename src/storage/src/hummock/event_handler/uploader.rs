@@ -1180,9 +1180,9 @@ mod tests {
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::version::{HummockVersion, SstableInfo};
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{KeyRange, SstableInfo};
     use spin::Mutex;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
@@ -1273,8 +1273,8 @@ mod tests {
             object_id: gen_sst_object_id,
             sst_id: gen_sst_object_id,
             key_range: Some(KeyRange {
-                left: start_full_key.encode(),
-                right: end_full_key.encode(),
+                left: Bytes::from(start_full_key.encode()),
+                right: Bytes::from(end_full_key.encode()),
                 right_exclusive: true,
             }),
             table_ids: vec![TEST_TABLE_ID.table_id],

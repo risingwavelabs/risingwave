@@ -20,11 +20,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
-use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStore;

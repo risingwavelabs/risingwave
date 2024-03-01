@@ -15,17 +15,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::{HummockVersion, SstableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 #[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot};
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -54,6 +56,8 @@ pub async fn add_test_tables(
     context_id: HummockContextId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
+
+    use risingwave_hummock_sdk::version::SstableInfo;
     let mut epoch: u64 = 1;
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
@@ -66,7 +70,7 @@ pub async fn add_test_tables(
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
         .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
@@ -142,7 +146,7 @@ pub async fn add_test_tables(
     let ssts = to_local_sstable_info(&test_tables_3);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
         .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
@@ -162,18 +166,18 @@ pub fn generate_test_sstables_with_table_id(
             object_id: sst_id,
             sst_id,
             key_range: Some(KeyRange {
-                left: key_with_epoch(
+                left: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
                         .as_bytes()
                         .to_vec(),
                     epoch,
-                ),
-                right: key_with_epoch(
+                )),
+                right: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
                         .as_bytes()
                         .to_vec(),
                     epoch,
-                ),
+                )),
                 right_exclusive: false,
             }),
             file_size: 2,
@@ -193,8 +197,8 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
             object_id: sst_id,
             sst_id,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
-                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
+                left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
+                right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
                 right_exclusive: false,
             }),
             file_size: 2,
@@ -270,7 +274,7 @@ pub fn iterator_test_key_of_epoch(
 pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObjectId> {
     sstables
         .iter()
-        .map(|table| table.get_object_id())
+        .map(|table| table.object_id)
         .sorted()
         .collect_vec()
 }
@@ -289,7 +293,7 @@ pub fn get_sorted_committed_object_ids(
         .levels
         .iter()
         .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
-        .flat_map(|levels| levels.table_infos.iter().map(|info| info.get_object_id()))
+        .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()
 }
@@ -378,7 +382,7 @@ pub async fn commit_from_meta_node(
 ) -> crate::hummock::error::Result<Option<HummockSnapshot>> {
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, META_NODE_ID))
         .collect();
     hummock_manager_ref
         .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
@@ -395,7 +399,7 @@ pub async fn add_ssts(
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.object_id, context_id))
         .collect();
     hummock_manager
         .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))

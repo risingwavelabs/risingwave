@@ -177,7 +177,7 @@ impl StreamService for StreamServiceImpl {
                          table_stats,
                      }| GroupedSstableInfo {
                         compaction_group_id,
-                        sst: Some(sst_info),
+                        sst: Some(sst_info.to_protobuf()),
                         table_stats_map: to_prost_table_stats_map(table_stats),
                     },
                 )

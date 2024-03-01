@@ -311,8 +311,8 @@ impl WatermarkDirection {
 
 #[derive(Clone, Debug, PartialEq, EstimateSize)]
 pub struct VnodeWatermark {
-    vnode_bitmap: Arc<Bitmap>,
-    watermark: Bytes,
+    pub vnode_bitmap: Arc<Bitmap>,
+    pub watermark: Bytes,
 }
 
 impl VnodeWatermark {

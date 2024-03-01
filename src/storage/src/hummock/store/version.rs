@@ -33,9 +33,9 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{
     ReadTableWatermark, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::version::{HummockVersionDelta, SstableInfo};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{LevelType, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::Instrument;
 
@@ -577,9 +577,7 @@ pub fn read_filter_for_batch(
         }));
 
         sst_vec.extend(staging_ssts.into_iter().filter(|staging_sst| {
-            assert!(
-                staging_sst.get_max_epoch() <= min_epoch || staging_sst.get_min_epoch() > min_epoch
-            );
+            assert!(staging_sst.max_epoch <= min_epoch || staging_sst.min_epoch > min_epoch);
             // Dedup staging SSTs in different shard. Duplicates can happen in the following case:
             // - Table 1 Shard 1 produces IMM 1
             // - Table 1 Shard 2 produces IMM 2
@@ -961,7 +959,7 @@ impl HummockVersionReader {
                             .binary_search(&read_options.table_id.table_id)
                             .is_ok()
                     })
-                    .cloned()
+                    .map(|sst| sst.clone())
                     .collect_vec();
                 if sstables.is_empty() {
                     continue;
@@ -969,7 +967,7 @@ impl HummockVersionReader {
                 if sstables.len() > 1 {
                     let ssts_which_have_delete_range = sstables
                         .iter()
-                        .filter(|sst| sst.get_range_tombstone_count() > 0)
+                        .filter(|sst| sst.range_tombstone_count > 0)
                         .cloned()
                         .collect_vec();
                     if !ssts_which_have_delete_range.is_empty() {
@@ -1035,7 +1033,7 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
-                    assert_eq!(sstable_info.get_object_id(), sstable.id);
+                    assert_eq!(sstable_info.object_id, sstable.id);
                     if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {

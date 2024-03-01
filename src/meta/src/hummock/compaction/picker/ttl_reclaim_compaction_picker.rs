@@ -14,12 +14,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use bytes::Bytes;
 use risingwave_common::catalog::TableOption;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
+use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::version::{InputLevel, Levels, SstableInfo};
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -46,8 +46,8 @@ impl TtlPickerState {
 
     pub fn init(&mut self, key_range: KeyRange) {
         self.last_select_end_bound = KeyRange {
-            left: vec![],
-            right: key_range.left.clone(),
+            left: Bytes::default(),
+            right: Bytes::from(key_range.left.clone()),
             right_exclusive: true,
         };
         self.end_bound_in_round = key_range;
@@ -173,8 +173,8 @@ impl TtlReclaimCompactionPicker {
 
         let select_last_sst = select_input_ssts.last().unwrap();
         state.last_select_end_bound.full_key_extend(&KeyRange {
-            left: vec![],
-            right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
+            left: Bytes::default(),
+            right: Bytes::from(select_last_sst.key_range.as_ref().unwrap().right.clone()),
             right_exclusive: select_last_sst.key_range.as_ref().unwrap().right_exclusive,
         });
 
@@ -204,8 +204,9 @@ mod test {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::version::Level;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{Level, LevelType};
+    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

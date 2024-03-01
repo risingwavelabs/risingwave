@@ -27,9 +27,10 @@ use risingwave_hummock_sdk::compact::{
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::version::CompactTask;
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
+use risingwave_pb::hummock::{BloomFilterType, LevelType};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -90,8 +91,8 @@ impl CompactorRunner {
             BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
 
         let key_range = KeyRange {
-            left: Bytes::copy_from_slice(task.splits[split_index].get_left()),
-            right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
+            left: task.splits[split_index].left.clone(),
+            right: task.splits[split_index].right.clone(),
             right_exclusive: true,
         };
 
@@ -104,7 +105,7 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 watermark: task.watermark,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-                task_type: task.task_type(),
+                task_type: TaskType::try_from(task.task_type).unwrap(),
                 is_target_l0_or_lbase: task.target_level == 0
                     || task.target_level == task.base_level,
                 use_block_based_filter,
@@ -173,13 +174,15 @@ impl CompactorRunner {
                     .table_infos
                     .iter()
                     .filter(|table_info| {
-                        let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                        // let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
                         let table_ids = &table_info.table_ids;
                         let exist_table = table_ids.iter().any(|table_id| {
                             self.compact_task.existing_table_ids.contains(table_id)
                         });
 
-                        self.key_range.full_key_overlap(&key_range) && exist_table
+                        self.key_range
+                            .full_key_overlap(table_info.key_range.as_ref().unwrap())
+                            && exist_table
                     })
                     .cloned()
                     .collect_vec();
@@ -201,13 +204,17 @@ impl CompactorRunner {
                 ));
             } else {
                 for table_info in &level.table_infos {
-                    let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                    // let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
                     let table_ids = &table_info.table_ids;
                     let exist_table = table_ids
                         .iter()
                         .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
 
-                    if !self.key_range.full_key_overlap(&key_range) || !exist_table {
+                    if !self
+                        .key_range
+                        .full_key_overlap(table_info.key_range.as_ref().unwrap())
+                        || !exist_table
+                    {
                         continue;
                     }
                     if table_info.range_tombstone_count > 0 {
@@ -388,7 +395,7 @@ pub async fn compact(
         .sum::<u64>();
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
-        .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked as i32);
 
     let delete_key_count = sstable_infos
         .iter()
@@ -408,7 +415,7 @@ pub async fn compact(
         && compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
         && delete_key_count * 100
             < context.storage_opts.compactor_fast_max_compact_delete_ratio as u64 * total_key_count
-        && compact_task.task_type() == TaskType::Dynamic;
+        && compact_task.task_type == TaskType::Dynamic as i32;
 
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
@@ -669,7 +676,7 @@ fn compact_done(
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let mut table_stats_map = TableStatsMap::default();
-    compact_task.set_task_status(task_status);
+    compact_task.task_status = task_status as i32;
     compact_task
         .sorted_output_ssts
         .reserve(compact_task.splits.len());
@@ -938,10 +945,11 @@ where
 mod tests {
     use std::collections::{HashSet, VecDeque};
 
+    use foyer::common::code::Key;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-    use risingwave_pb::hummock::{InputLevel, PbKeyRange};
+    use risingwave_hummock_sdk::version::InputLevel;
 
     use super::*;
     use crate::filter_key_extractor::FullKeyFilterKeyExtractor;
@@ -1013,7 +1021,7 @@ mod tests {
                 table_infos: vec![sstable_info_1, sstable_info_2],
             }],
             existing_table_ids: vec![2],
-            splits: vec![PbKeyRange::inf()],
+            splits: vec![KeyRange::inf()],
             watermark: 10,
             ..Default::default()
         };

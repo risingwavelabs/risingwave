@@ -27,12 +27,12 @@ use risingwave_common::cache::{
     CachePriority, LookupResponse, LruCacheEventListener, LruKey, LruValue,
 };
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectStoreRef, ObjectStreamingUploader,
 };
-use risingwave_pb::hummock::SstableInfo;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -611,7 +611,7 @@ impl SstableStore {
         sst: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.get_object_id();
+        let object_id = sst.object_id;
         let lookup_response = self
             .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(
@@ -1180,8 +1180,8 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::version::SstableInfo;
     use risingwave_hummock_sdk::HummockSstableObjectId;
-    use risingwave_pb::hummock::SstableInfo;
 
     use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};

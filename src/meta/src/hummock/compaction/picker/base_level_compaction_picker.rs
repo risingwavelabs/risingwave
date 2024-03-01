@@ -16,14 +16,15 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
+use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;

@@ -20,11 +20,11 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta, SstableInfo};
 use risingwave_hummock_sdk::{version_archive_dir, HummockSstableObjectId, HummockVersionId};
 use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::{HummockVersionArchive, SstableInfo};
+use risingwave_pb::hummock::HummockVersionArchive;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{Block, BlockHolder, BlockIterator, SstableStoreRef};
@@ -107,8 +107,7 @@ async fn print_user_key_in_version(
             .chain(cg.levels.iter())
         {
             for sstable_info in &level.table_infos {
-                use risingwave_hummock_sdk::key_range::KeyRange;
-                let key_range: KeyRange = sstable_info.key_range.as_ref().unwrap().into();
+                let key_range = sstable_info.key_range.as_ref().unwrap();
                 let left_user_key = FullKey::decode(&key_range.left);
                 let right_user_key = FullKey::decode(&key_range.right);
                 if left_user_key.user_key > *target_key || *target_key > right_user_key.user_key {

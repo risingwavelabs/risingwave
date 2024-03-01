@@ -17,8 +17,8 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::append_sstable_info_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
+use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
@@ -326,7 +326,7 @@ impl NonOverlapSubLevelPicker {
             level_ssts.sort_by(|sst1, sst2| {
                 let a = sst1.key_range.as_ref().unwrap();
                 let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
+                a.cmp(b)
             });
         });
 
@@ -477,7 +477,7 @@ impl NonOverlapSubLevelPicker {
 pub mod tests {
     use std::collections::BTreeSet;
 
-    pub use risingwave_pb::hummock::{Level, LevelType};
+    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;

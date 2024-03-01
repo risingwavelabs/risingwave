@@ -25,8 +25,9 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStats;
+use risingwave_hummock_sdk::version::{CompactTask, SstableInfo};
 use risingwave_hummock_sdk::{can_concat, compact_task_to_string, EpochWithGap, LocalSstableInfo};
-use risingwave_pb::hummock::{CompactTask, SstableInfo};
+use risingwave_pb::hummock::compact_task::TaskType;
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::block_stream::BlockDataStream;
@@ -291,7 +292,7 @@ impl CompactorRunner {
             gc_delete_keys: task.gc_delete_keys,
             watermark: task.watermark,
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-            task_type: task.task_type(),
+            task_type: TaskType::try_from(task.task_type).unwrap(),
             is_target_l0_or_lbase: task.target_level == 0 || task.target_level == task.base_level,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
@@ -515,7 +516,7 @@ impl CompactorRunner {
         )
         .await?;
         let sst_infos = ssts.iter().map(|sst| sst.sst_info.clone()).collect_vec();
-        assert!(can_concat(&sst_infos));
+        assert!(can_concat(sst_infos.as_slice()));
         Ok((ssts, statistic))
     }
 }

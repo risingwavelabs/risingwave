@@ -14,14 +14,15 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
+use risingwave_hummock_sdk::version::{InputLevel, Levels, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
+use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
@@ -411,7 +412,7 @@ impl WholeLevelCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::hummock::Level;
+    use risingwave_hummock_sdk::version::{Level, Levels};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;

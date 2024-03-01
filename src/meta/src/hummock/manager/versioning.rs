@@ -23,15 +23,14 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta, SstableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
-    SstableInfo, TableStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
@@ -408,13 +407,13 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
-    use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::write_limits::WriteLimit;
-    use risingwave_pb::hummock::{
-        HummockPinnedVersion, HummockVersionStats, KeyRange, Level, OverlappingLevel, SstableInfo,
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::version::{
+        HummockVersion, Level, Levels, OverlappingLevel, SstableInfo,
     };
+    use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
+    use risingwave_pb::hummock::write_limits::WriteLimit;
+    use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::manager::versioning::{
@@ -545,8 +544,8 @@ mod tests {
     fn test_estimate_table_stats() {
         let sst = SstableInfo {
             key_range: Some(KeyRange {
-                left: vec![1; 10],
-                right: vec![1; 20],
+                left: vec![1; 10].into(),
+                right: vec![1; 20].into(),
                 ..Default::default()
             }),
             table_ids: vec![1, 2, 3],
@@ -611,8 +610,8 @@ mod tests {
     fn test_estimate_table_stats_large_key_range() {
         let sst = SstableInfo {
             key_range: Some(KeyRange {
-                left: vec![1; 1000],
-                right: vec![1; 2000],
+                left: vec![1; 1000].into(),
+                right: vec![1; 2000].into(),
                 ..Default::default()
             }),
             table_ids: vec![1, 2, 3],

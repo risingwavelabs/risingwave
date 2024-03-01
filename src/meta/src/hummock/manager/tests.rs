@@ -24,18 +24,16 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ssts, BranchedSstInfo,
 };
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, SstableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
     HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{
-    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
-    SstableInfo,
-};
+use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot};
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -66,8 +64,8 @@ fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo
     SstableInfo {
         sst_id,
         key_range: Some(KeyRange {
-            left: iterator_test_key_of_epoch(1, idx, 1),
-            right: iterator_test_key_of_epoch(1, idx, 1),
+            left: iterator_test_key_of_epoch(1, idx, 1).into(),
+            right: iterator_test_key_of_epoch(1, idx, 1).into(),
             right_exclusive: false,
         }),
         table_ids,
@@ -1176,8 +1174,8 @@ async fn test_version_stats() {
                 object_id: sst_ids[idx],
                 sst_id: sst_ids[idx],
                 key_range: Some(KeyRange {
-                    left: iterator_test_key_of_epoch(1, 1, 1),
-                    right: iterator_test_key_of_epoch(1, 1, 1),
+                    left: iterator_test_key_of_epoch(1, 1, 1).into(),
+                    right: iterator_test_key_of_epoch(1, 1, 1).into(),
                     right_exclusive: false,
                 }),
                 file_size: 1024 * 1024 * 1024,
@@ -1407,8 +1405,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             object_id: 10,
             sst_id: 10,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(100, 1, 20),
-                right: iterator_test_key_of_epoch(100, 100, 20),
+                left: iterator_test_key_of_epoch(100, 1, 20).into(),
+                right: iterator_test_key_of_epoch(100, 100, 20).into(),
                 right_exclusive: false,
             }),
             table_ids: vec![100],
@@ -1424,8 +1422,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             object_id: 11,
             sst_id: 11,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(100, 101, 20),
-                right: iterator_test_key_of_epoch(101, 100, 20),
+                left: iterator_test_key_of_epoch(100, 101, 20).into(),
+                right: iterator_test_key_of_epoch(101, 100, 20).into(),
                 right_exclusive: false,
             }),
             table_ids: vec![100, 101],
@@ -1614,8 +1612,8 @@ async fn test_split_compaction_group_trivial_expired() {
             object_id: 10,
             sst_id: 10,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(100, 1, 20),
-                right: iterator_test_key_of_epoch(100, 100, 20),
+                left: iterator_test_key_of_epoch(100, 1, 20).into(),
+                right: iterator_test_key_of_epoch(100, 100, 20).into(),
                 right_exclusive: false,
             }),
             table_ids: vec![100],
@@ -1634,8 +1632,8 @@ async fn test_split_compaction_group_trivial_expired() {
             min_epoch: 20,
             max_epoch: 20,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(101, 1, 20),
-                right: iterator_test_key_of_epoch(101, 100, 20),
+                left: iterator_test_key_of_epoch(101, 1, 20).into(),
+                right: iterator_test_key_of_epoch(101, 100, 20).into(),
                 right_exclusive: false,
             }),
             ..Default::default()
@@ -1776,8 +1774,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             object_id: 10,
             sst_id: 10,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(1, 1, 1),
-                right: iterator_test_key_of_epoch(1, 1, 1),
+                left: iterator_test_key_of_epoch(1, 1, 1).into(),
+                right: iterator_test_key_of_epoch(1, 1, 1).into(),
                 right_exclusive: false,
             }),
             table_ids: vec![100, 101],
@@ -1810,8 +1808,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                     sst_id: 11,
                     table_ids: vec![100, 101],
                     key_range: Some(KeyRange {
-                        left: iterator_test_key_of_epoch(1, 1, 1),
-                        right: iterator_test_key_of_epoch(1, 1, 1),
+                        left: iterator_test_key_of_epoch(1, 1, 1).into(),
+                        right: iterator_test_key_of_epoch(1, 1, 1).into(),
                         right_exclusive: false,
                     }),
                     ..Default::default()
@@ -1821,8 +1819,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                     sst_id: 12,
                     table_ids: vec![100],
                     key_range: Some(KeyRange {
-                        left: iterator_test_key_of_epoch(1, 2, 2),
-                        right: iterator_test_key_of_epoch(1, 2, 2),
+                        left: iterator_test_key_of_epoch(1, 2, 2).into(),
+                        right: iterator_test_key_of_epoch(1, 2, 2).into(),
                         right_exclusive: false,
                     }),
                     ..Default::default()
@@ -1923,8 +1921,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             object_id: 10,
             sst_id: 10,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(1, 1, 1),
-                right: iterator_test_key_of_epoch(1, 1, 1),
+                left: iterator_test_key_of_epoch(1, 1, 1).into(),
+                right: iterator_test_key_of_epoch(1, 1, 1).into(),
                 right_exclusive: false,
             }),
             table_ids: vec![100, 101],
@@ -1940,8 +1938,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             object_id: 11,
             sst_id: 11,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(1, 1, 1),
-                right: iterator_test_key_of_epoch(1, 1, 1),
+                left: iterator_test_key_of_epoch(1, 1, 1).into(),
+                right: iterator_test_key_of_epoch(1, 1, 1).into(),
                 right_exclusive: false,
             }),
             table_ids: vec![101],

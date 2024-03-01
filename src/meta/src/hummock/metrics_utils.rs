@@ -21,11 +21,10 @@ use itertools::{enumerate, Itertools};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, BranchedSstInfo,
 };
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, Levels};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
-use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,

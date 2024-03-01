@@ -31,7 +31,7 @@ use std::cmp::Ordering;
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use version::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;

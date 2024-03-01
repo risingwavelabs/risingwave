@@ -31,9 +31,9 @@ pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::version::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
@@ -116,7 +116,9 @@ pub mod tests {
     use std::ops::Range;
 
     use itertools::Itertools;
-    use risingwave_pb::hummock::{KeyRange, Level, LevelType, OverlappingLevel, SstableInfo};
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::version::{Level, OverlappingLevel, SstableInfo};
+    use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
@@ -176,8 +178,8 @@ pub mod tests {
             object_id: id,
             sst_id: id,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
-                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,
@@ -203,8 +205,8 @@ pub mod tests {
             object_id: id,
             sst_id: id,
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
-                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch).into(),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch).into(),
                 right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,

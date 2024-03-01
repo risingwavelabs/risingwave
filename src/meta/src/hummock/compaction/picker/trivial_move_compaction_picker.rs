@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
+use risingwave_hummock_sdk::version::{InputLevel, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;

@@ -19,9 +19,11 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::util::epoch::{is_compatibility_max_epoch, is_max_epoch};
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
+use risingwave_pb::hummock::BloomFilterType;
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -629,9 +631,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
             bloom_filter_kind: bloom_filter_kind as i32,
-            key_range: Some(risingwave_pb::hummock::KeyRange {
-                left: meta.smallest_key.clone(),
-                right: meta.largest_key.clone(),
+            key_range: Some(KeyRange {
+                left: Bytes::from(meta.smallest_key.clone()),
+                right: Bytes::from(meta.largest_key.clone()),
                 right_exclusive,
             }),
             file_size: meta.estimated_size as u64,

@@ -172,7 +172,7 @@ impl HummockManager {
                 .collect_vec();
             if compactor
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
-                    sst_infos,
+                    sst_infos: sst_infos.iter().map(|sst| sst.to_protobuf()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
                     epoch,
                 }))

@@ -16,7 +16,7 @@ use std::cmp::Ordering::{Equal, Greater, Less};
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::version::SstableInfo;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::sstable::SstableIteratorReadOptions;

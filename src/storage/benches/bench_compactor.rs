@@ -23,10 +23,11 @@ use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::{compact_task, SstableInfo};
+use risingwave_pb::hummock::compact_task;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
