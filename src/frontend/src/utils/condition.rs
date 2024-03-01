@@ -27,7 +27,7 @@ use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use crate::error::Result;
 use crate::expr::{
     collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not,
-    simplify_stream_filter_expression, to_conjunctions, try_get_bool_constant, ExprDisplay,
+    to_conjunctions, try_get_bool_constant, ExprDisplay,
     ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair,
     InputRef,
 };
@@ -850,7 +850,6 @@ impl Condition {
             .into_iter()
             .map(push_down_not)
             .map(fold_boolean_constant)
-            .map(simplify_stream_filter_expression)
             .flat_map(to_conjunctions)
             .collect();
         let mut res: Vec<ExprImpl> = Vec::new();
