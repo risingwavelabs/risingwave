@@ -326,36 +326,3 @@ impl EpochWithGap {
         self.0 & EPOCH_SPILL_TIME_MASK
     }
 }
-
-impl EpochWithGap {
-    // The function `new_for_test` returns an `EpochWithGap` that is only used in unit testing.
-    // It has an offset of 0, and the u64 value stored in `EpochWithGap` will shift the passed random epoch by 16 bits,
-    // ensuring that the lower 16 bits are set to 0.
-    pub fn new_for_test(epoch: u64) -> Self {
-        const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
-        EpochWithGap::new(epoch << EPOCH_PHYSICAL_SHIFT_BITS, 0)
-    }
-
-    pub fn inc(&mut self) {
-        self.0 += EPOCH_INC_MIN_STEP_FOR_TEST;
-    }
-
-    pub fn dec(&mut self) {
-        if self.0 >= EPOCH_INC_MIN_STEP_FOR_TEST {
-            self.0 -= EPOCH_INC_MIN_STEP_FOR_TEST;
-        }
-    }
-
-    // return the epoch_with_gap(epoch + spill_offset)
-    pub fn as_u64_for_test(&self) -> HummockEpoch {
-        self.0
-    }
-
-    pub fn next_epoch(&self) -> EpochWithGap {
-        EpochWithGap::new(self.0 + EPOCH_INC_MIN_STEP_FOR_TEST, 0)
-    }
-
-    pub fn prev_epoch(&self) -> EpochWithGap {
-        EpochWithGap::new(self.0 - EPOCH_INC_MIN_STEP_FOR_TEST, 0)
-    }
-}
