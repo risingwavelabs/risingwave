@@ -762,7 +762,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::epoch::{
-        test_epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS,
+        test_epoch, EpochExt, EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST,
     };
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::store::StateStoreReadIterStream;
@@ -779,7 +779,7 @@ mod tests {
     };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreReadMetrics, SeqIdType};
 
-    const EPOCH0: u64 = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+    const EPOCH0: u64 = 1 << EPOCH_AVAILABLE_BITS;
     const EPOCH1: u64 = EPOCH0 + EPOCH_INC_MIN_STEP_FOR_TEST;
     const EPOCH2: u64 = EPOCH1 + EPOCH_INC_MIN_STEP_FOR_TEST;
 

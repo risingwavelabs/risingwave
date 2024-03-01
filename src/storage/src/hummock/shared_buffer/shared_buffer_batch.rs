@@ -897,7 +897,7 @@ mod tests {
 
     use risingwave_common::must_match;
     use risingwave_common::util::epoch::{
-        test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS,
+        test_epoch, EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST,
     };
     use risingwave_hummock_sdk::key::map_table_key_range;
 
@@ -1223,7 +1223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_range_existx() {
-        let epoch = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+        let epoch = 1 << EPOCH_AVAILABLE_BITS;
         let shared_buffer_items = vec![
             (Vec::from("a_1"), HummockValue::put(Bytes::from("value1"))),
             (Vec::from("a_3"), HummockValue::put(Bytes::from("value2"))),

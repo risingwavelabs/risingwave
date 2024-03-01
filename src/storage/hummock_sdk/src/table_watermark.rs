@@ -597,7 +597,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{
-        test_epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS,
+        test_epoch, EpochExt, EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST,
     };
 
     use crate::key::{
@@ -889,7 +889,7 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    const COMMITTED_EPOCH: u64 = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+    const COMMITTED_EPOCH: u64 = 1 << EPOCH_AVAILABLE_BITS;
     const EPOCH1: u64 = COMMITTED_EPOCH + EPOCH_INC_MIN_STEP_FOR_TEST;
     const EPOCH2: u64 = EPOCH1 + EPOCH_INC_MIN_STEP_FOR_TEST;
     const TEST_SINGLE_VNODE: VirtualNode = VirtualNode::from_index(1);

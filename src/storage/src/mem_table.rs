@@ -667,7 +667,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_PHYSICAL_SHIFT_BITS};
+    use risingwave_common::util::epoch::{EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -889,7 +889,7 @@ mod tests {
         }
 
         const TEST_TABLE_ID: TableId = TableId::new(233);
-        const TEST_EPOCH: u64 = 10 << EPOCH_PHYSICAL_SHIFT_BITS;
+        const TEST_EPOCH: u64 = 10 << EPOCH_AVAILABLE_BITS;
 
         async fn check_data(
             iter: &mut MemTableHummockIterator<'_>,

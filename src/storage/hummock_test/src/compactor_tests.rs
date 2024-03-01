@@ -276,7 +276,7 @@ pub(crate) mod tests {
             &storage,
             &hummock_meta_client,
             &key,
-            10,
+            1 << 10,
             (1..SST_COUNT + 1)
                 .map(|v| test_epoch(v * 1000))
                 .collect_vec(),
@@ -324,7 +324,7 @@ pub(crate) mod tests {
                 .unwrap();
         }
 
-        let mut val = b"0"[..].repeat(10);
+        let mut val = b"0"[..].repeat(1 << 10);
         val.extend_from_slice(&(TEST_WATERMARK * 1000).to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
