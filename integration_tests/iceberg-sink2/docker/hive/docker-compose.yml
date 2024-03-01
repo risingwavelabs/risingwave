@@ -17,7 +17,7 @@ services:
     depends_on:
       - minio-0
       - metastore
-    image: ghcr.io/icelake-io/icelake-spark:1.0
+    image: ghcr.io/icelake-io/icelake-spark:latest
     environment:
       - AWS_ACCESS_KEY_ID=hummockadmin
       - AWS_SECRET_ACCESS_KEY=hummockadmin
