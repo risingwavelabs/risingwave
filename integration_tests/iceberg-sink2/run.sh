@@ -5,7 +5,8 @@ set -euo pipefail
 
 # Install poetry
 
-export POETRY_HOME=/opt/poetry
+export POETRY_HOME=/tmp/poetry
+rm -rf /tmp/poetry
 python3 -m venv $POETRY_HOME
 $POETRY_HOME/bin/pip install poetry==1.8.0
 $POETRY_HOME/bin/poetry --version
