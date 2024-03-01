@@ -660,6 +660,7 @@ fn gen_table_plan_inner(
     let mut with_properties = WithOptions::new(with_properties);
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_properties, &schema_name, &session)?;
+    let retention_seconds = with_properties.retention_seconds();
 
     let is_external_source = source_info.is_some();
 
@@ -724,6 +725,14 @@ fn gen_table_plan_inner(
         .into());
     }
 
+    if !append_only && retention_seconds.is_some() {
+        return Err(ErrorCode::NotSupported(
+            "Defining retention seconds on table requires the table to be append only.".to_owned(),
+            "Use the key words `APPEND ONLY`".to_owned(),
+        )
+        .into());
+    }
+
     let materialize = plan_root.gen_table_plan(
         context,
         name,
@@ -735,6 +744,7 @@ fn gen_table_plan_inner(
         watermark_descs,
         version,
         is_external_source,
+        retention_seconds,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -856,6 +866,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         vec![],
         Some(col_id_gen.into_version()),
         true,
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
