@@ -108,6 +108,7 @@ impl Strong {
             | ExprType::Extract
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
+            // ALL: This kind of expression is null if and only if all of its arguments are null.
             ExprType::And | ExprType::Or | ExprType::Coalesce => self.all_null(func_call),
             // TODO: Function like case when is important but current its structure is complicated, so we need to implement it later if necessary.
             // Assume that any other expressions cannot be simplified.
