@@ -344,10 +344,13 @@ export default function Streaming() {
         if (actorBackPressures) {
           for (const m of actorBackPressures.outputBufferBlockingDuration) {
             if (m.sample.length > 0) {
-              // We issue an instant query to Prometheus to get the most recent value.
+              // Note: We issue an instant query to Prometheus to get the most recent value.
               // So there should be only one sample here.
-              console.assert(m.sample.length === 1)
-              const value = m.sample[0].value * 100
+              //
+              // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
+              // possible that an old version of meta service returns a range-query result.
+              // So we take the one with the latest timestamp here.
+              const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
               map.set(
                 `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
                 value
