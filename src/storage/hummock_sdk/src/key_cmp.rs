@@ -80,7 +80,7 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use crate::key::{FullKey, UserKey};
-    use crate::{EpochWithGap, KeyComparator};
+    use crate::KeyComparator;
 
     #[test]
     fn test_cmp_encoded_full_key() {

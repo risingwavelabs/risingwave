@@ -21,8 +21,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, EpochWithGap, HummockContextId, HummockEpoch, HummockSstableObjectId,
-    LocalSstableInfo,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 #[cfg(test)]
@@ -57,7 +56,7 @@ pub async fn add_test_tables(
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
 
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::util::epoch::EpochExt;
 
     let mut epoch = test_epoch(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;

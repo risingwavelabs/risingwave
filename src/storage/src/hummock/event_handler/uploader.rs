@@ -30,7 +30,6 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
@@ -1149,7 +1148,7 @@ mod tests {
     use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
+    use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{KeyRange, SstableInfo};
     use spin::Mutex;
     use tokio::spawn;

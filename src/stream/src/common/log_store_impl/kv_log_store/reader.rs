@@ -32,7 +32,7 @@ use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;

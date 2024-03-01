@@ -106,7 +106,6 @@ redis = { version = "0.24.0", features = ["aio","tokio-comp","async-std-comp"] }
 regex = "1.4"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }

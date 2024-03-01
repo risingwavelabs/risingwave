@@ -281,7 +281,7 @@ async fn test_snapshot_range_scan_inner(
             ],
             vec![],
             WriteOptions {
-                epoch: epoch,
+                epoch,
                 table_id: Default::default(),
             },
         )

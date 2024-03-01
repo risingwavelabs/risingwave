@@ -143,25 +143,7 @@ impl From<u64> for Epoch {
         Self(epoch)
     }
 }
-// named
-#[ext(EpochExt)]
-pub impl u64 {
-    fn inc_epoch(&mut self) {
-        *self += EPOCH_INC_MIN_STEP_FOR_TEST;
-    }
 
-    fn dec_epoch(&mut self) {
-        *self -= EPOCH_INC_MIN_STEP_FOR_TEST;
-    }
-
-    fn next_epoch(self) -> u64 {
-        self + EPOCH_INC_MIN_STEP_FOR_TEST
-    }
-
-    fn prev_epoch(self) -> u64 {
-        self - EPOCH_INC_MIN_STEP_FOR_TEST
-    }
-}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EpochPair {
     pub curr: u64,
@@ -188,6 +170,27 @@ impl EpochPair {
 /// This method is to turn a a random epoch into a well shifted value.
 pub fn test_epoch(value: u64) -> u64 {
     value << EPOCH_AVAILABLE_BITS
+}
+
+/// There are numerous operations in our system's unit tests that involve incrementing or decrementing the epoch.
+/// These extensions for u64 type are specifically used within the unit tests.
+#[ext(EpochExt)]
+pub impl u64 {
+    fn inc_epoch(&mut self) {
+        *self += EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn dec_epoch(&mut self) {
+        *self -= EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn next_epoch(self) -> u64 {
+        self + EPOCH_INC_MIN_STEP_FOR_TEST
+    }
+
+    fn prev_epoch(self) -> u64 {
+        self - EPOCH_INC_MIN_STEP_FOR_TEST
+    }
 }
 
 /// Task-local storage for the epoch pair.

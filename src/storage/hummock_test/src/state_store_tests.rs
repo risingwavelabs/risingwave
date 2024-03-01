@@ -437,7 +437,7 @@ async fn test_state_store_sync_inner(
             batch1,
             vec![],
             WriteOptions {
-                epoch: epoch,
+                epoch,
                 table_id: Default::default(),
             },
         )
@@ -465,7 +465,7 @@ async fn test_state_store_sync_inner(
             batch2,
             vec![],
             WriteOptions {
-                epoch: epoch,
+                epoch,
                 table_id: Default::default(),
             },
         )
@@ -495,7 +495,7 @@ async fn test_state_store_sync_inner(
             batch3,
             vec![],
             WriteOptions {
-                epoch: epoch,
+                epoch,
                 table_id: Default::default(),
             },
         )

@@ -21,7 +21,7 @@ use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::TableKey;
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
@@ -94,7 +94,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 batch,
                 vec![],
                 WriteOptions {
-                    epoch: epoch,
+                    epoch,
                     table_id: Default::default(),
                 },
             ))
