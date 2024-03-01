@@ -195,7 +195,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         right_stream_key_indices: &[usize],
     ) -> StreamExecutorResult<()> {
         for chunk in chunks {
-            let keys = K::build(join_keys, chunk.data_chunk())?;
+            let keys = K::build_many(join_keys, chunk.data_chunk());
             for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
                 let Some((op, row)) = r else {
                     continue;
@@ -436,7 +436,7 @@ mod phase1 {
         chunk: StreamChunk,
     ) {
         let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
-        let keys = K::build(left_join_keys, chunk.data_chunk())?;
+        let keys = K::build_many(left_join_keys, chunk.data_chunk());
         let to_fetch_keys = chunk
             .visibility()
             .iter()

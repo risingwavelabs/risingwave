@@ -24,12 +24,15 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 ///
 /// Examples:
 ///
-/// UNKNOWN is strong in [] (definitely null)
-/// `c = 1` is strong in [c] (definitely null if and only if c is null)
+/// UNKNOWN is strong in `[]` (definitely null)
+///
+/// `c = 1` is strong in `[c]` (definitely null if and only if c is null)
+///
 /// `c IS NULL` is not strong (always returns TRUE or FALSE, nevernull)
-/// `p1 AND p2` is strong in [p1, p2] (definitely null if either p1 is null or p2 is null)
+///
+/// `p1 AND p2` is strong in `[p1, p2]` (definitely null if either p1 is null or p2 is null)
+///
 /// `p1 OR p2` is strong if p1 and p2 are strong
-/// `c1 = 1 OR c2 IS NULL` is strong in [c1] (definitely null if c1 is null)
 
 #[derive(Default)]
 pub struct Strong {
@@ -37,18 +40,18 @@ pub struct Strong {
 }
 
 impl Strong {
-    pub fn new(null_columns: FixedBitSet) -> Self {
+    fn new(null_columns: FixedBitSet) -> Self {
         Self { null_columns }
     }
 
-    // Returns whether the analyzed expression will definitely return null if
-    // all of a given set of input columns are null.
+    /// Returns whether the analyzed expression will definitely return null if
+    /// all of a given set of input columns are null.
     pub fn is_null(expr: &ExprImpl, null_columns: FixedBitSet) -> bool {
         let strong = Strong::new(null_columns);
         strong.is_null_visit(expr)
     }
 
-    pub fn is_input_ref_null(&self, input_ref: &InputRef) -> bool {
+    fn is_input_ref_null(&self, input_ref: &InputRef) -> bool {
         self.null_columns.contains(input_ref.index())
     }
 
@@ -104,10 +107,190 @@ impl Strong {
             | ExprType::Extract
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
+            // ALL: This kind of expression is null if and only if all of its arguments are null.
             ExprType::And | ExprType::Or | ExprType::Coalesce => self.all_null(func_call),
             // TODO: Function like case when is important but current its structure is complicated, so we need to implement it later if necessary.
             // Assume that any other expressions cannot be simplified.
-            _ => false,
+            ExprType::In
+            | ExprType::Some
+            | ExprType::All
+            | ExprType::BitwiseAnd
+            | ExprType::BitwiseOr
+            | ExprType::BitwiseXor
+            | ExprType::BitwiseNot
+            | ExprType::BitwiseShiftLeft
+            | ExprType::BitwiseShiftRight
+            | ExprType::DatePart
+            | ExprType::TumbleStart
+            | ExprType::MakeDate
+            | ExprType::MakeTime
+            | ExprType::MakeTimestamp
+            | ExprType::SecToTimestamptz
+            | ExprType::AtTimeZone
+            | ExprType::DateTrunc
+            | ExprType::CharToTimestamptz
+            | ExprType::CharToDate
+            | ExprType::CastWithTimeZone
+            | ExprType::SubtractWithTimeZone
+            | ExprType::MakeTimestamptz
+            | ExprType::Substr
+            | ExprType::Length
+            | ExprType::ILike
+            | ExprType::SimilarToEscape
+            | ExprType::Upper
+            | ExprType::Lower
+            | ExprType::Replace
+            | ExprType::Position
+            | ExprType::Case
+            | ExprType::ConstantLookup
+            | ExprType::RoundDigit
+            | ExprType::Round
+            | ExprType::Ascii
+            | ExprType::Translate
+            | ExprType::ConcatWs
+            | ExprType::Abs
+            | ExprType::SplitPart
+            | ExprType::ToChar
+            | ExprType::Md5
+            | ExprType::CharLength
+            | ExprType::Repeat
+            | ExprType::ConcatOp
+            | ExprType::BoolOut
+            | ExprType::OctetLength
+            | ExprType::BitLength
+            | ExprType::Overlay
+            | ExprType::RegexpMatch
+            | ExprType::RegexpReplace
+            | ExprType::RegexpCount
+            | ExprType::RegexpSplitToArray
+            | ExprType::RegexpEq
+            | ExprType::Pow
+            | ExprType::Exp
+            | ExprType::Chr
+            | ExprType::StartsWith
+            | ExprType::Initcap
+            | ExprType::Lpad
+            | ExprType::Rpad
+            | ExprType::Reverse
+            | ExprType::Strpos
+            | ExprType::ToAscii
+            | ExprType::ToHex
+            | ExprType::QuoteIdent
+            | ExprType::Sin
+            | ExprType::Cos
+            | ExprType::Tan
+            | ExprType::Cot
+            | ExprType::Asin
+            | ExprType::Acos
+            | ExprType::Atan
+            | ExprType::Atan2
+            | ExprType::Sind
+            | ExprType::Cosd
+            | ExprType::Cotd
+            | ExprType::Tand
+            | ExprType::Asind
+            | ExprType::Sqrt
+            | ExprType::Degrees
+            | ExprType::Radians
+            | ExprType::Cosh
+            | ExprType::Tanh
+            | ExprType::Coth
+            | ExprType::Asinh
+            | ExprType::Acosh
+            | ExprType::Atanh
+            | ExprType::Sinh
+            | ExprType::Trunc
+            | ExprType::Ln
+            | ExprType::Log10
+            | ExprType::Cbrt
+            | ExprType::Sign
+            | ExprType::Scale
+            | ExprType::MinScale
+            | ExprType::TrimScale
+            | ExprType::Encode
+            | ExprType::Decode
+            | ExprType::Sha1
+            | ExprType::Sha224
+            | ExprType::Sha256
+            | ExprType::Sha384
+            | ExprType::Sha512
+            | ExprType::Left
+            | ExprType::Right
+            | ExprType::Format
+            | ExprType::PgwireSend
+            | ExprType::PgwireRecv
+            | ExprType::ConvertFrom
+            | ExprType::ConvertTo
+            | ExprType::Decrypt
+            | ExprType::Encrypt
+            | ExprType::Neg
+            | ExprType::Field
+            | ExprType::Array
+            | ExprType::ArrayAccess
+            | ExprType::Row
+            | ExprType::ArrayToString
+            | ExprType::ArrayRangeAccess
+            | ExprType::ArrayCat
+            | ExprType::ArrayAppend
+            | ExprType::ArrayPrepend
+            | ExprType::FormatType
+            | ExprType::ArrayDistinct
+            | ExprType::ArrayLength
+            | ExprType::Cardinality
+            | ExprType::ArrayRemove
+            | ExprType::ArrayPositions
+            | ExprType::TrimArray
+            | ExprType::StringToArray
+            | ExprType::ArrayPosition
+            | ExprType::ArrayReplace
+            | ExprType::ArrayDims
+            | ExprType::ArrayTransform
+            | ExprType::ArrayMin
+            | ExprType::ArrayMax
+            | ExprType::ArraySum
+            | ExprType::ArraySort
+            | ExprType::ArrayContains
+            | ExprType::ArrayContained
+            | ExprType::HexToInt256
+            | ExprType::JsonbAccess
+            | ExprType::JsonbAccessStr
+            | ExprType::JsonbExtractPath
+            | ExprType::JsonbExtractPathText
+            | ExprType::JsonbTypeof
+            | ExprType::JsonbArrayLength
+            | ExprType::IsJson
+            | ExprType::JsonbConcat
+            | ExprType::JsonbObject
+            | ExprType::JsonbPretty
+            | ExprType::JsonbContains
+            | ExprType::JsonbContained
+            | ExprType::JsonbExists
+            | ExprType::JsonbExistsAny
+            | ExprType::JsonbExistsAll
+            | ExprType::JsonbDeletePath
+            | ExprType::JsonbStripNulls
+            | ExprType::ToJsonb
+            | ExprType::JsonbBuildArray
+            | ExprType::JsonbBuildObject
+            | ExprType::JsonbPathExists
+            | ExprType::JsonbPathMatch
+            | ExprType::JsonbPathQueryArray
+            | ExprType::JsonbPathQueryFirst
+            | ExprType::Vnode
+            | ExprType::Proctime
+            | ExprType::PgSleep
+            | ExprType::PgSleepFor
+            | ExprType::PgSleepUntil
+            | ExprType::CastRegclass
+            | ExprType::PgGetIndexdef
+            | ExprType::ColDescription
+            | ExprType::PgGetViewdef
+            | ExprType::PgGetUserbyid
+            | ExprType::PgIndexesSize
+            | ExprType::PgRelationSize
+            | ExprType::PgGetSerialSequence
+            | ExprType::IcebergTransform => false,
+            ExprType::Unspecified => unreachable!(),
         }
     }
 
@@ -137,22 +320,22 @@ mod tests {
     fn test_literal() {
         let null_columns = FixedBitSet::with_capacity(1);
         let expr = Literal(crate::expr::Literal::new(None, DataType::Varchar).into());
-        assert_eq!(Strong::is_null(&expr, null_columns.clone()), true);
+        assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = Literal(
             crate::expr::Literal::new(Some("test".to_string().into()), DataType::Varchar).into(),
         );
-        assert_eq!(Strong::is_null(&expr, null_columns), false);
+        assert!(!Strong::is_null(&expr, null_columns));
     }
 
     #[test]
     fn test_input_ref1() {
         let null_columns = FixedBitSet::with_capacity(2);
         let expr = InputRef::new(0, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns.clone()), false);
+        assert!(!Strong::is_null(&expr, null_columns.clone()));
 
         let expr = InputRef::new(1, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns), false);
+        assert!(!Strong::is_null(&expr, null_columns));
     }
 
     #[test]
@@ -161,10 +344,39 @@ mod tests {
         null_columns.insert(0);
         null_columns.insert(1);
         let expr = InputRef::new(0, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns.clone()), true);
+        assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = InputRef::new(1, DataType::Varchar).into();
-        assert_eq!(Strong::is_null(&expr, null_columns), true);
+        assert!(Strong::is_null(&expr, null_columns));
+    }
+
+    #[test]
+    fn test_c1_equal_1_or_c2_is_null() {
+        let mut null_columns = FixedBitSet::with_capacity(2);
+        null_columns.insert(0);
+        let expr = FunctionCall::new_unchecked(
+            ExprType::Or,
+            vec![
+                FunctionCall::new_unchecked(
+                    ExprType::Equal,
+                    vec![
+                        InputRef::new(0, DataType::Int64).into(),
+                        Literal(crate::expr::Literal::new(Some(1.into()), DataType::Int32).into()),
+                    ],
+                    DataType::Boolean,
+                )
+                .into(),
+                FunctionCall::new_unchecked(
+                    ExprType::IsNull,
+                    vec![InputRef::new(1, DataType::Int64).into()],
+                    DataType::Boolean,
+                )
+                .into(),
+            ],
+            DataType::Boolean,
+        )
+        .into();
+        assert!(!Strong::is_null(&expr, null_columns));
     }
 
     #[test]
@@ -181,10 +393,10 @@ mod tests {
             DataType::Varchar,
         )
         .into();
-        assert_eq!(Strong::is_null(&expr, null_columns), true);
+        assert!(Strong::is_null(&expr, null_columns));
     }
 
-    // generate a test case for (0.8 * sum / count) where sum is null and count is not null
+    /// generate a test case for (0.8 * sum / count) where sum is null and count is not null
     #[test]
     fn test_multiply_divide() {
         let mut null_columns = FixedBitSet::with_capacity(2);
@@ -201,15 +413,15 @@ mod tests {
                     ],
                     DataType::Decimal,
                 )
-                    .into()
+                .into(),
             ],
             DataType::Decimal,
         )
         .into();
-        assert_eq!(Strong::is_null(&expr, null_columns), true);
+        assert!(Strong::is_null(&expr, null_columns));
     }
 
-    // generate test cases for is not null
+    /// generate test cases for is not null
     macro_rules! gen_test {
         ($func:ident, $expr:expr, $expected:expr) => {
             #[test]
