@@ -26,6 +26,10 @@ if [[ $mode == "standalone" ]]; then
   source ci/scripts/standalone-utils.sh
 fi
 
+if [[ $mode == "single-node" ]]; then
+  source ci/scripts/single-node-utils.sh
+fi
+
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
     mkdir -p "$PREFIX_LOG"
@@ -33,6 +37,13 @@ cluster_start() {
     cargo make pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
     cargo make dev standalone-minio-etcd
+  elif [[ $mode == "single-node" ]]; then
+    mkdir -p "$PREFIX_LOG"
+    cargo make clean-data
+    cargo make pre-start-dev
+    start_single_node "$PREFIX_LOG"/single-node.log &
+    # Give it a while to make sure the single-node is ready.
+    sleep 3
   else
     cargo make ci-start "$mode"
   fi
@@ -44,6 +55,9 @@ cluster_stop() {
     stop_standalone
     # Don't check standalone logs, they will exceed the limit.
     cargo make kill
+  elif [[ $mode == "single-node" ]]
+  then
+    stop_single_node
   else
     cargo make ci-kill
   fi

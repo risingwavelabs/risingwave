@@ -102,11 +102,11 @@ trait ExecutorBuilder {
     type Node;
 
     /// Create an [`Executor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> impl std::future::Future<Output = StreamResult<Executor>> + Send;
+    ) -> StreamResult<Executor>;
 }
 
 macro_rules! build_executor {

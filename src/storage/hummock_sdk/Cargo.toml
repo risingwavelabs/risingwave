@@ -32,4 +32,7 @@ workspace = true
 
 [features]
 enable_test_epoch = []
+# This is to enable setting enable_test_epoch in release mode in special cases.
+# It should be used very carefully.
+enable_test_epoch_in_release = []
 

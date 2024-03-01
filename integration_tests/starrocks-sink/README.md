@@ -18,7 +18,7 @@ Login to mysql
 docker compose exec starrocks-fe mysql -uroot -P9030 -h127.0.0.1
 ```
 
-Run the following queries to create database and table.
+Run the following queries to create database and table. You also use other starrocks table, example in ./starrocks_prepare.sql
 ```sql
 CREATE database demo;
 use demo;

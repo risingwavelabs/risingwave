@@ -24,7 +24,7 @@ import {
   API_ENDPOINT_KEY,
   DEFAULT_API_ENDPOINT,
   PREDEFINED_API_ENDPOINTS,
-} from "./api/api"
+} from "../lib/api/api"
 
 export default function Settings() {
   const isClient = useIsClient()
