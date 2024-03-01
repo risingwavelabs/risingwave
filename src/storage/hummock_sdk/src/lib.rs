@@ -313,7 +313,7 @@ impl EpochWithGap {
     }
 
     // return the epoch_with_gap(epoch + spill_offset)
-    pub(crate) fn from_u64_real(epoch_with_gap: u64) -> Self {
+    pub(crate) fn from_u64(epoch_with_gap: u64) -> Self {
         EpochWithGap(epoch_with_gap)
     }
 

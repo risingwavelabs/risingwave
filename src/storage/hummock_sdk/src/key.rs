@@ -741,7 +741,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::from_u64_real(epoch),
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
@@ -755,7 +755,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
-            epoch_with_gap: EpochWithGap::from_u64_real(epoch),
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
@@ -766,7 +766,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::from_u64_real(u64::MAX - epoch),
+            epoch_with_gap: EpochWithGap::from_u64(u64::MAX - epoch),
         }
     }
 
