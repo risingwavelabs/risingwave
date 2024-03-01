@@ -162,7 +162,10 @@ impl EpochPair {
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
+        if !is_max_epoch(curr) {
+            assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
+            assert!((curr & EPOCH_SPILL_TIME_MASK) == 0);
+        }
         Self::new(curr, curr - EPOCH_INC_MIN_STEP_FOR_TEST)
     }
 }

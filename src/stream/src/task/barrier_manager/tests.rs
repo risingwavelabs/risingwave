@@ -15,6 +15,7 @@
 use std::iter::once;
 
 use itertools::Itertools;
+use risingwave_common::util::epoch::test_epoch;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
@@ -39,7 +40,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         .collect_vec();
 
     // Send a barrier to all actors
-    let curr_epoch = 114514;
+    let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
@@ -101,7 +102,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         .collect_vec();
 
     // Prepare the barrier
-    let curr_epoch = 114514;
+    let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
