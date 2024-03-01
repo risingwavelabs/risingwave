@@ -42,13 +42,10 @@ import {
   BackPressureInfo,
   BackPressuresMetrics,
   INTERVAL,
+  average,
   calculateBPRate,
   getActorBackPressures,
   getBackPressureWithoutPrometheus,
-  p50,
-  p90,
-  p95,
-  p99,
 } from "../lib/api/metric"
 import { getFragments, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
@@ -179,9 +176,6 @@ function buildFragmentDependencyAsEdges(
 
 const SIDEBAR_WIDTH = 200
 
-type BackPressureAlgo = "p50" | "p90" | "p95" | "p99"
-const backPressureAlgos: BackPressureAlgo[] = ["p50", "p90", "p95", "p99"]
-
 type BackPressureDataSource = "Embedded" | "Prometheus"
 const backPressureDataSources: BackPressureDataSource[] = [
   "Embedded",
@@ -193,7 +187,6 @@ export default function Streaming() {
   const { response: fragmentList } = useFetch(getFragments)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
-  const [backPressureAlgo, setBackPressureAlgo] = useQueryState("backPressure")
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
   // used to get the data source
   const [backPressureDataSourceAlgo, setBackPressureDataSourceAlgo] =
@@ -202,7 +195,7 @@ export default function Streaming() {
   const { response: actorBackPressures } = useFetch(
     getActorBackPressures,
     INTERVAL,
-    backPressureDataSourceAlgo === "Prometheus" && backPressureAlgo !== null
+    backPressureDataSourceAlgo === "Prometheus"
   )
 
   const fragmentDependencyCallback = useCallback(() => {
@@ -230,7 +223,7 @@ export default function Streaming() {
         }
       }
     }
-    return () => {}
+    return () => { }
   }, [relationId, relationList, setRelationId])
 
   // get back pressure rate without prometheus
@@ -330,10 +323,7 @@ export default function Streaming() {
   }
 
   const backPressures = useMemo(() => {
-    if (
-      (actorBackPressures && backPressureAlgo && backPressureAlgo) ||
-      backPressuresMetricsWithoutPromtheus
-    ) {
+    if (actorBackPressures || backPressuresMetricsWithoutPromtheus) {
       let map = new Map()
 
       if (
@@ -351,25 +341,7 @@ export default function Streaming() {
         actorBackPressures
       ) {
         for (const m of actorBackPressures.outputBufferBlockingDuration) {
-          let algoFunc
-          switch (backPressureAlgo) {
-            case "p50":
-              algoFunc = p50
-              break
-            case "p90":
-              algoFunc = p90
-              break
-            case "p95":
-              algoFunc = p95
-              break
-            case "p99":
-              algoFunc = p99
-              break
-            default:
-              return
-          }
-
-          const value = algoFunc(m.sample) * 100
+          const value = average(m.sample) * 100
           map.set(
             `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
             value
@@ -381,7 +353,6 @@ export default function Streaming() {
   }, [
     backPressureDataSourceAlgo,
     actorBackPressures,
-    backPressureAlgo,
     backPressuresMetricsWithoutPromtheus,
   ])
 
@@ -468,26 +439,6 @@ export default function Streaming() {
               ))}
             </Select>
           </FormControl>
-          {backPressureDataSourceAlgo === "Prometheus" && (
-            <FormControl>
-              <FormLabel>Back Pressure Algorithm</FormLabel>
-              <Select
-                value={backPressureAlgo ?? undefined}
-                onChange={(event) => {
-                  setBackPressureAlgo(event.target.value as BackPressureAlgo)
-                }}
-              >
-                <option value="" disabled selected hidden>
-                  Please select
-                </option>
-                {backPressureAlgos.map((algo) => (
-                  <option value={algo} key={algo}>
-                    {algo}
-                  </option>
-                ))}
-              </Select>
-            </FormControl>
-          )}
           <Flex height="full" width="full" flexDirection="column">
             <Text fontWeight="semibold">Fragments</Text>
             {fragmentDependencyDag && (

@@ -125,7 +125,7 @@ export function calculateBPRate(
         key,
         // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
         ((value - (mapOld.get(key) || 0)) / ((INTERVAL / 1000) * 1000000000)) *
-          100
+        100
       )
     } else {
       result.set(key, 0)
@@ -178,6 +178,14 @@ export function p95(samples: MetricsSample[]) {
 
 export function p99(samples: MetricsSample[]) {
   return calculatePercentile(samples, 0.99)
+}
+
+export function average(samples: MetricsSample[]) {
+  let sum = 0
+  for (const sample of samples) {
+    sum += sample.value
+  }
+  return sum / samples.length
 }
 
 function isSet(value: any): boolean {
