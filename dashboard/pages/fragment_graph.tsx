@@ -43,7 +43,7 @@ import {
   BackPressuresMetrics,
   average,
   calculateBPRate,
-  getActorBackPressures,
+  fetchPrometheusBackPressure,
   fetchEmbeddedBackPressure,
 } from "../lib/api/metric"
 import { getFragments, getStreamingJobs } from "../lib/api/streaming"
@@ -195,7 +195,7 @@ export default function Streaming() {
     useState("Embedded")
 
   const { response: promethusMetrics } = useFetch(
-    getActorBackPressures,
+    fetchPrometheusBackPressure,
     INTERVAL,
     backPressureDataSource === "Prometheus"
   )
@@ -235,7 +235,8 @@ export default function Streaming() {
 
   useEffect(() => {
     if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
+      const task = setInterval(() => {
+        console.log("Start polling embedded back-pressure metrics")
         const fetchNewBP = async () => {
           const newBP = await fetchEmbeddedBackPressure()
           console.log(newBP)
@@ -245,13 +246,16 @@ export default function Streaming() {
 
         fetchNewBP().catch(console.error)
       }, INTERVAL)
-      return () => clearInterval(interval)
+      return () => {
+        clearInterval(task);
+        console.log("Stop polling embedded back-pressure metrics")
+      }
     }
   }, [currentBP, backPressureDataSource])
 
   useEffect(() => {
     if (currentBP !== null && previousBP !== null) {
-      const metrics = calculateBPRate(currentBP, previousBP)
+      const metrics = calculateBPRate(currentBP, previousBP, INTERVAL)
       metrics.outputBufferBlockingDuration = sortBy(
         metrics.outputBufferBlockingDuration,
         (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)

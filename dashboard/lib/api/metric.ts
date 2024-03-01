@@ -21,8 +21,8 @@ export interface BackPressuresMetrics {
   outputBufferBlockingDuration: Metrics[]
 }
 
-// Get back pressure from meta node -> prometheus
-export async function getActorBackPressures() {
+// Get back pressure from Prometheus
+export async function fetchPrometheusBackPressure() {
   const res: BackPressuresMetrics = await api.get(
     "/metrics/fragment/prometheus_back_pressures"
   )
@@ -113,7 +113,8 @@ function convertToBackPressureMetrics(
 
 export function calculateBPRate(
   backPressureNew: BackPressureInfo[],
-  backPressureOld: BackPressureInfo[]
+  backPressureOld: BackPressureInfo[],
+  interval_ms: number
 ): BackPressuresMetrics {
   let mapNew = convertToMapAndAgg(backPressureNew)
   let mapOld = convertToMapAndAgg(backPressureOld)
@@ -123,7 +124,7 @@ export function calculateBPRate(
       result.set(
         key,
         // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
-        ((value - (mapOld.get(key) || 0)) / ((INTERVAL / 1000) * 1000000000)) *
+        ((value - (mapOld.get(key) || 0)) / ((interval_ms / 1000) * 1000000000)) *
         100
       )
     } else {
