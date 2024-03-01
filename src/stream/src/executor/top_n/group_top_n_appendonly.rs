@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -31,7 +32,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
+use crate::executor::{ActorContextRef, Executor, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
@@ -45,9 +46,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input: Box<dyn Executor>,
+        input: Executor,
         ctx: ActorContextRef,
-        info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
@@ -59,7 +60,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             input,
             ctx: ctx.clone(),
             inner: InnerAppendOnlyGroupTopNExecutor::new(
-                info,
+                schema,
                 storage_key,
                 offset_and_limit,
                 order_by,
@@ -73,7 +74,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
 }
 
 pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bool> {
-    info: ExecutorInfo,
+    schema: Schema,
 
     /// `LIMIT XXX`. None means no limit.
     limit: usize,
@@ -103,7 +104,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        info: ExecutorInfo,
+        schema: Schema,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
@@ -119,12 +120,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             "GroupTopN",
         );
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &info.schema, &order_by, &group_by);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
-            info,
+            schema,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
@@ -147,7 +147,7 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
 
-        let data_types = self.info().schema.data_types();
+        let data_types = self.schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
         let table_id_str = self.managed_state.table().table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
@@ -197,7 +197,7 @@ where
             .group_top_n_appendonly_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, &self.info().schema)
+        generate_output(res_rows, res_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -206,10 +206,6 @@ where
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         self.managed_state.try_flush().await
-    }
-
-    fn info(&self) -> &ExecutorInfo {
-        &self.info
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {

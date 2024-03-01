@@ -18,6 +18,7 @@ use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
+use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::debezium::parse_transaction_meta;
@@ -43,7 +44,7 @@ impl PlainParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
             Some(AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
                 EncodingProperties::Bytes(BytesProperties {
@@ -81,7 +82,7 @@ impl PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         // if the message is transaction metadata, parse it and return
         if let Some(msg_meta) = writer.row_meta
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
@@ -145,7 +146,7 @@ impl ByteStreamSourceParser for PlainParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -154,7 +155,7 @@ impl ByteStreamSourceParser for PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }
@@ -262,7 +263,7 @@ mod tests {
         assert_eq!(1, output.len());
     }
 
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn source_message_stream(transactional: bool) {
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;

@@ -203,10 +203,12 @@ pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
     use std::ops::{Bound, Deref};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
@@ -459,6 +461,14 @@ pub mod verify {
             }
             ret
         }
+
+        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+            let ret = self.actual.update_vnode_bitmap(vnodes.clone());
+            if let Some(expected) = &mut self.expected {
+                assert_eq!(ret, expected.update_vnode_bitmap(vnodes));
+            }
+            ret
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -482,8 +492,8 @@ pub mod verify {
             self.actual.seal_epoch(epoch, is_checkpoint)
         }
 
-        fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.actual.clear_shared_buffer()
+        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
+            self.actual.clear_shared_buffer(prev_epoch)
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
@@ -683,11 +693,13 @@ impl AsHummock for SledStateStore {
 pub mod boxed_state_store {
     use std::future::Future;
     use std::ops::{Deref, DerefMut};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -781,6 +793,8 @@ pub mod boxed_state_store {
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
+
+        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
     }
 
     #[async_trait::async_trait]
@@ -844,6 +858,10 @@ pub mod boxed_state_store {
 
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             self.seal_current_epoch(next_epoch, opts)
+        }
+
+        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+            self.update_vnode_bitmap(vnodes)
         }
     }
 
@@ -915,6 +933,10 @@ pub mod boxed_state_store {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             self.deref_mut().seal_current_epoch(next_epoch, opts)
         }
+
+        fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+            self.deref_mut().update_vnode_bitmap(vnodes)
+        }
     }
 
     // For global StateStore
@@ -927,7 +949,7 @@ pub mod boxed_state_store {
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
-        async fn clear_shared_buffer(&self) -> StorageResult<()>;
+        async fn clear_shared_buffer(&self, prev_epoch: u64);
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
 
@@ -948,8 +970,8 @@ pub mod boxed_state_store {
             self.seal_epoch(epoch, is_checkpoint);
         }
 
-        async fn clear_shared_buffer(&self) -> StorageResult<()> {
-            self.clear_shared_buffer().await
+        async fn clear_shared_buffer(&self, prev_epoch: u64) {
+            self.clear_shared_buffer(prev_epoch).await
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
@@ -1018,8 +1040,8 @@ pub mod boxed_state_store {
             self.deref().sync(epoch)
         }
 
-        fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref().clear_shared_buffer()
+        fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
+            self.deref().clear_shared_buffer(prev_epoch)
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {

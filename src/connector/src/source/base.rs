@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_s3::types::Object;
 use bytes::Bytes;
@@ -25,6 +25,7 @@ use futures::Stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
@@ -45,6 +46,7 @@ use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
@@ -69,7 +71,9 @@ pub trait TryFromHashmap: Sized + UnknownFields {
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
 pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
     const SOURCE_NAME: &'static str;
-    type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
+    type Split: SplitMetaData
+        + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
+        + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
@@ -91,10 +95,10 @@ impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
         if !deny_unknown_fields || res.unknown_fields().is_empty() {
             Ok(res)
         } else {
-            Err(anyhow!(
+            bail!(
                 "Unknown fields in the WITH clause: {:?}",
                 res.unknown_fields()
-            ))
+            )
         }
     }
 }
@@ -133,12 +137,15 @@ pub struct SourceCtrlOpts {
     // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
     // in batch scenario
     pub chunk_size: usize,
+    /// Rate limit of source
+    pub rate_limit: Option<u32>,
 }
 
 impl Default for SourceCtrlOpts {
     fn default() -> Self {
         Self {
             chunk_size: MAX_CHUNK_SIZE,
+            rate_limit: None,
         }
     }
 }
@@ -150,7 +157,7 @@ pub struct SourceEnumeratorContext {
     pub connector_client: Option<ConnectorClient>,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceEnumeratorInfo {
     pub source_id: u32,
 }
@@ -254,6 +261,7 @@ pub enum SourceFormat {
     #[default]
     Invalid,
     Native,
+    None,
     Debezium,
     DebeziumMongo,
     Maxwell,
@@ -267,6 +275,7 @@ pub enum SourceEncode {
     #[default]
     Invalid,
     Native,
+    None,
     Avro,
     Csv,
     Protobuf,
@@ -327,6 +336,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
         (PbFormatType::Debezium, PbEncodeType::Avro) => {
             (SourceFormat::Debezium, SourceEncode::Avro)
         }
@@ -337,21 +347,22 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
         (format, encode) => {
-            return Err(anyhow!(
+            bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
                 format,
                 encode
-            ));
+            );
         }
     };
     Ok(SourceStruct::new(format, encode))
 }
 
-pub type BoxSourceStream = BoxStream<'static, anyhow::Result<Vec<SourceMessage>>>;
+pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
-pub trait ChunkSourceStream = Stream<Item = anyhow::Result<StreamChunk>> + Send + 'static;
-pub type BoxChunkSourceStream = BoxStream<'static, anyhow::Result<StreamChunk>>;
-pub type BoxTryStream<M> = BoxStream<'static, anyhow::Result<M>>;
+pub trait ChunkSourceStream =
+    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static;
+pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
@@ -367,7 +378,7 @@ pub trait SplitReader: Sized + Send {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self>;
+    ) -> crate::error::ConnectorResult<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
 }
@@ -423,7 +434,7 @@ impl ConnectorProperties {
             PropType,
             PropType::try_from_hashmap(with_properties, deny_unknown_fields)
                 .map(ConnectorProperties::from),
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 
@@ -459,7 +470,7 @@ impl From<&SplitImpl> for ConnectorSplit {
 }
 
 impl TryFrom<&ConnectorSplit> for SplitImpl {
-    type Error = anyhow::Error;
+    type Error = crate::error::ConnectorError;
 
     fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
         match_source_name_str!(
@@ -471,7 +482,7 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
                 )
                 .map(Into::into)
             },
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 }
@@ -500,7 +511,7 @@ impl SplitImpl {
             split_type.to_lowercase().as_str(),
             PropType,
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
-            |other| Err(anyhow!("connector '{}' is not supported", other))
+            |other| bail!("connector '{}' is not supported", other)
         )
     }
 }
@@ -618,7 +629,7 @@ pub trait SplitMetaData: Sized {
 
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()>;
+    fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

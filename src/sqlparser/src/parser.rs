@@ -2238,7 +2238,8 @@ impl Parser {
         };
 
         let params = self.parse_create_function_body()?;
-
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        let with_options = with_options.try_into()?;
         Ok(Statement::CreateFunction {
             or_replace,
             temporary,
@@ -2246,6 +2247,7 @@ impl Parser {
             args,
             returns: return_type,
             params,
+            with_options,
         })
     }
 

@@ -23,3 +23,6 @@
 
 pub mod anyhow;
 pub mod tonic;
+
+// Re-export the `thiserror-ext` crate.
+pub use thiserror_ext::*;

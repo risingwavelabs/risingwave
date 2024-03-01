@@ -14,10 +14,11 @@
 
 use std::marker::PhantomData;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
 use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait};
 use crate::source::{SplitId, SplitMetaData};
@@ -45,7 +46,7 @@ trait CdcSplitTrait: Send + Sync {
     fn split_id(&self) -> u32;
     fn start_offset(&self) -> &Option<String>;
     fn is_snapshot_done(&self) -> bool;
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()>;
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()>;
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -89,7 +90,7 @@ impl CdcSplitTrait for MySqlCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
             let dbz_offset: DebeziumOffset =
@@ -142,7 +143,7 @@ impl CdcSplitTrait for PostgresCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
             let dbz_offset: DebeziumOffset =
@@ -192,7 +193,7 @@ impl CdcSplitTrait for MongoDbCdcSplit {
         self.inner.snapshot_done
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         // extract snapshot state from debezium offset
         if !snapshot_done {
@@ -270,11 +271,11 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         self.update_with_offset(start_offset)
     }
 }
@@ -324,7 +325,7 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         dispatch_cdc_split!(self, ref, is_snapshot_done())
     }
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    pub fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         dispatch_cdc_split!(self, mut, update_with_offset(start_offset)?);
         Ok(())
     }

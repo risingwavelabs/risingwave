@@ -71,7 +71,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     depends_on:
       - mysql
       - db
@@ -84,24 +84,29 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     depends_on:
       - mysql
       - db
       - message_queue
       - elasticsearch
       - clickhouse-server
-      - pulsar
+      - redis-server
+      - pulsar-server
+      - cassandra-server
+      - starrocks-fe-server
+      - starrocks-be-server
     volumes:
       - ..:/risingwave
 
+
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -112,7 +117,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240213
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240223
     depends_on:
       db:
         condition: service_healthy
@@ -162,10 +167,63 @@ services:
     expose:
       - 9009
 
-# Temporary workaround for json schema registry test since redpanda only supports
-# protobuf/avro schema registry. Should be removed after the support.
-# Related tracking issue:
-# https://github.com/redpanda-data/redpanda/issues/1878
+  redis-server:
+    container_name: redis-server
+    image: 'redis:latest'
+    expose:
+      - 6379
+    ports:
+      - 6378:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+
+  cassandra-server:
+    container_name: cassandra-server
+    image: cassandra:4.0
+    ports:
+      - 9042:9042
+    environment:
+      - CASSANDRA_CLUSTER_NAME=cloudinfra
+
+  starrocks-fe-server:
+    container_name: starrocks-fe-server
+    image: starrocks/fe-ubuntu:3.1.7
+    hostname: starrocks-fe-server
+    command:
+      /opt/starrocks/fe/bin/start_fe.sh
+    ports:
+      - 28030:8030
+      - 29020:9020
+      - 29030:9030
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  starrocks-be-server:
+    image: starrocks/be-ubuntu:3.1.7
+    command:
+      - /bin/bash
+      - -c
+      - |
+        sleep 15s; mysql --connect-timeout 2 -h starrocks-fe-server -P9030 -uroot -e "alter system add backend \"starrocks-be-server:9050\";"
+        /opt/starrocks/be/bin/start_be.sh
+    ports:
+      - 28040:8040
+      - 29050:9050
+    hostname: starrocks-be-server
+    container_name: starrocks-be-server
+    depends_on:
+      - starrocks-fe-server
+
+# # Temporary workaround for json schema registry test since redpanda only supports
+# # protobuf/avro schema registry. Should be removed after the support.
+# # Related tracking issue:
+# # https://github.com/redpanda-data/redpanda/issues/1878
   zookeeper:
     container_name: zookeeper
     image: confluentinc/cp-zookeeper:latest
@@ -204,8 +262,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9093,PLAINTEXT_INTERNAL://localhost:29093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
-  pulsar:
-    container_name: pulsar
+  pulsar-server:
+    container_name: pulsar-server
     image: apachepulsar/pulsar:latest
     command: bin/pulsar standalone
     ports:

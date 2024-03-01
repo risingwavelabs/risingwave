@@ -94,6 +94,7 @@ pub struct CreateSourceStatement {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
+    None,          // Keyword::NONE
     Debezium,      // Keyword::DEBEZIUM
     DebeziumMongo, // Keyword::DEBEZIUM_MONGO
     Maxwell,       // Keyword::MAXWELL
@@ -116,6 +117,7 @@ impl fmt::Display for Format {
                 Format::Canal => "CANAL",
                 Format::Upsert => "UPSERT",
                 Format::Plain => "PLAIN",
+                Format::None => "NONE",
             }
         )
     }
@@ -149,6 +151,7 @@ pub enum Encode {
     Protobuf, // Keyword::PROTOBUF
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
+    None,     // Keyword::None
     Native,
     Template,
 }
@@ -167,6 +170,7 @@ impl fmt::Display for Encode {
                 Encode::Bytes => "BYTES",
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
+                Encode::None => "NONE",
             }
         )
     }
@@ -215,6 +219,7 @@ impl Parser {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
+        // FIXME: parse input `connector` to enum type instead using string here
         if connector.contains("-cdc") {
             let expected = if cdc_source_job {
                 ConnectorSchema::plain_json()
@@ -252,6 +257,18 @@ impl Parser {
             } else {
                 ConnectorSchema::native().into()
             })
+        } else if connector.contains("iceberg") {
+            let expected = ConnectorSchema::none();
+            if self.peek_source_schema_format() {
+                let schema = parse_source_schema(self)?.into_v2();
+                if schema != expected {
+                    return Err(ParserError::ParserError(format!(
+                        "Row format for iceberg connectors should be \
+                         either omitted or set to `{expected}`",
+                    )));
+                }
+            }
+            Ok(expected.into())
         } else {
             Ok(parse_source_schema(self)?)
         }
@@ -311,6 +328,16 @@ impl ConnectorSchema {
         ConnectorSchema {
             format: Format::Native,
             row_encode: Encode::Native,
+            row_options: Vec::new(),
+        }
+    }
+
+    /// Create a new source schema with `None` format and encoding.
+    /// Used for self-explanatory source like iceberg.
+    pub const fn none() -> Self {
+        ConnectorSchema {
+            format: Format::None,
+            row_encode: Encode::None,
             row_options: Vec::new(),
         }
     }

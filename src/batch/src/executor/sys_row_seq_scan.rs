@@ -15,9 +15,7 @@
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::catalog::{ColumnDesc, Schema, SysCatalogReaderRef, TableId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -29,7 +27,7 @@ use crate::task::BatchTaskContext;
 pub struct SysRowSeqScanExecutor {
     table_id: TableId,
     schema: Schema,
-    column_ids: Vec<ColumnId>,
+    column_indices: Vec<usize>,
     identity: String,
 
     sys_catalog_reader: SysCatalogReaderRef,
@@ -39,14 +37,14 @@ impl SysRowSeqScanExecutor {
     pub fn new(
         table_id: TableId,
         schema: Schema,
-        column_id: Vec<ColumnId>,
+        column_indices: Vec<usize>,
         identity: String,
         sys_catalog_reader: SysCatalogReaderRef,
     ) -> Self {
         Self {
             table_id,
             schema,
-            column_ids: column_id,
+            column_indices,
             identity,
             sys_catalog_reader,
         }
@@ -78,12 +76,15 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
 
-        let column_ids = column_descs.iter().map(|d| d.column_id).collect_vec();
+        let column_indices = column_descs
+            .iter()
+            .map(|d| d.column_id.get_id() as usize)
+            .collect_vec();
         let schema = Schema::new(column_descs.iter().map(Into::into).collect_vec());
         Ok(Box::new(SysRowSeqScanExecutor::new(
             table_id,
             schema,
-            column_ids,
+            column_indices,
             source.plan_node().get_identity().clone(),
             sys_catalog_reader,
         )))
@@ -107,26 +108,13 @@ impl Executor for SysRowSeqScanExecutor {
 impl SysRowSeqScanExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_executor(self: Box<Self>) {
-        let rows = self
+        let chunk = self
             .sys_catalog_reader
             .read_table(&self.table_id)
             .await
             .map_err(BatchError::SystemTable)?;
-        let filtered_rows = rows
-            .iter()
-            .map(|row| {
-                let datums = self
-                    .column_ids
-                    .iter()
-                    .map(|column_id| row.datum_at(column_id.get_id() as usize).to_owned_datum())
-                    .collect_vec();
-                OwnedRow::new(datums)
-            })
-            .collect_vec();
-
-        if !filtered_rows.is_empty() {
-            let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
-            yield chunk
+        if chunk.cardinality() != 0 {
+            yield chunk.project(&self.column_indices);
         }
     }
 }

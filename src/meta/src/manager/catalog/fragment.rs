@@ -858,6 +858,22 @@ impl FragmentManager {
         actor_maps
     }
 
+    pub async fn node_actor_count(&self) -> HashMap<WorkerId, usize> {
+        let mut actor_count = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for actor_status in fragments.actor_status.values() {
+                if let Some(pu) = &actor_status.parallel_unit {
+                    let e = actor_count.entry(pu.worker_node_id).or_insert(0);
+                    *e += 1;
+                }
+            }
+        }
+
+        actor_count
+    }
+
     // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
     // return the actor_ids to be applied
     pub async fn update_source_rate_limit_by_source_id(
