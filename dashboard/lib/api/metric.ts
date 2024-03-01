@@ -17,7 +17,6 @@
 import { Metrics, MetricsSample } from "../../components/metrics"
 import api from "./api"
 
-export const INTERVAL = 5000
 export interface BackPressuresMetrics {
   outputBufferBlockingDuration: Metrics[]
 }
@@ -149,7 +148,7 @@ export const BackPressureInfo = {
 }
 
 // Get back pressure from meta node -> compute node
-export async function getBackPressureWithoutPrometheus() {
+export async function fetchEmbeddedBackPressure() {
   const response = await api.get("/metrics/fragment/embedded_back_pressures")
   let backPressureInfos: BackPressureInfo[] = response.backPressureInfos.map(
     BackPressureInfo.fromJSON
