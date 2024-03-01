@@ -330,8 +330,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
             });
         }
 
-        let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();
-        hash_keys
+        serializers.into_iter().map(|s| s.finish()).collect()
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
