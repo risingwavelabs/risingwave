@@ -17,16 +17,17 @@ use std::sync::Arc;
 use anyhow::Context;
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
-use arrow_udf_js::{CallMode, Runtime as JsRuntime};
-use arrow_udf_wasm::Runtime as WasmRuntime;
+use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+#[cfg(feature = "embedded-python-udf")]
+use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
 use risingwave_common::array::{ArrayError, DataChunk, I32Array};
 use risingwave_common::bail;
-use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
 
 use super::*;
+use crate::expr::expr_udf::UdfImpl;
 
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
@@ -38,13 +39,6 @@ pub struct UserDefinedTableFunction {
     identifier: String,
     #[allow(dead_code)]
     chunk_size: usize,
-}
-
-#[derive(Debug)]
-enum UdfImpl {
-    External(Arc<ArrowFlightUdfClient>),
-    Wasm(Arc<WasmRuntime>),
-    JavaScript(JsRuntime),
 }
 
 #[async_trait::async_trait]
@@ -74,6 +68,12 @@ impl UdfImpl {
                 }
             }
             UdfImpl::JavaScript(runtime) => {
+                for res in runtime.call_table_function(identifier, &input, 1024)? {
+                    yield res?;
+                }
+            }
+            #[cfg(feature = "embedded-python-udf")]
+            UdfImpl::Python(runtime) => {
                 for res in runtime.call_table_function(identifier, &input, 1024)? {
                     yield res?;
                 }
@@ -207,10 +207,22 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             rt.add_function(
                 identifier,
                 arrow_schema::DataType::try_from(&return_type)?,
-                CallMode::CalledOnNullInput,
+                JsCallMode::CalledOnNullInput,
                 &body,
             )?;
             UdfImpl::JavaScript(rt)
+        }
+        #[cfg(feature = "embedded-python-udf")]
+        "python" if udtf.body.is_some() => {
+            let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+            let body = udtf.get_body()?;
+            rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                PythonCallMode::CalledOnNullInput,
+                body,
+            )?;
+            UdfImpl::Python(rt)
         }
         // connect to UDF service
         _ => {

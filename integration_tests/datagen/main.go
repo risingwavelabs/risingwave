@@ -205,6 +205,28 @@ func main() {
 				},
 				HelpName: "datagen s3",
 			},
+			{
+				Name: "nats",
+				Flags: []cli.Flag{
+					cli.BoolFlag{
+						Name:        "jetstream",
+						Usage:       "Whether to use JetStream",
+						Required:    false,
+						Destination: &cfg.Nats.JetStream,
+					},
+					cli.StringFlag{
+						Name:        "url",
+						Usage:       "The URL of the NATS server",
+						Required:    true,
+						Destination: &cfg.Nats.Url,
+					},
+				},
+				Action: func(c *cli.Context) error {
+					cfg.Sink = "nats"
+					return runCommand()
+				},
+				HelpName: "datagen nats",
+			},
 		},
 		Flags: []cli.Flag{
 			cli.BoolFlag{
