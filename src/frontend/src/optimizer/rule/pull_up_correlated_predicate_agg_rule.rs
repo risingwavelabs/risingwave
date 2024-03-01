@@ -181,58 +181,24 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
 
             // Shift the top project expressions to the right by apply_left schema len, because it is used to check null-rejected by the top filter.
             let apply_left_schema = apply_left.schema().len();
-            let mut top_proj_null_bitset = FixedBitSet::with_capacity(top_project.base.schema().len() + apply_left_schema);
+            let mut top_proj_null_bitset =
+                FixedBitSet::with_capacity(top_project.base.schema().len() + apply_left_schema);
             for (i, expr) in top_proj_exprs.iter().enumerate() {
                 if Strong::is_null(expr, agg_null_bitset.clone()) {
                     top_proj_null_bitset.insert(i + apply_left_schema);
                 }
             }
 
-            // Only all expr in conjuctions are null, we can apply this rule, otherwise, bail out.
-            if top_filter.predicate().conjunctions.iter().any(|expr| !Strong::is_null(expr, top_proj_null_bitset.clone())) {
+            // Only all expr in conjunctions are null, we can apply this rule, otherwise, bail out.
+            if top_filter
+                .predicate()
+                .conjunctions
+                .iter()
+                .any(|expr| !Strong::is_null(expr, top_proj_null_bitset.clone()))
+            {
                 return None;
             }
         }
-
-        // let sum_pos = agg_calls
-        //     .iter()
-        //     .positions(|agg_call| agg_call.agg_kind == AggKind::Sum)
-        //     .collect_vec();
-
-        // let mut avg_pos_in_top_proj = vec![];
-        //
-        // for pos in count_pos {
-        //     let mut found_avg = false;
-        //     for (expr_idx, expr) in top_proj_exprs.iter().enumerate() {
-        //         if let Some((dividend, divisor)) = expr.as_divide_cond() {
-        //             if divisor.index() == pos && sum_pos.contains(&dividend.index()) {
-        //                 found_avg = true;
-        //                 avg_pos_in_top_proj.push(expr_idx);
-        //                 break;
-        //             }
-        //         }
-        //     }
-        //     if !found_avg {
-        //         return None;
-        //     }
-        // }
-        //
-        // // Try to prove that the avg is null-rejected by the top filter.
-        // for avg_pos in avg_pos_in_top_proj {
-        //     let mut null_rejected = false;
-        //     for expr in &top_filter.predicate().conjunctions {
-        //         if let Some((op1, _cmp_type, op2)) = expr.as_comparison_cond() {
-        //             if op1.index() == avg_pos + apply_left.schema().len()
-        //                 || op2.index() == avg_pos + apply_left.schema().len()
-        //             {
-        //                 null_rejected = true;
-        //             }
-        //         }
-        //     }
-        //     if !null_rejected {
-        //         return None;
-        //     }
-        // }
 
         // New agg with group key extracted from the cor_eq_exprs.
         let new_agg = Agg::new(
