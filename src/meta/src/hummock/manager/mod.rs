@@ -1323,11 +1323,11 @@ impl HummockManager {
                 // recover to a correct state after restarting meta-node.
 
                 current_version.apply_version_delta(&version_delta);
-
-                let _commit_timer = self
+                version_timer.observe_duration();
+                let commit_timer = self
                     .metrics
                     .hummock_manager_latency
-                    .with_label_values(&["commit_version_delta"])
+                    .with_label_values(&["commit_transaction"])
                     .start_timer();
                 commit_multi_var!(
                     self,
@@ -1338,6 +1338,12 @@ impl HummockManager {
                     hummock_version_deltas,
                     version_stats
                 )?;
+                commit_timer.observe_duration();
+                let _commit_timer = self
+                    .metrics
+                    .hummock_manager_latency
+                    .with_label_values(&["commit_version_delta"])
+                    .start_timer();
                 branched_ssts.commit_memory();
 
                 trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);

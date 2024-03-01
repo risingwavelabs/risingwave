@@ -51,6 +51,10 @@ pub fn trigger_version_stat(
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
     metrics.version_stats.reset();
+    metrics
+        .version_stats
+        .with_label_values(&["total", ""])
+        .set(version_stats.table_stats.len() as i64);
     for (table_id, stats) in &version_stats.table_stats {
         let table_id = format!("{}", table_id);
         metrics
