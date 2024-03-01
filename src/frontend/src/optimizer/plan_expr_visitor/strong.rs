@@ -33,8 +33,6 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 /// `p1 AND p2` is strong in `[p1, p2]` (definitely null if either p1 is null or p2 is null)
 ///
 /// `p1 OR p2` is strong if p1 and p2 are strong
-///
-/// `c1 = 1 OR c2 IS NULL` is strong in `[c1]` (definitely null if c1 is null)
 
 #[derive(Default)]
 pub struct Strong {
@@ -46,8 +44,8 @@ impl Strong {
         Self { null_columns }
     }
 
-    // Returns whether the analyzed expression will definitely return null if
-    // all of a given set of input columns are null.
+    /// Returns whether the analyzed expression will definitely return null if
+    /// all of a given set of input columns are null.
     #[allow(dead_code)]
     pub fn is_null(expr: &ExprImpl, null_columns: FixedBitSet) -> bool {
         let strong = Strong::new(null_columns);
@@ -174,6 +172,41 @@ mod tests {
     }
 
     #[test]
+    fn test_c1_equal_1_or_c2_is_null() {
+        let mut null_columns = FixedBitSet::with_capacity(2);
+        null_columns.insert(0);
+        let expr = FunctionCall::new_unchecked(
+            ExprType::Or,
+            vec![
+                FunctionCall::new_unchecked(
+                    ExprType::Equal,
+                    vec![
+                        InputRef::new(0, DataType::Int64).into(),
+                        Literal(
+                            crate::expr::Literal::new(
+                                Some(1.into()),
+                                DataType::Int32,
+                            )
+                            .into(),
+                        ),
+                    ],
+                    DataType::Boolean,
+                )
+                .into(),
+                FunctionCall::new_unchecked(
+                    ExprType::IsNull,
+                    vec![InputRef::new(1, DataType::Int64).into()],
+                    DataType::Boolean,
+                )
+                .into(),
+            ],
+            DataType::Boolean,
+        )
+        .into();
+        assert!(!Strong::is_null(&expr, null_columns));
+    }
+
+    #[test]
     fn test_divide() {
         let mut null_columns = FixedBitSet::with_capacity(2);
         null_columns.insert(0);
@@ -190,7 +223,7 @@ mod tests {
         assert!(Strong::is_null(&expr, null_columns));
     }
 
-    // generate a test case for (0.8 * sum / count) where sum is null and count is not null
+    /// generate a test case for (0.8 * sum / count) where sum is null and count is not null
     #[test]
     fn test_multiply_divide() {
         let mut null_columns = FixedBitSet::with_capacity(2);
@@ -215,7 +248,7 @@ mod tests {
         assert!(Strong::is_null(&expr, null_columns));
     }
 
-    // generate test cases for is not null
+    /// generate test cases for is not null
     macro_rules! gen_test {
         ($func:ident, $expr:expr, $expected:expr) => {
             #[test]
