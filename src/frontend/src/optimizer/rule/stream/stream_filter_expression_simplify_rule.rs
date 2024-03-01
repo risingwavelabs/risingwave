@@ -21,7 +21,7 @@ use crate::expr::{
 use crate::expr::ExprType;
 use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
-use crate::optimizer::rule::Rule;
+use crate::optimizer::rule::{Rule, BoxedRule};
 use crate::optimizer::PlanRef;
 
 pub struct StreamFilterExpressionSimplifyRule {}
@@ -37,6 +37,12 @@ impl Rule for StreamFilterExpressionSimplifyRule {
         let input = share.input().rewrite_exprs(&mut rewriter);
         let share = LogicalShare::new(input);
         Some(LogicalFilter::create(share.into(), filter.predicate().clone()))
+    }
+}
+
+impl StreamFilterExpressionSimplifyRule {
+    pub fn create() -> BoxedRule {
+        Box::new(StreamFilterExpressionSimplifyRule {})
     }
 }
 
