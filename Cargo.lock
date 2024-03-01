@@ -4100,10 +4100,11 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.5.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2191b7c#2191b7c9b0a32e9e723e71c34026a592e52bb73a"
+source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
+ "foyer-memory",
  "foyer-storage",
  "foyer-workspace-hack",
 ]
@@ -4111,7 +4112,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.3.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2191b7c#2191b7c9b0a32e9e723e71c34026a592e52bb73a"
+source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4126,7 +4127,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2191b7c#2191b7c9b0a32e9e723e71c34026a592e52bb73a"
+source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -4141,9 +4142,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "foyer-memory"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+dependencies = [
+ "ahash 0.8.6",
+ "bitflags 2.4.0",
+ "crossbeam",
+ "foyer-intrusive",
+ "foyer-workspace-hack",
+ "hashbrown 0.14.0",
+ "itertools 0.12.0",
+ "libc",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+]
+
+[[package]]
 name = "foyer-storage"
 version = "0.4.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2191b7c#2191b7c9b0a32e9e723e71c34026a592e52bb73a"
+source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -4173,7 +4191,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2191b7c#2191b7c9b0a32e9e723e71c34026a592e52bb73a"
+source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
 dependencies = [
  "ahash 0.8.6",
  "cc",
