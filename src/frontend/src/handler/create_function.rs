@@ -193,11 +193,27 @@ pub async fn handle_create_function(
                 )
                 .into());
             }
+            let identifier_v1 = wasm_identifier_v1(
+                &function_name,
+                &arg_types,
+                &return_type,
+                matches!(kind, Kind::Table(_)),
+            );
+            // if the function returns a struct, users need to add `#[function]` macro by themselves.
+            // otherwise, we add it automatically. the code should start with `fn ...`.
+            let function_macro = if return_type.is_struct() {
+                String::new()
+            } else {
+                format!("#[function(\"{}\")]", identifier_v1)
+            };
             let script = params
                 .as_
                 .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
                 .into_string();
-            let script = format!("use arrow_udf::{{function, types::*}};\n{}", script);
+            let script = format!(
+                "use arrow_udf::{{function, types::*}};\n{}\n{}",
+                function_macro, script
+            );
             body = Some(script.clone());
 
             let wasm_binary = tokio::task::spawn_blocking(move || {
@@ -211,15 +227,8 @@ pub async fn handle_create_function(
             .await?
             .context("failed to build rust function")?;
 
-            // below is the same as `wasm` language
             let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-            identifier = get_wasm_identifier(
-                &runtime,
-                &function_name,
-                &arg_types,
-                &return_type,
-                matches!(kind, Kind::Table(_)),
-            )?;
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
 
             compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
         }
@@ -242,13 +251,13 @@ pub async fn handle_create_function(
                 }
             };
             let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-            identifier = get_wasm_identifier(
-                &runtime,
+            let identifier_v1 = wasm_identifier_v1(
                 &function_name,
                 &arg_types,
                 &return_type,
                 matches!(kind, Kind::Table(_)),
-            )?;
+            );
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
 
             compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_ref(), 0)?);
         }
@@ -295,22 +304,12 @@ async fn download_binary_from_link(link: &str) -> Result<Bytes> {
 }
 
 /// Get the function identifier in wasm binary.
-fn get_wasm_identifier(
+fn find_wasm_identifier_v2(
     runtime: &arrow_udf_wasm::Runtime,
-    name: &str,
-    args: &[DataType],
-    ret: &DataType,
-    table_function: bool,
+    inlined_signature: &str,
 ) -> Result<String> {
-    let inlined_signature = format!(
-        "{}({}){}{}",
-        name,
-        args.iter().map(datatype_name).join(","),
-        if table_function { "->>" } else { "->" },
-        datatype_name(ret)
-    );
     let identifier = runtime
-        .find_function_by_inlined_signature(&inlined_signature)
+        .find_function_by_inlined_signature(inlined_signature)
         .ok_or_else(|| {
             ErrorCode::InvalidParameterValue(format!(
                 "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
@@ -319,6 +318,22 @@ fn get_wasm_identifier(
             ))
         })?;
     Ok(identifier.into())
+}
+
+/// Generate the function identifier in wasm binary.
+fn wasm_identifier_v1(
+    name: &str,
+    args: &[DataType],
+    ret: &DataType,
+    table_function: bool,
+) -> String {
+    format!(
+        "{}({}){}{}",
+        name,
+        args.iter().map(datatype_name).join(","),
+        if table_function { "->>" } else { "->" },
+        datatype_name(ret)
+    )
 }
 
 /// Convert a data type to string used in identifier.

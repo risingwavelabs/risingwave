@@ -1,6 +1,5 @@
 statement ok
 create function int_42() returns int language rust as $$
-    #[function("int_42() -> int")]
     fn int_42() -> i32 {
         42
     }
@@ -17,7 +16,6 @@ drop function int_42;
 
 statement ok
 create function gcd(int, int) returns int language rust as $$
-    #[function("gcd(int, int) -> int")]
     fn gcd(mut a: i32, mut b: i32) -> i32 {
         while b != 0 {
             (a, b) = (b, a % b);
@@ -34,9 +32,8 @@ select gcd(25, 15);
 statement ok
 drop function gcd;
 
-
+statement ok
 create function decimal_add(a decimal, b decimal) returns decimal language rust as $$
-    #[function("decimal_add(decimal, decimal) -> decimal")]
     fn decimal_add(a: Decimal, b: Decimal) -> Decimal {
         a + b
     }
@@ -52,7 +49,6 @@ drop function decimal_add;
 
 statement ok
 create function datetime(d date, t time) returns timestamp language rust as $$
-    #[function("datetime(date, time) -> timestamp")]
     fn datetime(date: NaiveDate, time: NaiveTime) -> NaiveDateTime {
         NaiveDateTime::new(date, time)
     }
@@ -66,9 +62,8 @@ select datetime('2020-01-01', '12:34:56');
 statement ok
 drop function datetime;
 
-
+statement ok
 create function jsonb_access(json jsonb, index int) returns jsonb language rust as $$
-    #[function("jsonb_access(json, int) -> json")]
     fn jsonb_access(json: serde_json::Value, index: i32) -> Option<serde_json::Value> {
         json.get(index as usize).cloned()
     }
@@ -93,7 +88,6 @@ create function key_value(varchar) returns struct<key varchar, value varchar> la
         key: &'a str,
         value: &'a str,
     }
-
     #[function("key_value(varchar) -> struct KeyValue")]
     fn key_value(kv: &str) -> Option<KeyValue<'_>> {
         let (key, value) = kv.split_once('=')?;
@@ -112,7 +106,6 @@ drop function key_value;
 
 statement ok
 create function series(n int) returns table (x int) language rust as $$
-    #[function("series(int) -> setof int")]
     fn series(n: i32) -> impl Iterator<Item = i32> {
         (0..n).into_iter()
     }
