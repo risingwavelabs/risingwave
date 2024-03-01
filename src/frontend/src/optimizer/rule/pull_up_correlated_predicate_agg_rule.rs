@@ -32,6 +32,8 @@ use crate::utils::{Condition, IndexSet};
 /// Before:
 ///
 /// ```text
+///        Filter
+///          |
 ///     LogicalApply
 ///    /            \
 ///  LHS          Project
@@ -46,6 +48,8 @@ use crate::utils::{Condition, IndexSet};
 /// After:
 ///
 /// ```text
+///        Filter
+///          |
 ///     LogicalJoin [yyy = xxx]
 ///    /            \
 ///  LHS          Project
