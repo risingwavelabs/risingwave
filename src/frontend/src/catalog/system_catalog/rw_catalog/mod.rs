@@ -18,6 +18,7 @@ mod rw_columns;
 mod rw_connections;
 mod rw_databases;
 mod rw_ddl_progress;
+mod rw_depend;
 mod rw_description;
 mod rw_event_logs;
 mod rw_fragment_parallelism;
