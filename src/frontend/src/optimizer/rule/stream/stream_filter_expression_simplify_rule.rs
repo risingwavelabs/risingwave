@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// use fixedbitset::FixedBitSet;
 use risingwave_connector::source::DataType;
 
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, FunctionCall,
 };
 use crate::expr::ExprType;
+// use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
 use crate::optimizer::rule::Rule;
 use crate::optimizer::PlanRef;
@@ -42,7 +44,7 @@ impl Rule for StreamFilterExpressionSimplifyRule {
 /// First return value indicates if the optimizable pattern exist
 /// Second return value indicates if the term `e` is either `IsNotNull` or `IsNull`
 /// If so, it will contain the actual wrapper `ExprImpl` for that; otherwise it will be `None`
-fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
+fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>, Option<usize>) {
     fn is_null_or_not_null(func_type: ExprType) -> bool {
         func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
     }
@@ -76,6 +78,16 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
             return None;
         }
 
+        // let max_col_index = *columns
+            // .iter()
+            // .map(|e| {
+            //     let ExprImpl::InputRef(input_ref) = e else {
+            //         return 0;
+            //     };
+            // })
+            // .max()
+            // .unwrap_or(&0);
+
         let mut inputs: Vec<ExprImpl> = vec![];
         // From [`c1`, `c2`, ... , `cn`] to [`IsNotNull(c1)`, ... , `IsNotNull(cn)`]
         for column in columns {
@@ -97,6 +109,7 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
         }
     }
 
+    // Due to constant folding, we only need to consider `FunctionCall` here (presumably)
     let ExprImpl::FunctionCall(e1_func) = e1.clone() else {
         return (false, None);
     };
@@ -107,7 +120,9 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
         return (false, None);
     }
     if e1_func.func_type() != ExprType::Not {
+        // (e1) [op] not(e2)
         if e2_func.inputs().len() != 1 {
+            // `not` should only have a single operand, which is `e2` in this case
             return (false, None);
         }
         (
@@ -115,6 +130,7 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
             try_wrap_inner_expression(e1),
         )
     } else {
+        // not(e1) [op] (e2)
         if e1_func.inputs().len() != 1 {
             return (false, None);
         }
