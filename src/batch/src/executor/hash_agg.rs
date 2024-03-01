@@ -466,6 +466,7 @@ mod tests {
 
     /// A test to verify that `HashMap` may leak memory counter when using `into_iter`.
     #[test]
+    #[should_panic] // TODO(MrCroxx): This bug is fixed and the test should panic. Remove the test and fix the related code later.
     fn test_hashmap_into_iter_bug() {
         let dropped: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
