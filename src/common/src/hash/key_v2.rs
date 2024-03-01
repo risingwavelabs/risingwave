@@ -224,9 +224,8 @@ pub trait HashKey:
     // TODO: rename to `NullBitmap` and note that high bit represents null!
     type Bitmap: NullBitmap;
 
-    // TODO: remove result and rename to `build_many`
     /// Build hash keys from the given `data_chunk` with `column_indices` in a batch.
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>>;
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self>;
 
     /// Deserializes the hash key into a row.
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
@@ -288,7 +287,7 @@ impl<S: KeyStorage, N: NullBitmap> EstimateSize for HashKeyImpl<S, N> {
 impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     type Bitmap = N;
 
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
         let mut serializers = {
@@ -332,7 +331,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         }
 
         let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();
-        Ok(hash_keys)
+        hash_keys
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
