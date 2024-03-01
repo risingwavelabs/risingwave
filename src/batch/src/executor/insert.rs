@@ -267,10 +267,10 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
+    use foyer::memory::eviction::lru::LruContext;
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
-    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
@@ -400,7 +400,7 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )

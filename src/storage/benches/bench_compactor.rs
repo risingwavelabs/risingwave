@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_common::cache::CachePriority;
+use foyer::memory::eviction::lru::LruContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::hash::VirtualNode;
@@ -71,7 +71,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill(CachePriority::High),
+        policy: CachePolicy::Fill(LruContext::HighPriority),
     }
 }
 
@@ -108,7 +108,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CachePriority::High),
+            policy: CachePolicy::Fill(LruContext::HighPriority),
         },
     );
     let mut builder =
@@ -231,7 +231,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(LruContext::HighPriority),
         prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,

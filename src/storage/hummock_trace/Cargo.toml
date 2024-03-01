@@ -23,6 +23,7 @@ risingwave_pb = { workspace = true }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tracing = "0.1"
+foyer ={ workspace = true }
 
 [dev-dependencies]
 itertools = "0.12"

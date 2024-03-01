@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
+use foyer::memory::eviction::lru::LruContext;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
@@ -54,6 +55,24 @@ impl From<TracedCachePriority> for CachePriority {
         match value {
             TracedCachePriority::High => Self::High,
             TracedCachePriority::Low => Self::Low,
+        }
+    }
+}
+
+impl From<LruContext> for TracedCachePriority {
+    fn from(value: LruContext) -> Self {
+        match value {
+            LruContext::HighPriority => Self::High,
+            LruContext::LowPriority => Self::Low,
+        }
+    }
+}
+
+impl From<TracedCachePriority> for LruContext {
+    fn from(value: TracedCachePriority) -> Self {
+        match value {
+            TracedCachePriority::High => Self::HighPriority,
+            TracedCachePriority::Low => Self::LowPriority,
         }
     }
 }

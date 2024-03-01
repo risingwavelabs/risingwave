@@ -21,9 +21,9 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
+    use foyer::memory::eviction::lru::LruContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
-    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
@@ -364,7 +364,7 @@ pub(crate) mod tests {
                 TableKey(key.clone()),
                 read_epoch,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )
@@ -378,7 +378,7 @@ pub(crate) mod tests {
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
                     prefix_hint: Some(key.clone()),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )
@@ -501,7 +501,7 @@ pub(crate) mod tests {
                 TableKey(key.clone()),
                 SST_COUNT + 1,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )
@@ -846,7 +846,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )
@@ -1041,7 +1041,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )
@@ -1241,7 +1241,7 @@ pub(crate) mod tests {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                     ..Default::default()
                 },
             )

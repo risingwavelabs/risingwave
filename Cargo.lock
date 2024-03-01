@@ -319,7 +319,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "num",
 ]
 
@@ -335,7 +335,7 @@ dependencies = [
  "arrow-schema 50.0.0",
  "chrono",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "num",
 ]
 
@@ -550,7 +550,7 @@ dependencies = [
  "arrow-data 48.0.1",
  "arrow-schema 48.0.1",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -565,7 +565,7 @@ dependencies = [
  "arrow-data 50.0.0",
  "arrow-schema 50.0.0",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -2411,7 +2411,7 @@ dependencies = [
  "cranelift-entity",
  "cranelift-isle",
  "gimli",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "log",
  "regalloc2",
  "smallvec",
@@ -2952,7 +2952,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
 dependencies = [
  "cfg-if",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "lock_api",
  "once_cell",
  "parking_lot_core 0.9.8",
@@ -2997,7 +2997,7 @@ dependencies = [
  "futures",
  "glob",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "indexmap 2.0.0",
  "itertools 0.11.0",
  "log",
@@ -3048,7 +3048,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "futures",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "log",
  "object_store",
  "parking_lot 0.12.1",
@@ -3084,7 +3084,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "datafusion-physical-expr",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "itertools 0.11.0",
  "log",
  "regex-syntax 0.8.2",
@@ -3109,7 +3109,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "hex",
  "indexmap 2.0.0",
  "itertools 0.11.0",
@@ -3144,7 +3144,7 @@ dependencies = [
  "datafusion-physical-expr",
  "futures",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "indexmap 2.0.0",
  "itertools 0.11.0",
  "log",
@@ -4100,7 +4100,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.5.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+source = "git+https://github.com/mrcroxx/foyer?rev=cd4319d#cd4319d180894d9914bcc86bb73252cc1c05d039"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -4112,7 +4112,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.3.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+source = "git+https://github.com/mrcroxx/foyer?rev=cd4319d#cd4319d180894d9914bcc86bb73252cc1c05d039"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4127,7 +4127,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+source = "git+https://github.com/mrcroxx/foyer?rev=cd4319d#cd4319d180894d9914bcc86bb73252cc1c05d039"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -4144,14 +4144,15 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+source = "git+https://github.com/mrcroxx/foyer?rev=cd4319d#cd4319d180894d9914bcc86bb73252cc1c05d039"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.4.0",
  "crossbeam",
  "foyer-intrusive",
  "foyer-workspace-hack",
- "hashbrown 0.14.0",
+ "futures",
+ "hashbrown 0.14.3",
  "itertools 0.12.0",
  "libc",
  "madsim-tokio",
@@ -4161,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.4.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+source = "git+https://github.com/mrcroxx/foyer?rev=cd4319d#cd4319d180894d9914bcc86bb73252cc1c05d039"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -4191,7 +4192,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer.git?rev=2968b21#2968b214af7f990e4f7d46d12928e824312a3347"
+source = "git+https://github.com/mrcroxx/foyer?rev=cd4319d#cd4319d180894d9914bcc86bb73252cc1c05d039"
 dependencies = [
  "ahash 0.8.6",
  "cc",
@@ -4203,9 +4204,8 @@ dependencies = [
  "futures-executor",
  "futures-sink",
  "futures-util",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "libc",
- "memchr",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
  "proc-macro2",
@@ -4804,9 +4804,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.0"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
+checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
@@ -4818,7 +4818,7 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -5149,7 +5149,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "serde",
 ]
 
@@ -5758,7 +5758,7 @@ name = "lru"
 version = "0.7.6"
 source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=95f347b#95f347b5ca3c947335a51adf40fa86178ef4d60d"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -5776,7 +5776,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efa59af2ddfad1854ae27d75009d538d0998b4b2fd47083e743ac1a10e46c60"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -6610,7 +6610,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
 dependencies = [
  "crc32fast",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "indexmap 2.0.0",
  "memchr",
 ]
@@ -6890,7 +6890,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4d6a8c22fc714f0c2373e6091bf6f5e9b37b1bc0b1184874b7e0a4e303d318f"
 dependencies = [
  "dlv-list",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -7083,7 +7083,7 @@ dependencies = [
  "chrono",
  "flate2",
  "futures",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "lz4_flex",
  "num",
  "num-bigint",
@@ -7118,7 +7118,7 @@ dependencies = [
  "flate2",
  "futures",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "lz4_flex",
  "num",
  "num-bigint",
@@ -8576,10 +8576,11 @@ dependencies = [
  "async-trait",
  "criterion",
  "either",
+ "foyer",
  "futures",
  "futures-async-stream",
  "futures-util",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "hytra",
  "icelake",
  "itertools 0.12.0",
@@ -8872,6 +8873,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "clap",
+ "foyer",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -9353,6 +9355,7 @@ dependencies = [
  "criterion",
  "expect-test",
  "fail",
+ "foyer",
  "futures",
  "futures-async-stream",
  "itertools 0.12.0",
@@ -9383,6 +9386,7 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "byteorder",
  "bytes",
+ "foyer",
  "futures",
  "futures-async-stream",
  "itertools 0.12.0",
@@ -9892,6 +9896,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.7.0-alpha"
 dependencies = [
+ "ahash 0.8.6",
  "anyhow",
  "arc-swap",
  "async-trait",
@@ -9974,6 +9979,7 @@ dependencies = [
  "enum-as-inner",
  "expect-test",
  "fail",
+ "foyer",
  "futures",
  "futures-async-stream",
  "governor",
@@ -13729,6 +13735,7 @@ dependencies = [
  "clap_builder",
  "combine",
  "crossbeam-epoch",
+ "crossbeam-queue",
  "crossbeam-utils",
  "crypto-bigint 0.5.5",
  "deranged",
@@ -13749,7 +13756,7 @@ dependencies = [
  "generic-array",
  "governor",
  "hashbrown 0.13.2",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "hmac",
  "hyper",
  "indexmap 1.9.3",

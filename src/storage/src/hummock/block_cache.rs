@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use ahash::RandomState;
 use await_tree::InstrumentAwait;
+use foyer::memory::cache::{LruCache, LruCacheConfig, LruCacheEntry};
+use foyer::memory::eviction::lru::{LruConfig, LruContext};
 use futures::Future;
-use risingwave_common::cache::{
-    CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
-};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
@@ -29,9 +27,7 @@ use tokio::task::JoinHandle;
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
-
-type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
+type CachedBlockEntry = LruCacheEntry<(HummockSstableObjectId, u64), Box<Block>>;
 
 enum BlockEntry {
     Cache(CachedBlockEntry),
@@ -81,8 +77,8 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
-type BlockCacheEventListener =
-    Arc<dyn LruCacheEventListener<K = (HummockSstableObjectId, u64), T = Box<Block>>>;
+// type BlockCacheEventListener =
+//     Arc<dyn LruCacheEventListener<K = (HummockSstableObjectId, u64), T = Box<Block>>>;
 
 #[derive(Clone)]
 pub struct BlockCache {
@@ -115,45 +111,56 @@ impl BlockResponse {
 
 impl BlockCache {
     pub fn new(capacity: usize, max_shard_bits: usize, high_priority_ratio: usize) -> Self {
-        Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
+        // Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
+        Self::new_inner(capacity, max_shard_bits, high_priority_ratio)
     }
 
-    pub fn with_event_listener(
-        capacity: usize,
-        max_shard_bits: usize,
-        high_priority_ratio: usize,
-        listener: BlockCacheEventListener,
-    ) -> Self {
-        Self::new_inner(
-            capacity,
-            max_shard_bits,
-            high_priority_ratio,
-            Some(listener),
-        )
-    }
+    // pub fn with_event_listener(
+    //     capacity: usize,
+    //     max_shard_bits: usize,
+    //     high_priority_ratio: usize,
+    //     listener: BlockCacheEventListener,
+    // ) -> Self {
+    //     Self::new_inner(
+    //         capacity,
+    //         max_shard_bits,
+    //         high_priority_ratio,
+    //         Some(listener),
+    //     )
+    // }
 
     fn new_inner(
         capacity: usize,
-        mut max_shard_bits: usize,
+        max_shard_bits: usize,
         high_priority_ratio: usize,
-        listener: Option<BlockCacheEventListener>,
+        // listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-            max_shard_bits -= 1;
-        }
+        // while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
+        //     max_shard_bits -= 1;
+        // }
 
-        let cache = match listener {
-            Some(listener) => LruCache::with_event_listener(
-                max_shard_bits,
-                capacity,
-                high_priority_ratio,
-                listener,
-            ),
-            None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
-        };
+        // let cache = match listener {
+        //     Some(listener) => LruCache::with_event_listener(
+        //         max_shard_bits,
+        //         capacity,
+        //         high_priority_ratio,
+        //         listener,
+        //     ),
+        //     None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
+        // };
+
+        let cache = LruCache::new(LruCacheConfig {
+            capacity,
+            shards: 1 << max_shard_bits,
+            eviction_config: LruConfig {
+                high_priority_pool_ratio: high_priority_ratio as f64 / 100.0,
+            },
+            object_pool_capacity: (1 << max_shard_bits) * 1024,
+            hash_builder: RandomState::default(),
+        });
 
         Self {
             inner: Arc::new(cache),
@@ -162,13 +169,13 @@ impl BlockCache {
 
     pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
-            .lookup(Self::hash(object_id, block_idx), &(object_id, block_idx))
+            .get(&(object_id, block_idx))
             .map(BlockHolder::from_cached_block)
     }
 
     pub fn exists_block(&self, sst_id: HummockSstableObjectId, block_idx: u64) -> bool {
-        self.inner
-            .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+        // TODO(MrCroxx): optimize me
+        self.get(sst_id, block_idx).is_some()
     }
 
     pub fn insert(
@@ -176,13 +183,13 @@ impl BlockCache {
         object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Box<Block>,
-        priority: CachePriority,
+        priority: LruContext,
     ) -> BlockHolder {
-        BlockHolder::from_cached_block(self.inner.insert(
+        let charge = block.capacity();
+        BlockHolder::from_cached_block(self.inner.insert_with_context(
             (object_id, block_idx),
-            Self::hash(object_id, block_idx),
-            block.capacity(),
             block,
+            charge,
             priority,
         ))
     }
@@ -191,46 +198,38 @@ impl BlockCache {
         &self,
         object_id: HummockSstableObjectId,
         block_idx: u64,
-        priority: CachePriority,
+        priority: LruContext,
         mut fetch_block: F,
     ) -> BlockResponse
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
-        let h = Self::hash(object_id, block_idx);
         let key = (object_id, block_idx);
-        let lookup_response =
-            self.inner
-                .lookup_with_request_dedup::<_, HummockError, _>(h, key, priority, || {
-                    let f = fetch_block();
-                    async move {
-                        let block = f.await?;
-                        let len = block.capacity();
-                        Ok((block, len))
-                    }
-                });
-        match lookup_response {
-            LookupResponse::Invalid => unreachable!(),
-            LookupResponse::Cached(entry) => {
+
+        let entry = self.inner.entry(key, || {
+            let f = fetch_block();
+            async move {
+                let block = f.await?;
+                let len = block.capacity();
+                Ok::<_, HummockError>((block, len, Some(priority)))
+            }
+        });
+
+        match entry {
+            foyer::memory::cache::Entry::Hit(entry) => {
                 BlockResponse::Block(BlockHolder::from_cached_block(entry))
             }
-            LookupResponse::WaitPendingRequest(receiver) => {
+            foyer::memory::cache::Entry::Wait(receiver) => {
                 BlockResponse::WaitPendingRequest(receiver)
             }
-            LookupResponse::Miss(join_handle) => BlockResponse::Miss(join_handle),
+            foyer::memory::cache::Entry::Miss(join_handle) => BlockResponse::Miss(join_handle),
+            foyer::memory::cache::Entry::Invalid => unreachable!(),
         }
     }
 
-    fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
-        let mut hasher = DefaultHasher::default();
-        object_id.hash(&mut hasher);
-        block_idx.hash(&mut hasher);
-        hasher.finish()
-    }
-
     pub fn size(&self) -> usize {
-        self.inner.get_memory_usage()
+        self.inner.usage()
     }
 
     #[cfg(any(test, feature = "test"))]

@@ -72,6 +72,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "cd4319d" }
 await-tree = "0.1.1"
 aws-config = { version = "1", default-features = false, features = [
   "behavior-version-latest",
@@ -111,11 +112,7 @@ hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.3.1", features = [
   "cmake-build",
 ] }
-hashbrown = { version = "0.14.0", features = [
-  "ahash",
-  "inline-more",
-  "nightly",
-] }
+hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }

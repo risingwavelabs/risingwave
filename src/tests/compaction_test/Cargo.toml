@@ -19,6 +19,7 @@ anyhow = "1"
 async-trait = "0.1"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 prometheus = { version = "0.13" }
 rand = "0.8"

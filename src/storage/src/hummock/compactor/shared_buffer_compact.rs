@@ -17,10 +17,10 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use foyer::memory::eviction::lru::LruContext;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -500,7 +500,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,
