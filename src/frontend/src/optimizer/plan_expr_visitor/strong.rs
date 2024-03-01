@@ -183,13 +183,7 @@ mod tests {
                     ExprType::Equal,
                     vec![
                         InputRef::new(0, DataType::Int64).into(),
-                        Literal(
-                            crate::expr::Literal::new(
-                                Some(1.into()),
-                                DataType::Int32,
-                            )
-                            .into(),
-                        ),
+                        Literal(crate::expr::Literal::new(Some(1.into()), DataType::Int32).into()),
                     ],
                     DataType::Boolean,
                 )
