@@ -160,7 +160,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.sink_param.sink_type,
             stream_key,
             stream_key_sink_pk_mismatch,
-            true,
+            // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
+            stream_key_sink_pk_mismatch,
             self.chunk_size,
             self.input_data_types,
         );
