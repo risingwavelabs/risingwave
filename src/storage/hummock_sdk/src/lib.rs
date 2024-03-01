@@ -29,7 +29,7 @@ mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
-use risingwave_common::util::epoch::{EPOCH_INC_MIN_STEP_FOR_TEST, EPOCH_SPILL_TIME_MASK};
+use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
