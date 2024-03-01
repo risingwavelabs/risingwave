@@ -700,13 +700,8 @@ mod tests {
         builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
         builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
 
-        Box::new(
-            Block::decode(
-                builder.build().to_vec().into(),
-                builder.uncompressed_block_size(),
-            )
-            .unwrap(),
-        )
+        let uncompress = builder.uncompressed_block_size();
+        Box::new(Block::decode(builder.build().to_vec().into(), uncompress).unwrap())
     }
 
     fn sstable_for_test() -> Sstable {

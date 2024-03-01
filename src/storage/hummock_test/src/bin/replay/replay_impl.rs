@@ -186,12 +186,8 @@ impl ReplayStateStore for GlobalReplayImpl {
         Ok(())
     }
 
-    async fn clear_shared_buffer(&self) -> Result<()> {
-        self.store
-            .clear_shared_buffer()
-            .await
-            .map_err(|_| TraceError::ClearSharedBufferFailed)?;
-        Ok(())
+    async fn clear_shared_buffer(&self, prev_epoch: u64) {
+        self.store.clear_shared_buffer(prev_epoch).await
     }
 }
 pub(crate) struct LocalReplayImpl(LocalHummockStorage);

@@ -178,7 +178,7 @@ where
     /// as it needs to wait for prev epoch to be committed.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
         self.local_store
-            .init(InitOptions::new_with_epoch(epoch))
+            .init(InitOptions::new(epoch, self.vnodes().clone()))
             .await
     }
 }
@@ -195,7 +195,7 @@ where
     /// No need to `wait_for_epoch`, so it should complete immediately.
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store
-            .init(InitOptions::new_with_epoch(epoch))
+            .init(InitOptions::new(epoch, self.vnodes().clone()))
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
@@ -303,7 +303,7 @@ where
 
         // FIXME(yuhao): only use `dist_key_in_pk` in the proto
         let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
-            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices).unwrap()
         } else {
             table_catalog
                 .get_dist_key_in_pk()
@@ -780,6 +780,13 @@ where
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
+        let prev_vnodes = self.local_store.update_vnode_bitmap(new_vnodes.clone());
+        assert_eq!(
+            &prev_vnodes,
+            self.vnodes(),
+            "state table and state store vnode bitmap mismatches"
+        );
+
         if self.distribution.is_singleton() {
             assert_eq!(
                 &new_vnodes,

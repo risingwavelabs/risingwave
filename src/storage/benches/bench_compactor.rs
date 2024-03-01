@@ -19,7 +19,7 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use foyer::memory::eviction::lru::LruContext;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::MetricLevel;
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -49,7 +49,10 @@ use risingwave_storage::monitor::{
 };
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
+    let store = InMemObjectStore::new().monitored(
+        Arc::new(ObjectStoreMetrics::unused()),
+        ObjectStoreConfig::default(),
+    );
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
     Arc::new(SstableStore::new(SstableStoreConfig {
@@ -175,7 +178,7 @@ fn bench_table_scan(c: &mut Criterion) {
 
     c.bench_function("bench_table_iterator", |b| {
         let info1 = info.clone();
-        b.to_async(FuturesExecutor)
+        b.to_async(&runtime)
             .iter(|| scan_all_table(&info1, sstable_store.clone()));
     });
 }
@@ -220,15 +223,29 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let sstable_store = mock_sstable_store();
     let test_key_size = 256 * 1024;
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size, 1).await });
-    let info2 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 2, 0..test_key_size, 1).await });
+        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size / 2, 1).await });
+    let info2 = runtime.block_on(async {
+        build_table(
+            sstable_store.clone(),
+            2,
+            test_key_size / 2..test_key_size,
+            1,
+        )
+        .await
+    });
     let level1 = vec![info1, info2];
 
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size, 2).await });
-    let info2 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
+        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size / 2, 2).await });
+    let info2 = runtime.block_on(async {
+        build_table(
+            sstable_store.clone(),
+            4,
+            test_key_size / 2..test_key_size,
+            2,
+        )
+        .await
+    });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(LruContext::HighPriority),

@@ -28,11 +28,11 @@ use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
 use tokio_postgres::NoTls;
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ConnectorResult, DebeziumOffset, ExternalTableConfig,
-    ExternalTableReader, SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
+    SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -199,7 +199,7 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&sql, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, anyhow::Error>(postgres_row_to_owned_row(row, &self.rw_schema))
+            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
         });
 
         pin_mut!(row_stream);

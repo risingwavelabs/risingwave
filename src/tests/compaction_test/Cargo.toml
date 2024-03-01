@@ -25,7 +25,7 @@ prometheus = { version = "0.13" }
 rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_node = { workspace = true }

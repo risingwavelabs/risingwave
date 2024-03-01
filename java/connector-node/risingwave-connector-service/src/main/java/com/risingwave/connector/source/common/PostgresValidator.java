@@ -42,7 +42,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private final boolean pubAutoCreate;
 
-    private static final String AWS_RDS_HOST = "rds.amazonaws.com";
+    private static final String AWS_RDS_HOST = "amazonaws.com";
     private final boolean isAwsRds;
 
     // Whether the properties to validate is shared by multiple tables.

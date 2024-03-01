@@ -22,7 +22,7 @@ use futures::stream::{self, StreamExt};
 use futures::{pin_mut, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarRef, ScalarRefImpl};
@@ -39,8 +39,13 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
+use super::{get_split_offset_col_idx, SourceStateTableHandler};
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::*;
+use crate::executor::{
+    expect_first_barrier, get_split_offset_mapping_from_chunk, prune_additional_cols,
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, Mutation, StreamExecutorError,
+    StreamExecutorResult, StreamSourceCore,
+};
 
 const SPLIT_BATCH_SIZE: usize = 1000;
 
@@ -48,13 +53,12 @@ type SplitBatch = Option<Vec<SplitImpl>>;
 
 pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
 
     /// Upstream list executor.
-    upstream: Option<BoxedExecutor>,
+    upstream: Option<Executor>,
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
@@ -69,15 +73,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         source_ctrl_opts: SourceCtrlOpts,
         connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             source_ctrl_opts,
@@ -354,21 +356,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     }
 }
 
-impl<S: StateStore, Src: OpendalSource> Executor for FsFetchExecutor<S, Src> {
+impl<S: StateStore, Src: OpendalSource> Execute for FsFetchExecutor<S, Src> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -378,7 +368,6 @@ impl<S: StateStore, Src: OpendalSource> Debug for FsFetchExecutor<S, Src> {
             f.debug_struct("FsFetchExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsFetchExecutor").finish()

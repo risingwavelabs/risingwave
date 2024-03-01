@@ -21,11 +21,12 @@ use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::{GcsProperties, OpendalSource};
+use crate::error::ConnectorResult;
 use crate::source::filesystem::s3::enumerator::get_prefix;
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal gcs source.
-    pub fn new_gcs_source(gcs_properties: GcsProperties) -> anyhow::Result<Self> {
+    pub fn new_gcs_source(gcs_properties: GcsProperties) -> ConnectorResult<Self> {
         // Create gcs builder.
         let mut builder = Gcs::default();
 

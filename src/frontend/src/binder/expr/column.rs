@@ -18,6 +18,7 @@ use risingwave_sqlparser::ast::Ident;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -54,8 +55,10 @@ impl Binder {
                 // there will not exist any column identifiers
                 // And invalid cases should already be caught
                 // during semantic check phase
+                // Note: the error message here also help with hint display
+                // when invalid definition occurs at sql udf creation time
                 return Err(ErrorCode::BindError(format!(
-                    "failed to find named parameter {column_name}"
+                    "{SQL_UDF_PATTERN} failed to find named parameter {column_name}"
                 ))
                 .into());
             }

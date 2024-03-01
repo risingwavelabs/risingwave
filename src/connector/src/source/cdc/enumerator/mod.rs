@@ -27,9 +27,9 @@ use risingwave_pb::connector_service::{
     SourceCommonParam, SourceType, ValidateSourceRequest, ValidateSourceResponse,
 };
 
+use crate::error::ConnectorResult;
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, CdcSplitBase, Citus, DebeziumCdcSplit, MySqlCdcSplit, Mysql,
-    Postgres, PostgresCdcSplit,
+    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
 };
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -54,7 +54,7 @@ where
     async fn new(
         props: CdcProperties<T>,
         context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let server_addrs = props
             .properties
             .get(DATABASE_SERVERS_KEY)
@@ -72,7 +72,7 @@ where
         );
 
         let source_id = context.info.source_id;
-        tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             let mut env = JVM.get_or_init()?.attach_current_thread()?;
 
             let validate_source_request = ValidateSourceRequest {
@@ -100,15 +100,11 @@ where
                     .deref(),
             )?;
 
-            validate_source_response.error.map_or_else(
-                || Ok(()),
-                |err| {
-                    Err(anyhow!(format!(
-                        "source cannot pass validation: {}",
-                        err.error_message
-                    )))
-                },
-            )
+            if let Some(error) = validate_source_response.error {
+                return Err(anyhow!(error.error_message).context("source cannot pass validation"));
+            }
+
+            Ok(())
         })
         .await
         .context("failed to validate source")??;
@@ -121,7 +117,7 @@ where
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<DebeziumCdcSplit<T>>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<DebeziumCdcSplit<T>>> {
         Ok(self.list_cdc_splits())
     }
 }
@@ -136,15 +132,11 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
-        let split = MySqlCdcSplit {
-            inner: CdcSplitBase::new(self.source_id, None),
-        };
-        let dbz_split = DebeziumCdcSplit {
-            mysql_split: Some(split),
-            pg_split: None,
-            _phantom: PhantomData,
-        };
-        vec![dbz_split]
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
     }
 }
 
@@ -152,16 +144,12 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
     type CdcSourceType = Postgres;
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
-        let split = PostgresCdcSplit {
-            inner: CdcSplitBase::new(self.source_id, None),
-            server_addr: None,
-        };
-        let dbz_split = DebeziumCdcSplit {
-            mysql_split: None,
-            pg_split: Some(split),
-            _phantom: Default::default(),
-        };
-        vec![dbz_split]
+        // CDC source only supports single split
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
     }
 }
 
@@ -173,16 +161,24 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Citus> {
             .iter()
             .enumerate()
             .map(|(id, addr)| {
-                let split = PostgresCdcSplit {
-                    inner: CdcSplitBase::new(id as u32, None),
-                    server_addr: Some(addr.to_string()),
-                };
-                DebeziumCdcSplit {
-                    mysql_split: None,
-                    pg_split: Some(split),
-                    _phantom: Default::default(),
-                }
+                DebeziumCdcSplit::<Self::CdcSourceType>::new(
+                    id as u32,
+                    None,
+                    Some(addr.to_string()),
+                )
             })
             .collect_vec()
+    }
+}
+impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
+    type CdcSourceType = Mongodb;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        // CDC source only supports single split
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id,
+            None,
+            None,
+        )]
     }
 }

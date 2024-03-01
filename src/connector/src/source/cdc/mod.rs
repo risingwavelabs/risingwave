@@ -28,6 +28,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
+use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
@@ -37,10 +38,13 @@ pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
 pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 // User can set snapshot='false' to disable cdc backfill
 pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
+// We enable transaction for shared cdc source by default
+pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
+pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
@@ -55,6 +59,7 @@ impl<'a> From<&'a str> for CdcSourceType {
             MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
+            MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
             _ => CdcSourceType::Unspecified,
         }
     }
@@ -66,6 +71,7 @@ impl CdcSourceType {
             CdcSourceType::Mysql => "MySQL",
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Citus => "Citus",
+            CdcSourceType::Mongodb => "MongoDB",
             CdcSourceType::Unspecified => "Unspecified",
         }
     }
@@ -89,7 +95,7 @@ impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
     fn try_from_hashmap(
         properties: HashMap<String, String>,
         _deny_unknown_fields: bool,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let is_multi_table_shared = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
@@ -105,7 +111,7 @@ impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
 
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where
-    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = crate::error::ConnectorError> + Into<SplitImpl>,
     DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
 {
     type Split = DebeziumCdcSplit<T>;

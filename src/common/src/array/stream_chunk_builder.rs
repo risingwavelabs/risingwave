@@ -14,6 +14,7 @@
 
 use crate::array::stream_record::Record;
 use crate::array::{ArrayBuilderImpl, Op, StreamChunk};
+use crate::buffer::BitmapBuilder;
 use crate::row::Row;
 use crate::types::{DataType, DatumRef};
 use crate::util::iter_util::ZipEqFast;
@@ -25,6 +26,9 @@ pub struct StreamChunkBuilder {
 
     /// arrays in the data chunk to build
     column_builders: Vec<ArrayBuilderImpl>,
+
+    /// Visibility
+    vis_builder: BitmapBuilder,
 
     /// Data types of columns
     data_types: Vec<DataType>,
@@ -61,6 +65,7 @@ impl StreamChunkBuilder {
             ops,
             column_builders,
             data_types,
+            vis_builder: BitmapBuilder::default(),
             capacity: chunk_size,
             size: 0,
         }
@@ -94,17 +99,33 @@ impl StreamChunkBuilder {
         op: Op,
         iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
     ) -> Option<StreamChunk> {
+        self.append_iter_inner::<true>(op, iter)
+    }
+
+    #[must_use]
+    fn append_iter_inner<'a, const VIS: bool>(
+        &mut self,
+        op: Op,
+        iter: impl IntoIterator<Item = (usize, DatumRef<'a>)>,
+    ) -> Option<StreamChunk> {
         self.ops.push(op);
         for (i, datum) in iter {
             self.column_builders[i].append(datum);
         }
+        self.vis_builder.append(VIS);
         self.inc_size()
     }
 
     /// Append a row to the builder, return a chunk if the builder is full.
     #[must_use]
     pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
-        self.append_iter(op, row.iter().enumerate())
+        self.append_iter_inner::<true>(op, row.iter().enumerate())
+    }
+
+    /// Append an invisible row to the builder, return a chunk if the builder is full.
+    #[must_use]
+    pub fn append_row_invisible(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
+        self.append_iter_inner::<false>(op, row.iter().enumerate())
     }
 
     /// Append a record to the builder, return a chunk if the builder is full.
@@ -138,9 +159,12 @@ impl StreamChunkBuilder {
             .map(Into::into)
             .collect::<Vec<_>>();
 
-        Some(StreamChunk::new(
+        let vis = std::mem::take(&mut self.vis_builder).finish();
+
+        Some(StreamChunk::with_visibility(
             std::mem::replace(&mut self.ops, Vec::with_capacity(self.capacity)),
             new_columns,
+            vis,
         ))
     }
 }
