@@ -40,11 +40,10 @@ import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
   BackPressureInfo,
-  BackPressuresMetrics,
   average,
   calculateBPRate,
-  fetchPrometheusBackPressure,
   fetchEmbeddedBackPressure,
+  fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import { getFragments, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
@@ -289,7 +288,8 @@ export default function Streaming() {
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
-  const [backPressureDataSource, setBackPressureDataSource] = useState("Embedded")
+  const [backPressureDataSource, setBackPressureDataSource] =
+    useState("Embedded")
 
   // Periodically fetch Prometheus back-pressure from Meta node
   const { response: promethusMetrics } = useFetch(
@@ -300,26 +300,34 @@ export default function Streaming() {
 
   // Periodically fetch embedded back-pressure from Meta node
   // Didn't call `useFetch()` because the `setState` way is special.
-  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] = useState<EmbeddedBackPressureInfo>()
+  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
+    useState<EmbeddedBackPressureInfo>()
   useEffect(() => {
     if (backPressureDataSource === "Embedded") {
       const interval = setInterval(() => {
-        fetchEmbeddedBackPressure().then((newBP) => {
-          console.log(newBP)
-          setEmbeddedBackPressureInfo((prev) => prev ? {
-            previous: prev.current,
-            current: newBP,
-          } : {
-            previous: newBP, // Use current value to show zero rate, but it's fine
-            current: newBP,
-          })
-        }, (e) => {
-          console.error(e)
-          toast(e, "error")
-        })
+        fetchEmbeddedBackPressure().then(
+          (newBP) => {
+            console.log(newBP)
+            setEmbeddedBackPressureInfo((prev) =>
+              prev
+                ? {
+                    previous: prev.current,
+                    current: newBP,
+                  }
+                : {
+                    previous: newBP, // Use current value to show zero rate, but it's fine
+                    current: newBP,
+                  }
+            )
+          },
+          (e) => {
+            console.error(e)
+            toast(e, "error")
+          }
+        )
       }, INTERVAL)
       return () => {
-        clearInterval(interval);
+        clearInterval(interval)
       }
     }
   }, [backPressureDataSource])
@@ -328,11 +336,12 @@ export default function Streaming() {
     if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
-      if (
-        backPressureDataSource === "Embedded" &&
-        embeddedBackPressureInfo
-      ) {
-        const metrics = calculateBPRate(embeddedBackPressureInfo.current, embeddedBackPressureInfo.previous, INTERVAL)
+      if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
+        const metrics = calculateBPRate(
+          embeddedBackPressureInfo.current,
+          embeddedBackPressureInfo.previous,
+          INTERVAL
+        )
         // why sorting?
         metrics.outputBufferBlockingDuration = sortBy(
           metrics.outputBufferBlockingDuration,
@@ -344,10 +353,7 @@ export default function Streaming() {
             m.sample[0].value
           )
         }
-      } else if (
-        backPressureDataSource !== "Embedded" &&
-        promethusMetrics
-      ) {
+      } else if (backPressureDataSource !== "Embedded" && promethusMetrics) {
         for (const m of promethusMetrics.outputBufferBlockingDuration) {
           const value = average(m.sample) * 100
           map.set(
@@ -358,11 +364,7 @@ export default function Streaming() {
       }
       return map
     }
-  }, [
-    backPressureDataSource,
-    promethusMetrics,
-    embeddedBackPressureInfo,
-  ])
+  }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
