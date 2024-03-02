@@ -40,7 +40,6 @@ import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
   BackPressureInfo,
-  average,
   calculateBPRate,
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
@@ -311,13 +310,13 @@ export default function Streaming() {
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
-                  previous: prev.current,
-                  current: newBP,
-                }
+                    previous: prev.current,
+                    current: newBP,
+                  }
                 : {
-                  previous: newBP, // Use current value to show zero rate, but it's fine
-                  current: newBP,
-                }
+                    previous: newBP, // Use current value to show zero rate, but it's fine
+                    current: newBP,
+                  }
             )
           },
           (e) => {

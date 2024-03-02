@@ -181,14 +181,6 @@ export function p99(samples: MetricsSample[]) {
   return calculatePercentile(samples, 0.99)
 }
 
-export function average(samples: MetricsSample[]) {
-  let sum = 0
-  for (const sample of samples) {
-    sum += sample.value
-  }
-  return sum / samples.length
-}
-
 function isSet(value: any): boolean {
   return value !== null && value !== undefined
 }
