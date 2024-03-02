@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -25,7 +26,9 @@ use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
+use risingwave_common::fifo_cache::FifoCache;
 use risingwave_storage::hummock::{HummockError, HummockResult, LruCache};
+use spin::Mutex;
 use tokio::runtime::{Builder, Runtime};
 
 pub struct Block {
@@ -80,15 +83,19 @@ impl CacheBase for MokaCache {
     }
 }
 
+use tokio::sync::oneshot::{channel, Sender};
+type RequestQueue = Vec<Sender<Arc<Block>>>;
 pub struct LruCacheImpl {
     inner: Arc<LruCache<(u64, u64), Arc<Block>>>,
     fake_io_latency: Duration,
 }
 
+const BLOCK_SIZE: usize = 4096;
+
 impl LruCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(3, capacity, 0)),
+            inner: Arc::new(LruCache::new(2, capacity * BLOCK_SIZE, 0)),
             fake_io_latency,
         }
     }
@@ -108,10 +115,91 @@ impl CacheBase for LruCacheImpl {
             .lookup_with_request_dedup(h, key, CachePriority::High, || async move {
                 get_fake_block(sst_object_id, block_idx, latency)
                     .await
-                    .map(|block| (Arc::new(block), 1))
+                    .map(|block| (Arc::new(block), BLOCK_SIZE))
             })
             .await?;
         Ok((*entry).clone())
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct BlockKey {
+    object_id: u64,
+    block_idx: u64,
+}
+
+impl Hash for BlockKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.object_id);
+        state.write_u64(self.block_idx);
+    }
+}
+
+pub struct FIFOCacheImpl {
+    inner: Arc<FifoCache<BlockKey, Arc<Block>>>,
+    fake_io_latency: Duration,
+    write_requests: Arc<Mutex<HashMap<BlockKey, RequestQueue>>>,
+}
+
+impl FIFOCacheImpl {
+    pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
+        Self {
+            inner: Arc::new(FifoCache::new(2, capacity * BLOCK_SIZE)),
+            fake_io_latency,
+            write_requests: Arc::new(Mutex::new(HashMap::default())),
+        }
+    }
+}
+
+#[async_trait]
+impl CacheBase for FIFOCacheImpl {
+    async fn try_get_with(&self, object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
+        let key = BlockKey {
+            object_id,
+            block_idx,
+        };
+        if let Some(ret) = self.inner.lookup(&key) {
+            return Ok(ret);
+        }
+
+        let follower_notify = {
+            let mut guard = self.write_requests.lock();
+            if let Some(que) = guard.get_mut(&key) {
+                let (tx, recv) = channel();
+                que.push(tx);
+                Some(recv)
+            } else {
+                guard.insert(key.clone(), vec![]);
+                None
+            }
+        };
+        if let Some(recv) = follower_notify {
+            match recv.await {
+                Ok(block) => {
+                    return Ok(block);
+                }
+                Err(_) => {
+                    return Err(HummockError::invalid_block());
+                }
+            }
+        } else {
+            let block = match get_fake_block(object_id, block_idx, self.fake_io_latency).await {
+                Ok(ret) => Arc::new(ret),
+                Err(e) => {
+                    let mut guard = self.write_requests.lock();
+                    let mut que = guard.remove(&key).unwrap();
+                    que.clear();
+                    return Err(e);
+                }
+            };
+            let mut guard = self.write_requests.lock();
+            let que = guard.remove(&key).unwrap();
+            for sender in que {
+                let _ = sender.send(block.clone());
+            }
+            self.inner.insert(key, block.clone(), BLOCK_SIZE);
+            return Ok(block);
+        }
     }
 }
 
@@ -194,9 +282,11 @@ fn bench_block_cache(c: &mut Criterion) {
     let block_cache = Arc::new(LruCacheImpl::new(2048, Duration::from_millis(0)));
     bench_cache(block_cache, c, 10000);
 
-    let block_cache = Arc::new(MokaCache::new(2048, Duration::from_millis(1)));
+    let block_cache = Arc::new(MokaCache::new(1024, Duration::from_millis(1)));
     bench_cache(block_cache, c, 1000);
-    let block_cache = Arc::new(LruCacheImpl::new(2048, Duration::from_millis(1)));
+    let block_cache = Arc::new(LruCacheImpl::new(1024, Duration::from_millis(1)));
+    bench_cache(block_cache, c, 1000);
+    let block_cache = Arc::new(FIFOCacheImpl::new(1024, Duration::from_millis(1)));
     bench_cache(block_cache, c, 1000);
 
     let block_cache = Arc::new(MokaCache::new(256, Duration::from_millis(10)));

@@ -38,6 +38,8 @@ chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 crc32fast = "1"
+crossbeam-queue = "0.3"
+dashmap = "5"
 easy-ext = "1"
 educe = "0.5"
 either = "1"
