@@ -14,9 +14,12 @@
 
 use std::fmt::Debug;
 
+use anyhow::Context;
 use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
+use crate::error::ConnectorResult;
+use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
@@ -27,17 +30,18 @@ pub struct DebeziumJsonAccessBuilder {
 }
 
 impl DebeziumJsonAccessBuilder {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new() -> ConnectorResult<Self> {
         Ok(Self { value: None })
     }
 }
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
-            simd_json::to_borrowed_value(self.value.as_mut().unwrap())?;
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+                .context("failed to parse debezium json payload")?;
 
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)
@@ -48,6 +52,37 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             payload,
             &JsonParseOptions::DEBEZIUM,
+        )))
+    }
+}
+
+#[derive(Debug)]
+pub struct DebeziumMongoJsonAccessBuilder {
+    value: Option<Vec<u8>>,
+}
+
+impl DebeziumMongoJsonAccessBuilder {
+    pub fn new() -> anyhow::Result<Self> {
+        Ok(Self { value: None })
+    }
+}
+
+impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+        self.value = Some(payload);
+        let mut event: BorrowedValue<'_> =
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+                .context("failed to parse debezium mongo json payload")?;
+
+        let payload = if let Some(payload) = event.get_mut("payload") {
+            std::mem::take(payload)
+        } else {
+            event
+        };
+
+        Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
+            JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM),
         )))
     }
 }
@@ -64,12 +99,14 @@ mod tests {
         DataType, Date, Interval, Scalar, ScalarImpl, StructType, Time, Timestamp,
     };
     use serde_json::Value;
+    use thiserror_ext::AsReport;
 
     use crate::parser::{
         DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceContextRef;
+
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
             let mut json_string = String::new();
@@ -491,7 +528,7 @@ mod tests {
                 } else {
                     // For f64 overflow, the parsing fails
                     let e = res.unwrap_err();
-                    assert!(e.to_string().contains("InvalidNumber"), "{i}: {e}");
+                    assert!(e.to_report_string().contains("InvalidNumber"), "{i}: {e}");
                 }
             }
         }

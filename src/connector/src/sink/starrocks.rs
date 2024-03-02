@@ -52,10 +52,10 @@ pub struct StarrocksCommon {
     #[serde(rename = "starrocks.host")]
     pub host: String,
     /// The port to the MySQL server of StarRocks FE.
-    #[serde(rename = "starrocks.mysqlport")]
+    #[serde(rename = "starrocks.mysqlport", alias = "starrocks.query_port")]
     pub mysql_port: String,
     /// The port to the HTTP server of StarRocks FE.
-    #[serde(rename = "starrocks.httpport")]
+    #[serde(rename = "starrocks.httpport", alias = "starrocks.http_port")]
     pub http_port: String,
     /// The user name used to access the StarRocks database.
     #[serde(rename = "starrocks.user")]
@@ -69,6 +69,8 @@ pub struct StarrocksCommon {
     /// The StarRocks table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
+    #[serde(rename = "starrocks.partial_update")]
+    pub partial_update: Option<String>,
 }
 
 #[serde_as]
@@ -126,8 +128,8 @@ impl StarrocksSink {
         starrocks_columns_desc: HashMap<String, String>,
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
-        if rw_fields_name.len().ne(&starrocks_columns_desc.len()) {
-            return Err(SinkError::Starrocks("The length of the RisingWave column must be equal to the length of the starrocks column".to_string()));
+        if rw_fields_name.len() > starrocks_columns_desc.len() {
+            return Err(SinkError::Starrocks("The length of the RisingWave column must be equal or less to the length of the starrocks column".to_string()));
         }
 
         for i in rw_fields_name {
@@ -173,35 +175,33 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("varchar"))
             }
             risingwave_common::types::DataType::Time => Err(SinkError::Starrocks(
-                "starrocks can not support Time".to_string(),
+                "TIME is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
             risingwave_common::types::DataType::Timestamp => {
                 Ok(starrocks_data_type.contains("datetime"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Starrocks(
-                "starrocks can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Starrocks sink as Starrocks doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
-                "starrocks can not support Interval".to_string(),
+                "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
             // todo! Validate the type struct and list
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
-                "starrocks can not support import struct".to_string(),
+                "STRUCT is not supported for Starrocks sink.".to_string(),
             )),
             risingwave_common::types::DataType::List(_) => {
                 Ok(starrocks_data_type.contains("unknown"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
-                "starrocks can not support Bytea".to_string(),
+                "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::Starrocks(
-                "starrocks can not support import json".to_string(),
-            )),
+            risingwave_common::types::DataType::Jsonb => Ok(starrocks_data_type.contains("json")),
             risingwave_common::types::DataType::Serial => {
                 Ok(starrocks_data_type.contains("bigint"))
             }
             risingwave_common::types::DataType::Int256 => Err(SinkError::Starrocks(
-                "starrocks can not support Int256".to_string(),
+                "INT256 is not supported for Starrocks sink.".to_string(),
             )),
         }
     }
@@ -337,18 +337,18 @@ impl StarrocksSinkWriter {
                 decimal_map.insert(name.to_string(), (length, scale));
             }
         }
+        let mut fields_name = schema.names_str();
+        if !is_append_only {
+            fields_name.push(STARROCKS_DELETE_SIGN);
+        };
 
-        let builder = HeaderBuilder::new()
+        let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
-            .add_json_format();
-        let header = if !is_append_only {
-            let mut fields_name = schema.names_str();
-            fields_name.push(STARROCKS_DELETE_SIGN);
-            builder.set_columns_name(fields_name).build()
-        } else {
-            builder.build()
-        };
+            .add_json_format()
+            .set_partial_update(config.common.partial_update.clone())
+            .set_columns_name(fields_name)
+            .build();
 
         let starrocks_insert_builder = InserterInnerBuilder::new(
             format!("http://{}:{}", config.common.host, config.common.http_port),
@@ -363,7 +363,7 @@ impl StarrocksSinkWriter {
             inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(
+            row_encoder: JsonEncoder::new_with_starrocks(
                 schema,
                 None,
                 TimestampHandlingMode::String,

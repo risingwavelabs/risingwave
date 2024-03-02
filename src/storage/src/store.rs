@@ -23,6 +23,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
@@ -31,8 +32,8 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedBitmap, TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel,
+    TracedPrefetchOptions, TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -191,7 +192,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 
     /// Clears contents in shared buffer.
     /// This method should only be called when dropping all actors in the local compute node.
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_;
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
 
@@ -270,6 +271,10 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
+
+    // Updates the vnode bitmap corresponding to the local state store
+    // Returns the previous vnode bitmap
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
@@ -534,17 +539,14 @@ impl NewLocalOptions {
 #[derive(Clone)]
 pub struct InitOptions {
     pub epoch: EpochPair,
+
+    /// The vnode bitmap for the local state store instance
+    pub vnodes: Arc<Bitmap>,
 }
 
 impl InitOptions {
-    pub fn new_with_epoch(epoch: EpochPair) -> Self {
-        Self { epoch }
-    }
-}
-
-impl From<EpochPair> for InitOptions {
-    fn from(value: EpochPair) -> Self {
-        Self { epoch: value }
+    pub fn new(epoch: EpochPair, vnodes: Arc<Bitmap>) -> Self {
+        Self { epoch, vnodes }
     }
 }
 
@@ -552,6 +554,7 @@ impl From<InitOptions> for TracedInitOptions {
     fn from(value: InitOptions) -> Self {
         TracedInitOptions {
             epoch: value.epoch.into(),
+            vnodes: TracedBitmap::from(value.vnodes.as_ref().clone()),
         }
     }
 }
@@ -560,6 +563,7 @@ impl From<TracedInitOptions> for InitOptions {
     fn from(value: TracedInitOptions) -> Self {
         InitOptions {
             epoch: value.epoch.into(),
+            vnodes: Arc::new(Bitmap::from(value.vnodes)),
         }
     }
 }

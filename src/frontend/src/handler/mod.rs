@@ -18,11 +18,15 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::bail_not_implemented;
+use risingwave_common::types::Fields;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::*;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
@@ -59,7 +63,7 @@ pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
-mod describe;
+pub mod describe;
 mod drop_connection;
 mod drop_database;
 pub mod drop_function;
@@ -78,7 +82,7 @@ pub mod handle_privilege;
 mod kill_process;
 pub mod privilege;
 pub mod query;
-mod show;
+pub mod show;
 mod transaction;
 pub mod util;
 pub mod variable;
@@ -89,6 +93,42 @@ pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
 
 /// The [`PgResponse`] used by RisingWave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
+
+#[easy_ext::ext(RwPgResponseBuilderExt)]
+impl RwPgResponseBuilder {
+    /// Append rows to the response.
+    pub fn rows<T: Fields>(self, rows: impl IntoIterator<Item = T>) -> Self {
+        let fields = T::fields();
+        self.values(
+            rows.into_iter()
+                .map(|row| {
+                    Row::new(
+                        row.into_owned_row()
+                            .into_iter()
+                            .zip_eq_fast(&fields)
+                            .map(|(datum, (_, ty))| {
+                                datum.map(|scalar| {
+                                    scalar.as_scalar_ref_impl().text_format(ty).into()
+                                })
+                            })
+                            .collect(),
+                    )
+                })
+                .collect_vec()
+                .into(),
+            fields_to_descriptors(fields),
+        )
+    }
+}
+
+pub fn fields_to_descriptors(
+    fields: Vec<(&str, risingwave_common::types::DataType)>,
+) -> Vec<PgFieldDescriptor> {
+    fields
+        .iter()
+        .map(|(name, ty)| PgFieldDescriptor::new(name.to_string(), ty.to_oid(), ty.type_len()))
+        .collect()
+}
 
 pub enum PgResponseStream {
     LocalQuery(DataChunkToRowSetAdapter<LocalQueryStream>),
@@ -206,6 +246,7 @@ pub async fn handle(
             args,
             returns,
             params,
+            with_options,
         } => {
             // For general udf, `language` clause could be ignored
             // refer: https://github.com/risingwavelabs/risingwave/pull/10608
@@ -226,6 +267,7 @@ pub async fn handle(
                     args,
                     returns,
                     params,
+                    with_options,
                 )
                 .await
             } else {

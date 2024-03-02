@@ -284,7 +284,7 @@ impl ReplayWorker {
             }
             Operation::NewLocalStorage(new_local_opts, id) => {
                 assert_ne!(storage_type, StorageType::Global);
-                local_storage_opts_map.insert(id, new_local_opts);
+                local_storage_opts_map.insert(id, new_local_opts.clone());
                 let local_storage = replay.new_local(new_local_opts).await;
                 local_storages.insert(storage_type, local_storage);
             }
@@ -327,22 +327,9 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::ClearSharedBuffer => {
+            Operation::ClearSharedBuffer(prev_epoch) => {
                 assert_eq!(storage_type, StorageType::Global);
-                let res = res_rx.recv().await.expect("recv result failed");
-                if let OperationResult::ClearSharedBuffer(expected) = res {
-                    let actual = replay.clear_shared_buffer().await;
-                    assert_eq!(
-                        TraceResult::from(actual),
-                        expected,
-                        "clear_shared_buffer wrong"
-                    );
-                } else {
-                    panic!(
-                        "wrong clear_shared_buffer result, expect epoch result, but got {:?}",
-                        res
-                    );
-                }
+                replay.clear_shared_buffer(prev_epoch).await;
             }
             Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);

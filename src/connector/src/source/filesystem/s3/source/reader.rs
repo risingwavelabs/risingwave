@@ -32,6 +32,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::common::AwsAuthProps;
+use crate::error::ConnectorResult;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
@@ -54,7 +55,7 @@ pub struct S3FileReader {
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     pub async fn stream_read_object(
         client_for_s3: s3_client::Client,
         bucket_name: String,
@@ -85,7 +86,9 @@ impl S3FileReader {
                 return Ok(());
             }
             Err(e) => {
-                return Err(anyhow!(e).context(format!("S3 GetObject from {bucket_name} error")));
+                return Err(anyhow!(e)
+                    .context(format!("S3 GetObject from {bucket_name} error"))
+                    .into());
             }
         };
 
@@ -180,7 +183,7 @@ impl SplitReader for S3FileReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let config = AwsAuthProps::from(&props);
 
         let sdk_config = config.build_config().await?;
@@ -206,7 +209,7 @@ impl SplitReader for S3FileReader {
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
+    #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();

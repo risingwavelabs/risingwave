@@ -20,11 +20,12 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
+use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
     ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -281,7 +282,7 @@ impl CatalogController {
 
         let vnode_mapping = pb_vnode_mapping.map(FragmentVnodeMapping).unwrap();
 
-        let stream_node = StreamNode(stream_node);
+        let stream_node = StreamNode::from_protobuf(&stream_node);
 
         let distribution_type = PbFragmentDistributionType::try_from(pb_distribution_type)
             .unwrap()
@@ -367,7 +368,7 @@ impl CatalogController {
             upstream_fragment_id,
         } = fragment;
 
-        let stream_node_template = stream_node.into_inner();
+        let stream_node_template = stream_node.to_protobuf();
 
         let mut pb_actors = vec![];
 
@@ -699,6 +700,23 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let count = Fragment::find().count(&inner.db).await?;
         Ok(count > 0)
+    }
+
+    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let inner = self.inner.read().await;
+        let actor_cnt: Vec<(WorkerId, i64)> = Actor::find()
+            .select_only()
+            .column(actor::Column::WorkerId)
+            .column_as(actor::Column::ActorId.count(), "count")
+            .group_by(actor::Column::WorkerId)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(actor_cnt
+            .into_iter()
+            .map(|(worker_id, count)| (worker_id, count as usize))
+            .collect())
     }
 
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
@@ -1186,7 +1204,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = find_stream_source(stream_node.inner_ref()) {
+            if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
                 source_fragment_ids
                     .entry(source.source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
@@ -1216,7 +1234,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some(source) = find_stream_source(stream_node.inner_ref()) {
+            if let Some(source) = find_stream_source(&stream_node.to_protobuf()) {
                 source_fragment_ids
                     .entry(source.source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
@@ -1278,11 +1296,10 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::actor::ActorStatus;
-    use risingwave_meta_model_v2::fragment::DistributionType;
+    use risingwave_meta_model_v2::fragment::{DistributionType, StreamNode};
     use risingwave_meta_model_v2::{
         actor, actor_dispatcher, fragment, ActorId, ActorUpstreamActors, ConnectorSplits,
-        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode, TableId,
-        VnodeBitmap,
+        ExprContext, FragmentId, FragmentVnodeMapping, I32Array, ObjectId, TableId, VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
@@ -1448,13 +1465,13 @@ mod tests {
         actors: Vec<PbStreamActor>,
         upstream_actor_ids: &HashMap<ActorId, BTreeMap<FragmentId, Vec<ActorId>>>,
     ) {
-        let stream_node_template = fragment.stream_node.clone();
+        let stream_node_template = fragment.stream_node.to_protobuf();
 
         for PbStreamActor {
             nodes, actor_id, ..
         } in actors
         {
-            let mut template_node = stream_node_template.clone().into_inner();
+            let mut template_node = stream_node_template.clone();
             let nodes = nodes.unwrap();
             let actor_upstream_actor_ids =
                 upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
@@ -1553,7 +1570,7 @@ mod tests {
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
-            stream_node: StreamNode(stream_node),
+            stream_node: StreamNode::from_protobuf(&stream_node),
             vnode_mapping: FragmentVnodeMapping(parallel_unit_mapping.to_protobuf()),
             state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: I32Array::default(),

@@ -23,6 +23,7 @@ use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 
 use crate::dispatch_source_prop;
+use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, ConnectorProperties, ConnectorState,
@@ -44,7 +45,7 @@ impl FsSourceReader {
         columns: Vec<SourceColumnDesc>,
         connector_node_addr: Option<String>,
         parser_config: SpecificParserConfig,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         // Store the connector node address to properties for later use.
         let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
         connector_node_addr
@@ -62,7 +63,7 @@ impl FsSourceReader {
     fn get_target_columns(
         &self,
         column_ids: Vec<ColumnId>,
-    ) -> anyhow::Result<Vec<SourceColumnDesc>> {
+    ) -> ConnectorResult<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
             .map(|id| {
@@ -72,9 +73,10 @@ impl FsSourceReader {
                     .with_context(|| {
                         format!("Failed to find column id: {} in source: {:?}", id, self)
                     })
-                    .map(|col| col.clone())
+                    .cloned()
             })
             .try_collect()
+            .map_err(Into::into)
     }
 
     pub async fn to_stream(
@@ -82,7 +84,7 @@ impl FsSourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> anyhow::Result<BoxChunkSourceStream> {
+    ) -> ConnectorResult<BoxChunkSourceStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
