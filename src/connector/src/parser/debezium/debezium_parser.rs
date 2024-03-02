@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
@@ -33,6 +35,27 @@ pub struct DebeziumParser {
     payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+
+    props: DebeziumProps,
+}
+
+pub const DEBEZIUM_IGNORE_KEY: &str = "ignore_key";
+
+#[derive(Debug, Clone, Default)]
+pub struct DebeziumProps {
+    // Ignore the key part of the message.
+    // If enabled, we don't take the key part into message accessor.
+    pub ignore_key: bool,
+}
+
+impl DebeziumProps {
+    pub fn from(props: &BTreeMap<String, String>) -> Self {
+        let ignore_key = props
+            .get(DEBEZIUM_IGNORE_KEY)
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        Self { ignore_key }
+    }
 }
 
 async fn build_accessor_builder(
@@ -68,11 +91,20 @@ impl DebeziumParser {
         let key_builder = build_accessor_builder(key_config, key_type).await?;
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
+        let debezium_props = if let ProtocolProperties::Debezium(props) = props.protocol_config {
+            props
+        } else {
+            unreachable!(
+                "expecting Debezium protocol properties but got {:?}",
+                props.protocol_config
+            )
+        };
         Ok(Self {
             key_builder,
             payload_builder,
             rw_columns,
             source_ctx,
+            props: debezium_props,
         })
     }
 
@@ -82,7 +114,7 @@ impl DebeziumParser {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         Self::new(props, rw_columns, Default::default()).await
     }
@@ -94,9 +126,10 @@ impl DebeziumParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<ParseResult> {
         // tombetone messages are handled implicitly by these accessors
-        let key_accessor = match key {
-            None => None,
-            Some(data) => Some(self.key_builder.generate_accessor(data).await?),
+        let key_accessor = match (key, self.props.ignore_key) {
+            (None, false) => None,
+            (Some(data), false) => Some(self.key_builder.generate_accessor(data).await?),
+            (_, true) => None,
         };
         let payload_accessor = match payload {
             None => None,
@@ -186,7 +219,7 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         let mut source_ctx = SourceContext::default();
         source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
