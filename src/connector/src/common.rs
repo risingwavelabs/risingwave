@@ -684,3 +684,129 @@ impl NatsCommon {
         Ok(creds)
     }
 }
+
+#[serde_as]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
+pub struct MqttCommon {
+    /// Protocol used for RisingWave to communicate with Kafka brokers. Could be tcp or ssl
+    #[serde(rename = "protocol")]
+    pub protocol: Option<String>,
+    #[serde(rename = "host")]
+    pub host: String,
+    #[serde(rename = "port")]
+    pub port: Option<i32>,
+    #[serde(rename = "topic")]
+    pub topic: String,
+    #[serde(rename = "username")]
+    pub user: Option<String>,
+    #[serde(rename = "password")]
+    pub password: Option<String>,
+    #[serde(rename = "client_prefix")]
+    pub client_prefix: Option<String>,
+    #[serde(rename = "tls.ca")]
+    pub ca: Option<String>,
+    #[serde(rename = "tls.client_cert")]
+    pub client_cert: Option<String>,
+    #[serde(rename = "tls.client_key")]
+    pub client_key: Option<String>,
+}
+
+impl MqttCommon {
+    pub(crate) fn build_client(
+        &self,
+        id: u32,
+    ) -> ConnectorResult<(rumqttc::v5::AsyncClient, rumqttc::v5::EventLoop)> {
+        let ssl = self
+            .protocol
+            .as_ref()
+            .map(|p| p == "ssl")
+            .unwrap_or_default();
+
+        let client_id = format!(
+            "{}_{}{}",
+            self.client_prefix.as_deref().unwrap_or("risingwave"),
+            id,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 100000,
+        );
+
+        let port = self.port.unwrap_or(if ssl { 8883 } else { 1883 }) as u16;
+
+        let mut options = rumqttc::v5::MqttOptions::new(client_id, &self.host, port);
+        if ssl {
+            let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
+            if let Some(ca) = &self.ca {
+                let certificates = load_certs(ca)?;
+                for cert in certificates {
+                    root_cert_store.add(&cert).unwrap();
+                }
+            } else {
+                for cert in
+                    rustls_native_certs::load_native_certs().expect("could not load platform certs")
+                {
+                    root_cert_store
+                        .add(&tokio_rustls::rustls::Certificate(cert.0))
+                        .unwrap();
+                }
+            }
+
+            let builder = tokio_rustls::rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(root_cert_store);
+
+            let tls_config = if let (Some(client_cert), Some(client_key)) =
+                (self.client_cert.as_ref(), self.client_key.as_ref())
+            {
+                let certs = load_certs(client_cert)?;
+                let key = load_private_key(client_key)?;
+
+                builder.with_client_auth_cert(certs, key)?
+            } else {
+                builder.with_no_client_auth()
+            };
+
+            options.set_transport(rumqttc::Transport::tls_with_config(
+                rumqttc::TlsConfiguration::Rustls(std::sync::Arc::new(tls_config)),
+            ));
+        }
+
+        if let Some(user) = &self.user {
+            options.set_credentials(user, self.password.as_deref().unwrap_or_default());
+        }
+
+        Ok(rumqttc::v5::AsyncClient::new(options, 10))
+    }
+}
+
+fn load_certs(certificates: &str) -> ConnectorResult<Vec<tokio_rustls::rustls::Certificate>> {
+    let cert_bytes = if let Some(path) = certificates.strip_prefix("fs://") {
+        std::fs::read_to_string(path).map(|cert| cert.as_bytes().to_owned())?
+    } else {
+        certificates.as_bytes().to_owned()
+    };
+
+    let certs = rustls_pemfile::certs(&mut cert_bytes.as_slice())?;
+
+    Ok(certs
+        .into_iter()
+        .map(tokio_rustls::rustls::Certificate)
+        .collect())
+}
+
+fn load_private_key(certificate: &str) -> ConnectorResult<tokio_rustls::rustls::PrivateKey> {
+    let cert_bytes = if let Some(path) = certificate.strip_prefix("fs://") {
+        std::fs::read_to_string(path).map(|cert| cert.as_bytes().to_owned())?
+    } else {
+        certificate.as_bytes().to_owned()
+    };
+
+    let certs = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())?;
+    let cert = certs
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("No private key found"))?;
+    Ok(tokio_rustls::rustls::PrivateKey(cert))
+}

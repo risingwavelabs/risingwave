@@ -255,6 +255,42 @@ KinesisProperties:
     field_type: String
     required: false
     alias: kinesis.assumerole.external_id
+MqttProperties:
+  fields:
+  - name: protocol
+    field_type: String
+    comments: Protocol used for RisingWave to communicate with Kafka brokers. Could be tcp or ssl
+    required: false
+  - name: host
+    field_type: String
+    required: true
+  - name: port
+    field_type: i32
+    required: false
+  - name: topic
+    field_type: String
+    required: true
+  - name: username
+    field_type: String
+    required: false
+  - name: password
+    field_type: String
+    required: false
+  - name: client_prefix
+    field_type: String
+    required: false
+  - name: tls.ca
+    field_type: String
+    required: false
+  - name: tls.client_cert
+    field_type: String
+    required: false
+  - name: tls.client_key
+    field_type: String
+    required: false
+  - name: qos
+    field_type: i32
+    required: false
 NatsProperties:
   fields:
   - name: server_url
