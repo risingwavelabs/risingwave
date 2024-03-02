@@ -1862,11 +1862,6 @@ impl ScaleController {
                                         *downstream_fragment_id,
                                         dispatcher.dispatcher_id as FragmentId
                                     );
-                                } else {
-                                    tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
-                                        downstream_actor_id
-                                    );
                                 }
 
                                 no_shuffle_target_fragment_ids
