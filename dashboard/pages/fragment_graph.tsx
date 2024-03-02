@@ -197,15 +197,8 @@ export default function Streaming() {
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
-  // used to get the data source
-  const [backPressureDataSource, setBackPressureDataSource] =
-    useState("Embedded")
 
-  const { response: promethusMetrics } = useFetch(
-    fetchPrometheusBackPressure,
-    INTERVAL,
-    backPressureDataSource === "Prometheus"
-  )
+  const toast = useErrorToast()
 
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
@@ -232,35 +225,6 @@ export default function Streaming() {
       }
     }
   }, [relationId, relationList, setRelationId])
-
-  // get embedded back pressure rate from meta node
-  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] = useState<EmbeddedBackPressureInfo>()
-  const toast = useErrorToast()
-
-  useEffect(() => {
-    if (backPressureDataSource === "Embedded") {
-      console.log("Start polling embedded back-pressure metrics")
-      const interval = setInterval(() => {
-        const fetchNewBP = async () => {
-          const newBP = await fetchEmbeddedBackPressure()
-          console.log(newBP)
-          setEmbeddedBackPressureInfo((prev) => prev ? {
-            previous: prev.current,
-            current: newBP,
-          } : {
-            previous: newBP, // Use current value to show zero rate, but it's fine
-            current: newBP,
-          })
-        }
-
-        fetchNewBP().catch(console.error)
-      }, INTERVAL)
-      return () => {
-        console.log("Stop polling embedded back-pressure metrics")
-        clearInterval(interval);
-      }
-    }
-  }, [backPressureDataSource])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -324,6 +288,41 @@ export default function Streaming() {
 
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
+
+  const [backPressureDataSource, setBackPressureDataSource] = useState("Embedded")
+
+  // Periodically fetch Prometheus back-pressure from Meta node
+  const { response: promethusMetrics } = useFetch(
+    fetchPrometheusBackPressure,
+    INTERVAL,
+    backPressureDataSource === "Prometheus"
+  )
+
+  // Periodically fetch embedded back-pressure from Meta node
+  // Didn't call `useFetch()` because the `setState` way is special.
+  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] = useState<EmbeddedBackPressureInfo>()
+  useEffect(() => {
+    if (backPressureDataSource === "Embedded") {
+      const interval = setInterval(() => {
+        fetchEmbeddedBackPressure().then((newBP) => {
+          console.log(newBP)
+          setEmbeddedBackPressureInfo((prev) => prev ? {
+            previous: prev.current,
+            current: newBP,
+          } : {
+            previous: newBP, // Use current value to show zero rate, but it's fine
+            current: newBP,
+          })
+        }, (e) => {
+          console.error(e)
+          toast(e, "error")
+        })
+      }, INTERVAL)
+      return () => {
+        clearInterval(interval);
+      }
+    }
+  }, [backPressureDataSource])
 
   const backPressures = useMemo(() => {
     if (promethusMetrics || embeddedBackPressureInfo) {
