@@ -311,13 +311,13 @@ export default function Streaming() {
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
-                    previous: prev.current,
-                    current: newBP,
-                  }
+                  previous: prev.current,
+                  current: newBP,
+                }
                 : {
-                    previous: newBP, // Use current value to show zero rate, but it's fine
-                    current: newBP,
-                  }
+                  previous: newBP, // Use current value to show zero rate, but it's fine
+                  current: newBP,
+                }
             )
           },
           (e) => {
@@ -353,12 +353,11 @@ export default function Streaming() {
             m.sample[0].value
           )
         }
-      } else if (backPressureDataSource !== "Embedded" && promethusMetrics) {
+      } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
         for (const m of promethusMetrics.outputBufferBlockingDuration) {
-          const value = average(m.sample) * 100
           map.set(
             `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-            value
+            m.sample[0].value * 100
           )
         }
       }
@@ -441,12 +440,14 @@ export default function Streaming() {
               onChange={(event) =>
                 setBackPressureDataSource(event.target.value)
               }
+              defaultValue="Embedded"
             >
-              {backPressureDataSources.map((algo) => (
-                <option value={algo} key={algo}>
-                  {algo}
-                </option>
-              ))}
+              <option value="Embedded" key="Embedded">
+                Embedded (5 secs)
+              </option>
+              <option value="Prometheus" key="Prometheus">
+                Prometheus (1 min)
+              </option>
             </Select>
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
