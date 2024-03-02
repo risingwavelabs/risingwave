@@ -184,6 +184,13 @@ const backPressureDataSources: BackPressureDataSource[] = [
   "Prometheus",
 ]
 
+// The state of the embedded back pressure metrics.
+// The metrics from previous fetch are stored here to calculate the rate.
+interface EmbeddedBackPressureInfo {
+  previous: BackPressureInfo[]
+  current: BackPressureInfo[]
+}
+
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
@@ -227,42 +234,33 @@ export default function Streaming() {
   }, [relationId, relationList, setRelationId])
 
   // get embedded back pressure rate from meta node
-  const [embeddedMetrics, setBackPressuresMetrics] =
-    useState<BackPressuresMetrics>()
-  const [previousBP, setPreviousBP] = useState<BackPressureInfo[]>([])
-  const [currentBP, setCurrentBP] = useState<BackPressureInfo[]>([])
+  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] = useState<EmbeddedBackPressureInfo>()
   const toast = useErrorToast()
 
   useEffect(() => {
     if (backPressureDataSource === "Embedded") {
-      const task = setInterval(() => {
-        console.log("Start polling embedded back-pressure metrics")
+      console.log("Start polling embedded back-pressure metrics")
+      const interval = setInterval(() => {
         const fetchNewBP = async () => {
           const newBP = await fetchEmbeddedBackPressure()
           console.log(newBP)
-          setPreviousBP(currentBP)
-          setCurrentBP(newBP)
+          setEmbeddedBackPressureInfo((prev) => prev ? {
+            previous: prev.current,
+            current: newBP,
+          } : {
+            previous: newBP, // Use current value to show zero rate, but it's fine
+            current: newBP,
+          })
         }
 
         fetchNewBP().catch(console.error)
       }, INTERVAL)
       return () => {
-        clearInterval(task);
         console.log("Stop polling embedded back-pressure metrics")
+        clearInterval(interval);
       }
     }
-  }, [currentBP, backPressureDataSource])
-
-  useEffect(() => {
-    if (currentBP !== null && previousBP !== null) {
-      const metrics = calculateBPRate(currentBP, previousBP, INTERVAL)
-      metrics.outputBufferBlockingDuration = sortBy(
-        metrics.outputBufferBlockingDuration,
-        (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)
-      )
-      setBackPressuresMetrics(metrics)
-    }
-  }, [currentBP, previousBP])
+  }, [backPressureDataSource])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -328,14 +326,20 @@ export default function Streaming() {
   }
 
   const backPressures = useMemo(() => {
-    if (promethusMetrics || embeddedMetrics) {
+    if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
       if (
         backPressureDataSource === "Embedded" &&
-        embeddedMetrics
+        embeddedBackPressureInfo
       ) {
-        for (const m of embeddedMetrics.outputBufferBlockingDuration) {
+        const metrics = calculateBPRate(embeddedBackPressureInfo.current, embeddedBackPressureInfo.previous, INTERVAL)
+        // why sorting?
+        metrics.outputBufferBlockingDuration = sortBy(
+          metrics.outputBufferBlockingDuration,
+          (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)
+        )
+        for (const m of metrics.outputBufferBlockingDuration) {
           map.set(
             `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
             m.sample[0].value
@@ -358,7 +362,7 @@ export default function Streaming() {
   }, [
     backPressureDataSource,
     promethusMetrics,
-    embeddedMetrics,
+    embeddedBackPressureInfo,
   ])
 
   const retVal = (
