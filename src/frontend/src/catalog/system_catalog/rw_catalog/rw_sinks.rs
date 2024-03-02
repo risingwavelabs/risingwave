@@ -76,3 +76,48 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
         })
         .collect())
 }
+
+#[system_catalog(
+    view,
+    "rw_catalog.rw_sink_decouple",
+    "WITH decoupled_sink_internal_table_ids AS (
+        SELECT
+            distinct (node->'sink'->'table'->'id')::int as internal_table_id
+        FROM rw_catalog.rw_actor_infos actor
+            JOIN
+                rw_catalog.rw_fragments fragment
+            ON actor.fragment_id = fragment.fragment_id
+        WHERE
+            'SINK' = any(flags)
+            AND
+            (node->'sink'->'logStoreType')::string = '\"SINK_LOG_STORE_TYPE_KV_LOG_STORE\"'
+    ),
+    internal_table_vnode_count AS (
+        SELECT
+            internal_table_id, count(*)::int as watermark_vnode_count
+        FROM decoupled_sink_internal_table_ids
+            LEFT JOIN
+                rw_catalog.rw_hummock_table_watermark
+            ON decoupled_sink_internal_table_ids.internal_table_id = rw_catalog.rw_hummock_table_watermark.table_id
+        GROUP BY internal_table_id
+    )
+    SELECT
+        rw_catalog.rw_sinks.id as sink_id,
+        (watermark_vnode_count is not null) as is_decouple,
+        watermark_vnode_count
+    FROM rw_catalog.rw_sinks
+        LEFT JOIN
+            (rw_catalog.rw_fragments
+                JOIN
+                    internal_table_vnode_count
+                ON internal_table_id = any(state_table_ids)
+            )
+        ON table_id = rw_catalog.rw_sinks.id
+    "
+)]
+#[derive(Fields)]
+struct RwSinkDecouple {
+    sink_id: i32,
+    is_decouple: bool,
+    watermark_vnode_count: i32,
+}

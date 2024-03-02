@@ -70,7 +70,6 @@ pub enum Components {
     BuildConnectorNode,
     Dashboard,
     Release,
-    AllInOne,
     Sanitizer,
     DynamicLinking,
     HummockTrace,
@@ -92,7 +91,6 @@ impl Components {
             Self::Dashboard => "[Build] Dashboard",
             Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
-            Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
             Self::HummockTrace => "[Build] Hummock Trace",
@@ -148,12 +146,6 @@ you download Grafana Tempo."
             Self::Release => {
                 "
 Build RisingWave in release mode"
-            }
-            Self::AllInOne => {
-                "
-With this option enabled, RiseDev will help you create
-symlinks to `risingwave` all-in-one binary, so as to build
-and use `risingwave` in all-in-one mode."
             }
             Self::Sanitizer => {
                 "
@@ -212,7 +204,6 @@ As a result, RisingWave will dump the core on panics.
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_DYNAMIC_LINKING" => Some(Self::DynamicLinking),
-            "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
@@ -234,7 +225,6 @@ As a result, RisingWave will dump the core on panics.
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
-            Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",

@@ -931,7 +931,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
-        unimplemented!()
+        Ok(HummockVersion::default())
     }
 
     async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {
