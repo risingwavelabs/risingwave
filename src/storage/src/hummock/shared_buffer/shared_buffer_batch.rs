@@ -218,7 +218,7 @@ impl SharedBufferBatch {
                 None,
             )),
             table_id,
-            instance_id: LocalInstanceId::default(),
+            instance_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
     }
 
