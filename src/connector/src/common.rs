@@ -736,6 +736,7 @@ impl MqttCommon {
         let port = self.port.unwrap_or(if ssl { 8883 } else { 1883 }) as u16;
 
         let mut options = rumqttc::v5::MqttOptions::new(client_id, &self.host, port);
+        options.set_keep_alive(std::time::Duration::from_secs(10));
         if ssl {
             let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
             if let Some(ca) = &self.ca {

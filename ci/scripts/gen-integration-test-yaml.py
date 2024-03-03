@@ -35,7 +35,7 @@ CASES_MAP = {
     'mindsdb': ['json'],
     'vector': ['json'],
     'nats': ['json'],
-    'mqtt-source': ['json'],
+    'mqtt': ['json'],
     'doris-sink': ['json'],
     'starrocks-sink': ['json'],
     'deltalake-sink': ['json'],

@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
-use rumqttc::v5::{Event, Incoming};
+use rumqttc::v5::{ConnectionError, Event, Incoming};
 
 use super::message::MqttMessage;
 use super::MqttSplit;
@@ -32,6 +31,9 @@ use crate::source::{
 
 pub struct MqttSplitReader {
     eventloop: rumqttc::v5::EventLoop,
+    client: rumqttc::v5::AsyncClient,
+    qos: QoS,
+    splits: Vec<MqttSplit>,
     properties: MqttProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -53,27 +55,27 @@ impl SplitReader for MqttSplitReader {
             .common
             .build_client(source_ctx.actor_id, source_ctx.fragment_id)?;
 
-        let qos = if let Some(qos) = properties.qos {
-            match qos {
-                0 => QoS::AtMostOnce,
-                1 => QoS::AtLeastOnce,
-                2 => QoS::ExactlyOnce,
-                _ => bail!("Invalid QoS level: {}", qos),
-            }
-        } else {
-            QoS::AtLeastOnce
+        let qos = match properties.qos {
+            0 => QoS::AtMostOnce,
+            1 => QoS::AtLeastOnce,
+            2 => QoS::ExactlyOnce,
+            _ => bail!("Invalid QoS level: {}", properties.qos),
         };
 
         client
             .subscribe_many(
                 splits
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|split| Filter::new(split.topic, qos)),
             )
             .await?;
 
         Ok(Self {
             eventloop,
+            client,
+            qos,
+            splits,
             properties,
             parser_config,
             source_ctx,
@@ -91,6 +93,9 @@ impl CommonSplitReader for MqttSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let mut eventloop = self.eventloop;
+        let client = self.client;
+        let qos = self.qos;
+        let splits = self.splits;
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
@@ -98,7 +103,20 @@ impl CommonSplitReader for MqttSplitReader {
                     yield vec![SourceMessage::from(msg)];
                 }
                 Ok(_) => (),
-                Err(e) => Err(e).context("Error getting data from the event loop")?,
+                Err(e) => {
+                    if let ConnectionError::Timeout(_) = e {
+                        continue;
+                    }
+                    tracing::error!("[Reader] Failed to poll mqtt eventloop: {}", e);
+                    client
+                        .subscribe_many(
+                            splits
+                                .iter()
+                                .cloned()
+                                .map(|split| Filter::new(split.topic, qos)),
+                        )
+                        .await?;
+                }
             }
         }
     }

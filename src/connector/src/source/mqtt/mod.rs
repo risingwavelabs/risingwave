@@ -22,6 +22,7 @@ use serde::Deserialize;
 use with_options::WithOptions;
 
 use crate::common::MqttCommon;
+use crate::deserialize_u32_from_string;
 use crate::source::mqtt::enumerator::MqttSplitEnumerator;
 use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;
@@ -34,7 +35,8 @@ pub struct MqttProperties {
     pub common: MqttCommon,
 
     // 0 - AtLeastOnce, 1 - AtMostOnce, 2 - ExactlyOnce
-    pub qos: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_u32_from_string")]
+    pub qos: u32,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
