@@ -18,6 +18,7 @@ use risingwave_common::bail;
 use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
+use thiserror_ext::AsReport;
 
 use super::message::MqttMessage;
 use super::MqttSplit;
@@ -107,7 +108,7 @@ impl CommonSplitReader for MqttSplitReader {
                     if let ConnectionError::Timeout(_) = e {
                         continue;
                     }
-                    tracing::error!("[Reader] Failed to poll mqtt eventloop: {}", e);
+                    tracing::error!("[Reader] Failed to poll mqtt eventloop: {}", e.as_report());
                     client
                         .subscribe_many(
                             splits

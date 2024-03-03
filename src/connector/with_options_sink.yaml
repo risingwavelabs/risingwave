@@ -350,7 +350,7 @@ KinesisSinkConfig:
     field_type: String
     required: false
     alias: kinesis.assumerole.external_id
-MqttCommon:
+MqttConfig:
   fields:
   - name: protocol
     field_type: String
@@ -383,6 +383,17 @@ MqttCommon:
   - name: tls.client_key
     field_type: String
     required: false
+  - name: qos
+    field_type: u32
+    required: false
+    default: Default::default
+  - name: retain
+    field_type: bool
+    required: false
+    default: Default::default
+  - name: r#type
+    field_type: String
+    required: true
 NatsConfig:
   fields:
   - name: server_url

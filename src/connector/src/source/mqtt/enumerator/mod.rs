@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use risingwave_common::bail;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use rumqttc::Outgoing;
+use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 
 use super::source::MqttSplit;
@@ -93,7 +94,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
                         tracing::error!(
                             "[Enumerator] Failed to subscribe to topic {}: {}",
                             topic,
-                            err
+                            err.as_report(),
                         );
                         connected_clone.store(false, std::sync::atomic::Ordering::Relaxed);
                         cloned_client

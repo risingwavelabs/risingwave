@@ -9,7 +9,8 @@ CREATE TABLE mqtt_source_table
 WITH (
     connector='mqtt',
     host='mqtt-server',
-    topic= 'test'
+    topic= 'test',
+    qos = '1'
 ) FORMAT PLAIN ENCODE JSON;
 
 
@@ -23,7 +24,7 @@ WITH
     topic= 'test',
     type = 'append-only',
     force_append_only='true',
-    retain = 'true',
+    retain = 'false',
     qos = '1'
   );
 
@@ -38,6 +39,5 @@ VALUES
   (6, 'Clover'),
   (7, 'Posey'),
   (8, 'Waverly');
-
 
 FLUSH;

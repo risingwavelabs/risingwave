@@ -778,7 +778,7 @@ impl MqttCommon {
             options.set_credentials(user, self.password.as_deref().unwrap_or_default());
         }
 
-        Ok(rumqttc::v5::AsyncClient::new(options, 10))
+        Ok(rumqttc::v5::AsyncClient::new(options, 100))
     }
 }
 

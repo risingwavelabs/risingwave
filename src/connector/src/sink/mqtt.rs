@@ -23,6 +23,7 @@ use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 use with_options::WithOptions;
@@ -122,9 +123,11 @@ impl Sink for MqttSink {
                 "Nats sink only support append-only mode"
             )));
         }
+
         let _client = (self.config.common.build_client(0))
             .context("validate mqtt sink error")
             .map_err(SinkError::Mqtt)?;
+
         Ok(())
     }
 
@@ -171,11 +174,17 @@ impl MqttSinkWriter {
 
                         if let ConnectionError::MqttState(rumqttc::v5::StateError::Io(err)) = err {
                             if err.kind() != std::io::ErrorKind::ConnectionAborted {
-                                tracing::error!("[Sink] Failed to poll mqtt eventloop: {}", err);
+                                tracing::error!(
+                                    "[Sink] Failed to poll mqtt eventloop: {}",
+                                    err.as_report()
+                                );
                                 std::thread::sleep(std::time::Duration::from_secs(1));
                             }
                         } else {
-                            tracing::error!("[Sink] Failed to poll mqtt eventloop: {}", err);
+                            tracing::error!(
+                                "[Sink] Failed to poll mqtt eventloop: {}",
+                                err.as_report()
+                            );
                             std::thread::sleep(std::time::Duration::from_secs(1));
                         }
                     }

@@ -289,8 +289,9 @@ MqttProperties:
     field_type: String
     required: false
   - name: qos
-    field_type: i32
+    field_type: u32
     required: false
+    default: Default::default
 NatsProperties:
   fields:
   - name: server_url
