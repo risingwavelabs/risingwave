@@ -15,16 +15,14 @@
 use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::future::{poll_fn, Future};
+use std::future::pending;
 use std::mem::{replace, take};
 use std::sync::Arc;
-use std::task::{ready, Poll};
 use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use fail::fail_point;
-use futures::FutureExt;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
@@ -198,6 +196,7 @@ pub struct GlobalBarrierManager {
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
+    /// Key is the prev_epoch.
     command_ctx_queue: BTreeMap<u64, EpochNode>,
 
     /// Command that has been collected but is still completing.
@@ -406,7 +405,7 @@ enum CompletingCommand {
         // The join handle of a spawned task that completes the barrier.
         // The return value indicate whether there is some create streaming job command
         // that has finished but not checkpointed. If there is any, we will force checkpoint on the next barrier
-        join_handle: JoinHandle<MetaResult<bool>>,
+        join_handle: JoinHandle<MetaResult<BarrierCompleteOutput>>,
     },
     Err(MetaError),
 }
@@ -666,11 +665,11 @@ impl GlobalBarrierManager {
                 }
                 complete_result = self.checkpoint_control.next_completed_barrier() => {
                     match complete_result {
-                        Ok((command_context, remaining)) => {
+                        Ok(output) => {
                             // If there are remaining commands (that requires checkpoint to finish), we force
                             // the next barrier to be a checkpoint.
-                            if remaining {
-                                assert_matches!(command_context.kind, BarrierKind::Barrier);
+                            if output.require_next_checkpoint {
+                                assert_matches!(output.command_ctx.kind, BarrierKind::Barrier);
                                 self.scheduled_barriers.force_checkpoint_in_next_barrier();
                             }
                         }
@@ -778,7 +777,7 @@ impl GlobalBarrierManager {
 
 impl GlobalBarrierManagerContext {
     /// Try to commit this node. If err, returns
-    async fn complete_barrier(self, node: EpochNode) -> MetaResult<bool> {
+    async fn complete_barrier(self, node: EpochNode) -> MetaResult<BarrierCompleteOutput> {
         let EpochNode {
             command_ctx,
             mut notifiers,
@@ -798,13 +797,16 @@ impl GlobalBarrierManagerContext {
         notifiers.iter_mut().for_each(|notifier| {
             notifier.notify_collected();
         });
-        let result = self
+        let has_remaining = self
             .update_tracking_jobs(notifiers, command_ctx.clone(), create_mview_progress)
-            .await;
+            .await?;
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
         wait_commit_timer.observe_duration();
-        result
+        Ok(BarrierCompleteOutput {
+            command_ctx,
+            require_next_checkpoint: has_remaining,
+        })
     }
 
     async fn update_snapshot(
@@ -940,10 +942,13 @@ impl GlobalBarrierManagerContext {
     }
 }
 
+struct BarrierCompleteOutput {
+    command_ctx: Arc<CommandContext>,
+    require_next_checkpoint: bool,
+}
+
 impl CheckpointControl {
-    pub(super) fn next_completed_barrier(
-        &mut self,
-    ) -> impl Future<Output = MetaResult<(Arc<CommandContext>, bool)>> + '_ {
+    pub(super) async fn next_completed_barrier(&mut self) -> MetaResult<BarrierCompleteOutput> {
         if matches!(&self.completing_command, CompletingCommand::None) {
             // If there is no completing barrier, try to start completing the earliest barrier if
             // it has been collected.
@@ -965,30 +970,24 @@ impl CheckpointControl {
             }
         }
 
-        poll_fn(|cx| {
-            if let CompletingCommand::Completing {
-                join_handle,
-                command_ctx,
-            } = &mut self.completing_command
-            {
-                let join_result = ready!(join_handle.poll_unpin(cx))
-                    .map_err(|e| {
-                        anyhow!("failed to join completing command: {:?}", e.as_report()).into()
-                    })
-                    .and_then(|result| result);
-                let command_ctx = command_ctx.clone();
-                if let Err(e) = &join_result {
-                    self.completing_command = CompletingCommand::Err(e.clone());
-                } else {
-                    self.completing_command = CompletingCommand::None;
-                }
-                let result = join_result.map(move |has_remaining| (command_ctx, has_remaining));
-
-                Poll::Ready(result)
+        if let CompletingCommand::Completing { join_handle, .. } = &mut self.completing_command {
+            let join_result = join_handle
+                .await
+                .map_err(|e| {
+                    anyhow!("failed to join completing command: {:?}", e.as_report()).into()
+                })
+                .and_then(|result| result);
+            // It's important to reset the completing_command after await no matter the result is err
+            // or not, and otherwise the join handle will be polled again after ready.
+            if let Err(e) = &join_result {
+                self.completing_command = CompletingCommand::Err(e.clone());
             } else {
-                Poll::Pending
+                self.completing_command = CompletingCommand::None;
             }
-        })
+            join_result
+        } else {
+            pending().await
+        }
     }
 }
 
