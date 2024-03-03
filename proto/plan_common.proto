@@ -185,6 +185,7 @@ message Cardinality {
 // Provide statement-local context, e.g. session info like time zone, for execution.
 message ExprContext {
   string time_zone = 1;
+  uint32 fragment_id = 2;
 }
 
 message AdditionalColumnKey {}

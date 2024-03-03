@@ -20,16 +20,23 @@ use risingwave_pb::plan_common::ExprContext;
 // For all execution mode.
 define_context! {
     pub TIME_ZONE: String,
+    pub FRAGMENT_ID: u32,
 }
 
 pub fn capture_expr_context() -> ExprResult<ExprContext> {
     let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
-    Ok(ExprContext { time_zone })
+    let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or_else(|_| 0);
+    Ok(ExprContext {
+        time_zone,
+        fragment_id,
+    })
 }
 
 pub async fn expr_context_scope<Fut>(expr_context: ExprContext, future: Fut) -> Fut::Output
 where
     Fut: Future,
 {
+    let future =
+        async move { FRAGMENT_ID::scope(expr_context.fragment_id.to_owned(), future).await };
     TIME_ZONE::scope(expr_context.time_zone.to_owned(), future).await
 }

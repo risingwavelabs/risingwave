@@ -648,6 +648,7 @@ impl StageRunner {
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
         let expr_context = ExprContext {
             time_zone: self.ctx.session().config().timezone().to_owned(),
+            ..Default::default()
         };
         // If root, we execute it locally.
         if !self.is_root_stage() {
