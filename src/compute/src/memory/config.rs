@@ -91,7 +91,7 @@ pub fn storage_memory_config(
 
     let prefetch_buffer_capacity_mb = storage_config
         .prefetch_buffer_capacity_mb
-        .unwrap_or(block_cache_capacity_mb);
+        .unwrap_or(default_block_cache_capacity_mb);
 
     if meta_cache_capacity_mb != default_meta_cache_capacity_mb {
         default_block_cache_capacity_mb += default_meta_cache_capacity_mb;
@@ -114,7 +114,7 @@ pub fn storage_memory_config(
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
         default_block_cache_capacity_mb -= shared_buffer_capacity_mb;
     }
-    let mut block_cache_capacity_mb = storage_config
+    let block_cache_capacity_mb = storage_config
         .block_cache_capacity_mb
         .unwrap_or(default_block_cache_capacity_mb);
 
@@ -177,6 +177,8 @@ pub fn storage_memory_config(
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
+        block_shard_num,
+        meta_shard_num,
     }
 }
 

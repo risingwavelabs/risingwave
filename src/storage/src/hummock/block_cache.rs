@@ -29,7 +29,6 @@ use tokio::task::JoinHandle;
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
-
 type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
 
 enum BlockEntry {
