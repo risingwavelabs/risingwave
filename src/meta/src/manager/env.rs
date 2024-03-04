@@ -93,6 +93,12 @@ pub struct MetaOpts {
     pub enable_recovery: bool,
     /// Whether to disable the auto-scaling feature.
     pub disable_automatic_parallelism_control: bool,
+    /// The number of streaming jobs per scaling operation.
+    pub parallelism_control_batch_size: usize,
+    /// The period of parallelism control trigger.
+    pub parallelism_control_trigger_period_sec: u64,
+    /// The first delay of parallelism control.
+    pub parallelism_control_trigger_first_delay_sec: u64,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -221,6 +227,7 @@ impl MetaOpts {
         Self {
             enable_recovery,
             disable_automatic_parallelism_control: false,
+            parallelism_control_batch_size: 1,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
