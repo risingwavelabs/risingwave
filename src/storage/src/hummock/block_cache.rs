@@ -29,7 +29,6 @@ use tokio::task::JoinHandle;
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
 
 type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
 
@@ -114,19 +113,19 @@ impl BlockResponse {
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize, max_shard_bits: usize, high_priority_ratio: usize) -> Self {
-        Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
+    pub fn new(capacity: usize, block_shard_num: usize, high_priority_ratio: usize) -> Self {
+        Self::new_inner(capacity, block_shard_num, high_priority_ratio, None)
     }
 
     pub fn with_event_listener(
         capacity: usize,
-        max_shard_bits: usize,
+        block_shard_num: usize,
         high_priority_ratio: usize,
         listener: BlockCacheEventListener,
     ) -> Self {
         Self::new_inner(
             capacity,
-            max_shard_bits,
+            block_shard_num,
             high_priority_ratio,
             Some(listener),
         )
@@ -134,25 +133,22 @@ impl BlockCache {
 
     fn new_inner(
         capacity: usize,
-        mut max_shard_bits: usize,
+        block_shard_num: usize,
         high_priority_ratio: usize,
         listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-            max_shard_bits -= 1;
-        }
 
         let cache = match listener {
             Some(listener) => LruCache::with_event_listener(
-                max_shard_bits,
+                block_shard_num,
                 capacity,
                 high_priority_ratio,
                 listener,
             ),
-            None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
+            None => LruCache::new(block_shard_num, capacity, high_priority_ratio),
         };
 
         Self {

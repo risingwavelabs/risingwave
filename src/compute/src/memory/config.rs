@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
+use risingwave_common::config::{
+    StorageConfig, StorageMemoryConfig, MAX_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS,
+    MIN_BUFFER_SIZE_PER_SHARD,
+};
 use risingwave_common::util::pretty_bytes::convert;
 
 /// The minimal memory requirement of computing tasks in megabytes.
@@ -30,6 +33,7 @@ const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
 const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
+const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 1024;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
@@ -65,24 +69,23 @@ pub fn storage_memory_config(
     } else {
         (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)
     };
-    let mut block_cache_capacity_mb = storage_config.block_cache_capacity_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64
-            * storage_memory_proportion
-            * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION)
-            .ceil() as usize)
-            >> 20,
-    );
+    let mut default_block_cache_capacity_mb = ((non_reserved_memory_bytes as f64
+        * storage_memory_proportion
+        * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION)
+        .ceil() as usize)
+        >> 20;
     let high_priority_ratio_in_percent = storage_config
         .high_priority_ratio_in_percent
         .unwrap_or(STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO);
-    let default_meta_cache_capacity = (non_reserved_memory_bytes as f64
+    let default_meta_cache_capacity_mb = ((non_reserved_memory_bytes as f64
         * storage_memory_proportion
         * STORAGE_META_CACHE_MEMORY_PROPORTION)
-        .ceil() as usize;
+        .ceil() as usize)
+        >> 20;
     let meta_cache_capacity_mb = storage_config
         .meta_cache_capacity_mb
         .unwrap_or(std::cmp::min(
-            default_meta_cache_capacity >> 20,
+            default_meta_cache_capacity_mb,
             STORAGE_META_CACHE_MAX_MEMORY_MB,
         ));
 
@@ -90,16 +93,30 @@ pub fn storage_memory_config(
         .prefetch_buffer_capacity_mb
         .unwrap_or(block_cache_capacity_mb);
 
-    if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
-        block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
+    if meta_cache_capacity_mb != default_meta_cache_capacity_mb {
+        default_block_cache_capacity_mb += default_meta_cache_capacity_mb;
+        default_block_cache_capacity_mb -= meta_cache_capacity_mb;
     }
-    let shared_buffer_capacity_mb = storage_config.shared_buffer_capacity_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64
-            * storage_memory_proportion
-            * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
-            .ceil() as usize)
-            >> 20,
-    );
+
+    let default_shared_buffer_capacity_mb = ((non_reserved_memory_bytes as f64
+        * storage_memory_proportion
+        * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
+        .ceil() as usize)
+        >> 20;
+    let shared_buffer_capacity_mb =
+        storage_config
+            .shared_buffer_capacity_mb
+            .unwrap_or(std::cmp::min(
+                default_shared_buffer_capacity_mb,
+                STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
+            ));
+    if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
+        default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
+        default_block_cache_capacity_mb -= shared_buffer_capacity_mb;
+    }
+    let mut block_cache_capacity_mb = storage_config
+        .block_cache_capacity_mb
+        .unwrap_or(default_block_cache_capacity_mb);
 
     let data_file_cache_ring_buffer_capacity_mb = if storage_config.data_file_cache.dir.is_empty() {
         0
@@ -134,6 +151,22 @@ pub fn storage_memory_config(
             convert((soft_limit_mb << 20) as _)
         );
     }
+
+    let meta_shard_num = storage_config.meta_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (meta_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        1 << shard_bits
+    });
+    let block_shard_num = storage_config.block_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_CACHE_SHARD_BITS;
+        while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0
+        {
+            shard_bits -= 1;
+        }
+        1 << shard_bits
+    });
 
     StorageMemoryConfig {
         block_cache_capacity_mb,

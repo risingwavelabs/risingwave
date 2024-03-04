@@ -68,6 +68,8 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         high_priority_ratio: 0,
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
+        meta_shard_num: 2,
+        block_shard_num: 2,
         data_file_cache: FileCache::none(),
         meta_file_cache: FileCache::none(),
         recent_filter: None,

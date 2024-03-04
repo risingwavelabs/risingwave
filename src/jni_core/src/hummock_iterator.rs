@@ -76,6 +76,8 @@ impl HummockJavaBindingIterator {
             max_prefetch_block_number: 16,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
+            block_shard_num: 2,
+            meta_shard_num: 2,
             recent_filter: None,
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
