@@ -629,9 +629,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-udf-js"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "312f36dcda3f40902ad2a68cb4991ba35788a8f7fe155295c8ae50eaa5240e5b"
+checksum = "252b6355ad1e57eb6454b705c51652de55aa22eb018cdb95be0dbf62ee3ec78f"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -5097,12 +5097,12 @@ dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
  "arrow-arith 50.0.0",
- "arrow-array 48.0.1",
- "arrow-buffer 48.0.1",
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
  "arrow-cast 50.0.0",
  "arrow-ord 50.0.0",
  "arrow-row 50.0.0",
- "arrow-schema 48.0.1",
+ "arrow-schema 50.0.0",
  "arrow-select 50.0.0",
  "async-trait",
  "bitvec",
