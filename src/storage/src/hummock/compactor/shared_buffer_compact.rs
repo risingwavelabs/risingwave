@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -346,11 +346,17 @@ pub async fn merge_imms_in_memory(
             )
             .is_some()
         {
-            // Record kv entries
-            merged_entries.push(SharedBufferKeyEntry {
-                key: full_key_tracker.latest_user_key().table_key.clone(),
-                value_offset: values.len(),
-            });
+            let last_entry = merged_entries.last_mut().expect("non-empty");
+            if last_entry.value_offset == values.len() {
+                warn!(key = ?last_entry.key, "key has no value in imm compact. skipped");
+                last_entry.key = full_key_tracker.latest_user_key().table_key.clone();
+            } else {
+                // Record kv entries
+                merged_entries.push(SharedBufferKeyEntry {
+                    key: full_key_tracker.latest_user_key().table_key.clone(),
+                    value_offset: values.len(),
+                });
+            }
         }
         values.extend(
             key_entry
