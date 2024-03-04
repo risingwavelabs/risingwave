@@ -111,8 +111,8 @@ impl UserDefinedFunction {
             UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
-                // batch query does not have fragment_id
-                let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or_else(|_| 0);
+                // batch query does not have a fragment_id
+                let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or(0);
 
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
