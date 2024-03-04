@@ -228,6 +228,8 @@ impl MetaOpts {
             enable_recovery,
             disable_automatic_parallelism_control: false,
             parallelism_control_batch_size: 1,
+            parallelism_control_trigger_period_sec: 10,
+            parallelism_control_trigger_first_delay_sec: 30,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,

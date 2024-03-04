@@ -2677,9 +2677,11 @@ impl GlobalStreamManager {
     }
 
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
+        tracing::info!("trigger parallelism control");
+
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        match &self.metadata_manager {
+        let (schedulable_worker_ids, table_parallelisms) = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let table_parallelisms: HashMap<u32, TableParallelism> = {
                     let guard = mgr.fragment_manager.get_fragment_read_guard().await;
@@ -2709,49 +2711,7 @@ impl GlobalStreamManager {
                     .map(|worker| worker.id)
                     .collect();
 
-                let batch_size = match self.env.opts.parallelism_control_batch_size {
-                    0 => table_parallelisms.len(),
-                    n => n,
-                };
-
-                let mut reschedules = None;
-
-                let batches: Vec<_> = table_parallelisms
-                    .into_iter()
-                    .chunks(batch_size)
-                    .into_iter()
-                    .map(|chunk| chunk.collect_vec())
-                    .collect();
-
-                for batch in batches {
-                    let plan = self
-                        .scale_controller
-                        .generate_table_resize_plan(TableResizePolicy {
-                            worker_ids: schedulable_worker_ids.clone(),
-                            table_parallelisms: batch.into_iter().collect(),
-                        })
-                        .await?;
-
-                    if !plan.is_empty() {
-                        reschedules = Some(plan);
-                        break;
-                    }
-                }
-
-                let Some(reschedules) = reschedules else {
-                    return Ok(false);
-                };
-
-                self.reschedule_actors(
-                    reschedules,
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream: false,
-                    },
-                    None,
-                )
-                .await?;
-
-                return Ok(true);
+                (schedulable_worker_ids, table_parallelisms)
             }
             MetadataManager::V2(mgr) => {
                 let table_parallelisms: HashMap<_, _> = {
@@ -2791,30 +2751,67 @@ impl GlobalStreamManager {
                     .map(|worker| worker.id)
                     .collect();
 
-                let reschedules = self
-                    .scale_controller
-                    .generate_table_resize_plan(TableResizePolicy {
-                        worker_ids: schedulable_worker_ids,
-                        table_parallelisms: table_parallelisms.clone(),
-                    })
-                    .await?;
+                (schedulable_worker_ids, table_parallelisms)
+            }
+        };
 
-                if reschedules.is_empty() {
-                    return Ok(false);
-                }
+        let batch_size = match self.env.opts.parallelism_control_batch_size {
+            0 => table_parallelisms.len(),
+            n => n,
+        };
 
-                self.reschedule_actors(
-                    reschedules,
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream: false,
-                    },
-                    None,
-                )
+        tracing::info!(
+            "total {} streaming jobs, batch size {}, schedulable worker ids: {:?}",
+            table_parallelisms.len(),
+            batch_size,
+            schedulable_worker_ids
+        );
+
+        let batches: Vec<_> = table_parallelisms
+            .into_iter()
+            .chunks(batch_size)
+            .into_iter()
+            .map(|chunk| chunk.collect_vec())
+            .collect();
+
+        let mut reschedules = None;
+
+        for batch in batches {
+            let parallelisms: HashMap<_, _> = batch.into_iter().collect();
+
+            let plan = self
+                .scale_controller
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids: schedulable_worker_ids.clone(),
+                    table_parallelisms: parallelisms.clone(),
+                })
                 .await?;
+
+            if !plan.is_empty() {
+                tracing::info!(
+                    "reschedule plan generated for streaming jobs {:?}",
+                    parallelisms
+                );
+                reschedules = Some(plan);
+                break;
             }
         }
 
-        Ok(false)
+        let Some(reschedules) = reschedules else {
+            tracing::info!("no reschedule plan generated");
+            return Ok(false);
+        };
+
+        self.reschedule_actors(
+            reschedules,
+            RescheduleOptions {
+                resolve_no_shuffle_upstream: false,
+            },
+            None,
+        )
+        .await?;
+
+        Ok(true)
     }
 
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
