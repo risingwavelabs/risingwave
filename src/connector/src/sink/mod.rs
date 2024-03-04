@@ -33,6 +33,7 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod starrocks;
+pub mod snowflake;
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
@@ -88,6 +89,7 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { Snowflake, $crate::sink::snowflake::SnowflakeSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
@@ -515,6 +517,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("Snowflake error: {0}")]
+    Snowflake(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
