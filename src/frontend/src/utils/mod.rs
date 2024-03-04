@@ -18,6 +18,7 @@ use std::hash::{Hash, Hasher};
 
 pub use column_index_mapping::*;
 mod condition;
+pub mod redact;
 pub use condition::*;
 mod connected_components;
 pub(crate) use connected_components::*;

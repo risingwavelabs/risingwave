@@ -87,7 +87,7 @@ impl Serialize for SecretString {
     where
         S: Serializer,
     {
-        format!("{:?}", self.0).serialize(serializer)
+        "[REDACTED]".serialize(serializer)
     }
 }
 

@@ -451,8 +451,9 @@ mod tests {
 
     #[test]
     fn test_redact() {
-        use risingwave_sqlparser::ast::utils::SqlOptionVecSerializer;
         use serde::Serialize;
+
+        use crate::utils::redact::SqlOptionVecSerializer;
 
         let p = S3PropertiesCommon {
             region_name: "region".to_string(),
@@ -486,7 +487,7 @@ mod tests {
                 },
                 SqlOption {
                     name: to_object_name("s3.credentials.secret"),
-                    value: Value::SingleQuotedString("[REDACTED alloc::string::String]".into())
+                    value: Value::SingleQuotedString("[REDACTED]".into())
                 },
                 SqlOption {
                     name: to_object_name("s3.endpoint_url"),

@@ -14,10 +14,9 @@
 
 use core::fmt::{Debug, Display, Formatter};
 
+use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption, Value};
 use serde::ser::{Impossible, StdError};
 use serde::{ser, Serialize};
-
-use crate::ast::{Ident, ObjectName, SqlOption, Value};
 
 #[derive(Debug)]
 pub enum Error {
@@ -50,65 +49,65 @@ struct ValueSerializer {}
 
 impl serde::Serializer for ValueSerializer {
     type Error = Error;
-    type Ok = Value;
-    type SerializeMap = Impossible<Value, Error>;
-    type SerializeSeq = Impossible<Value, Error>;
-    type SerializeStruct = Impossible<Value, Error>;
-    type SerializeStructVariant = Impossible<Value, Error>;
-    type SerializeTuple = Impossible<Value, Error>;
-    type SerializeTupleStruct = Impossible<Value, Error>;
-    type SerializeTupleVariant = Impossible<Value, Error>;
+    type Ok = Option<Value>;
+    type SerializeMap = Impossible<Option<Value>, Error>;
+    type SerializeSeq = Impossible<Option<Value>, Error>;
+    type SerializeStruct = Impossible<Option<Value>, Error>;
+    type SerializeStructVariant = Impossible<Option<Value>, Error>;
+    type SerializeTuple = Impossible<Option<Value>, Error>;
+    type SerializeTupleStruct = Impossible<Option<Value>, Error>;
+    type SerializeTupleVariant = Impossible<Option<Value>, Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Boolean(v))
+        Ok(Some(Value::Boolean(v)))
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Number(v.to_string()))
+        Ok(Some(Value::Number(v.to_string())))
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::SingleQuotedString(v.to_string()))
+        Ok(Some(Value::SingleQuotedString(v.to_string())))
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::SingleQuotedString(v.to_string()))
+        Ok(Some(Value::SingleQuotedString(v.to_string())))
     }
 
     fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
@@ -116,7 +115,7 @@ impl serde::Serializer for ValueSerializer {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Null)
+        Ok(None)
     }
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
@@ -237,7 +236,8 @@ impl<'a> ser::SerializeMap for &'a mut SqlOptionVecSerializer {
         T: Serialize,
     {
         assert!(self.last_name.take().is_none());
-        let Value::SingleQuotedString(name) = key.serialize(ValueSerializer::default())? else {
+        let Some(Value::SingleQuotedString(name)) = key.serialize(ValueSerializer::default())?
+        else {
             return Err(Error::Message("expect key of string type".into()));
         };
         self.last_name = Some(ObjectName(vec![Ident::new_unchecked(name)]));
@@ -252,8 +252,9 @@ impl<'a> ser::SerializeMap for &'a mut SqlOptionVecSerializer {
             .last_name
             .take()
             .ok_or_else(|| Error::Message("expect name".into()))?;
-        let value = value.serialize(ValueSerializer::default())?;
-        self.output.push(SqlOption { name, value });
+        if let Some(value) = value.serialize(ValueSerializer::default())? {
+            self.output.push(SqlOption { name, value });
+        }
         Ok(())
     }
 
@@ -274,10 +275,12 @@ impl<'a> ser::SerializeStruct for &'a mut SqlOptionVecSerializer {
     where
         T: Serialize,
     {
-        let value_serializer = ValueSerializer::default();
+        let Some(value) = value.serialize(ValueSerializer::default())? else {
+            return Ok(());
+        };
         let sql_option = SqlOption {
             name: ObjectName(vec![Ident::new_unchecked(key)]),
-            value: value.serialize(value_serializer)?,
+            value,
         };
         self.output.push(sql_option);
         Ok(())
@@ -458,10 +461,10 @@ impl<'a> serde::Serializer for &'a mut SqlOptionVecSerializer {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption, Value};
     use serde::Serialize;
 
-    use crate::ast::utils::SqlOptionVecSerializer;
-    use crate::ast::{Ident, ObjectName, SqlOption, Value};
+    use crate::utils::redact::SqlOptionVecSerializer;
 
     fn to_object_name(s: &str) -> ObjectName {
         ObjectName(vec![Ident::new_unchecked(s)])
@@ -501,10 +504,6 @@ mod tests {
                 SqlOption {
                     name: to_object_name("c"),
                     value: Value::Number("1.5".into())
-                },
-                SqlOption {
-                    name: to_object_name("d"),
-                    value: Value::Null
                 },
             ]
         );
