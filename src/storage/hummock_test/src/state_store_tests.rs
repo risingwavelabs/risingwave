@@ -411,7 +411,12 @@ async fn test_state_store_sync_inner(
     hummock_storage: impl HummockStateStoreTestTrait,
     _meta_client: Arc<MockHummockMetaClient>,
 ) {
-    let mut epoch = test_epoch(hummock_storage.get_pinned_version().max_committed_epoch() + 1);
+    let mut epoch = test_epoch(
+        hummock_storage
+            .get_pinned_version()
+            .max_committed_epoch()
+            .next_epoch(),
+    );
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -726,7 +731,7 @@ async fn test_write_anytime_inner(
 ) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
 
-    let epoch1 = test_epoch(initial_epoch + 1);
+    let epoch1 = test_epoch(initial_epoch.next_epoch());
 
     let assert_old_value = |epoch: u64| {
         let hummock_storage = &hummock_storage;
@@ -1027,7 +1032,7 @@ async fn test_delete_get_inner(
     meta_client: Arc<MockHummockMetaClient>,
 ) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-    let epoch1 = test_epoch(initial_epoch + 1);
+    let epoch1 = test_epoch(initial_epoch.next_epoch());
     let batch1 = vec![
         (
             gen_key_from_str(VirtualNode::ZERO, "aa"),
@@ -1111,7 +1116,7 @@ async fn test_multiple_epoch_sync_inner(
     meta_client: Arc<MockHummockMetaClient>,
 ) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-    let epoch1 = test_epoch(initial_epoch + 1);
+    let epoch1 = test_epoch(initial_epoch.next_epoch());
     let batch1 = vec![
         (
             gen_key_from_str(VirtualNode::ZERO, "aa"),
@@ -1264,7 +1269,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         .await;
 
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
-    let epoch1 = test_epoch(initial_epoch + 1);
+    let epoch1 = test_epoch(initial_epoch.next_epoch());
     local_hummock_storage.init_for_test(epoch1).await.unwrap();
     local_hummock_storage
         .insert(

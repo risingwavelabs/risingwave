@@ -50,7 +50,7 @@ async fn test_read_version_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch / EPOCH_INC_MIN_STEP_FOR_TEST);
+        let kv_pairs = gen_dummy_batch(1);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
@@ -66,7 +66,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of((epoch / EPOCH_INC_MIN_STEP_FOR_TEST) as usize);
+        let key = iterator_test_table_key_of((1) as usize);
         let key_range = map_table_key_range((
             Bound::Included(Bytes::from(key.to_vec())),
             Bound::Included(Bytes::from(key.to_vec())),
@@ -86,9 +86,9 @@ async fn test_read_version_basic() {
 
     {
         // several epoch
-        for _ in 0..5 {
+        for i in 0..5 {
             epoch.inc_epoch();
-            let kv_pairs = gen_dummy_batch(epoch / EPOCH_INC_MIN_STEP_FOR_TEST);
+            let kv_pairs = gen_dummy_batch(i + 2);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
@@ -107,8 +107,8 @@ async fn test_read_version_basic() {
 
         let repeat_num = epoch / EPOCH_INC_MIN_STEP_FOR_TEST;
         for e in 1..repeat_num {
-            let epoch = test_epoch(e);
-            let key = iterator_test_table_key_of((epoch / EPOCH_INC_MIN_STEP_FOR_TEST) as usize);
+            let epoch = test_epoch(6);
+            let key = iterator_test_table_key_of(e as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),

@@ -1038,7 +1038,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += EPOCH_INC_MIN_STEP_FOR_TEST;
+        epoch.inc_epoch();
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1228,7 +1228,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += EPOCH_INC_MIN_STEP_FOR_TEST;
+        epoch.inc_epoch();
         // to update version for hummock_storage
         storage.wait_version(version).await;
 

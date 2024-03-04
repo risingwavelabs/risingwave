@@ -643,7 +643,6 @@ async fn test_state_store_sync() {
         ];
         for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
-            println!("result = {:?}", result);
             assert_eq!(
                 result,
                 Some((
@@ -754,7 +753,7 @@ async fn test_delete_get() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = test_epoch(initial_epoch + 1);
+    let epoch1 = test_epoch(initial_epoch.next_epoch());
 
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
@@ -841,7 +840,7 @@ async fn test_multiple_epoch_sync() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = test_epoch(initial_epoch + 1);
+    let epoch1 = test_epoch(initial_epoch.next_epoch());
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
         (
