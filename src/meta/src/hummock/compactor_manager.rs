@@ -469,6 +469,7 @@ impl CompactorManager {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
 
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -499,6 +500,7 @@ mod tests {
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
                     &mut default_compaction_selector(),
+                    &mut HashMap::default(),
                 )
                 .await
                 .unwrap()

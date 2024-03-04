@@ -22,11 +22,11 @@ use prometheus::IntGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, BranchedSstInfo,
 };
+use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
 };
-use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -48,21 +48,18 @@ pub struct LocalTableMetrics {
 pub fn get_local_table_stats(
     metrics: &MetaMetrics,
     version_stats: &HummockVersionStats,
-) -> HashMap<u32, LocalTableMetrics>{
+) -> HashMap<u32, LocalTableMetrics> {
     let mut m = HashMap::default();
-    for (table_id, _) in &version_stats.table_stats {
+    for table_id in version_stats.table_stats.keys() {
         let table_label = format!("{}", table_id);
         let stats = LocalTableMetrics {
-          total_key_count:
-          metrics
-              .version_stats
-              .with_label_values(&[&table_label, "total_key_count"]),
-            total_key_size:
-            metrics
+            total_key_count: metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_key_count"]),
+            total_key_size: metrics
                 .version_stats
                 .with_label_values(&[&table_label, "total_key_size"]),
-            total_value_size:
-            metrics
+            total_value_size: metrics
                 .version_stats
                 .with_label_values(&[&table_label, "total_value_size"]),
         };
@@ -70,7 +67,7 @@ pub fn get_local_table_stats(
     }
     m
 }
-pub fn trigger_table_stat(
+pub fn trigger_local_table_stat(
     metrics: &MetaMetrics,
     local_metrics: &mut HashMap<u32, LocalTableMetrics>,
     version_stats: &HummockVersionStats,
@@ -83,33 +80,59 @@ pub fn trigger_table_stat(
         let table_metrics = local_metrics.entry(*table_id).or_insert_with(|| {
             let table_label = format!("{}", table_id);
             LocalTableMetrics {
-                total_key_count:
-                metrics
+                total_key_count: metrics
                     .version_stats
                     .with_label_values(&[&table_label, "total_key_count"]),
-                total_key_size:
-                metrics
+                total_key_size: metrics
                     .version_stats
                     .with_label_values(&[&table_label, "total_key_size"]),
-                total_value_size:
-                metrics
+                total_value_size: metrics
                     .version_stats
                     .with_label_values(&[&table_label, "total_value_size"]),
             }
         });
         if let Some(table_stats) = version_stats.table_stats.get(table_id) {
-            table_metrics.total_key_count.set(table_stats.total_key_count);
-            table_metrics.total_value_size.set(table_stats.total_value_size);
+            table_metrics
+                .total_key_count
+                .set(table_stats.total_key_count);
+            table_metrics
+                .total_value_size
+                .set(table_stats.total_value_size);
             table_metrics.total_key_size.set(table_stats.total_key_size);
         }
     }
 }
-
-pub fn trigger_version_stat(
+pub fn trigger_table_stat(
     metrics: &MetaMetrics,
-    current_version: &HummockVersion,
     version_stats: &HummockVersionStats,
+    table_stats_change: &PbTableStatsMap,
 ) {
+    for (table_id, stats) in table_stats_change {
+        let table_label = format!("{}", table_id);
+        let stats_value =
+            std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
+        metrics
+            .table_write_throughput
+            .with_label_values(&[&table_label])
+            .inc_by(stats_value as u64);
+        if let Some(table_stats) = version_stats.table_stats.get(table_id) {
+            metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_key_count"])
+                .set(table_stats.total_key_count);
+            metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_key_size"])
+                .set(table_stats.total_key_size);
+            metrics
+                .version_stats
+                .with_label_values(&[&table_label, "total_value_size"])
+                .set(table_stats.total_value_size);
+        }
+    }
+}
+
+pub fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
@@ -118,21 +141,6 @@ pub fn trigger_version_stat(
         .set(current_version.estimated_encode_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
-    for (table_id, stats) in &version_stats.table_stats {
-        let table_id = format!("{}", table_id);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_key_count"])
-            .set(stats.total_key_count);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_key_size"])
-            .set(stats.total_key_size);
-        metrics
-            .version_stats
-            .with_label_values(&[&table_id, "total_value_size"])
-            .set(stats.total_value_size);
-    }
 }
 
 pub fn trigger_mv_stat(

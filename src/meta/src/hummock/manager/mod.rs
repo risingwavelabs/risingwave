@@ -81,7 +81,12 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{build_compact_task_level_type_metrics_label, get_local_table_stats, LocalTableMetrics, trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_table_stat, trigger_version_stat, trigger_write_stop_stats};
+use crate::hummock::metrics_utils::{
+    build_compact_task_level_type_metrics_label, get_local_table_stats, trigger_delta_log_stats,
+    trigger_local_table_stat, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_table_stat,
+    trigger_version_stat, trigger_write_stop_stats, LocalTableMetrics,
+};
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
@@ -185,7 +190,9 @@ macro_rules! read_lock {
 }
 pub(crate) use read_lock;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
-use risingwave_hummock_sdk::table_stats::{add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap};
+use risingwave_hummock_sdk::table_stats::{
+    add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
+};
 use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -1442,7 +1449,12 @@ impl HummockManager {
                 }
                 if let Some(table_stats_change) = &table_stats_change {
                     add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
-                    trigger_table_stat(&self.metrics, local_metrics, &version_stats, table_stats_change);
+                    trigger_local_table_stat(
+                        &self.metrics,
+                        local_metrics,
+                        &version_stats,
+                        table_stats_change,
+                    );
                 }
                 commit_multi_var!(
                     self.env.meta_store(),
@@ -1454,11 +1466,7 @@ impl HummockManager {
                 )?;
                 branched_ssts.commit_memory();
 
-                self.metrics
-                    .version_size
-                    .set(current_version.estimated_encode_len() as i64);
-                self.metrics.safe_epoch.set(current_version.safe_epoch as i64);
-                self.metrics.current_version_id.set(current_version.id as i64);
+                trigger_version_stat(&self.metrics, &current_version);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
@@ -1719,15 +1727,7 @@ impl HummockManager {
             VarTransaction::new(&mut versioning.version_stats)
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        for (table_id, stats) in &table_stats_change {
-            let table_id_str = table_id.to_string();
-            let stats_value =
-                std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
-            self.metrics
-                .table_write_throughput
-                .with_label_values(&[table_id_str.as_str()])
-                .inc_by(stats_value as u64);
-        }
+        trigger_table_stat(&self.metrics, &version_stats, &table_stats_change);
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
@@ -1745,11 +1745,7 @@ impl HummockManager {
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(
-            &self.metrics,
-            &versioning.current_version,
-            &versioning.version_stats,
-        );
+        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,

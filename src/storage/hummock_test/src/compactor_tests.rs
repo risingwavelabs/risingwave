@@ -15,7 +15,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
     use std::ops::Bound;
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
@@ -280,6 +280,7 @@ pub(crate) mod tests {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
+                &mut HashMap::default(),
             )
             .await
             .unwrap()
@@ -446,6 +447,7 @@ pub(crate) mod tests {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
+                &mut HashMap::default(),
             )
             .await
             .unwrap()
@@ -467,6 +469,7 @@ pub(crate) mod tests {
                     result_task.task_status(),
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
+                    &mut HashMap::default(),
                 )
                 .await
                 .unwrap();
@@ -644,6 +647,7 @@ pub(crate) mod tests {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -799,6 +803,7 @@ pub(crate) mod tests {
                 result_task.task_status(),
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -828,6 +833,7 @@ pub(crate) mod tests {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -993,6 +999,7 @@ pub(crate) mod tests {
                 result_task.task_status(),
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -1023,6 +1030,7 @@ pub(crate) mod tests {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -1181,6 +1189,7 @@ pub(crate) mod tests {
                 result_task.task_status(),
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -1212,6 +1221,7 @@ pub(crate) mod tests {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
@@ -1351,6 +1361,7 @@ pub(crate) mod tests {
                 result_task.task_status(),
                 result_task.sorted_output_ssts,
                 Some(to_prost_table_stats_map(task_stats)),
+                &mut HashMap::default(),
             )
             .await
             .unwrap();
