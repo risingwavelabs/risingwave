@@ -687,6 +687,8 @@ impl StageGraph {
                 .clone()
                 .complete(self.batch_parallelism)
                 .await?;
+            // For file source batch read, all the files  to be read are divide into several parts to prevent the task from taking up too many resources.
+            // todo(wcy-fdu): Currently it will be divided into half of batch_parallelism groups, and this will be changed to configurable later.
             let complete_stage = Arc::new(stage.clone_with_exchange_info_and_complete_source_info(
                 exchange_info,
                 complete_source_info,

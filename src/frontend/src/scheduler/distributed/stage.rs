@@ -377,6 +377,7 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
+            // todo(wcy-fdu): Currently it will be divided into half of schedule_unit_count groups, and this will be changed to configurable later.
             let chunk_size = (source_info.split_info().unwrap().len() as f32
                 / self.stage.parallelism.unwrap() as f32)
                 .ceil() as usize;

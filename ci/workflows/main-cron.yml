@@ -539,7 +539,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
-  
+
   - label: "S3_v2 source batch read on AWS (json parser)"
     key: "s3-v2-source-batch-read-check-aws-json-parser"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_batch.py json'"

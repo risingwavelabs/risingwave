@@ -353,8 +353,10 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
+                    // For file source batch read, all the files  to be read  are divide into several parts to prevent the task from taking up too many resources.
+
                     let chunk_size = (source_info.split_info().unwrap().len() as f32
-                        / (self.worker_node_manager.schedule_unit_count() / 2) as f32)
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
                         .ceil() as usize;
                     for (id, split) in source_info
                         .split_info()
