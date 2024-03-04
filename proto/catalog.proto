@@ -178,8 +178,7 @@ message Subscription {
   optional string initialized_at_cluster_version = 15;
   optional string created_at_cluster_version = 16;
 
-  string db_name = 17;
-  string subscription_from_name = 18;
+  string subscription_from_name = 17;
 }
 
 message Connection {

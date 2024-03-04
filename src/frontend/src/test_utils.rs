@@ -606,7 +606,11 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn alter_subscription_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
+    async fn alter_subscription_name(
+        &self,
+        _subscription_id: u32,
+        _subscription_name: &str,
+    ) -> Result<()> {
         unreachable!()
     }
 
@@ -762,7 +766,7 @@ impl MockCatalogWriter {
     fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(&sink);
-        self.add_table_or_subscription_id(sink.id, sink.schema_id, sink.database_id);
+        self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
         Ok(())
     }
 
@@ -773,7 +777,7 @@ impl MockCatalogWriter {
     ) -> Result<()> {
         subscription.id = self.gen_id();
         self.catalog.write().create_subscription(&subscription);
-        self.add_table_or_sink_id(
+        self.add_table_or_subscription_id(
             subscription.id,
             subscription.schema_id,
             subscription.database_id,

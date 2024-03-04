@@ -1138,7 +1138,7 @@ impl DdlController {
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
-                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Sink),
+                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Subscription),
                 };
 
                 let version = self
@@ -1950,9 +1950,9 @@ impl DdlController {
                         .alter_database_name(database_id, new_name)
                         .await
                 }
-                alter_name_request::Object::SubscriptionId(sink_id) => {
+                alter_name_request::Object::SubscriptionId(subscription_id) => {
                     mgr.catalog_manager
-                        .alter_subscription_name(sink_id, new_name)
+                        .alter_subscription_name(subscription_id, new_name)
                         .await
                 }
             },

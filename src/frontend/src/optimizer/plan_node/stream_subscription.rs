@@ -32,7 +32,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{PlanRef, TableCatalog, WithOptions};
 
-/// [`StreamSink`] represents a subscription at the very end of the graph.
+/// [`StreamSubscription`] represents a subscription at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSubscription {
     pub base: PlanBase<Stream>,
@@ -66,7 +66,6 @@ impl StreamSubscription {
         dependent_relations: HashSet<TableId>,
         input: PlanRef,
         name: String,
-        db_name: String,
         subscription_from_name: String,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
@@ -84,7 +83,6 @@ impl StreamSubscription {
             input,
             user_distributed_by,
             name,
-            db_name,
             subscription_from_name,
             user_order_by,
             columns,
@@ -103,7 +101,6 @@ impl StreamSubscription {
         input: PlanRef,
         user_distributed_by: RequiredDist,
         name: String,
-        db_name: String,
         subscription_from_name: String,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
@@ -127,7 +124,6 @@ impl StreamSubscription {
             dependent_relations: dependent_relations.into_iter().collect(),
             id: SubscriptionId::placeholder(),
             name,
-            db_name,
             subscription_from_name,
             definition,
             columns,
@@ -143,7 +139,7 @@ impl StreamSubscription {
         Ok((input, subscription_desc))
     }
 
-    /// The table schema is: | epoch | seq id | row op | sink columns |
+    /// The table schema is: | epoch | seq id | row op | subscription columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         StreamSink::infer_kv_log_store_table_catalog_inner(

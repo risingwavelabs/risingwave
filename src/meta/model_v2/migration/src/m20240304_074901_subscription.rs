@@ -40,6 +40,11 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(Subscription::Definition).string().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::SubscriptionFromName)
+                            .string()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -63,4 +68,5 @@ enum Subscription {
     DistributionKey,
     Properties,
     Definition,
+    SubscriptionFromName,
 }

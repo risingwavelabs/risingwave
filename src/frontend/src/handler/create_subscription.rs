@@ -83,7 +83,6 @@ pub fn gen_subscription_plan(
         definition,
         with_options,
         false,
-        db_name.to_string(),
         subscription_from_table_name,
         UserId::new(session.user_id()),
     )?;

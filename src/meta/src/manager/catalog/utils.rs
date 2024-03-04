@@ -134,8 +134,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                     subscription_from: table_name,
                     ..
                 },
-        }
-         => replace_table_name(table_name, to),
+        } => replace_table_name(table_name, to),
         Statement::CreateSink {
             stmt: CreateSinkStatement {
                 sink_from,

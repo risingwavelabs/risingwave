@@ -40,15 +40,12 @@ pub struct SubscriptionCatalog {
     /// Primiary keys of the subscription. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
-    /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
+    /// Distribution key indices of the subscription. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
     /// The properties of the subscription, only `retention`.
     pub properties: BTreeMap<String, String>,
-
-    /// Name of the database
-    pub db_name: String,
 
     /// The upstream table name on which the subscription depends
     pub subscription_from_name: String,
@@ -120,7 +117,6 @@ impl SubscriptionCatalog {
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             subscription_from_name: self.subscription_from_name.clone(),
             properties: self.properties.clone().into_iter().collect(),
-            db_name: self.db_name.clone(),
             database_id: self.database_id,
             schema_id: self.schema_id,
             dependent_relations: self
@@ -157,7 +153,6 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             distribution_key: prost.distribution_key.iter().map(|k| *k as _).collect_vec(),
             subscription_from_name: prost.subscription_from_name.clone(),
             properties: prost.properties.clone().into_iter().collect(),
-            db_name: prost.db_name.clone(),
             database_id: prost.database_id,
             schema_id: prost.schema_id,
             dependent_relations: prost

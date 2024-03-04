@@ -839,7 +839,6 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
-        db_name: String,
         subscription_from_table_name: String,
         user_id: UserId,
     ) -> Result<StreamSubscription> {
@@ -853,7 +852,6 @@ impl PlanRoot {
             dependent_relations,
             stream_plan,
             subscription_name,
-            db_name,
             subscription_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),

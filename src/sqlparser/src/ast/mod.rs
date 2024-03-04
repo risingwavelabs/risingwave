@@ -2397,7 +2397,7 @@ impl ParseTo for ObjectType {
             ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION SCHEMA, DATABASE, USER or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
