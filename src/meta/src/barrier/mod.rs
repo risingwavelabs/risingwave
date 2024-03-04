@@ -327,13 +327,14 @@ impl CheckpointControl {
                 match join_handle.await {
                     Err(e) => {
                         warn!(err = ?e.as_report(), "failed to join completing task");
+                        true
                     }
                     Ok(Err(e)) => {
                         warn!(err = ?e.as_report(), "failed to complete barrier during clear");
+                        true
                     }
-                    Ok(Ok(_)) => {}
-                };
-                false
+                    Ok(Ok(_)) => false,
+                }
             }
             CompletingCommand::Err(_) => true,
         };
