@@ -114,7 +114,7 @@ function convertToBackPressureMetrics(
 export function calculateBPRate(
   backPressureNew: BackPressureInfo[],
   backPressureOld: BackPressureInfo[],
-  interval_ms: number
+  intervalMs: number
 ): BackPressuresMetrics {
   let mapNew = convertToMapAndAgg(backPressureNew)
   let mapOld = convertToMapAndAgg(backPressureOld)
@@ -125,8 +125,8 @@ export function calculateBPRate(
         key,
         // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
         ((value - (mapOld.get(key) || 0)) /
-          ((interval_ms / 1000) * 1000000000)) *
-          100
+          ((intervalMs / 1000) * 1000000000)) *
+        100
       )
     } else {
       result.set(key, 0)
