@@ -15,11 +15,12 @@
 use bytes::Bytes;
 use pgwire::types::{Format, FormatIterator};
 use risingwave_common::bail;
-use risingwave_common::error::{BoxedError, ErrorCode, Result};
+use risingwave_common::error::BoxedError;
 use risingwave_common::types::{Datum, ScalarImpl};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 
 /// Rewrites parameter expressions to literals.
@@ -62,6 +63,11 @@ impl ExprRewriter for ParamRewriter {
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
             ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
+    }
+
+    fn rewrite_subquery(&mut self, mut subquery: crate::expr::Subquery) -> ExprImpl {
+        subquery.query.rewrite_exprs_recursive(self);
+        subquery.into()
     }
 
     fn rewrite_parameter(&mut self, parameter: crate::expr::Parameter) -> ExprImpl {
@@ -217,6 +223,19 @@ mod test {
             create_expect_bound("select 1,1::INT4"),
             create_actual_bound(
                 "select $1,$1::INT4",
+                vec![],
+                vec![Some("1".into())],
+                vec![Format::Text],
+            ),
+        );
+    }
+
+    #[tokio::test]
+    async fn subquery() {
+        expect_actual_eq(
+            create_expect_bound("select (select '1')"),
+            create_actual_bound(
+                "select (select $1)",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],

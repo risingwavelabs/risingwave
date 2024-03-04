@@ -23,6 +23,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
@@ -118,7 +119,7 @@ impl StagingSstableInfo {
 #[derive(Clone)]
 pub enum StagingData {
     ImmMem(ImmutableMemtable),
-    MergedImmMem(ImmutableMemtable),
+    MergedImmMem(ImmutableMemtable, Vec<ImmId>),
     Sst(StagingSstableInfo),
 }
 
@@ -192,6 +193,10 @@ impl StagingVersion {
             });
         (overlapped_imms, overlapped_ssts)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.imm.is_empty() && self.sst.is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -212,6 +217,10 @@ pub struct HummockReadVersion {
     is_replicated: bool,
 
     table_watermarks: Option<TableWatermarksIndex>,
+
+    // Vnode bitmap corresponding to the read version
+    // It will be initialized after local state store init
+    vnodes: Option<Arc<Bitmap>>,
 }
 
 impl HummockReadVersion {
@@ -238,6 +247,7 @@ impl HummockReadVersion {
             committed: committed_version,
 
             is_replicated,
+            vnodes: None,
         }
     }
 
@@ -271,8 +281,8 @@ impl HummockReadVersion {
 
                     self.staging.imm.push_front(imm)
                 }
-                StagingData::MergedImmMem(merged_imm) => {
-                    self.add_merged_imm(merged_imm);
+                StagingData::MergedImmMem(merged_imm, imm_ids) => {
+                    self.add_merged_imm(merged_imm, imm_ids);
                 }
                 StagingData::Sst(staging_sst) => {
                     // The following properties must be ensured:
@@ -410,9 +420,11 @@ impl HummockReadVersion {
         }
     }
 
-    pub fn add_merged_imm(&mut self, merged_imm: ImmutableMemtable) {
-        assert!(merged_imm.get_imm_ids().iter().rev().is_sorted());
-        let min_imm_id = *merged_imm.get_imm_ids().last().expect("non-empty");
+    /// `imm_ids` is the list of imm ids that are merged into this batch
+    /// This field is immutable. Larger imm id at the front.
+    pub fn add_merged_imm(&mut self, merged_imm: ImmutableMemtable, imm_ids: Vec<ImmId>) {
+        assert!(imm_ids.iter().rev().is_sorted());
+        let min_imm_id = *imm_ids.last().expect("non-empty");
 
         let back = self.staging.imm.back().expect("should not be empty");
 
@@ -446,9 +458,7 @@ impl HummockReadVersion {
 
                         unreachable!(
                             "must have break in equal: {:?} {:?} {:?}",
-                            remaining_staging_imm_ids,
-                            earlier_imm_ids,
-                            merged_imm.get_imm_ids()
+                            remaining_staging_imm_ids, earlier_imm_ids, imm_ids
                         )
                     }
                 }
@@ -466,13 +476,13 @@ impl HummockReadVersion {
                         .map(|imm| imm.batch_id())
                         .collect_vec()
                 },
-                merged_imm.get_imm_ids()
+                imm_ids
             );
             None
         };
 
         // iter from smaller imm and take the older imm at the back.
-        for imm_id in merged_imm.get_imm_ids().iter().rev() {
+        for imm_id in imm_ids.iter().rev() {
             let imm = self.staging.imm.pop_back().expect("should exist");
             assert_eq!(
                 imm.batch_id(),
@@ -485,7 +495,7 @@ impl HummockReadVersion {
                         .map(|imm| imm.batch_id())
                         .collect_vec()
                 },
-                merged_imm.get_imm_ids(),
+                imm_ids,
                 imm_id,
             );
         }
@@ -498,6 +508,10 @@ impl HummockReadVersion {
 
     pub fn is_replicated(&self) -> bool {
         self.is_replicated
+    }
+
+    pub fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Option<Arc<Bitmap>> {
+        self.vnodes.replace(vnodes)
     }
 }
 

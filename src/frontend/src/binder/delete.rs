@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::user::UserId;
 

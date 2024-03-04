@@ -598,7 +598,9 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
                 self.watermark_can_see_last_key = false;
                 self.last_key_is_delete = false;
             }
-            if epoch <= self.task_config.watermark
+
+            // See note in `compactor_runner.rs`.
+            if epoch < self.task_config.watermark
                 && self.task_config.gc_delete_keys
                 && value.is_delete()
             {

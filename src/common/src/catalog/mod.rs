@@ -19,7 +19,6 @@ mod physical_table;
 mod schema;
 pub mod test_utils;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,11 +30,10 @@ pub use physical_table::*;
 use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
-use thiserror_ext::AsReport;
 
+use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-use crate::row::OwnedRow;
 use crate::types::DataType;
 
 /// The global version of the catalog.
@@ -148,7 +146,7 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError>;
+    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
@@ -273,46 +271,24 @@ pub struct TableOption {
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let retention_seconds =
-            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND {
-                None
-            } else {
-                Some(table_option.retention_seconds)
-            };
-
-        Self { retention_seconds }
+        Self {
+            retention_seconds: table_option.retention_seconds,
+        }
     }
 }
 
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            retention_seconds: table_option
-                .retention_seconds
-                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table_option.retention_seconds,
         }
     }
 }
 
 impl TableOption {
-    pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
+    pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
-        let mut result = TableOption::default();
-        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETENTION_SECOND_KEY) {
-            match ttl_string.trim().parse::<u32>() {
-                Ok(retention_seconds_u32) => result.retention_seconds = Some(retention_seconds_u32),
-                Err(e) => {
-                    tracing::info!(
-                        error = %e.as_report(),
-                        "build_table_option parse option ttl_string {}",
-                        ttl_string,
-                    );
-                    result.retention_seconds = None;
-                }
-            };
-        }
-
-        result
+        TableOption { retention_seconds }
     }
 }
 

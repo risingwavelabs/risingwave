@@ -1250,7 +1250,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
                             "fragment {{fragment_id}}",
                         ),
                         panels.target_hidden(
@@ -1264,7 +1264,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,side)",
                             "fragment {{fragment_id}} {{side}}",
                         ),
                         panels.target_hidden(
@@ -3679,6 +3679,26 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
+                    "The resident memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_resident_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The metadata memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_metadata_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
                     "The allocated memory of jvm",
                     "",
                     [
@@ -4098,8 +4118,16 @@ def section_udf(outer_panels):
                             "udf_latency_p99 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_latency_avg - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, link, name))",
+                            "udf_latency_p99_by_name - {{link}} {{name}}",
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by (link, name)",
+                            "udf_latency_avg_by_name - {{link}} {{name}}",
                         ),
                     ],
                 ),

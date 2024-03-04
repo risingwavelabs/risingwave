@@ -31,6 +31,7 @@ use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId,
 use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
 use risingwave_pb::common::{
     HostAddress, ParallelUnit, PbHostAddress, PbParallelUnit, PbWorkerNode, PbWorkerType,
+    WorkerNode,
 };
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
@@ -43,6 +44,7 @@ use sea_orm::{
     TransactionTrait,
 };
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -336,6 +338,22 @@ impl ClusterController {
                 .await?,
         );
         Ok(workers)
+    }
+
+    pub(crate) async fn subscribe_active_streaming_compute_nodes(
+        &self,
+    ) -> MetaResult<(Vec<WorkerNode>, UnboundedReceiver<LocalNotification>)> {
+        let inner = self.inner.read().await;
+        let worker_nodes = inner.list_active_streaming_workers().await?;
+        let (tx, rx) = unbounded_channel();
+
+        // insert before release the read lock to ensure that we don't lose any update in between
+        self.env
+            .notification_manager()
+            .insert_local_sender(tx)
+            .await;
+        drop(inner);
+        Ok((worker_nodes, rx))
     }
 
     /// A convenient method to get all running compute nodes that may have running actors on them

@@ -22,7 +22,7 @@ use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::bail;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, Datum, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
@@ -30,6 +30,7 @@ use risingwave_common::types::{
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
+use crate::error::ConnectorResult;
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
@@ -334,7 +335,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     _precision: usize,
     scale: usize,
-) -> RwResult<rust_decimal::Decimal> {
+) -> AccessResult<rust_decimal::Decimal> {
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
@@ -385,7 +386,7 @@ pub(crate) fn extract_decimal(bytes: Vec<u8>) -> AccessResult<(u32, u32, u32)> {
     }
 }
 
-pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
+pub fn avro_schema_skip_union(schema: &Schema) -> ConnectorResult<&Schema> {
     match schema {
         Schema::Union(union_schema) => {
             let inner_schema = union_schema
@@ -404,7 +405,7 @@ pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
 pub fn avro_extract_field_schema<'a>(
     schema: &'a Schema,
     name: Option<&'a str>,
-) -> anyhow::Result<&'a Schema> {
+) -> ConnectorResult<&'a Schema> {
     match schema {
         Schema::Record(RecordSchema { fields, lookup, .. }) => {
             let name =
@@ -419,7 +420,7 @@ pub fn avro_extract_field_schema<'a>(
         }
         Schema::Array(schema) => Ok(schema),
         Schema::Union(_) => avro_schema_skip_union(schema),
-        _ => Err(anyhow::format_err!("avro schema is not a record or array")),
+        _ => bail!("avro schema is not a record or array"),
     }
 }
 
@@ -430,7 +431,6 @@ pub(crate) fn unix_epoch_days() -> i32 {
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::error::{ErrorCode, RwError};
     use risingwave_common::types::{Decimal, Timestamptz};
 
     use super::*;
@@ -483,13 +483,13 @@ mod tests {
         value: Value,
         value_schema: &Schema,
         shape: &DataType,
-    ) -> RwResult<Datum> {
+    ) -> crate::error::ConnectorResult<Datum> {
         AvroParseOptions {
             schema: Some(value_schema),
             relax_numeric: true,
         }
         .parse(&value, Some(shape))
-        .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{:?}", err))))
+        .map_err(Into::into)
     }
 
     #[test]

@@ -24,12 +24,12 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -41,10 +41,9 @@ use crate::hummock::iterator::{
     Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
+    SharedBufferBatch, SharedBufferBatchInner, SharedBufferKeyEntry, VersionedSharedBufferValue,
 };
 use crate::hummock::utils::MemoryTracker;
-use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
     HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef,
@@ -147,7 +146,7 @@ async fn compact_shared_buffer(
         ret
     });
 
-    let total_key_count = payload.iter().map(|imm| imm.kv_count()).sum::<usize>();
+    let total_key_count = payload.iter().map(|imm| imm.key_count()).sum::<usize>();
     let (splits, sub_compaction_sstable_size, split_weight_by_vnode) =
         generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
@@ -285,24 +284,24 @@ pub async fn merge_imms_in_memory(
     instance_id: LocalInstanceId,
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
-) -> HummockResult<ImmutableMemtable> {
-    let mut kv_count = 0;
+) -> ImmutableMemtable {
     let mut epochs = vec![];
     let mut merged_size = 0;
-    let mut merged_imm_ids = Vec::with_capacity(imms.len());
+    assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
+    let max_imm_id = imms[0].batch_id();
 
     let mut imm_iters = Vec::with_capacity(imms.len());
+    let key_count = imms.iter().map(|imm| imm.key_count()).sum();
+    let value_count = imms.iter().map(|imm| imm.value_count()).sum();
     for imm in imms {
-        assert!(imm.kv_count() > 0, "imm should not be empty");
+        assert!(imm.key_count() > 0, "imm should not be empty");
         assert_eq!(
             table_id,
             imm.table_id(),
             "should only merge data belonging to the same table"
         );
 
-        merged_imm_ids.push(imm.batch_id());
         epochs.push(imm.min_epoch());
-        kv_count += imm.kv_count();
         merged_size += imm.size();
 
         imm_iters.push(imm.into_forward_iter());
@@ -311,12 +310,18 @@ pub async fn merge_imms_in_memory(
 
     // use merge iterator to merge input imms
     let mut mi = MergeIterator::new(imm_iters);
-    mi.rewind().await?;
+    mi.rewind_no_await();
     assert!(mi.is_valid());
 
-    let first_item_key = mi.current_item().0.clone();
+    let first_item_key = mi.current_key_entry().key.clone();
 
-    let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
+    let mut merged_entries: Vec<SharedBufferKeyEntry> = Vec::with_capacity(key_count);
+    let mut values: Vec<VersionedSharedBufferValue> = Vec::with_capacity(value_count);
+
+    merged_entries.push(SharedBufferKeyEntry {
+        key: first_item_key.clone(),
+        value_offset: 0,
+    });
 
     // Use first key, max epoch to initialize the tracker to ensure that the check first call to full_key_tracker.observe will succeed
     let mut full_key_tracker = FullKeyTracker::<Bytes>::new(FullKey::new_with_gap_epoch(
@@ -324,47 +329,59 @@ pub async fn merge_imms_in_memory(
         first_item_key,
         EpochWithGap::new_max_epoch(),
     ));
-    let mut table_key_versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
     while mi.is_valid() {
-        let (key, (epoch_with_gap, value)) = mi.current_item();
-        let full_key = FullKey::new_with_gap_epoch(table_id, key.clone(), *epoch_with_gap);
-        if let Some(last_full_key) = full_key_tracker.observe(full_key) {
-            let last_user_key = last_full_key.user_key;
-            // `epoch_with_gap` of the `last_full_key` may not reflect the real epoch in the items
-            // and should not be used because we use max epoch to initialize the tracker
-            let _epoch_with_gap = last_full_key.epoch_with_gap;
-
-            // Record kv entries
-            merged_payload.push((last_user_key.table_key, table_key_versions));
-
-            // Reset state before moving onto the new table key
-            table_key_versions = vec![];
+        let key_entry = mi.current_key_entry();
+        let user_key = UserKey {
+            table_id,
+            table_key: key_entry.key.clone(),
+        };
+        if full_key_tracker
+            .observe_multi_version(
+                user_key,
+                key_entry
+                    .new_values
+                    .iter()
+                    .map(|(epoch_with_gap, _)| *epoch_with_gap),
+            )
+            .is_some()
+        {
+            let last_entry = merged_entries.last_mut().expect("non-empty");
+            if last_entry.value_offset == values.len() {
+                warn!(key = ?last_entry.key, "key has no value in imm compact. skipped");
+                last_entry.key = full_key_tracker.latest_user_key().table_key.clone();
+            } else {
+                // Record kv entries
+                merged_entries.push(SharedBufferKeyEntry {
+                    key: full_key_tracker.latest_user_key().table_key.clone(),
+                    value_offset: values.len(),
+                });
+            }
         }
-        table_key_versions.push((*epoch_with_gap, value.clone()));
-        mi.next().await?;
+        values.extend(
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, value)| (*epoch_with_gap, value.clone())),
+        );
+        mi.advance_peek_to_next_key();
+        // Since there is no blocking point in this method, but it is cpu intensive, we call this method
+        // to do cooperative scheduling
+        tokio::task::consume_budget().await;
     }
 
-    // process the last key
-    if !table_key_versions.is_empty() {
-        merged_payload.push((
-            full_key_tracker.latest_full_key.user_key.table_key,
-            table_key_versions,
-        ));
-    }
-
-    Ok(SharedBufferBatch {
+    SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
-            merged_payload,
-            kv_count,
-            merged_imm_ids,
+            merged_entries,
+            values,
             merged_size,
+            max_imm_id,
             memory_tracker,
         )),
         table_id,
         instance_id,
-    })
+    }
 }
 
 ///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
@@ -378,7 +395,7 @@ fn generate_splits(
     for imm in payload {
         let data_size = {
             // calculate encoded bytes of key var length
-            (imm.kv_count() * 8 + imm.size()) as u64
+            (imm.value_count() * EPOCH_LEN + imm.size()) as u64
         };
         compact_data_size += data_size;
         size_and_start_user_keys.push((data_size, imm.start_user_key()));

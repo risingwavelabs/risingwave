@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::binder::BoundSetExpr;
+use crate::error::Result;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::PlanRef;
 use crate::planner::Planner;

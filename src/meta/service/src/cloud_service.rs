@@ -18,6 +18,7 @@ use std::sync::LazyLock;
 use async_trait::async_trait;
 use regex::Regex;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -135,7 +136,7 @@ impl CloudService for CloudServiceImpl {
                 {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::PrivatelinkResolveErr,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
             } else {
@@ -151,13 +152,13 @@ impl CloudService for CloudServiceImpl {
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,
-                e.to_string(),
+                e.to_report_string(),
             ));
         };
 
         async fn new_enumerator<P: SourceProperties>(
             props: P,
-        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+        ) -> ConnectorResult<P::SplitEnumerator> {
             P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
         }
 
@@ -166,15 +167,15 @@ impl CloudService for CloudServiceImpl {
             if let Err(e) = enumerator {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::KafkaInvalidProperties,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
             if let Err(e) = enumerator.unwrap().list_splits().await {
-                let error_message = e.to_string();
+                let error_message = e.to_report_string();
                 if error_message.contains("BrokerTransportFailure") {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::KafkaBrokerUnreachable,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
                 static TOPIC_NOT_FOUND: LazyLock<Regex> =
@@ -182,12 +183,12 @@ impl CloudService for CloudServiceImpl {
                 if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::KafkaTopicNotFound,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::KafkaOther,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
         });

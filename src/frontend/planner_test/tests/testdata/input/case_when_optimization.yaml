@@ -1,117 +1,295 @@
 - id: create_table
   sql: |
-    CREATE TABLE t1 (c1 INT, c2 INT, c3 INT);
+    create table t1 (c1 INT, c2 INT, c3 INT);
   expected_outputs: []
 - id: basic_optimization_pattern
   before:
     - create_table
   sql: |
-    SELECT
-      CASE c1
-        WHEN 1 THEN 'one'
-        WHEN 2 THEN 'two'
-        WHEN 3 THEN 'three'
-        WHEN 4 THEN 'four'
-        WHEN 5 THEN 'five'
-        WHEN 6 THEN 'six'
-        WHEN 7 THEN 'seven'
-        WHEN 8 THEN 'eight'
-        WHEN 9 THEN 'nine'
-        WHEN 10 THEN 'ten'
-        WHEN 11 THEN 'eleven'
-        WHEN 12 THEN 'twelve'
-        WHEN 13 THEN 'thirteen'
-        WHEN 14 THEN 'fourteen'
-        WHEN 15 THEN 'fifteen'
-        WHEN 16 THEN 'sixteen'
-        WHEN 17 THEN 'seventeen'
-        WHEN 18 THEN 'eighteen'
-        WHEN 19 THEN 'nineteen'
-        WHEN 20 THEN 'twenty'
-        WHEN 21 THEN 'twenty-one'
-        WHEN 22 THEN 'twenty-two'
-        WHEN 23 THEN 'twenty-three'
-        WHEN 24 THEN 'twenty-four'
-        WHEN 25 THEN 'twenty-five'
-        WHEN 26 THEN 'twenty-six'
-        WHEN 27 THEN 'twenty-seven'
-        WHEN 28 THEN 'twenty-eight'
-        WHEN 29 THEN 'twenty-nine'
-        WHEN 30 THEN 'thirty'
-        WHEN 31 THEN 'thirty-one'
-        WHEN 32 THEN 'thirty-two'
-        WHEN 33 THEN 'thirty-three'
-        WHEN 34 THEN 'thirty-four'
-        WHEN 35 THEN 'thirty-five'
-        WHEN 36 THEN 'thirty-six'
-        WHEN 37 THEN 'thirty-seven'
-        WHEN 38 THEN 'thirty-eight'
-        WHEN 39 THEN 'thirty-nine'
-        WHEN 40 THEN 'forty'
-        WHEN 41 THEN 'forty-one'
-        WHEN 42 THEN 'forty-two'
-        WHEN 43 THEN 'forty-three'
-        WHEN 44 THEN 'forty-four'
-        WHEN 45 THEN 'forty-five'
-        WHEN 46 THEN 'forty-six'
-        WHEN 47 THEN 'forty-seven'
-        WHEN 48 THEN 'forty-eight'
-        WHEN 49 THEN 'forty-nine'
-        WHEN 50 THEN 'fifty'
-        WHEN 51 THEN 'fifty-one'
-        WHEN 52 THEN 'fifty-two'
-        WHEN 53 THEN 'fifty-three'
-        WHEN 54 THEN 'fifty-four'
-        WHEN 55 THEN 'fifty-five'
-        WHEN 56 THEN 'fifty-six'
-        WHEN 57 THEN 'fifty-seven'
-        WHEN 58 THEN 'fifty-eight'
-        WHEN 59 THEN 'fifty-nine'
-        WHEN 60 THEN 'sixty'
-        WHEN 61 THEN 'sixty-one'
-        WHEN 62 THEN 'sixty-two'
-        WHEN 63 THEN 'sixty-three'
-        WHEN 64 THEN 'sixty-four'
-        WHEN 65 THEN 'sixty-five'
-        WHEN 66 THEN 'sixty-six'
-        WHEN 67 THEN 'sixty-seven'
-        WHEN 68 THEN 'sixty-eight'
-        WHEN 69 THEN 'sixty-nine'
-        WHEN 70 THEN 'seventy'
-        WHEN 71 THEN 'seventy-one'
-        WHEN 72 THEN 'seventy-two'
-        WHEN 73 THEN 'seventy-three'
-        WHEN 74 THEN 'seventy-four'
-        WHEN 75 THEN 'seventy-five'
-        WHEN 76 THEN 'seventy-six'
-        WHEN 77 THEN 'seventy-seven'
-        WHEN 78 THEN 'seventy-eight'
-        WHEN 79 THEN 'seventy-nine'
-        WHEN 80 THEN 'eighty'
-        WHEN 81 THEN 'eighty-one'
-        WHEN 82 THEN 'eighty-two'
-        WHEN 83 THEN 'eighty-three'
-        WHEN 84 THEN 'eighty-four'
-        WHEN 85 THEN 'eighty-five'
-        WHEN 86 THEN 'eighty-six'
-        WHEN 87 THEN 'eighty-seven'
-        WHEN 88 THEN 'eighty-eight'
-        WHEN 89 THEN 'eighty-nine'
-        WHEN 90 THEN 'ninety'
-        WHEN 91 THEN 'ninety-one'
-        WHEN 92 THEN 'ninety-two'
-        WHEN 93 THEN 'ninety-three'
-        WHEN 94 THEN 'ninety-four'
-        WHEN 95 THEN 'ninety-five'
-        WHEN 96 THEN 'ninety-six'
-        WHEN 97 THEN 'ninety-seven'
-        WHEN 98 THEN 'ninety-eight'
-        WHEN 99 THEN 'ninety-nine'
-        WHEN 100 THEN 'one hundred'
-      ELSE
+    select
+      case c1
+        when 1 then 'one'
+        when 2 then 'two'
+        when 3 then 'three'
+        when 4 then 'four'
+        when 5 then 'five'
+        when 6 then 'six'
+        when 7 then 'seven'
+        when 8 then 'eight'
+        when 9 then 'nine'
+        when 10 then 'ten'
+        when 11 then 'eleven'
+        when 12 then 'twelve'
+        when 13 then 'thirteen'
+        when 14 then 'fourteen'
+        when 15 then 'fifteen'
+        when 16 then 'sixteen'
+        when 17 then 'seventeen'
+        when 18 then 'eighteen'
+        when 19 then 'nineteen'
+        when 20 then 'twenty'
+        when 21 then 'twenty-one'
+        when 22 then 'twenty-two'
+        when 23 then 'twenty-three'
+        when 24 then 'twenty-four'
+        when 25 then 'twenty-five'
+        when 26 then 'twenty-six'
+        when 27 then 'twenty-seven'
+        when 28 then 'twenty-eight'
+        when 29 then 'twenty-nine'
+        when 30 then 'thirty'
+        when 31 then 'thirty-one'
+        when 32 then 'thirty-two'
+        when 33 then 'thirty-three'
+        when 34 then 'thirty-four'
+        when 35 then 'thirty-five'
+        when 36 then 'thirty-six'
+        when 37 then 'thirty-seven'
+        when 38 then 'thirty-eight'
+        when 39 then 'thirty-nine'
+        when 40 then 'forty'
+        when 41 then 'forty-one'
+        when 42 then 'forty-two'
+        when 43 then 'forty-three'
+        when 44 then 'forty-four'
+        when 45 then 'forty-five'
+        when 46 then 'forty-six'
+        when 47 then 'forty-seven'
+        when 48 then 'forty-eight'
+        when 49 then 'forty-nine'
+        when 50 then 'fifty'
+        when 51 then 'fifty-one'
+        when 52 then 'fifty-two'
+        when 53 then 'fifty-three'
+        when 54 then 'fifty-four'
+        when 55 then 'fifty-five'
+        when 56 then 'fifty-six'
+        when 57 then 'fifty-seven'
+        when 58 then 'fifty-eight'
+        when 59 then 'fifty-nine'
+        when 60 then 'sixty'
+        when 61 then 'sixty-one'
+        when 62 then 'sixty-two'
+        when 63 then 'sixty-three'
+        when 64 then 'sixty-four'
+        when 65 then 'sixty-five'
+        when 66 then 'sixty-six'
+        when 67 then 'sixty-seven'
+        when 68 then 'sixty-eight'
+        when 69 then 'sixty-nine'
+        when 70 then 'seventy'
+        when 71 then 'seventy-one'
+        when 72 then 'seventy-two'
+        when 73 then 'seventy-three'
+        when 74 then 'seventy-four'
+        when 75 then 'seventy-five'
+        when 76 then 'seventy-six'
+        when 77 then 'seventy-seven'
+        when 78 then 'seventy-eight'
+        when 79 then 'seventy-nine'
+        when 80 then 'eighty'
+        when 81 then 'eighty-one'
+        when 82 then 'eighty-two'
+        when 83 then 'eighty-three'
+        when 84 then 'eighty-four'
+        when 85 then 'eighty-five'
+        when 86 then 'eighty-six'
+        when 87 then 'eighty-seven'
+        when 88 then 'eighty-eight'
+        when 89 then 'eighty-nine'
+        when 90 then 'ninety'
+        when 91 then 'ninety-one'
+        when 92 then 'ninety-two'
+        when 93 then 'ninety-three'
+        when 94 then 'ninety-four'
+        when 95 then 'ninety-five'
+        when 96 then 'ninety-six'
+        when 97 then 'ninety-seven'
+        when 98 then 'ninety-eight'
+        when 99 then 'ninety-nine'
+        when 100 then 'one hundred'
+      else
         '114514'
-      END
-    FROM t1;
+      end
+    from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: then_arm_could_be_expression_pattern
+  before:
+  - create_table
+  sql: |
+    select
+      case c1
+        when 1 then c1 + 1
+        when 2 then c2 + 1
+        when 3 then c3 + 1
+        when 4 then c1 + 2
+        when 5 then c2 + 2
+        when 6 then c3 + 2
+        when 7 then c1 + 3
+        when 8 then c2 + 3
+        when 9 then c3 + 3
+        when 10 then c1 + c2 + 1
+        when 11 then c2 + c3 + 2
+        when 12 then c3 + c1 + 2
+        when 13 then c1 + c3
+        when 14 then c2 + c2
+        when 15 then c3 + c1
+        when 16 then c1 + c2 + 2
+        when 17 then c2 + c3 + 2
+        when 18 then c3 + c1 + 2
+        when 19 then c1 + c2 + c3 + 1
+        when 20 then c2 + c3 + c1 + 1
+        when 21 then c3 + c1 + c2 + 1
+        when 22 then c1 + c2 + c3 + c1
+        when 23 then c2 + c3 + c1 + c2
+        when 24 then c3 + c1 + c2 + c3
+        when 25 then c1 + 1
+        when 26 then c2 + 1
+        when 27 then c3 + 1
+        when 28 then c1 + 2
+        when 29 then c2 + 2
+        when 30 then c3 + 2
+        when 31 then c1 + 1030
+      else
+        114514 + c1 + c2 + c3 + 1919810
+      end
+    from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: use_with_built_in_functions_pattern
+  before:
+  - create_table
+  sql: |
+    select
+      case c1
+        when 1 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 2 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 3 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 4 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 5 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 6 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 7 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 8 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 9 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 10 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 11 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 12 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 13 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 14 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 15 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 16 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 17 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 18 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 19 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 20 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 21 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 22 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 23 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 24 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 25 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 26 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 27 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 28 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 29 then regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 30 then regexp_replace('💗💗💗💗💗亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')
+        when 31 then '😡😡😡这是爱情😭😭😭'
+      else
+        '❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥❤️‍🔥'
+      end
+    from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: const_case_when_basic
+  sql: |
+    select
+      case 1
+        when 1 then 114514
+        else 1919810
+      end;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: const_case_when_with_table
+  before:
+  - create_table
+  sql: |
+    select
+      case 1
+        when 1 then 114514
+        when 2 then 1919810
+        when 3 then 101010
+        else 111111
+      end
+    from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: const_case_when_with_functions
+  sql: |
+    select
+      case 2
+        when 1 then regexp_count('foobarbaz', 'b..', 3)
+        when 2 then regexp_count('ABCABCAXYaxy', '[a-c]', 1, 'i')
+        when 3 then regexp_count('ABCABCAXYaxy', 'A.')
+        else 0
+      end;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: const_case_when_fallback_case
+  sql: |
+    select
+      case 1
+        when 0 then 114514
+        else 1919810
+      end;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+- id: case_when_optimizable_pattern_basic
+  before:
+  - create_table
+  sql: |
+    select
+      case
+        when c1 = 1 then 'one'
+        when c1 = 2 then 'two'
+        when c1 = 3 then 'three'
+        when c1 = 4 then 'four'
+        when c1 = 5 then 'five'
+        when c1 = 6 then 'six'
+        when c1 = 7 then 'seven'
+        when c1 = 8 then 'eight'
+        when c1 = 9 then 'nine'
+        when c1 = 10 then 'ten'
+        when c1 = 11 then 'eleven'
+        when c1 = 12 then 'twelve'
+        when c1 = 13 then 'thirteen'
+        when c1 = 14 then 'fourteen'
+        when c1 = 15 then 'fifteen'
+        when c1 = 16 then 'sixteen'
+        when c1 = 17 then 'seventeen'
+        when c1 = 18 then 'eighteen'
+        when c1 = 19 then 'nineteen'
+        when c1 = 20 then 'twenty'
+        when c1 = 21 then 'twenty-one'
+        when c1 = 22 then 'twenty-two'
+        when c1 = 23 then 'twenty-three'
+        when c1 = 24 then 'twenty-four'
+        when c1 = 25 then 'twenty-five'
+        when c1 = 26 then 'twenty-six'
+        when c1 = 27 then 'twenty-seven'
+        when c1 = 28 then 'twenty-eight'
+        when c1 = 29 then 'twenty-nine'
+        when c1 = 30 then 'thirty'
+        when c1 = 31 then 'thirty-one'
+        else 'other'
+      end
+    from t1;
   expected_outputs:
   - logical_plan
   - batch_plan

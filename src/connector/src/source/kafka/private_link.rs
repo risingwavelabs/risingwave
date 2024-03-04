@@ -16,17 +16,21 @@ use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::producer::{DeliveryResult, ProducerContext};
 use rdkafka::{ClientContext, Statistics};
+use risingwave_common::bail;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
-use crate::common::{AwsPrivateLinkItem, BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY};
+use crate::common::{
+    AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+};
+use crate::error::ConnectorResult;
 use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use crate::source::KAFKA_CONNECTOR;
@@ -66,9 +70,9 @@ impl BrokerAddrRewriter {
     pub fn new(
         role: PrivateLinkContextRole,
         broker_rewrite_map: Option<HashMap<String, String>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         tracing::info!("[{}] rewrite map {:?}", role, broker_rewrite_map);
-        let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
+        let rewrite_map: ConnectorResult<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
                 addr_map
                     .into_iter()
@@ -107,7 +111,7 @@ impl PrivateLinkConsumerContext {
         broker_rewrite_map: Option<HashMap<String, String>>,
         identifier: Option<String>,
         metrics: Option<Arc<RdKafkaStats>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Consumer, broker_rewrite_map)?;
         Ok(Self {
             inner,
@@ -150,7 +154,7 @@ impl PrivateLinkProducerContext {
         broker_rewrite_map: Option<HashMap<String, String>>,
         identifier: Option<String>,
         metrics: Option<Arc<RdKafkaStats>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let inner = BrokerAddrRewriter::new(PrivateLinkContextRole::Producer, broker_rewrite_map)?;
         Ok(Self {
             inner,
@@ -193,11 +197,12 @@ fn kafka_props_broker_key(with_properties: &BTreeMap<String, String>) -> &str {
 fn get_property_required(
     with_properties: &BTreeMap<String, String>,
     property: &str,
-) -> anyhow::Result<String> {
+) -> ConnectorResult<String> {
     with_properties
         .get(property)
         .map(|s| s.to_lowercase())
-        .ok_or_else(|| anyhow!("Required property \"{property}\" is not provided"))
+        .with_context(|| format!("Required property \"{property}\" is not provided"))
+        .map_err(Into::into)
 }
 
 #[inline(always)]
@@ -211,23 +216,25 @@ fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
 }
 
 pub fn insert_privatelink_broker_rewrite_map(
-    properties: &mut BTreeMap<String, String>,
+    with_options: &mut BTreeMap<String, String>,
     svc: Option<&PrivateLinkService>,
     privatelink_endpoint: Option<String>,
-) -> anyhow::Result<()> {
+) -> ConnectorResult<()> {
     let mut broker_rewrite_map = HashMap::new();
-    let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
+    let servers = get_property_required(with_options, kafka_props_broker_key(with_options))?;
     let broker_addrs = servers.split(',').collect_vec();
-    let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
+    let link_target_value = get_property_required(with_options, PRIVATE_LINK_TARGETS_KEY)?;
     let link_targets: Vec<AwsPrivateLinkItem> =
         serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
+    // remove the private link targets from WITH options, as they are useless after we constructed the rewrite mapping
+    with_options.remove(PRIVATE_LINK_TARGETS_KEY);
 
     if broker_addrs.len() != link_targets.len() {
-        return Err(anyhow!(
+        bail!(
             "The number of broker addrs {} does not match the number of private link targets {}",
             broker_addrs.len(),
             link_targets.len()
-        ));
+        );
     }
 
     if let Some(endpoint) = privatelink_endpoint {
@@ -237,15 +244,15 @@ pub fn insert_privatelink_broker_rewrite_map(
         }
     } else {
         if svc.is_none() {
-            return Err(anyhow!("Privatelink endpoint not found.",));
+            bail!("Privatelink endpoint not found.");
         }
         let svc = svc.unwrap();
         for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
             if svc.dns_entries.is_empty() {
-                return Err(anyhow!(
+                bail!(
                     "No available private link endpoints for Kafka broker {}",
                     broker
-                ));
+                );
             }
             // rewrite the broker address to the dns name w/o az
             // requires the NLB has enabled the cross-zone load balancing
@@ -259,6 +266,6 @@ pub fn insert_privatelink_broker_rewrite_map(
     // save private link dns names into source properties, which
     // will be extracted into KafkaProperties
     let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
-    properties.insert(BROKER_REWRITE_MAP_KEY.to_string(), json);
+    with_options.insert(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_string(), json);
     Ok(())
 }

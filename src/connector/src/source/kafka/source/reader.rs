@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::mem::swap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,6 +27,7 @@ use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::{
@@ -61,7 +62,7 @@ impl SplitReader for KafkaSplitReader {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.common.brokers;
-        let broker_rewrite_map = properties.common.broker_rewrite_map.clone();
+        let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
@@ -98,7 +99,7 @@ impl SplitReader for KafkaSplitReader {
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)
             .await
-            .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
+            .context("failed to create kafka consumer")?;
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
@@ -168,7 +169,7 @@ impl KafkaSplitReader {
 }
 
 impl CommonSplitReader for KafkaSplitReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
@@ -198,7 +199,7 @@ impl CommonSplitReader for KafkaSplitReader {
         // ingest kafka message header can be expensive, do it only when required
         let require_message_header = self.parser_config.common.rw_columns.iter().any(|col_desc| {
             matches!(
-                col_desc.additional_column_type.column_type,
+                col_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Headers(_) | AdditionalColumnType::HeaderInner(_))
             )
         });

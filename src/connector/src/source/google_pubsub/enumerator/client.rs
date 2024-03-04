@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, bail};
+use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
+use risingwave_common::bail;
 
+use crate::error::ConnectorResult;
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
 use crate::source::google_pubsub::PubsubProperties;
@@ -36,7 +38,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<PubsubSplitEnumerator> {
+    ) -> ConnectorResult<PubsubSplitEnumerator> {
         let subscription = properties.subscription.to_owned();
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
@@ -49,20 +51,23 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         let config = ClientConfig::default().with_auth().await?;
         let client = Client::new(config)
             .await
-            .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
+            .context("error initializing pubsub client")?;
 
         let sub = client.subscription(&subscription);
         if !sub
             .exists(None)
             .await
-            .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
+            .context("error checking subscription validity")?
         {
             bail!("subscription {} does not exist", &subscription)
         }
 
         // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
         // as done in the [`PubsubSplitReader`] and here.
-        let (_, subscription_config) = sub.config(None).await?;
+        let (_, subscription_config) = sub
+            .config(None)
+            .await
+            .context("failed to fetch subscription config")?;
         if let SubscriptionConfig {
             retain_acked_messages: false,
             ..
@@ -76,7 +81,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             (Some(start_offset), None) => {
                 let ts = start_offset
                     .parse::<i64>()
-                    .map_err(|e| anyhow!("error parsing start_offset: {:?}", e))
+                    .context("error parsing start_offset")
                     .map(|nanos| Utc.timestamp_nanos(nanos).into())?;
                 Some(SeekTo::Timestamp(ts))
             }
@@ -89,7 +94,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         if let Some(seek_to) = seek_to {
             sub.seek(seek_to, None)
                 .await
-                .map_err(|e| anyhow!("error seeking subscription: {:?}", e))?;
+                .context("error seeking subscription")?;
         }
 
         Ok(Self {
@@ -98,7 +103,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<PubsubSplit>> {
         tracing::debug!("enumerating pubsub splits");
         let splits: Vec<PubsubSplit> = (0..self.split_count)
             .map(|i| PubsubSplit {

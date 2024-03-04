@@ -15,12 +15,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::try_join_all;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
+use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::ActorId;
@@ -35,18 +35,22 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
 use rw_futures_util::pending_on_none;
 use tokio::sync::oneshot;
+use tokio::time::timeout;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::command::CommandContext;
 use super::{BarrierCompletion, GlobalBarrierManagerContext};
 use crate::manager::{MetaSrvEnv, WorkerId};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub(super) struct BarrierRpcManager {
     context: GlobalBarrierManagerContext,
 
     /// Futures that await on the completion of barrier.
     injected_in_progress_barrier: FuturesUnordered<BarrierCompletionFuture>,
+
+    prev_injecting_barrier: Option<oneshot::Receiver<()>>,
 }
 
 impl BarrierRpcManager {
@@ -54,15 +58,24 @@ impl BarrierRpcManager {
         Self {
             context,
             injected_in_progress_barrier: FuturesUnordered::new(),
+            prev_injecting_barrier: None,
         }
     }
 
     pub(super) fn clear(&mut self) {
         self.injected_in_progress_barrier = FuturesUnordered::new();
+        self.prev_injecting_barrier = None;
     }
 
-    pub(super) async fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
-        let await_complete_future = self.context.inject_barrier(command_context).await;
+    pub(super) fn inject_barrier(&mut self, command_context: Arc<CommandContext>) {
+        // this is to notify that the barrier has been injected so that the next
+        // barrier can be injected to avoid out of order barrier injection.
+        // TODO: can be removed when bidi-stream control in implemented.
+        let (inject_tx, inject_rx) = oneshot::channel();
+        let prev_inject_rx = self.prev_injecting_barrier.replace(inject_rx);
+        let await_complete_future =
+            self.context
+                .inject_barrier(command_context, Some(inject_tx), prev_inject_rx);
         self.injected_in_progress_barrier
             .push(await_complete_future);
     }
@@ -76,35 +89,49 @@ pub(super) type BarrierCompletionFuture = impl Future<Output = BarrierCompletion
 
 impl GlobalBarrierManagerContext {
     /// Inject a barrier to all CNs and spawn a task to collect it
-    pub(super) async fn inject_barrier(
+    pub(super) fn inject_barrier(
         &self,
         command_context: Arc<CommandContext>,
+        inject_tx: Option<oneshot::Sender<()>>,
+        prev_inject_rx: Option<oneshot::Receiver<()>>,
     ) -> BarrierCompletionFuture {
         let (tx, rx) = oneshot::channel();
         let prev_epoch = command_context.prev_epoch.value().0;
-        let result = self
-            .stream_rpc_manager
-            .inject_barrier(command_context.clone())
-            .await;
-        match result {
-            Ok(node_need_collect) => {
-                // todo: the collect handler should be abort when recovery.
-                tokio::spawn({
-                    let stream_rpc_manager = self.stream_rpc_manager.clone();
-                    async move {
-                        stream_rpc_manager
-                            .collect_barrier(node_need_collect, command_context, tx)
-                            .await
+        let stream_rpc_manager = self.stream_rpc_manager.clone();
+        // todo: the collect handler should be abort when recovery.
+        let _join_handle = tokio::spawn(async move {
+            let span = command_context.span.clone();
+            if let Some(prev_inject_rx) = prev_inject_rx {
+                if prev_inject_rx.await.is_err() {
+                    let _ = tx.send(BarrierCompletion {
+                        prev_epoch,
+                        result: Err(anyhow!("prev barrier failed to be injected").into()),
+                    });
+                    return;
+                }
+            }
+            let result = stream_rpc_manager
+                .inject_barrier(command_context.clone())
+                .instrument(span.clone())
+                .await;
+            match result {
+                Ok(node_need_collect) => {
+                    if let Some(inject_tx) = inject_tx {
+                        let _ = inject_tx.send(());
                     }
-                });
+                    stream_rpc_manager
+                        .collect_barrier(node_need_collect, command_context, tx)
+                        .instrument(span.clone())
+                        .await;
+                }
+                Err(e) => {
+                    let _ = tx.send(BarrierCompletion {
+                        prev_epoch,
+                        result: Err(e),
+                    });
+                }
             }
-            Err(e) => {
-                let _ = tx.send(BarrierCompletion {
-                    prev_epoch,
-                    result: Err(e),
-                });
-            }
-        }
+        });
         rx.map(move |result| match result {
             Ok(completion) => completion,
             Err(_e) => BarrierCompletion {
@@ -268,11 +295,12 @@ impl StreamRpcManager {
     ) -> MetaResult<Vec<RSP>> {
         let pool = self.env.stream_client_pool();
         let f = &f;
-        Ok(try_join_all(request.map(|(node, input)| async move {
-            let client = pool.get(node).await?;
-            f(client, input).await
-        }))
-        .await?)
+        let iters = request.map(|(node, input)| async move {
+            let client = pool.get(node).await.map_err(|e| (node.id, e))?;
+            f(client, input).await.map_err(|e| (node.id, e))
+        });
+        let result = try_join_all_with_error_timeout(iters, Duration::from_secs(3)).await;
+        result.map_err(|results_err| merge_node_rpc_errors("merged RPC Error", results_err))
     }
 
     async fn broadcast<RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
@@ -379,15 +407,72 @@ impl StreamRpcManager {
     pub async fn force_stop_actors(
         &self,
         nodes: impl Iterator<Item = &WorkerNode>,
+        prev_epoch: u64,
     ) -> MetaResult<()> {
         self.broadcast(nodes, |client| async move {
             client
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Self::new_request_id(),
+                    prev_epoch,
                 })
                 .await
         })
         .await?;
         Ok(())
     }
+}
+
+/// This function is similar to `try_join_all`, but it attempts to collect as many error as possible within `error_timeout`.
+async fn try_join_all_with_error_timeout<I, RSP, E, F>(
+    iters: I,
+    error_timeout: Duration,
+) -> Result<Vec<RSP>, Vec<E>>
+where
+    I: IntoIterator<Item = F>,
+    F: Future<Output = Result<RSP, E>>,
+{
+    let stream = FuturesUnordered::from_iter(iters);
+    pin_mut!(stream);
+    let mut results_ok = vec![];
+    let mut results_err = vec![];
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(rsp) => {
+                results_ok.push(rsp);
+            }
+            Err(err) => {
+                results_err.push(err);
+                break;
+            }
+        }
+    }
+    if results_err.is_empty() {
+        return Ok(results_ok);
+    }
+    let _ = timeout(error_timeout, async {
+        while let Some(result) = stream.next().await {
+            if let Err(err) = result {
+                results_err.push(err);
+            }
+        }
+    })
+    .await;
+    Err(results_err)
+}
+
+fn merge_node_rpc_errors(
+    message: &str,
+    errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
+) -> MetaError {
+    use std::fmt::Write;
+
+    use thiserror_ext::AsReport;
+
+    let concat: String = errors
+        .into_iter()
+        .fold(format!("{message}:"), |mut s, (w, e)| {
+            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+            s
+        });
+    anyhow::anyhow!(concat).into()
 }

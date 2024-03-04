@@ -123,7 +123,10 @@ IcebergConfig:
     required: true
   - name: database.name
     field_type: String
-    required: true
+    required: false
+  - name: catalog.name
+    field_type: String
+    required: false
   - name: catalog.type
     field_type: String
     required: false
@@ -158,9 +161,6 @@ KafkaConfig:
     field_type: String
     required: true
     alias: kafka.brokers
-  - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
-    required: false
   - name: topic
     field_type: String
     required: true
@@ -255,6 +255,9 @@ KafkaConfig:
     field_type: String
     comments: Client identifier
     required: false
+  - name: properties.enable.ssl.certificate.verification
+    field_type: bool
+    required: false
   - name: properties.allow.auto.create.topics
     field_type: bool
     comments: Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
@@ -305,6 +308,10 @@ KafkaConfig:
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
     default: '5'
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
+    required: false
 KinesisSinkConfig:
   fields:
   - name: stream
@@ -462,10 +469,12 @@ StarrocksConfig:
     field_type: String
     comments: The port to the MySQL server of StarRocks FE.
     required: true
+    alias: starrocks.query_port
   - name: starrocks.httpport
     field_type: String
     comments: The port to the HTTP server of StarRocks FE.
     required: true
+    alias: starrocks.http_port
   - name: starrocks.user
     field_type: String
     comments: The user name used to access the StarRocks database.
@@ -482,6 +491,9 @@ StarrocksConfig:
     field_type: String
     comments: The StarRocks table you want to sink data to.
     required: true
+  - name: starrocks.partial_update
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true

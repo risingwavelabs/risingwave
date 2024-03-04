@@ -106,7 +106,6 @@ impl From<ObjectModel<table::Model>> for PbTable {
             stream_key: value.0.stream_key.0,
             append_only: value.0.append_only,
             owner: value.1.owner_id as _,
-            properties: value.0.properties.0,
             fragment_id: value.0.fragment_id.unwrap_or_default() as u32,
             vnode_col_index: value.0.vnode_col_index.map(|index| index as _),
             row_id_index: value.0.row_id_index.map(|index| index as _),
@@ -135,10 +134,10 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
             description: value.0.description,
-            // TODO: fix it for model v2.
-            incoming_sinks: vec![],
+            incoming_sinks: value.0.incoming_sinks.into_u32_array(),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
+            retention_seconds: value.0.retention_seconds.map(|id| id as u32),
         }
     }
 }
@@ -204,8 +203,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
-            // todo: fix this for model v2
-            target_table: None,
+            target_table: value.0.target_table.map(|id| id as _),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
@@ -286,7 +284,9 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             link: value.0.link,
             identifier: value.0.identifier,
             body: value.0.body,
+            compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
+            always_retry_on_network_error: value.0.always_retry_on_network_error,
         }
     }
 }

@@ -15,9 +15,8 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::mem::swap;
-use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -66,7 +65,7 @@ pub type SpawnMergingTask = Arc<
             LocalInstanceId,
             Vec<ImmutableMemtable>,
             Option<MemoryTracker>,
-        ) -> JoinHandle<HummockResult<ImmutableMemtable>>
+        ) -> JoinHandle<ImmutableMemtable>
         + Send
         + Sync
         + 'static,
@@ -119,6 +118,8 @@ struct UploadingTask {
 }
 
 pub struct MergeImmTaskOutput {
+    /// Input imm ids of the merging task. Larger imm ids at the front.
+    pub imm_ids: Vec<ImmId>,
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
     pub merged_imm: ImmutableMemtable,
@@ -129,7 +130,17 @@ struct MergingImmTask {
     table_id: TableId,
     instance_id: LocalInstanceId,
     input_imms: Vec<ImmutableMemtable>,
-    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
+    join_handle: JoinHandle<ImmutableMemtable>,
+}
+
+impl Debug for MergingImmTask {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergingImmTask")
+            .field("table_id", &self.table_id)
+            .field("instance_id", &self.instance_id)
+            .field("input_imms", &self.input_imms)
+            .finish()
+    }
 }
 
 impl MergingImmTask {
@@ -140,6 +151,7 @@ impl MergingImmTask {
         memory_tracker: Option<MemoryTracker>,
         context: &UploaderContext,
     ) -> Self {
+        assert!(imms.iter().rev().map(|imm| imm.batch_id()).is_sorted());
         let input_imms = imms.clone();
         let join_handle = (context.spawn_merging_task)(table_id, instance_id, imms, memory_tracker);
 
@@ -152,19 +164,22 @@ impl MergingImmTask {
     }
 
     /// Poll the result of the merge task
-    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<ImmutableMemtable>> {
+    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<ImmutableMemtable> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
-            Err(err) => Err(HummockError::other(format!(
-                "fail to join imm merge join handle: {}",
-                err.as_report()
-            ))),
+            Err(err) => {
+                panic!(
+                    "failed to join merging task: {:?} {:?}",
+                    err.as_report(),
+                    self
+                );
+            }
         })
     }
 }
 
 impl Future for MergingImmTask {
-    type Output = HummockResult<ImmutableMemtable>;
+    type Output = ImmutableMemtable;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.poll_result(cx)
@@ -510,7 +525,6 @@ impl SealedData {
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
-        debug_assert!(merged_imm.is_merged_imm());
         // add merged_imm to merged_imms
         self.merged_imms.push_front(merged_imm.clone());
     }
@@ -573,15 +587,16 @@ impl SealedData {
     fn poll_success_merge_imm(&mut self, cx: &mut Context<'_>) -> Poll<Option<MergeImmTaskOutput>> {
         // only poll the oldest merge task if there is any
         if let Some(task) = self.merging_tasks.back_mut() {
-            let merge_result = ready!(task.poll_unpin(cx));
+            let merged_imm = ready!(task.poll_unpin(cx));
 
             // pop the finished task
             let task = self.merging_tasks.pop_back().expect("must exist");
 
             Poll::Ready(Some(MergeImmTaskOutput {
+                imm_ids: task.input_imms.iter().map(|imm| imm.batch_id()).collect(),
                 table_id: task.table_id,
                 instance_id: task.instance_id,
-                merged_imm: merge_result.unwrap(),
+                merged_imm,
             }))
         } else {
             Poll::Ready(None)
@@ -764,6 +779,10 @@ impl HummockUploader {
         self.context.pinned_version.max_committed_epoch()
     }
 
+    pub(crate) fn hummock_version(&self) -> &PinnedVersion {
+        &self.context.pinned_version
+    }
+
     pub(crate) fn get_synced_data(&self, epoch: HummockEpoch) -> Option<&SyncedDataState> {
         assert!(self.max_committed_epoch() < epoch && epoch <= self.max_synced_epoch);
         self.synced_data.get(&epoch)
@@ -849,18 +868,18 @@ impl HummockUploader {
             .filter(|(_, imms)| imms.len() >= self.context.imm_merge_threshold)
         {
             let imms_to_merge = imms.drain(..).collect_vec();
-            let mut kv_count = 0;
+            let mut value_count = 0;
             let mut imm_size = 0;
             imms_to_merge.iter().for_each(|imm| {
                 // ensure imms are sealed
                 assert_le!(imm.max_epoch(), sealed_epoch);
-                kv_count += imm.kv_count();
+                value_count += imm.value_count();
                 imm_size += imm.size();
             });
 
             // acquire memory before generate merge task
             // if acquire memory failed, the task will not be generated
-            let memory_sz = (imm_size + kv_count * EPOCH_LEN) as u64;
+            let memory_sz = (imm_size + value_count * EPOCH_LEN) as u64;
             if let Some(tracker) = memory_limiter.try_require_memory(memory_sz) {
                 self.sealed_data
                     .merging_tasks
@@ -1021,10 +1040,6 @@ impl HummockUploader {
 
         // TODO: call `abort` on the uploading task join handle
     }
-
-    pub(crate) fn next_event(&mut self) -> NextUploaderEvent<'_> {
-        NextUploaderEvent { uploader: self }
-    }
 }
 
 impl HummockUploader {
@@ -1110,14 +1125,12 @@ impl HummockUploader {
                 .stats
                 .merge_imm_batch_memory_sz
                 .with_label_values(&[table_id_label.as_str()])
-                .inc_by((output.merged_imm.size() + output.merged_imm.kv_count() * EPOCH_LEN) as _);
+                .inc_by(
+                    (output.merged_imm.size() + output.merged_imm.value_count() * EPOCH_LEN) as _,
+                );
         }
         poll_ret
     }
-}
-
-pub(crate) struct NextUploaderEvent<'a> {
-    uploader: &'a mut HummockUploader,
 }
 
 pub(crate) enum UploaderEvent {
@@ -1127,30 +1140,28 @@ pub(crate) enum UploaderEvent {
     ImmMerged(MergeImmTaskOutput),
 }
 
-impl<'a> Future for NextUploaderEvent<'a> {
-    type Output = UploaderEvent;
+impl HummockUploader {
+    pub(crate) fn next_event(&mut self) -> impl Future<Output = UploaderEvent> + '_ {
+        poll_fn(|cx| {
+            if let Some((epoch, newly_uploaded_sstables)) = ready!(self.poll_syncing_task(cx)) {
+                return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
+            }
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let uploader = &mut self.deref_mut().uploader;
+            if let Some(sstable_info) = ready!(self.poll_sealed_spill_task(cx)) {
+                return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
+            }
 
-        if let Some((epoch, newly_uploaded_sstables)) = ready!(uploader.poll_syncing_task(cx)) {
-            return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
-        }
+            if let Some(sstable_info) = ready!(self.poll_unsealed_spill_task(cx)) {
+                return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
+            }
 
-        if let Some(sstable_info) = ready!(uploader.poll_sealed_spill_task(cx)) {
-            return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
-        }
-
-        if let Some(sstable_info) = ready!(uploader.poll_unsealed_spill_task(cx)) {
-            return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
-        }
-
-        if let Some(merge_output) = ready!(uploader.poll_sealed_merge_imm_task(cx)) {
-            // add the merged imm into sealed data
-            uploader.update_sealed_data(&merge_output.merged_imm);
-            return Poll::Ready(UploaderEvent::ImmMerged(merge_output));
-        }
-        Poll::Pending
+            if let Some(merge_output) = ready!(self.poll_sealed_merge_imm_task(cx)) {
+                // add the merged imm into sealed data
+                self.update_sealed_data(&merge_output.merged_imm);
+                return Poll::Ready(UploaderEvent::ImmMerged(merge_output));
+            }
+            Poll::Pending
+        })
     }
 }
 
@@ -1655,17 +1666,10 @@ mod tests {
             _ = sleep => {
                 println!("sleep timeout")
             }
-            res = &mut task => {
-                match res {
-                    Ok(imm) => {
-                        println!("merging task success");
-                        assert_eq!(table_id, imm.table_id);
-                        assert_eq!(9, imm.kv_count());
-                    }
-                    Err(err) => {
-                        println!("merging task failed: {:?}", err);
-                    }
-                }
+            imm = &mut task => {
+                println!("merging task success");
+                assert_eq!(table_id, imm.table_id);
+                assert_eq!(9, imm.value_count());
             }
         }
         task.join_handle.abort();

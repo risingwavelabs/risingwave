@@ -302,13 +302,13 @@ pub(crate) mod tests {
             compact_task.table_options = BTreeMap::from([(
                 0,
                 TableOption {
-                    retention_seconds: 64,
+                    retention_seconds: Some(64),
                 },
             )]);
             compact_task.current_epoch_time = 0;
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (result_task, task_stats) = compact(
+            let ((result_task, task_stats), _) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -464,7 +464,7 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (result_task, task_stats) = compact(
+            let ((result_task, task_stats), _) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -796,7 +796,7 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -973,7 +973,7 @@ pub(crate) mod tests {
         compact_task.table_options = BTreeMap::from_iter([(
             existing_table_id,
             TableOption {
-                retention_seconds: retention_seconds_expire_second,
+                retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
         compact_task.current_epoch_time = epoch;
@@ -990,7 +990,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1178,7 +1178,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1348,7 +1348,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,

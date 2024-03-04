@@ -16,7 +16,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -31,20 +30,20 @@ use crate::barrier::{
 };
 use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 type ConsumedRows = u64;
 
 #[derive(Clone, Copy, Debug)]
 enum BackfillState {
     Init,
-    ConsumingUpstream(Epoch, ConsumedRows),
+    ConsumingUpstream(#[allow(dead_code)] Epoch, ConsumedRows),
     Done(ConsumedRows),
 }
 
 /// Progress of all actors containing backfill executors while creating mview.
 #[derive(Debug)]
-struct Progress {
+pub(super) struct Progress {
     states: HashMap<ActorId, BackfillState>,
 
     done_count: usize,
@@ -217,6 +216,20 @@ impl TrackingJob {
         }
     }
 
+    pub(crate) fn notify_finish_failed(self, err: MetaError) {
+        match self {
+            TrackingJob::New(command) => {
+                command
+                    .notifiers
+                    .into_iter()
+                    .for_each(|n| n.notify_finish_failed(err.clone()));
+            }
+            TrackingJob::Recovered(recovered) => {
+                recovered.finished.notify_finish_failed(err);
+            }
+        }
+    }
+
     pub(crate) fn table_to_create(&self) -> Option<TableId> {
         match self {
             TrackingJob::New(command) => command.context.table_to_create(),
@@ -254,6 +267,9 @@ pub(super) struct CreateMviewProgressTracker {
 
     /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.
     actor_map: HashMap<ActorId, TableId>,
+
+    /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
+    finished_jobs: Vec<TrackingJob>,
 }
 
 impl CreateMviewProgressTracker {
@@ -313,6 +329,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map,
             actor_map,
+            finished_jobs: Vec::new(),
         }
     }
 
@@ -320,6 +337,7 @@ impl CreateMviewProgressTracker {
         Self {
             progress_map: Default::default(),
             actor_map: Default::default(),
+            finished_jobs: Vec::new(),
         }
     }
 
@@ -338,25 +356,44 @@ impl CreateMviewProgressTracker {
             .collect()
     }
 
-    /// Try to find the target create-streaming-job command from track.
+    /// Stash a command to finish later.
+    pub(super) fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
+        self.finished_jobs.push(finished_job);
+    }
+
+    /// Finish stashed jobs.
+    /// If checkpoint, means all jobs can be finished.
+    /// If not checkpoint, jobs which do not require checkpoint can be finished.
     ///
-    /// Return the target command as it should be cancelled based on the input actors.
-    pub fn find_cancelled_command(
-        &mut self,
-        actors_to_cancel: HashSet<ActorId>,
-    ) -> Option<TrackingJob> {
-        let epochs = actors_to_cancel
-            .into_iter()
-            .map(|actor_id| self.actor_map.get(&actor_id))
-            .collect_vec();
-        assert!(epochs.iter().all_equal());
-        // If the target command found in progress map, return and remove it. Note that the command
-        // should have finished if not found.
-        if let Some(Some(epoch)) = epochs.first() {
-            Some(self.progress_map.remove(epoch).unwrap().1)
-        } else {
-            None
+    /// Returns whether there are still remaining stashed jobs to finish.
+    pub(super) async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
+        for job in self
+            .finished_jobs
+            .extract_if(|job| checkpoint || !job.is_checkpoint_required())
+        {
+            // The command is ready to finish. We can now call `pre_finish`.
+            job.pre_finish().await?;
+            job.notify_finished();
         }
+        Ok(!self.finished_jobs.is_empty())
+    }
+
+    pub(super) fn cancel_command(&mut self, id: TableId) {
+        let _ = self.progress_map.remove(&id);
+        self.finished_jobs
+            .retain(|x| x.table_to_create() != Some(id));
+        self.actor_map.retain(|_, table_id| *table_id != id);
+    }
+
+    /// Notify all tracked commands that error encountered and clear them.
+    pub fn abort_all(&mut self, err: &MetaError) {
+        self.actor_map.clear();
+        self.finished_jobs.drain(..).for_each(|job| {
+            job.notify_finish_failed(err.clone());
+        });
+        self.progress_map
+            .drain()
+            .for_each(|(_, (_, job))| job.notify_finish_failed(err.clone()));
     }
 
     /// Add a new create-mview DDL command to track.
@@ -496,7 +533,7 @@ impl CreateMviewProgressTracker {
                         table_id
                     );
 
-                    // Clean-up the mapping from actors to DDL epoch.
+                    // Clean-up the mapping from actors to DDL table_id.
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }

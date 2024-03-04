@@ -154,8 +154,10 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
+mod pull_up_correlated_predicate_agg_rule;
 mod values_extract_project_rule;
 pub use batch::batch_push_limit_to_scan_rule::*;
+pub use pull_up_correlated_predicate_agg_rule::*;
 pub use values_extract_project_rule::*;
 
 #[macro_export]
@@ -227,6 +229,7 @@ macro_rules! for_all_rules {
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
+            , { PullUpCorrelatedPredicateAggRule }
         }
     };
 }
