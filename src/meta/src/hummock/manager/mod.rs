@@ -968,8 +968,6 @@ impl HummockManager {
             _ => 0,
         };
         let vnode_partition_count = compact_task.input.vnode_partition_count;
-        use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-
         let mut compact_task = CompactTask {
             input_ssts: compact_task.input.input_levels,
             splits: vec![KeyRange::inf()],
@@ -3209,7 +3207,7 @@ impl HummockManager {
                                 .report_compact_task(
                                     task_id,
                                     TaskStatus::try_from(task_status).unwrap(),
-                                    sorted_output_ssts.iter().map(|pb_sst| SstableInfo::from_protobuf(pb_sst)).collect_vec(),
+                                    sorted_output_ssts.iter().map(SstableInfo::from_protobuf).collect_vec(),
                                     Some(table_stats_change),
                                 )
                                 .await

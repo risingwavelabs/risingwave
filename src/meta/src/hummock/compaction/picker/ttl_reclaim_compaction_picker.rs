@@ -47,7 +47,7 @@ impl TtlPickerState {
     pub fn init(&mut self, key_range: KeyRange) {
         self.last_select_end_bound = KeyRange {
             left: Bytes::default(),
-            right: Bytes::from(key_range.left.clone()),
+            right: key_range.left.clone(),
             right_exclusive: true,
         };
         self.end_bound_in_round = key_range;
@@ -174,7 +174,7 @@ impl TtlReclaimCompactionPicker {
         let select_last_sst = select_input_ssts.last().unwrap();
         state.last_select_end_bound.full_key_extend(&KeyRange {
             left: Bytes::default(),
-            right: Bytes::from(select_last_sst.key_range.as_ref().unwrap().right.clone()),
+            right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
             right_exclusive: select_last_sst.key_range.as_ref().unwrap().right_exclusive,
         });
 

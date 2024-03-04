@@ -20,18 +20,16 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
-use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
-    GroupTableChange, LevelType, PbLevelType, PbTableWatermarks,
+    GroupTableChange, LevelType, PbLevelType,
 };
 use tracing::warn;
 
 use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
+use crate::table_watermark::{TableWatermarks, TableWatermarksIndex};
 use crate::version::{
     HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
 };
@@ -76,7 +74,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                         intra_level
                             .inserted_table_infos
                             .iter()
-                            .map(|pb_sst| SstableInfo::from_protobuf(pb_sst)),
+                            .map(SstableInfo::from_protobuf),
                     );
                 }
                 new_vnode_partition_count = intra_level.vnode_partition_count;
@@ -435,7 +433,7 @@ impl HummockVersion {
                             delta
                                 .inserted_table_infos
                                 .iter()
-                                .map(|pb_sst| SstableInfo::from_protobuf(pb_sst)),
+                                .map(SstableInfo::from_protobuf),
                         );
                     }
                     if !delta.removed_table_ids.is_empty() {

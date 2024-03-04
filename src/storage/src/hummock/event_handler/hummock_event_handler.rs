@@ -219,7 +219,7 @@ impl HummockEventHandler {
         );
         let write_conflict_detector = ConflictDetector::new_from_config(storage_opts);
 
-    let uploader = HummockUploader::new(
+        let uploader = HummockUploader::new(
             state_store_metrics,
             pinned_version.clone(),
             spawn_upload_task,

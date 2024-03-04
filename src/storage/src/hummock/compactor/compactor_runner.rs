@@ -17,7 +17,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::util::epoch::is_max_epoch;
@@ -945,10 +944,9 @@ where
 mod tests {
     use std::collections::{HashSet, VecDeque};
 
-    use foyer::common::code::Key;
+    use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
-    use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::version::InputLevel;
 
     use super::*;

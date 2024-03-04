@@ -32,7 +32,6 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, InputLevel, SstableInfo};
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;

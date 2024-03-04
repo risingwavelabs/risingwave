@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, VecDeque};
 
 use bytes::Bytes;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_hummock_sdk::key::FullKey;

@@ -959,7 +959,7 @@ impl HummockVersionReader {
                             .binary_search(&read_options.table_id.table_id)
                             .is_ok()
                     })
-                    .map(|sst| sst.clone())
+                    .cloned()
                     .collect_vec();
                 if sstables.is_empty() {
                     continue;

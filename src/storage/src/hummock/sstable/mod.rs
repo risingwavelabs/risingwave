@@ -18,9 +18,7 @@
 mod block;
 
 use std::fmt::{Debug, Display, Formatter};
-use std::mem::size_of;
 use std::ops::{BitXor, Bound, Range};
-use std::sync::Arc;
 
 pub use block::*;
 mod block_iterator;
@@ -28,8 +26,6 @@ pub use block_iterator::*;
 mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
-use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_pb::hummock::{PbKeyRange, PbSstableInfo};
 pub use xor_filter::{
     BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder, XorFilterReader,
 };
@@ -40,7 +36,7 @@ use risingwave_common::catalog::TableId;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;

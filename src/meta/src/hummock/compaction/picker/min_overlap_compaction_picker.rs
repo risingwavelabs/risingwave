@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::append_sstable_info_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::version::{InputLevel, Level, Levels, SstableInfo};
 use risingwave_pb::hummock::LevelType;
 

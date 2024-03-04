@@ -325,7 +325,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                 TaskStatus::try_from(task_status).unwrap(),
                                 sorted_output_ssts
                                     .iter()
-                                    .map(|pb_sst| SstableInfo::from_protobuf(pb_sst))
+                                    .map(SstableInfo::from_protobuf)
                                     .collect_vec(),
                                 Some(table_stats_change),
                             )

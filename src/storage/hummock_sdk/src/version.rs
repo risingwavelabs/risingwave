@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::mem::size_of;
-use std::ops::Deref;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -26,7 +25,6 @@ use risingwave_pb::hummock::{
     LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta, PbInputLevel, PbKeyRange,
     PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo, PbValidationTask, TableOption,
 };
-use risingwave_pb::java_binding::key_range;
 use serde::Serialize;
 
 use crate::key_range::KeyRange;
@@ -69,7 +67,7 @@ impl OverlappingLevel {
             sub_levels: pb_overlapping_level
                 .sub_levels
                 .iter()
-                .map(|level| Level::from_protobuf(level))
+                .map(Level::from_protobuf)
                 .collect_vec(),
             total_file_size: pb_overlapping_level.total_file_size,
             uncompressed_file_size: pb_overlapping_level.uncompressed_file_size,
@@ -123,7 +121,7 @@ impl Level {
             table_infos: pb_level
                 .table_infos
                 .iter()
-                .map(|pb_sst| SstableInfo::from_protobuf(pb_sst))
+                .map(SstableInfo::from_protobuf)
                 .collect_vec(),
             total_file_size: pb_level.total_file_size,
             sub_level_id: pb_level.sub_level_id,
@@ -211,7 +209,7 @@ impl Levels {
             levels: pb_levels
                 .levels
                 .iter()
-                .map(|pb_level| Level::from_protobuf(pb_level))
+                .map(Level::from_protobuf)
                 .collect_vec(),
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
@@ -544,7 +542,7 @@ impl InputLevel {
             table_infos: pb_input_level
                 .table_infos
                 .iter()
-                .map(|pb_sst| SstableInfo::from_protobuf(pb_sst))
+                .map(SstableInfo::from_protobuf)
                 .collect_vec(),
         }
     }
@@ -634,7 +632,7 @@ impl CompactTask {
             input_ssts: pb_compact_task
                 .input_ssts
                 .iter()
-                .map(|pb_input_level| InputLevel::from_protobuf(pb_input_level))
+                .map(InputLevel::from_protobuf)
                 .collect_vec(),
             splits: pb_compact_task
                 .splits
@@ -649,7 +647,7 @@ impl CompactTask {
             sorted_output_ssts: pb_compact_task
                 .sorted_output_ssts
                 .iter()
-                .map(|pb_sst| SstableInfo::from_protobuf(pb_sst))
+                .map(SstableInfo::from_protobuf)
                 .collect_vec(),
             task_id: pb_compact_task.task_id,
             target_level: pb_compact_task.target_level,
@@ -718,8 +716,7 @@ impl CompactTask {
             current_epoch_time: self.current_epoch_time,
             target_sub_level_id: self.target_sub_level_id,
             task_type: self.task_type,
-            #[allow(deprecated)]
-            split_by_state_table: self.split_by_state_table,
+            //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
             split_weight_by_vnode: self.split_weight_by_vnode,
             table_vnode_partition: self.table_vnode_partition.clone(),
             table_watermarks: self
@@ -727,6 +724,7 @@ impl CompactTask {
                 .iter()
                 .map(|(table_id, table_watermark)| (*table_id, table_watermark.to_protobuf()))
                 .collect(),
+            ..Default::default()
         }
     }
 
@@ -806,7 +804,7 @@ impl ValidationTask {
             sst_infos: pb_validation_task
                 .sst_infos
                 .iter()
-                .map(|pb_sst| SstableInfo::from_protobuf(pb_sst))
+                .map(SstableInfo::from_protobuf)
                 .collect_vec(),
             sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.clone(),
             epoch: pb_validation_task.epoch,
