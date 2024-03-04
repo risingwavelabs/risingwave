@@ -29,7 +29,7 @@ use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr_context::capture_expr_context;
+use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::expr::ExprNode;
@@ -111,16 +111,18 @@ impl UserDefinedFunction {
             UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
-                let expr_context = capture_expr_context().unwrap();
+                // batch query does not have fragment_id
+                let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or_else(|_| 0);
+
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if disable_retry_count != 0 {
                     client
-                        .call(&self.identifier, arrow_input, expr_context.fragment_id)
+                        .call(&self.identifier, arrow_input, fragment_id)
                         .instrument_await(self.span.clone())
                         .await
                 } else {
                     client
-                        .call_with_retry(&self.identifier, arrow_input, expr_context.fragment_id)
+                        .call_with_retry(&self.identifier, arrow_input, fragment_id)
                         .instrument_await(self.span.clone())
                         .await
                 };

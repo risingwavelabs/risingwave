@@ -30,7 +30,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::MetricLevel;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
@@ -733,18 +732,8 @@ impl StreamActorManagerState {
     fn update_actors(&mut self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
         for actor in actors {
             let actor_id = actor.get_actor_id();
-            let fragment_id = actor.get_fragment_id();
-            let expr_context = actor.get_expr_context();
-            let mut new_actor = actor.clone();
-            if let Ok(value) = expr_context {
-                let _ = new_actor.expr_context.insert(ExprContext {
-                    time_zone: value.time_zone.clone(),
-                    fragment_id,
-                });
-            }
-
             self.actors
-                .try_insert(actor_id, new_actor)
+                .try_insert(actor_id, actor)
                 .map_err(|_| anyhow!("duplicated actor {}", actor_id))?;
         }
 
