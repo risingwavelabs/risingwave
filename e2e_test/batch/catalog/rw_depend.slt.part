@@ -16,14 +16,14 @@ create sink sink1 from mv2 with (connector='blackhole');
 
 # equivalent to:
 # select objid::regclass, refobjid::regclass from rw_depend;
-query TT
+query TT rowsort
 select r1.name, r2.name relname
 from rw_depend d
 join rw_relations r1 on d.objid = r1.id
 join rw_relations r2 on d.refobjid = r2.id;
 ----
-mv1   t1
 mv1   s1
+mv1   t1
 mv2   mv1
 sink1 mv2
 
