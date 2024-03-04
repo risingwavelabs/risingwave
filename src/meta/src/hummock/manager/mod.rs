@@ -81,11 +81,7 @@ use crate::hummock::compaction::selector::{
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
-    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
-    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
-};
+use crate::hummock::metrics_utils::{build_compact_task_level_type_metrics_label, get_local_table_stats, LocalTableMetrics, trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_table_stat, trigger_version_stat, trigger_write_stop_stats};
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
@@ -189,9 +185,7 @@ macro_rules! read_lock {
 }
 pub(crate) use read_lock;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
-use risingwave_hummock_sdk::table_stats::{
-    add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
-};
+use risingwave_hummock_sdk::table_stats::{add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap};
 use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -856,6 +850,7 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn CompactionSelector>,
+        local_metrics: &mut HashMap<u32, LocalTableMetrics>,
     ) -> Result<Option<CompactTask>> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
@@ -1017,6 +1012,7 @@ impl HummockManager {
                 vec![],
                 &mut compaction_guard,
                 None,
+                local_metrics,
             )
             .await?;
             tracing::debug!(
@@ -1040,6 +1036,7 @@ impl HummockManager {
                 compact_task.input_ssts[0].table_infos.clone(),
                 &mut compaction_guard,
                 None,
+                local_metrics,
             )
             .await?;
 
@@ -1181,6 +1178,7 @@ impl HummockManager {
                 vec![],
                 &mut compaction_guard,
                 None,
+                &mut HashMap::default(),
             )
             .await?;
         #[cfg(test)]
@@ -1222,13 +1220,14 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn CompactionSelector>,
+        local_metrics: &mut HashMap<u32, LocalTableMetrics>,
     ) -> Result<Option<CompactTask>> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
 
         while let Some(task) = self
-            .get_compact_task_impl(compaction_group_id, selector)
+            .get_compact_task_impl(compaction_group_id, selector, local_metrics)
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
@@ -1250,7 +1249,7 @@ impl HummockManager {
     ) -> Result<Option<CompactTask>> {
         let mut selector: Box<dyn CompactionSelector> =
             Box::new(ManualCompactionSelector::new(manual_compaction_option));
-        self.get_compact_task(compaction_group_id, &mut selector)
+        self.get_compact_task(compaction_group_id, &mut selector, &mut HashMap::default())
             .await
     }
 
@@ -1280,6 +1279,7 @@ impl HummockManager {
         task_status: TaskStatus,
         sorted_output_ssts: Vec<SstableInfo>,
         table_stats_change: Option<PbTableStatsMap>,
+        local_metrics: &mut HashMap<u32, LocalTableMetrics>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
         self.report_compact_task_impl(
@@ -1289,6 +1289,7 @@ impl HummockManager {
             sorted_output_ssts,
             &mut guard,
             table_stats_change,
+            local_metrics,
         )
         .await
     }
@@ -1309,6 +1310,7 @@ impl HummockManager {
         sorted_output_ssts: Vec<SstableInfo>,
         compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
+        local_metrics: &mut HashMap<u32, LocalTableMetrics>,
     ) -> Result<bool> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
@@ -1430,13 +1432,18 @@ impl HummockManager {
                     VarTransactionWrapper,
                     VarTransaction::new(&mut versioning.version_stats,)
                 );
-                if let Some(table_stats_change) = &table_stats_change {
-                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
-                }
 
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
                 current_version.apply_version_delta(&version_delta);
+                if purge_prost_table_stats(&mut version_stats.table_stats, &current_version) {
+                    self.metrics.version_stats.reset();
+                    local_metrics.clear();
+                }
+                if let Some(table_stats_change) = &table_stats_change {
+                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
+                    trigger_table_stat(&self.metrics, local_metrics, &version_stats, table_stats_change);
+                }
                 commit_multi_var!(
                     self.env.meta_store(),
                     self.sql_meta_store(),
@@ -1447,7 +1454,11 @@ impl HummockManager {
                 )?;
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
+                self.metrics
+                    .version_size
+                    .set(current_version.estimated_encode_len() as i64);
+                self.metrics.safe_epoch.set(current_version.safe_epoch as i64);
+                self.metrics.current_version_id.set(current_version.id as i64);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
@@ -1708,7 +1719,6 @@ impl HummockManager {
             VarTransaction::new(&mut versioning.version_stats)
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
         for (table_id, stats) in &table_stats_change {
             let table_id_str = table_id.to_string();
             let stats_value =
@@ -2143,6 +2153,7 @@ impl HummockManager {
             sorted_output_ssts,
             &mut guard,
             table_stats_change,
+            &mut HashMap::default(),
         )
         .await
     }
@@ -3090,6 +3101,11 @@ impl HummockManager {
         Ok(())
     }
 
+    async fn local_metrics(&self) -> HashMap<u32, LocalTableMetrics> {
+        let versioning = self.versioning.read(&["local_metrics"]).await;
+        get_local_table_stats(self.metrics.as_ref(), &versioning.version_stats)
+    }
+
     /// dedicated event runtime for CPU/IO bound event
     #[named]
     async fn compact_task_dedicated_event_handler(
@@ -3098,6 +3114,7 @@ impl HummockManager {
         shutdown_rx_shared: Shared<OneShotReceiver<()>>,
     ) {
         let mut compaction_selectors = init_selectors();
+        let mut local_metrics = hummock_manager.local_metrics().await;
 
         tokio::select! {
             _ = shutdown_rx_shared => {}
@@ -3146,7 +3163,7 @@ impl HummockManager {
                                     };
                                     for _ in 0..pull_task_count {
                                         let compact_task =
-                                            hummock_manager.get_compact_task(group, selector).await;
+                                            hummock_manager.get_compact_task(group, selector, &mut local_metrics).await;
 
                                         match compact_task {
                                             Ok(Some(compact_task)) => {
@@ -3206,6 +3223,7 @@ impl HummockManager {
                                     TaskStatus::try_from(task_status).unwrap(),
                                     sorted_output_ssts,
                                     Some(table_stats_change),
+                                    &mut local_metrics,
                                 )
                                 .await
                             {
