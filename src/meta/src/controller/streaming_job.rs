@@ -31,9 +31,9 @@ use risingwave_meta_model_v2::prelude::{
 };
 use risingwave_meta_model_v2::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
-    streaming_job, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId, ExprNodeArray,
-    FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId, StreamingParallelism,
-    TableId, TableVersion, UserId,
+    streaming_job, subscription, table, ActorId, ActorUpstreamActors, CreateType, DatabaseId,
+    ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SourceId,
+    StreamingParallelism, TableId, TableVersion, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
@@ -171,6 +171,22 @@ impl CatalogController {
                 sink.id = job_id as _;
                 let sink: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink).exec(&txn).await?;
+            }
+            StreamingJob::Subscription(subscription) => {
+                let job_id = Self::create_streaming_job_obj(
+                    &txn,
+                    ObjectType::Subscription,
+                    subscription.owner as _,
+                    Some(subscription.database_id as _),
+                    Some(subscription.schema_id as _),
+                    create_type,
+                    ctx,
+                    streaming_parallelism,
+                )
+                .await?;
+                subscription.id = job_id as _;
+                let subscription: subscription::ActiveModel = subscription.clone().into();
+                subscription.insert(&txn).await?;
             }
             StreamingJob::Table(src, table, _) => {
                 let job_id = Self::create_streaming_job_obj(
