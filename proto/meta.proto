@@ -371,9 +371,9 @@ message MetaSnapshot {
   repeated catalog.Table tables = 5;
   repeated catalog.Index indexes = 6;
   repeated catalog.View views = 7;
-  repeated catalog.Subscription subscriptions = 19;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
+    repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   // for streaming
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
