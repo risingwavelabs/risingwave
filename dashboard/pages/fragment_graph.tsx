@@ -310,13 +310,13 @@ export default function Streaming() {
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
-                    previous: prev.current,
-                    current: newBP,
-                  }
+                  previous: prev.current,
+                  current: newBP,
+                }
                 : {
-                    previous: newBP, // Use current value to show zero rate, but it's fine
-                    current: newBP,
-                  }
+                  previous: newBP, // Use current value to show zero rate, but it's fine
+                  current: newBP,
+                }
             )
           },
           (e) => {
@@ -340,11 +340,6 @@ export default function Streaming() {
           embeddedBackPressureInfo.current,
           embeddedBackPressureInfo.previous,
           INTERVAL
-        )
-        // why sorting?
-        metrics.outputBufferBlockingDuration = sortBy(
-          metrics.outputBufferBlockingDuration,
-          (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)
         )
         for (const m of metrics.outputBufferBlockingDuration) {
           map.set(
