@@ -553,14 +553,14 @@ impl SharedBufferBatchIterator<Forward> {
     }
 
     pub(crate) fn current_key_entry(&self) -> SharedBufferVersionedEntryRef<'_> {
-        debug_assert!(self.is_valid_entry_idx(), "iterator is not valid");
+        self.assert_valid_idx();
         debug_assert_eq!(
             self.current_value_idx,
             self.inner.entries[self.current_entry_idx].value_offset
         );
         SharedBufferVersionedEntryRef {
             key: &self.inner.entries[self.current_entry_idx].key,
-            new_values: self.inner.values(self.current_entry_idx),
+            new_values: &self.inner.new_values[self.current_value_idx..self.value_end_offset],
         }
     }
 }
@@ -981,7 +981,7 @@ mod tests {
         }
         assert!(!iter.is_valid());
 
-        // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
+        // BACKWARD: Seek to 2nd key with old epoch, expect first item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(iterator_test_key_of_epoch(2, epoch - 1).to_ref())
             .await
@@ -993,7 +993,7 @@ mod tests {
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
 
-        // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
+        // BACKWARD: Seek to 2nd key with future epoch, expect first two item to return
         let mut iter = shared_buffer_batch.clone().into_backward_iter();
         iter.seek(iterator_test_key_of_epoch(2, epoch + 1).to_ref())
             .await
