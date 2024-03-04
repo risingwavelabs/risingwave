@@ -716,6 +716,7 @@ where
                 ObjectType::Function => PbObject::FunctionId(oid),
                 ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
+                ObjectType::Subscription => PbObject::SubscriptionId(oid),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
