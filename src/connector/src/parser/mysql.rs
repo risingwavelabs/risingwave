@@ -33,8 +33,13 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
-                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
+                    );
                 }
                 None
             }
@@ -45,8 +50,13 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
-                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
+                    );
                 }
                 None
             }
@@ -106,7 +116,7 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
                                     suppressed_count,
-                                    column_name = name,
+                                    column = name,
                                     error = %err.as_report(),
                                     "parse column failed",
                                 );
@@ -125,7 +135,7 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                             if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
                                     suppressed_count,
-                                    column_name = name,
+                                    column = name,
                                     error = %err.as_report(),
                                     "parse column failed",
                                 );

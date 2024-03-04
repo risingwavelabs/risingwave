@@ -473,7 +473,8 @@ impl IcebergSink {
             .try_into()
             .map_err(|err: icelake::Error| SinkError::Iceberg(anyhow!(err)))?;
 
-        try_matches_arrow_schema(&sink_schema, &iceberg_schema)?;
+        try_matches_arrow_schema(&sink_schema, &iceberg_schema, false)
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         Ok(table)
     }
@@ -961,13 +962,18 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 }
 
 /// Try to match our schema with iceberg schema.
-pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
+/// `for_source` = true means the schema is used for source, otherwise it's used for sink.
+pub fn try_matches_arrow_schema(
+    rw_schema: &Schema,
+    arrow_schema: &ArrowSchema,
+    for_source: bool,
+) -> anyhow::Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
-        return Err(SinkError::Iceberg(anyhow!(
-            "Schema length not match, ours is {}, and iceberg is {}",
+        bail!(
+            "Schema length not match, risingwave is {}, and iceberg is {}",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
-        )));
+        );
     }
 
     let mut schema_fields = HashMap::new();
@@ -978,26 +984,37 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     });
 
     for arrow_field in &arrow_schema.fields {
-        let our_field_type = schema_fields.get(arrow_field.name()).ok_or_else(|| {
-            SinkError::Iceberg(anyhow!(
-                "Field {} not found in our schema",
-                arrow_field.name()
-            ))
-        })?;
+        let our_field_type = schema_fields
+            .get(arrow_field.name())
+            .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
 
-        let converted_arrow_data_type =
-            ArrowDataType::try_from(*our_field_type).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+        // Iceberg source should be able to read iceberg decimal type.
+        // Since the arrow type default conversion is used by udf, in udf, decimal is converted to
+        // large binary type which is not compatible with iceberg decimal type,
+        // so we need to convert it to decimal type manually.
+        let converted_arrow_data_type = if for_source
+            && matches!(our_field_type, risingwave_common::types::DataType::Decimal)
+        {
+            // RisingWave decimal type cannot specify precision and scale, so we use the default value.
+            ArrowDataType::Decimal128(38, 0)
+        } else {
+            ArrowDataType::try_from(*our_field_type).map_err(|e| anyhow!(e))?
+        };
 
         let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
             (ArrowDataType::Decimal128(p1, s1), ArrowDataType::Decimal128(p2, s2)) => {
-                *p1 >= *p2 && *s1 >= *s2
+                if for_source {
+                    true
+                } else {
+                    *p1 >= *p2 && *s1 >= *s2
+                }
             }
             (left, right) => left == right,
         };
         if !compatible {
-            return Err(SinkError::Iceberg(anyhow!("Field {}'s type not compatible, ours converted data type {}, iceberg's data type: {}",
+            bail!("Field {}'s type not compatible, risingwave converted data type {}, iceberg's data type: {}",
                     arrow_field.name(), converted_arrow_data_type, arrow_field.data_type()
-                )));
+                );
         }
     }
 
@@ -1029,7 +1046,7 @@ mod test {
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
 
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
 
         let risingwave_schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "d"),
@@ -1043,7 +1060,7 @@ mod test {
             ArrowField::new("d", ArrowDataType::Int32, false),
             ArrowField::new("c", ArrowDataType::Int32, false),
         ]);
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema, false).unwrap();
     }
 
     #[test]

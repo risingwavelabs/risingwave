@@ -42,7 +42,7 @@ use risingwave_frontend_macro::system_catalog;
     ORDER BY job.id"
 )]
 #[derive(Fields)]
-struct RwEventLog {
+struct RwFragmentParallelism {
     id: i32,
     name: String,
     relation_type: String,

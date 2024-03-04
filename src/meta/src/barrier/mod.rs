@@ -368,7 +368,7 @@ impl CheckpointControl {
         }
         for (_, node) in take(&mut self.command_ctx_queue) {
             for notifier in node.notifiers {
-                notifier.notify_collection_failed(err.clone());
+                notifier.notify_failed(err.clone());
             }
             node.enqueue_time.observe_duration();
         }
@@ -749,6 +749,7 @@ impl GlobalBarrierManager {
     }
 
     async fn failure_recovery(&mut self, err: MetaError) {
+        self.context.tracker.lock().await.abort_all(&err);
         self.rpc_manager.clear();
         self.checkpoint_control.clear_on_err(&err).await;
 

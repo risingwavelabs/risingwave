@@ -97,11 +97,11 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
                     LazyLock::new(LogSuppresser::default);
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::warn!(
-                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate. ({} suppressed)",
-                    Decimal::MAX_PRECISION,
-                    suppressed_count,
-                    precision
-                );
+                        suppressed_count,
+                        "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                        Decimal::MAX_PRECISION,
+                        precision
+                    );
                 }
             }
             DataType::Decimal
