@@ -17,7 +17,7 @@ use std::time::SystemTime;
 
 use anyhow::anyhow;
 use axum::{Extension, Json};
-use prometheus_http_query::response::{RangeVector, Sample};
+use prometheus_http_query::response::{InstantVector, RangeVector, Sample};
 use serde::Serialize;
 
 use super::handlers::{err, DashboardError};
@@ -41,6 +41,7 @@ impl From<&Sample> for PrometheusSample {
 #[derive(Serialize, Debug)]
 pub struct PrometheusVector {
     metric: HashMap<String, String>,
+    // Multiple samples from `RangeVector` or single sample from `InstantVector`.
     sample: Vec<PrometheusSample>,
 }
 
@@ -48,7 +49,16 @@ impl From<&RangeVector> for PrometheusVector {
     fn from(value: &RangeVector) -> Self {
         PrometheusVector {
             metric: value.metric().clone(),
-            sample: value.samples().iter().map(PrometheusSample::from).collect(),
+            sample: value.samples().iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&InstantVector> for PrometheusVector {
+    fn from(value: &InstantVector) -> Self {
+        PrometheusVector {
+            metric: value.metric().clone(),
+            sample: vec![value.sample().into()],
         }
     }
 }
@@ -134,27 +144,12 @@ pub async fn list_prometheus_fragment_back_pressure(
     Extension(srv): Extension<Service>,
 ) -> Result<Json<FragmentBackPressure>> {
     if let Some(ref client) = srv.prometheus_client {
-        let now = SystemTime::now();
         let back_pressure_query =
             format!("avg(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) / 1000000000", srv.prometheus_selector);
-        let result = client
-            .query_range(
-                back_pressure_query,
-                now.duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64
-                    - 1800,
-                now.duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64,
-                15.0,
-            )
-            .get()
-            .await
-            .map_err(err)?;
+        let result = client.query(back_pressure_query).get().await.map_err(err)?;
         let back_pressure_data = result
             .data()
-            .as_matrix()
+            .as_vector()
             .unwrap()
             .iter()
             .map(PrometheusVector::from)

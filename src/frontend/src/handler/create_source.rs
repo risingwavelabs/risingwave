@@ -32,7 +32,7 @@ use risingwave_connector::parser::additional_columns::{
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig,
+    SpecificParserConfig, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
@@ -328,6 +328,10 @@ pub(crate) async fn bind_columns_from_source(
         format_encode_options,
         ..Default::default()
     };
+
+    if source_schema.format == Format::Debezium {
+        try_consume_string_from_options(&mut format_encode_options_to_consume, DEBEZIUM_IGNORE_KEY);
+    }
 
     let columns = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native)
@@ -994,7 +998,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
                 ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],

@@ -197,7 +197,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = Arc::new(chunk?);
-            let keys = K::build(self.group_key.as_slice(), &chunk)?;
+            let keys = K::build_many(self.group_key.as_slice(), &chunk);
 
             for (row_id, ((encoded_row, key), visible)) in
                 encode_chunk(&chunk, &self.column_orders)?
