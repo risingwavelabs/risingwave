@@ -13974,7 +13974,7 @@ dependencies = [
  "aws-smithy-runtime",
  "aws-smithy-types",
  "axum",
- "base64 0.22.0",
+ "base64 0.21.7",
  "bigdecimal 0.4.2",
  "bit-vec",
  "bitflags 2.4.0",
