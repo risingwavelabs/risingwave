@@ -45,7 +45,8 @@ use risingwave_hummock_sdk::version::{CompactTask, HummockVersionDelta, SstableI
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
     HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, SstObjectIdRange, INVALID_VERSION_ID,
+    HummockSstableObjectId, HummockVersionId, ProtoSerializeExt, ProtoSerializeOwnExt,
+    SstObjectIdRange, INVALID_VERSION_ID,
 };
 use risingwave_meta_model_v2::{
     compaction_status, compaction_task, hummock_pinned_snapshot, hummock_pinned_version,
@@ -94,8 +95,8 @@ use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
-    BTreeMapTransactionWrapper, ClusterId, MetadataModel, MetadataModelError, ValTransaction,
-    VarTransaction, VarTransactionWrapper,
+    BTreeMapTransactionWrapper, ClusterId, MetadataModelError, ValTransaction, VarTransaction,
+    VarTransactionWrapper,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -443,6 +444,8 @@ impl HummockManager {
         versioning_guard: &mut RwLockWriteGuard<'_, Versioning>,
     ) -> Result<()> {
         use sea_orm::EntityTrait;
+
+        use crate::model::MetadataModel;
         let sql_meta_store = self.sql_meta_store();
         let compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus> = match &sql_meta_store
         {
@@ -1691,8 +1694,8 @@ impl HummockManager {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
                     inserted_table_infos: group_sstables
-                        .iter()
-                        .map(|sst| sst.to_protobuf())
+                        .into_iter()
+                        .map(|sst| sst.to_protobuf_own())
                         .collect_vec(),
                     l0_sub_level_id,
                     ..Default::default()
@@ -1921,6 +1924,7 @@ impl HummockManager {
         table_catalogs: Vec<Table>,
         compaction_groups: Vec<PbCompactionGroupInfo>,
     ) -> Result<()> {
+        use crate::model::MetadataModel;
         for table in &table_catalogs {
             table.insert(self.env.meta_store_checked()).await?;
         }
@@ -2092,7 +2096,7 @@ impl HummockManager {
         let compact_task_string = compact_task_to_string(&compact_task);
         // TODO: shall we need to cancel on meta ?
         compactor
-            .send_event(ResponseEvent::CompactTask(compact_task.to_protobuf()))
+            .send_event(ResponseEvent::CompactTask(compact_task.to_protobuf_own()))
             .with_context(|| {
                 format!(
                     "Failed to trigger compaction task for compaction_group {}",
@@ -3155,7 +3159,7 @@ impl HummockManager {
                                             Ok(Some(compact_task)) => {
                                                 let task_id = compact_task.task_id;
                                                 if let Err(e) = compactor.send_event(
-                                                    ResponseEvent::CompactTask(compact_task.to_protobuf()),
+                                                    ResponseEvent::CompactTask(compact_task.to_protobuf_own()),
                                                 ) {
                                                     tracing::warn!(
                                                         error = %e.as_report(),
@@ -3207,7 +3211,7 @@ impl HummockManager {
                                 .report_compact_task(
                                     task_id,
                                     TaskStatus::try_from(task_status).unwrap(),
-                                    sorted_output_ssts.iter().map(SstableInfo::from_protobuf).collect_vec(),
+                                    sorted_output_ssts.into_iter().map(SstableInfo::from_protobuf_own).collect_vec(),
                                     Some(table_stats_change),
                                 )
                                 .await

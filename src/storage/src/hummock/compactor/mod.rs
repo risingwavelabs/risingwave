@@ -52,7 +52,10 @@ use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    compact_task_to_string, HummockCompactionTaskId, LocalSstableInfo, ProtoSerializeExt,
+    ProtoSerializeOwnExt,
+};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
@@ -463,7 +466,7 @@ pub fn start_compactor(
                         executor.spawn(async move {
                                 match event {
                                     ResponseEvent::CompactTask(compact_task)  => {
-                                        let compact_task = CompactTask::from_protobuf(&compact_task);
+                                        let compact_task = CompactTask::from_protobuf_own(compact_task);
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
@@ -543,7 +546,7 @@ pub fn start_compactor(
                                         }
                                     }
                                     ResponseEvent::ValidationTask(validation_task) => {
-                                        let validation_task = ValidationTask::from_protobuf(&validation_task);
+                                        let validation_task = ValidationTask::from_protobuf_own(validation_task);
                                         validate_ssts(
                                             validation_task,
                                             context.sstable_store.clone(),
@@ -759,7 +762,7 @@ pub fn start_shared_compactor(
                                     }
                                 }
                                 dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
-                                    let validation_task = ValidationTask::from_protobuf(&validation_task);
+                                    let validation_task = ValidationTask::from_protobuf_own(validation_task);
                                     validate_ssts(validation_task, context.sstable_store.clone()).await;
                                 }
                                 dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {

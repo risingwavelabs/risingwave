@@ -20,7 +20,7 @@ use fail::fail_point;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::statistics_compact_task;
 use risingwave_hummock_sdk::version::CompactTask;
-use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId, ProtoSerializeOwnExt};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
@@ -149,8 +149,8 @@ impl CompactorManagerInner {
         };
         // Initialize heartbeat for existing tasks.
         task_assignment.into_iter().for_each(|assignment| {
-            manager.initiate_task_heartbeat(CompactTask::from_protobuf(
-                assignment.compact_task.as_ref().unwrap(),
+            manager.initiate_task_heartbeat(CompactTask::from_protobuf_own(
+                assignment.compact_task.unwrap(),
             ));
         });
         Ok(manager)

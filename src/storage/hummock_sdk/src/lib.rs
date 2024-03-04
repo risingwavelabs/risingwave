@@ -355,3 +355,25 @@ impl EpochWithGap {
         self.0 & EPOCH_SPILL_TIME_MASK
     }
 }
+
+pub trait ProtoSerializeSizeEstimatedExt {
+    fn estimated_encode_len(&self) -> usize;
+}
+
+pub trait ProtoSerializeExt {
+    type PB: Clone + PartialEq + ::prost::Message;
+    type T: Clone + PartialEq;
+
+    fn from_protobuf(pb: &Self::PB) -> Self::T;
+
+    fn to_protobuf(&self) -> Self::PB;
+}
+
+pub trait ProtoSerializeOwnExt {
+    type PB: Clone + PartialEq + ::prost::Message;
+    type T: Clone + PartialEq;
+
+    fn from_protobuf_own(pb: Self::PB) -> Self::T;
+
+    fn to_protobuf_own(self) -> Self::PB;
+}

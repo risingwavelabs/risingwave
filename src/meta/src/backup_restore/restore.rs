@@ -20,7 +20,7 @@ use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::version_checkpoint_path;
+use risingwave_hummock_sdk::{version_checkpoint_path, ProtoSerializeExt};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::hummock::PbHummockVersionCheckpoint;

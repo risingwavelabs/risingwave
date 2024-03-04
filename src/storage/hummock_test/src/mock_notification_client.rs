@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
+use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::backup_service::MetaBackupManifestId;

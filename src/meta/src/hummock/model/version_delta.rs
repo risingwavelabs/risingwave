@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prost::Message;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::PbHummockVersionDelta;
@@ -30,11 +29,19 @@ impl MetadataModel for HummockVersionDelta {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        self.to_protobuf()
+        use risingwave_hummock_sdk::ProtoSerializeExt;
+        <risingwave_hummock_sdk::version::HummockVersionDelta as ProtoSerializeExt>::to_protobuf(
+            self,
+        )
     }
 
     fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.to_protobuf().encode_to_vec()
+        use prost::Message;
+        use risingwave_hummock_sdk::ProtoSerializeExt;
+        <risingwave_hummock_sdk::version::HummockVersionDelta as ProtoSerializeExt>::to_protobuf(
+            self,
+        )
+        .encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

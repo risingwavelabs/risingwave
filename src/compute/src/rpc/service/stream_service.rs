@@ -15,7 +15,7 @@
 use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{LocalSstableInfo, ProtoSerializeOwnExt};
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
@@ -177,7 +177,7 @@ impl StreamService for StreamServiceImpl {
                          table_stats,
                      }| GroupedSstableInfo {
                         compaction_group_id,
-                        sst: Some(sst_info.to_protobuf()),
+                        sst: Some(sst_info.to_protobuf_own()),
                         table_stats_map: to_prost_table_stats_map(table_stats),
                     },
                 )
@@ -185,7 +185,7 @@ impl StreamService for StreamServiceImpl {
             worker_id: self.env.worker_id(),
             table_watermarks: table_watermarks
                 .into_iter()
-                .map(|(key, value)| (key.table_id, value.to_protobuf()))
+                .map(|(key, value)| (key.table_id, value.to_protobuf_own()))
                 .collect(),
         }))
     }

@@ -19,6 +19,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };

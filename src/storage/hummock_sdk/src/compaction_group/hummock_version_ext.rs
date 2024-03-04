@@ -33,7 +33,9 @@ use crate::table_watermark::{TableWatermarks, TableWatermarksIndex};
 use crate::version::{
     HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
 };
-use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
+use crate::{
+    can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId, ProtoSerializeExt,
+};
 
 pub struct GroupDeltasSummary {
     pub delete_sst_levels: Vec<u32>,
@@ -1298,6 +1300,7 @@ mod tests {
     use crate::version::{
         HummockVersion, HummockVersionDelta, Level, Levels, OverlappingLevel, SstableInfo,
     };
+    use crate::ProtoSerializeExt;
 
     #[test]
     fn test_get_sst_object_ids() {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;

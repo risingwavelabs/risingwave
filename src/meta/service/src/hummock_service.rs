@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;

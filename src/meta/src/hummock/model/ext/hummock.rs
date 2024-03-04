@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
