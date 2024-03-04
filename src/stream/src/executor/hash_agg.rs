@@ -339,7 +339,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Find groups in this chunk and generate visibility for each group key.
-        let keys = K::build(&this.group_key_indices, chunk.data_chunk())?;
+        let keys = K::build_many(&this.group_key_indices, chunk.data_chunk());
         let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
 
         // Ensure all `AggGroup`s are in `dirty_groups`.

@@ -16,7 +16,6 @@
 #![feature(coroutines)]
 
 use std::collections::{HashMap, HashSet};
-use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -34,7 +33,7 @@ use risingwave_connector::source::cdc::external::mock_external_table::MockExtern
 use risingwave_connector::source::cdc::external::{
     DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
 };
-use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
+use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
@@ -284,17 +283,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let mut splits = HashMap::new();
     splits.insert(
         actor_id,
-        vec![SplitImpl::MysqlCdc(DebeziumCdcSplit {
-            mysql_split: Some(MySqlCdcSplit {
-                inner: CdcSplitBase {
-                    split_id: 0,
-                    start_offset: None,
-                    snapshot_done: false,
-                },
-            }),
-            pg_split: None,
-            _phantom: PhantomData,
-        })],
+        vec![SplitImpl::MysqlCdc(DebeziumCdcSplit::new(0, None, None))],
     );
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {

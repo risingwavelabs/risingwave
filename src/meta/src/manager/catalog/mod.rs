@@ -797,13 +797,15 @@ impl CatalogManager {
         Ok(())
     }
 
-    fn assert_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
-        if let Some(t) = tables.get(&table.id)
-            && let Ok(StreamJobStatus::Creating) = t.get_stream_job_status()
-        {
+    fn check_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) -> MetaResult<()> {
+        return if let Some(t) = tables.get(&table.id) {
+            assert_eq!(t.get_stream_job_status(), Ok(StreamJobStatus::Creating));
+            Ok(())
         } else {
-            panic!("Table must be in creating procedure: {table:#?}")
-        }
+            // If the table does not exist, it should be created in Foreground and cleaned during recovery in some cases.
+            assert_eq!(table.create_type(), CreateType::Foreground);
+            Err(anyhow!("failed to create table during recovery").into())
+        };
     }
 
     pub async fn assert_tables_deleted(&self, table_ids: Vec<TableId>) {
@@ -1007,7 +1009,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         if cfg!(not(test)) {
-            Self::assert_table_creating(tables, &table);
+            Self::check_table_creating(tables, &table)?;
         }
         let mut tables = BTreeMapTransaction::new(tables);
 

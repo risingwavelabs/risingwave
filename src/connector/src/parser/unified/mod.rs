@@ -23,6 +23,7 @@ use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
 use self::json::JsonAccess;
 use self::protobuf::ProtobufAccess;
+use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::source::SourceColumnDesc;
 
 pub mod avro;
@@ -46,6 +47,7 @@ pub enum AccessImpl<'a, 'b> {
     Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
     Json(JsonAccess<'a, 'b>),
+    MongoJson(MongoJsonAccess<JsonAccess<'a, 'b>>),
 }
 
 impl Access for AccessImpl<'_, '_> {
@@ -55,6 +57,7 @@ impl Access for AccessImpl<'_, '_> {
             Self::Bytes(accessor) => accessor.access(path, type_expected),
             Self::Protobuf(accessor) => accessor.access(path, type_expected),
             Self::Json(accessor) => accessor.access(path, type_expected),
+            Self::MongoJson(accessor) => accessor.access(path, type_expected),
         }
     }
 }
