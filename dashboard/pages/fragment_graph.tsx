@@ -288,7 +288,7 @@ export default function Streaming() {
   }
 
   const [backPressureDataSource, setBackPressureDataSource] =
-    useState("Embedded")
+    useState<BackPressureDataSource>("Embedded")
 
   // Periodically fetch Prometheus back-pressure from Meta node
   const { response: promethusMetrics } = useFetch(
@@ -354,10 +354,19 @@ export default function Streaming() {
         }
       } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
         for (const m of promethusMetrics.outputBufferBlockingDuration) {
-          map.set(
-            `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-            m.sample[0].value * 100
-          )
+          if (m.sample.length > 0) {
+            // Note: We issue an instant query to Prometheus to get the most recent value.
+            // So there should be only one sample here.
+            //
+            // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
+            // possible that an old version of meta service returns a range-query result.
+            // So we take the one with the latest timestamp here.
+            const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
+            map.set(
+              `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+              value
+            )
+          }
         }
       }
       return map
@@ -437,7 +446,9 @@ export default function Streaming() {
             <Select
               value={backPressureDataSource}
               onChange={(event) =>
-                setBackPressureDataSource(event.target.value)
+                setBackPressureDataSource(
+                  event.target.value as BackPressureDataSource
+                )
               }
               defaultValue="Embedded"
             >
