@@ -274,3 +274,50 @@
     LogicalProject { exprs: [1919810:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: 'BatchValues { rows: [[1919810:Int32]] }'
+- id: case_when_optimizable_pattern_basic
+  before:
+  - create_table
+  sql: |
+    select
+      case
+        when c1 = 1 then 'one'
+        when c1 = 2 then 'two'
+        when c1 = 3 then 'three'
+        when c1 = 4 then 'four'
+        when c1 = 5 then 'five'
+        when c1 = 6 then 'six'
+        when c1 = 7 then 'seven'
+        when c1 = 8 then 'eight'
+        when c1 = 9 then 'nine'
+        when c1 = 10 then 'ten'
+        when c1 = 11 then 'eleven'
+        when c1 = 12 then 'twelve'
+        when c1 = 13 then 'thirteen'
+        when c1 = 14 then 'fourteen'
+        when c1 = 15 then 'fifteen'
+        when c1 = 16 then 'sixteen'
+        when c1 = 17 then 'seventeen'
+        when c1 = 18 then 'eighteen'
+        when c1 = 19 then 'nineteen'
+        when c1 = 20 then 'twenty'
+        when c1 = 21 then 'twenty-one'
+        when c1 = 22 then 'twenty-two'
+        when c1 = 23 then 'twenty-three'
+        when c1 = 24 then 'twenty-four'
+        when c1 = 25 then 'twenty-five'
+        when c1 = 26 then 'twenty-six'
+        when c1 = 27 then 'twenty-seven'
+        when c1 = 28 then 'twenty-eight'
+        when c1 = 29 then 'twenty-nine'
+        when c1 = 30 then 'thirty'
+        when c1 = 31 then 'thirty-one'
+        else 'other'
+      end
+    from t1;
+  logical_plan: |-
+    LogicalProject { exprs: [ConstantLookup(t1.c1, 1:Int32, 'one':Varchar, 2:Int32, 'two':Varchar, 3:Int32, 'three':Varchar, 4:Int32, 'four':Varchar, 5:Int32, 'five':Varchar, 6:Int32, 'six':Varchar, 7:Int32, 'seven':Varchar, 8:Int32, 'eight':Varchar, 9:Int32, 'nine':Varchar, 10:Int32, 'ten':Varchar, 11:Int32, 'eleven':Varchar, 12:Int32, 'twelve':Varchar, 13:Int32, 'thirteen':Varchar, 14:Int32, 'fourteen':Varchar, 15:Int32, 'fifteen':Varchar, 16:Int32, 'sixteen':Varchar, 17:Int32, 'seventeen':Varchar, 18:Int32, 'eighteen':Varchar, 19:Int32, 'nineteen':Varchar, 20:Int32, 'twenty':Varchar, 21:Int32, 'twenty-one':Varchar, 22:Int32, 'twenty-two':Varchar, 23:Int32, 'twenty-three':Varchar, 24:Int32, 'twenty-four':Varchar, 25:Int32, 'twenty-five':Varchar, 26:Int32, 'twenty-six':Varchar, 27:Int32, 'twenty-seven':Varchar, 28:Int32, 'twenty-eight':Varchar, 29:Int32, 'twenty-nine':Varchar, 30:Int32, 'thirty':Varchar, 31:Int32, 'thirty-one':Varchar, 'other':Varchar) as $expr1] }
+    └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [ConstantLookup(t1.c1, 1:Int32, 'one':Varchar, 2:Int32, 'two':Varchar, 3:Int32, 'three':Varchar, 4:Int32, 'four':Varchar, 5:Int32, 'five':Varchar, 6:Int32, 'six':Varchar, 7:Int32, 'seven':Varchar, 8:Int32, 'eight':Varchar, 9:Int32, 'nine':Varchar, 10:Int32, 'ten':Varchar, 11:Int32, 'eleven':Varchar, 12:Int32, 'twelve':Varchar, 13:Int32, 'thirteen':Varchar, 14:Int32, 'fourteen':Varchar, 15:Int32, 'fifteen':Varchar, 16:Int32, 'sixteen':Varchar, 17:Int32, 'seventeen':Varchar, 18:Int32, 'eighteen':Varchar, 19:Int32, 'nineteen':Varchar, 20:Int32, 'twenty':Varchar, 21:Int32, 'twenty-one':Varchar, 22:Int32, 'twenty-two':Varchar, 23:Int32, 'twenty-three':Varchar, 24:Int32, 'twenty-four':Varchar, 25:Int32, 'twenty-five':Varchar, 26:Int32, 'twenty-six':Varchar, 27:Int32, 'twenty-seven':Varchar, 28:Int32, 'twenty-eight':Varchar, 29:Int32, 'twenty-nine':Varchar, 30:Int32, 'thirty':Varchar, 31:Int32, 'thirty-one':Varchar, 'other':Varchar) as $expr1] }
+      └─BatchScan { table: t1, columns: [t1.c1], distribution: SomeShard }

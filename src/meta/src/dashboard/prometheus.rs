@@ -41,6 +41,7 @@ impl From<&Sample> for PrometheusSample {
 #[derive(Serialize, Debug)]
 pub struct PrometheusVector {
     metric: HashMap<String, String>,
+    // Multiple samples from `RangeVector` or single sample from `InstantVector`.
     sample: Vec<PrometheusSample>,
 }
 
@@ -48,7 +49,16 @@ impl From<&RangeVector> for PrometheusVector {
     fn from(value: &RangeVector) -> Self {
         PrometheusVector {
             metric: value.metric().clone(),
-            sample: value.samples().iter().map(PrometheusSample::from).collect(),
+            sample: value.samples().iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&InstantVector> for PrometheusVector {
+    fn from(value: &InstantVector) -> Self {
+        PrometheusVector {
+            metric: value.metric().clone(),
+            sample: vec![value.sample().into()],
         }
     }
 }
