@@ -65,7 +65,7 @@ public class SourceValidateHandler {
     private static void ensurePropNotBlank(Map<String, String> props, String name) {
         if (StringUtils.isBlank(props.get(name))) {
             throw ValidatorUtils.invalidArgument(
-                    String.format("'%s' not found, please check the WITH properties", name));
+                    String.format("'%s' cannot be empty, please check the WITH properties", name));
         }
     }
 
@@ -74,7 +74,6 @@ public class SourceValidateHandler {
         ensurePropNotBlank(props, DbzConnectorConfig.PORT);
         ensurePropNotBlank(props, DbzConnectorConfig.DB_NAME);
         ensurePropNotBlank(props, DbzConnectorConfig.USER);
-        ensurePropNotBlank(props, DbzConnectorConfig.PASSWORD);
         // ensure table name is passed by user in non-sharing mode
         if (!isMultiTableShared) {
             ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
