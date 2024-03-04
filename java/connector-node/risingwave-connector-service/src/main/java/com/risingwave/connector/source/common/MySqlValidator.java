@@ -32,7 +32,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private final Connection jdbcConnection;
 
-    public MySqlValidator(Map<String, String> userProps, TableSchema tableSchema)
+    private final boolean isMultiTableShared;
+
+    public MySqlValidator(
+            Map<String, String> userProps, TableSchema tableSchema, boolean isMultiTableShared)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -45,6 +48,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
+        this.isMultiTableShared = isMultiTableShared;
     }
 
     @Override
@@ -110,6 +114,11 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
+    @Override
+    boolean isMultiTableShared() {
+        return isMultiTableShared;
+    }
+
     private void validateTableSchema() throws SQLException {
         // check whether table exist
         var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
@@ -172,10 +181,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private void validatePrivileges() throws SQLException {
-        String[] privilegesRequired = {
+        final String[] dedicatedSourcePrivileges = {
             "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT",
         };
 
+        final String[] sharedSourcePrivileges = {
+            "SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT",
+        };
+
+        String[] privilegesRequired =
+                isMultiTableShared ? sharedSourcePrivileges : dedicatedSourcePrivileges;
         var hashSet = new HashSet<>(List.of(privilegesRequired));
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));

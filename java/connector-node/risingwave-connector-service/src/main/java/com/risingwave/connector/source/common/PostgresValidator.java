@@ -136,6 +136,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
+    @Override
+    boolean isMultiTableShared() {
+        return isMultiTableShared;
+    }
+
     /** For Citus which is a distributed version of PG */
     public void validateDistributedTable() throws SQLException {
         try (var stmt =

@@ -97,7 +97,7 @@ public class SourceValidateHandler {
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
                 try (var validator =
                         new PostgresValidator(props, tableSchema, isMultiTableShared)) {
-                    validator.validateAll(isMultiTableShared);
+                    validator.validateAll();
                 }
                 break;
 
@@ -133,8 +133,8 @@ public class SourceValidateHandler {
             case MYSQL:
                 ensureRequiredProps(props, isMultiTableShared);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
-                try (var validator = new MySqlValidator(props, tableSchema)) {
-                    validator.validateAll(isMultiTableShared);
+                try (var validator = new MySqlValidator(props, tableSchema, isMultiTableShared)) {
+                    validator.validateAll();
                 }
                 break;
             case MONGODB:
