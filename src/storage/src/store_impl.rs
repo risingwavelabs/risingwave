@@ -629,6 +629,8 @@ impl StateStoreImpl {
                     meta_file_cache,
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
+                    block_cache_shard_bits: opts.block_cache_shard_bits,
+                    meta_cache_shard_bits: opts.meta_cache_shard_bits,
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

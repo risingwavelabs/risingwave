@@ -53,8 +53,6 @@ use crate::hummock::{
 };
 use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
 
-const MAX_META_CACHE_SHARD_BITS: usize = 2;
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CacheableEntry<HummockSstableObjectId, Box<Sstable>>;
@@ -176,6 +174,9 @@ pub struct SstableStoreConfig {
     pub meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
     pub recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
+
+    pub block_cache_shard_bits: usize,
+    pub meta_cache_shard_bits: usize,
 }
 
 pub struct SstableStore {
@@ -197,13 +198,11 @@ pub struct SstableStore {
 
 impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
-        // TODO: We should validate path early. Otherwise object store won't report invalid path
-        // error until first write attempt.
-        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
-        while (config.meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
-            && shard_bits > 0
+        let mut meta_cache_shard_bits = config.meta_cache_shard_bits;
+        while (config.meta_cache_capacity >> meta_cache_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
+            && meta_cache_shard_bits > 0
         {
-            shard_bits -= 1;
+            meta_cache_shard_bits -= 1;
         }
         let block_cache_listener = Arc::new(BlockCacheEventListener {
             data_file_cache: config.data_file_cache.clone(),
@@ -215,12 +214,12 @@ impl SstableStore {
             store: config.store,
             block_cache: BlockCache::with_event_listener(
                 config.block_cache_capacity,
-                MAX_CACHE_SHARD_BITS,
+                config.block_cache_shard_bits,
                 config.high_priority_ratio,
                 block_cache_listener,
             ),
             meta_cache: Arc::new(LruCache::with_event_listener(
-                shard_bits,
+                meta_cache_shard_bits,
                 config.meta_cache_capacity,
                 0,
                 meta_cache_listener,

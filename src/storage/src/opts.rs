@@ -137,6 +137,9 @@ pub struct StorageOpts {
 
     pub mem_table_spill_threshold: usize,
 
+    pub block_cache_shard_bits: usize,
+    pub meta_cache_shard_bits: usize,
+
     pub object_store_config: ObjectStoreConfig,
 }
 
@@ -260,6 +263,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
+            block_cache_shard_bits: c.storage.block_cache_shard_bits,
+            meta_cache_shard_bits: c.storage.meta_cache_shard_bits,
         }
     }
 }

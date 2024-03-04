@@ -75,6 +75,8 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+        block_cache_shard_bits: 6,
+        meta_cache_shard_bits: 2,
     }))
 }
 

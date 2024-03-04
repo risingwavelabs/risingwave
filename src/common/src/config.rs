@@ -592,6 +592,14 @@ pub struct StorageConfig {
     #[serde(default)]
     pub prefetch_buffer_capacity_mb: Option<usize>,
 
+    /// num shard bits of block cache.
+    #[serde(default = "default::storage::block_cache_shard_bits")]
+    pub block_cache_shard_bits: usize,
+
+    /// num shard bits of meta cache.
+    #[serde(default = "default::storage::meta_cache_shard_bits")]
+    pub meta_cache_shard_bits: usize,
+
     /// max prefetch block number
     #[serde(default = "default::storage::max_prefetch_block_number")]
     pub max_prefetch_block_number: usize,
@@ -1182,6 +1190,14 @@ pub mod default {
 
         pub fn meta_cache_capacity_mb() -> usize {
             128
+        }
+
+        pub fn block_cache_shard_bits() -> usize {
+            6
+        }
+
+        pub fn meta_cache_shard_bits() -> usize {
+            2
         }
 
         pub fn disable_remote_compactor() -> bool {

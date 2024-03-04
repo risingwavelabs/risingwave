@@ -80,6 +80,8 @@ impl HummockJavaBindingIterator {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            block_cache_shard_bits: 6,
+            meta_cache_shard_bits: 2,
         }));
         let reader = HummockVersionReader::new(
             sstable_store,
