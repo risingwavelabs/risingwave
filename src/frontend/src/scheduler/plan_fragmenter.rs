@@ -437,6 +437,7 @@ impl QueryStage {
         &self,
         exchange_info: Option<ExchangeInfo>,
         source_info: SourceScanInfo,
+        task_parallelism: u32,
     ) -> Self {
         assert!(matches!(source_info, SourceScanInfo::Complete(_)));
         let exchange_info = if let Some(exchange_info) = exchange_info {
@@ -450,7 +451,7 @@ impl QueryStage {
             id: self.id,
             root: self.root.clone(),
             exchange_info,
-            parallelism: Some(source_info.split_info().unwrap().len() as u32),
+            parallelism: Some(task_parallelism),
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
@@ -660,9 +661,11 @@ impl StageGraph {
                 .complete(self.batch_parallelism)
                 .await?;
 
+            // In order to cooperate with the batch reading of file source, all the splits to be read are divide into several parts to prevent the task from taking up too many resources.
             let complete_stage = Arc::new(stage.clone_with_exchange_info_and_complete_source_info(
                 exchange_info,
                 complete_source_info,
+                (self.batch_parallelism / 2) as u32,
             ));
             let parallelism = complete_stage.parallelism;
             complete_stages.insert(stage.id, complete_stage);
