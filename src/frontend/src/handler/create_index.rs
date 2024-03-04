@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -323,6 +324,7 @@ fn assemble_materialize(
     //   LogicalScan(table_desc)
 
     let definition = context.normalized_sql().to_owned();
+    let retention_seconds = table_catalog.retention_seconds.and_then(NonZeroU32::new);
 
     let logical_scan = LogicalScan::create(
         table_name,
@@ -395,7 +397,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_index_plan(index_name, definition)
+    .gen_index_plan(index_name, definition, retention_seconds)
 }
 
 pub async fn handle_create_index(

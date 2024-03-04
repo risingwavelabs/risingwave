@@ -823,7 +823,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 &side_update.ht.table_id().to_string(),
             ]);
 
-        let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
+        let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row)) = r else {
                 continue;

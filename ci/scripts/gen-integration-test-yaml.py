@@ -15,6 +15,7 @@ CASES_MAP = {
     'mysql-sink': ['json'],
     'postgres-sink': ['json'],
     'iceberg-cdc': ['json'],
+    'iceberg-sink': ['none'],
     'twitter': ['json', 'protobuf'],
     'twitter-pulsar': ['json'],
     'debezium-mysql': ['json'],

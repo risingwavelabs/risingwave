@@ -62,7 +62,7 @@ mod dedup;
 mod dispatch;
 pub mod dml;
 mod dynamic_filter;
-mod error;
+pub mod error;
 mod expand;
 mod filter;
 mod flow_control;
