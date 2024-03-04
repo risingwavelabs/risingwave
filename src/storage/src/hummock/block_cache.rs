@@ -29,6 +29,8 @@ use crate::hummock::HummockError;
 
 type CachedBlockEntry = LruCacheEntry<(HummockSstableObjectId, u64), Box<Block>>;
 
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
+
 enum BlockEntry {
     Cache(#[allow(dead_code)] CachedBlockEntry),
     Owned(#[allow(dead_code)] Box<Block>),
@@ -131,34 +133,25 @@ impl BlockCache {
 
     fn new_inner(
         capacity: usize,
-        max_shard_bits: usize,
+        mut max_shard_bits: usize,
         high_priority_ratio: usize,
         // listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        // while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-        //     max_shard_bits -= 1;
-        // }
-
-        // let cache = match listener {
-        //     Some(listener) => LruCache::with_event_listener(
-        //         max_shard_bits,
-        //         capacity,
-        //         high_priority_ratio,
-        //         listener,
-        //     ),
-        //     None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
-        // };
+        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
+            max_shard_bits -= 1;
+        }
+        let shards = 1 << max_shard_bits;
 
         let cache = LruCache::new(LruCacheConfig {
             capacity,
-            shards: 1 << max_shard_bits,
+            shards,
             eviction_config: LruConfig {
                 high_priority_pool_ratio: high_priority_ratio as f64 / 100.0,
             },
-            object_pool_capacity: (1 << max_shard_bits) * 1024,
+            object_pool_capacity: shards * 1024,
             hash_builder: RandomState::default(),
         });
 

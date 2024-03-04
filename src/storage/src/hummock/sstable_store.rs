@@ -200,47 +200,31 @@ impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
-        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
-        while (config.meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
-            && shard_bits > 0
+        let mut meta_cache_shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (config.meta_cache_capacity >> meta_cache_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
+            && meta_cache_shard_bits > 0
         {
-            shard_bits -= 1;
+            meta_cache_shard_bits -= 1;
         }
-        // let block_cache_listener = Arc::new(BlockCacheEventListener {
-        //     data_file_cache: config.data_file_cache.clone(),
-        //     metrics: config.state_store_metrics,
-        // });
-        // let meta_cache_listener = Arc::new(MetaCacheEventListener(config.meta_file_cache.clone()));
+        let block_cache = BlockCache::new(
+            config.block_cache_capacity,
+            MAX_CACHE_SHARD_BITS,
+            config.high_priority_ratio,
+        );
+        let meta_cache = Arc::new(LruCache::new(LruCacheConfig {
+            capacity: config.meta_cache_capacity,
+            shards: 1 << meta_cache_shard_bits,
+            eviction_config: LruConfig {
+                high_priority_pool_ratio: 0.0,
+            },
+            object_pool_capacity: (1 << meta_cache_shard_bits) * 1024,
+            hash_builder: RandomState::default(),
+        }));
         Self {
             path: config.path,
             store: config.store,
-            // block_cache: BlockCache::with_event_listener(
-            //     config.block_cache_capacity,
-            //     MAX_CACHE_SHARD_BITS,
-            //     config.high_priority_ratio,
-            //     block_cache_listener,
-            // ),
-            // meta_cache: Arc::new(LruCache::with_event_listener(
-            //     shard_bits,
-            //     config.meta_cache_capacity,
-            //     0,
-            //     meta_cache_listener,
-            // )),
-            block_cache: BlockCache::new(
-                config.block_cache_capacity,
-                MAX_CACHE_SHARD_BITS,
-                config.high_priority_ratio,
-            ),
-            // meta_cache: Arc::new(LruCache::new(shard_bits, config.meta_cache_capacity, 0)),
-            meta_cache: Arc::new(LruCache::new(LruCacheConfig {
-                capacity: config.meta_cache_capacity,
-                shards: 1 << shard_bits,
-                eviction_config: LruConfig {
-                    high_priority_pool_ratio: 0.0,
-                },
-                object_pool_capacity: (1 << shard_bits) * 1024,
-                hash_builder: RandomState::default(),
-            })),
+            block_cache,
+            meta_cache,
 
             data_file_cache: config.data_file_cache,
             meta_file_cache: config.meta_file_cache,
