@@ -181,16 +181,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private void validatePrivileges() throws SQLException {
-        final String[] dedicatedSourcePrivileges = {
-            "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT",
+        String[] privilegesRequired = {
+            "SELECT", "RELOAD", "REPLICATION SLAVE", "REPLICATION CLIENT",
         };
 
-        final String[] sharedSourcePrivileges = {
-            "SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT",
-        };
-
-        String[] privilegesRequired =
-                isMultiTableShared ? sharedSourcePrivileges : dedicatedSourcePrivileges;
         var hashSet = new HashSet<>(List.of(privilegesRequired));
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
