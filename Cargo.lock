@@ -923,14 +923,13 @@ dependencies = [
 
 [[package]]
 name = "auto_impl"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fee3da8ef1276b0bee5dd1c7258010d8fffd31801447323115a25560e1327b89"
+checksum = "3c87f3f15e7794432337fc718554eaa4dc8f04c9677a950ffe366f20a162ae42"
 dependencies = [
- "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -1039,30 +1038,6 @@ dependencies = [
  "percent-encoding",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "aws-sdk-ec2"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88111ec31c6a3b9ed890f345b063bc2c76b49897e0c4601f6b1350c95d8d96d6"
-dependencies = [
- "aws-credential-types",
- "aws-http",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-query",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-smithy-xml",
- "aws-types",
- "fastrand 2.0.1",
- "http 0.2.9",
- "regex",
- "tracing",
 ]
 
 [[package]]
@@ -4701,9 +4676,9 @@ dependencies = [
 
 [[package]]
 name = "google-cloud-pubsub"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c96d7e0fd07ecbce85bc8420bb7a049bb70ea74036e59fbee1a51deaa79216"
+checksum = "1da196da473976944d408a91213bafe078e7223e10694d3f8ed36b6e210fa130"
 dependencies = [
  "async-channel",
  "async-stream",
@@ -9628,7 +9603,6 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "aws-config",
- "aws-sdk-ec2",
  "axum",
  "base64-url",
  "bytes",
@@ -9673,6 +9647,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_sqlparser",
  "risingwave_test_runner",
+ "rw-aws-sdk-ec2",
  "rw_futures_util",
  "scopeguard",
  "sea-orm",
@@ -10510,6 +10485,30 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
+]
+
+[[package]]
+name = "rw-aws-sdk-ec2"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80dba3602b267a7f9dcc546ccbf1d05752447773146253c7e344e2a320630b7f"
+dependencies = [
+ "aws-credential-types",
+ "aws-http",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-query",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "fastrand 2.0.1",
+ "http 0.2.9",
+ "regex",
+ "tracing",
 ]
 
 [[package]]
@@ -12961,9 +12960,9 @@ checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
 
 [[package]]
 name = "walkdir"
-version = "2.4.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71d857dc86794ca4c280d616f7da00d2dbfd8cd788846559a6813e6aa4b54ee"
+checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",

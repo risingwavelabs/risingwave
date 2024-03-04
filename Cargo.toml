@@ -90,7 +90,8 @@ aws-sdk-s3 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-ec2 = { version = "1", default-features = false, features = [
+# To bump the version of aws-sdk-ec2, check the README of https://github.com/risingwavelabs/rw-aws-sdk-ec2
+aws-sdk-ec2 = { package = "rw-aws-sdk-ec2", version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
