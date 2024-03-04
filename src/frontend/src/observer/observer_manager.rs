@@ -127,6 +127,8 @@ impl ObserverState for FrontendObserverNode {
             meta_backup_manifest_id: _,
             hummock_write_limits: _,
             version,
+            // todo!: add subscriptions
+            subscriptions: _,
         } = snapshot;
 
         for db in databases {
@@ -288,6 +290,7 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
+                        RelationInfo::Subscription(_) => todo!(),
                     }
                 }
             }

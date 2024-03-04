@@ -21,7 +21,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::ProtoSerializeExt;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats};
 use risingwave_pb::meta::{SystemParams, TableFragments};
@@ -121,6 +121,7 @@ pub struct ClusterMetadata {
     pub connection: Vec<Connection>,
     pub system_param: SystemParams,
     pub cluster_id: String,
+    pub subscription: Vec<Subscription>,
 }
 
 impl ClusterMetadata {
@@ -145,6 +146,7 @@ impl ClusterMetadata {
         Self::encode_prost_message_list(&self.connection.iter().collect_vec(), buf);
         Self::encode_prost_message(&self.system_param, buf);
         Self::encode_prost_message(&self.cluster_id, buf);
+        Self::encode_prost_message_list(&self.subscription.iter().collect_vec(), buf);
         Ok(())
     }
 
@@ -172,6 +174,8 @@ impl ClusterMetadata {
         let connection: Vec<Connection> = Self::decode_prost_message_list(&mut buf)?;
         let system_param: SystemParams = Self::decode_prost_message(&mut buf)?;
         let cluster_id: String = Self::decode_prost_message(&mut buf)?;
+        let subscription: Vec<Subscription> =
+            Self::try_decode_prost_message_list(&mut buf).unwrap_or_else(|| Ok(vec![]))?;
 
         Ok(Self {
             default_cf,
@@ -191,6 +195,7 @@ impl ClusterMetadata {
             connection,
             system_param,
             cluster_id,
+            subscription,
         })
     }
 
@@ -228,6 +233,16 @@ impl ClusterMetadata {
             result.push(v);
         }
         Ok(result)
+    }
+
+    fn try_decode_prost_message_list<T>(buf: &mut &[u8]) -> Option<BackupResult<Vec<T>>>
+    where
+        T: prost::Message + Default,
+    {
+        if buf.is_empty() {
+            return None;
+        }
+        Some(Self::decode_prost_message_list(buf))
     }
 }
 

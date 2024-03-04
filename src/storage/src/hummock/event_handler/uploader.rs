@@ -868,18 +868,18 @@ impl HummockUploader {
             .filter(|(_, imms)| imms.len() >= self.context.imm_merge_threshold)
         {
             let imms_to_merge = imms.drain(..).collect_vec();
-            let mut kv_count = 0;
+            let mut value_count = 0;
             let mut imm_size = 0;
             imms_to_merge.iter().for_each(|imm| {
                 // ensure imms are sealed
                 assert_le!(imm.max_epoch(), sealed_epoch);
-                kv_count += imm.kv_count();
+                value_count += imm.value_count();
                 imm_size += imm.size();
             });
 
             // acquire memory before generate merge task
             // if acquire memory failed, the task will not be generated
-            let memory_sz = (imm_size + kv_count * EPOCH_LEN) as u64;
+            let memory_sz = (imm_size + value_count * EPOCH_LEN) as u64;
             if let Some(tracker) = memory_limiter.try_require_memory(memory_sz) {
                 self.sealed_data
                     .merging_tasks
@@ -1125,7 +1125,9 @@ impl HummockUploader {
                 .stats
                 .merge_imm_batch_memory_sz
                 .with_label_values(&[table_id_label.as_str()])
-                .inc_by((output.merged_imm.size() + output.merged_imm.kv_count() * EPOCH_LEN) as _);
+                .inc_by(
+                    (output.merged_imm.size() + output.merged_imm.value_count() * EPOCH_LEN) as _,
+                );
         }
         poll_ret
     }
@@ -1667,7 +1669,7 @@ mod tests {
             imm = &mut task => {
                 println!("merging task success");
                 assert_eq!(table_id, imm.table_id);
-                assert_eq!(9, imm.kv_count());
+                assert_eq!(9, imm.value_count());
             }
         }
         task.join_handle.abort();
