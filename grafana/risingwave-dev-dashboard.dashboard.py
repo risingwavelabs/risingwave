@@ -1250,7 +1250,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
                             "fragment {{fragment_id}}",
                         ),
                         panels.target_hidden(
@@ -1264,7 +1264,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,side)",
                             "fragment {{fragment_id}} {{side}}",
                         ),
                         panels.target_hidden(

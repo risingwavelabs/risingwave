@@ -192,7 +192,7 @@ impl GlobalBarrierManagerContext {
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", table.id);
-                    finished.await.context("failed to finish command")?;
+                    finished.await.ok().context("failed to finish command")??;
 
                     tracing::debug!("finished stream job {}", table.id);
                     // Once notified that job is finished we need to notify frontend.
@@ -275,7 +275,7 @@ impl GlobalBarrierManagerContext {
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", id);
-                    finished.await.ok().context("failed to finish command")?;
+                    finished.await.ok().context("failed to finish command")??;
                     tracing::debug!(id, "finished stream job");
                     catalog_controller.finish_streaming_job(id).await?;
                 };
