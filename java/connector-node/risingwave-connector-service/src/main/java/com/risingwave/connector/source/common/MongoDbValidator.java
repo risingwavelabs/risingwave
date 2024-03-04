@@ -53,4 +53,9 @@ public class MongoDbValidator extends DatabaseValidator {
     void validateTable() {
         // do nothing since MongoDB is schemaless
     }
+
+    @Override
+    boolean isMultiTableShared() {
+        return false;
+    }
 }
