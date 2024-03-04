@@ -1864,8 +1864,10 @@ impl ScaleController {
                                     );
                                 } else {
                                     tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
-                                        downstream_actor_id
+                                        "actor {} downstream actor id {} in fragment {} not found in fragment_actor_id_map",
+                                        actor.actor_id,
+                                        downstream_actor_id,
+                                        dispatcher.dispatcher_id,
                                     );
                                 }
 
