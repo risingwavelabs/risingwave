@@ -31,7 +31,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{
+    ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType,
+};
 use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -2815,13 +2817,7 @@ impl GlobalStreamManager {
     }
 
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
-        let (local_notification_tx, mut local_notification_rx) =
-            tokio::sync::mpsc::unbounded_channel();
-
-        self.env
-            .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+        tracing::info!("starting automatic parallelism control monitor");
 
         let check_period =
             Duration::from_secs(self.env.opts.parallelism_control_trigger_period_sec);
@@ -2832,6 +2828,17 @@ impl GlobalStreamManager {
             check_period,
         );
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        // waiting for first tick
+        ticker.tick().await;
+
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+
+        self.env
+            .notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
 
         let worker_nodes = self
             .metadata_manager
@@ -2844,7 +2851,7 @@ impl GlobalStreamManager {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let mut should_trigger = true;
+        let mut should_trigger = false;
 
         loop {
             tokio::select! {
@@ -2880,13 +2887,26 @@ impl GlobalStreamManager {
 
                     match notification {
                         LocalNotification::WorkerNodeActivated(worker) => {
-                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
-
-                            if let Some(prev_worker) = prev_worker && prev_worker.parallel_units != worker.parallel_units {
-                                tracing::info!(worker = worker.id, "worker parallelism changed");
+                            match (worker.get_type(), worker.property.as_ref()) {
+                                (Ok(WorkerType::ComputeNode), Some(prop)) if prop.is_streaming => {
+                                    tracing::info!("worker {} activated notification received", worker.id);
+                                }
+                                _ => continue
                             }
 
-                            should_trigger = true;
+                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
+
+                            match prev_worker {
+                                Some(prev_worker) if prev_worker.parallel_units != worker.parallel_units  => {
+                                    tracing::info!(worker = worker.id, "worker parallelism changed");
+                                    should_trigger = true;
+                                }
+                                None => {
+                                    tracing::info!(worker = worker.id, "new worker joined");
+                                    should_trigger = true;
+                                }
+                                _ => {}
+                            }
                         }
 
                         // Since our logic for handling passive scale-in is within the barrier manager,
