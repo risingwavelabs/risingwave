@@ -698,6 +698,7 @@ impl GlobalBarrierManager {
         err: MetaError,
         fail_nodes: impl IntoIterator<Item = EpochNode>,
     ) {
+        self.context.tracker.lock().await.abort_all(&err);
         self.rpc_manager.clear();
 
         for node in fail_nodes {
@@ -707,9 +708,10 @@ impl GlobalBarrierManager {
             if let Some(wait_commit_timer) = node.wait_commit_timer {
                 wait_commit_timer.observe_duration();
             }
-            node.notifiers
-                .into_iter()
-                .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
+            node.notifiers.into_iter().for_each(|notifier|
+                // some of the fail nodes may be notified as collected before, we should notify them
+                // as failed using the specified error.
+                notifier.notify_failed(err.clone()));
         }
 
         if self.enable_recovery {
