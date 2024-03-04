@@ -53,10 +53,6 @@ use crate::hummock::{
 };
 use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
 
-const MAX_META_CACHE_SHARD_BITS: usize = 2;
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
-
 pub type TableHolder = CacheableEntry<HummockSstableObjectId, Box<Sstable>>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
@@ -170,6 +166,8 @@ pub struct SstableStoreConfig {
     pub block_cache_capacity: usize,
     pub meta_cache_capacity: usize,
     pub high_priority_ratio: usize,
+    pub meta_shard_num: usize,
+    pub block_shard_num: usize,
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
     pub data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
@@ -199,12 +197,6 @@ impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
-        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
-        while (config.meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
-            && shard_bits > 0
-        {
-            shard_bits -= 1;
-        }
         let block_cache_listener = Arc::new(BlockCacheEventListener {
             data_file_cache: config.data_file_cache.clone(),
             metrics: config.state_store_metrics,
@@ -215,12 +207,12 @@ impl SstableStore {
             store: config.store,
             block_cache: BlockCache::with_event_listener(
                 config.block_cache_capacity,
-                MAX_CACHE_SHARD_BITS,
+                config.block_shard_num,
                 config.high_priority_ratio,
                 block_cache_listener,
             ),
             meta_cache: Arc::new(LruCache::with_event_listener(
-                shard_bits,
+                config.meta_shard_num,
                 config.meta_cache_capacity,
                 0,
                 meta_cache_listener,
@@ -244,11 +236,11 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity, 0));
+        let meta_cache = Arc::new(LruCache::new(1, meta_cache_capacity, 0));
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 0, 0),
+            block_cache: BlockCache::new(block_cache_capacity, 1, 0),
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),

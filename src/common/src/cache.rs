@@ -665,31 +665,25 @@ pub struct LruCache<K: LruKey, T: LruValue> {
 const DEFAULT_OBJECT_POOL_SIZE: usize = 1024;
 
 impl<K: LruKey, T: LruValue> LruCache<K, T> {
-    pub fn new(num_shard_bits: usize, capacity: usize, high_priority_ratio: usize) -> Self {
-        Self::new_inner(num_shard_bits, capacity, high_priority_ratio, None)
+    pub fn new(num_shards: usize, capacity: usize, high_priority_ratio: usize) -> Self {
+        Self::new_inner(num_shards, capacity, high_priority_ratio, None)
     }
 
     pub fn with_event_listener(
-        num_shard_bits: usize,
+        num_shards: usize,
         capacity: usize,
         high_priority_ratio: usize,
         listener: Arc<dyn LruCacheEventListener<K = K, T = T>>,
     ) -> Self {
-        Self::new_inner(
-            num_shard_bits,
-            capacity,
-            high_priority_ratio,
-            Some(listener),
-        )
+        Self::new_inner(num_shards, capacity, high_priority_ratio, Some(listener))
     }
 
     fn new_inner(
-        num_shard_bits: usize,
+        num_shards: usize,
         capacity: usize,
         high_priority_ratio: usize,
         listener: Option<Arc<dyn LruCacheEventListener<K = K, T = T>>>,
     ) -> Self {
-        let num_shards = 1 << num_shard_bits;
         let mut shards = Vec::with_capacity(num_shards);
         let per_shard = capacity / num_shards;
         let mut shard_usages = Vec::with_capacity(num_shards);
