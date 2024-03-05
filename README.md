@@ -61,15 +61,13 @@ RisingWave is a Postgres-compatible streaming database engineered to provide the
 
 ## Try it out in 60 seconds
 
-Start RisingWave:
+Install RisingWave:
 ```shell
 curl https://risingwave.com/sh | sh
 ```
 
-Now connect to RisingWave using `psql`:
-```
-psql -h localhost -p 4566 -d dev -U root
-```
+Then follow the prompts to start and connect to RisingWave.
+
 To learn about other installation options such as Docker, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## Production deployments
