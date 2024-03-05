@@ -30,7 +30,7 @@ aws-sigv4 = { version = "1", features = ["http0-compat", "sign-eventstream", "si
 aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
 aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
 axum = { version = "0.6" }
-base64 = { version = "0.22" }
+base64 = { version = "0.21" }
 bigdecimal = { version = "0.4" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
