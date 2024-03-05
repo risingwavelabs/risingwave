@@ -1135,7 +1135,7 @@ pub mod default {
         }
 
         pub fn parallelism_control_batch_size() -> usize {
-            1
+            10
         }
 
         pub fn parallelism_control_trigger_period_sec() -> u64 {
