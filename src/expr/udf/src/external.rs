@@ -228,7 +228,12 @@ impl ArrowFlightUdfClient {
                 Err(err) if err.is_connection_error() => {
                     tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
-                ret => return ret,
+                ret => {
+                    if ret.is_err() {
+                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    }
+                    return ret;
+                }
             }
             tokio::time::sleep(backoff).await;
             backoff *= 2;
