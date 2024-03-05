@@ -551,17 +551,28 @@ pub enum ProfileCommands {
     },
 }
 
+/// Start `risectl` with the given options.
+/// Log and abort the process if any error occurs.
+///
+/// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
+/// in an embedded manner.
 pub async fn start(opts: CliOpts) {
-    let context = CtlContext::default();
-    let result = start_impl(opts, &context).await;
-    context.try_close().await;
-    if let Err(e) = result {
+    if let Err(e) = start_fallible(opts).await {
         eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
         std::process::exit(1);
     }
 }
 
-pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
+/// Start `risectl` with the given options.
+/// Return `Err` if any error occurs.
+pub async fn start_fallible(opts: CliOpts) -> Result<()> {
+    let context = CtlContext::default();
+    let result = start_impl(opts, &context).await;
+    context.try_close().await;
+    result
+}
+
+async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?

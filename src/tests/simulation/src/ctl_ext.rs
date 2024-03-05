@@ -15,6 +15,7 @@
 #![cfg_attr(not(madsim), expect(unused_imports))]
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -380,7 +381,6 @@ impl Cluster {
             .spawn(async move {
                 let revision = format!("{}", revision);
                 let mut v = vec![
-                    "ctl",
                     "meta",
                     "reschedule",
                     "--plan",
@@ -393,10 +393,9 @@ impl Cluster {
                     v.push("--resolve-no-shuffle");
                 }
 
-                let opts = risingwave_ctl::CliOpts::parse_from(v);
-                risingwave_ctl::start(opts).await;
+                start_ctl(v).await
             })
-            .await?;
+            .await??;
 
         Ok(())
     }
@@ -404,26 +403,14 @@ impl Cluster {
     /// Pause all data sources in the cluster.
     #[cfg_or_panic(madsim)]
     pub async fn pause(&mut self) -> Result<()> {
-        self.ctl
-            .spawn(async move {
-                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "pause"]);
-                risingwave_ctl::start(opts).await;
-            })
-            .await?;
-
+        self.ctl.spawn(start_ctl(["meta", "pause"])).await??;
         Ok(())
     }
 
     /// Resume all data sources in the cluster.
     #[cfg_or_panic(madsim)]
     pub async fn resume(&mut self) -> Result<()> {
-        self.ctl
-            .spawn(async move {
-                let opts = risingwave_ctl::CliOpts::parse_from(["ctl", "meta", "resume"]);
-                risingwave_ctl::start(opts).await;
-            })
-            .await?;
-
+        self.ctl.spawn(start_ctl(["meta", "resume"])).await??;
         Ok(())
     }
 
@@ -433,7 +420,6 @@ impl Cluster {
         self.ctl
             .spawn(async move {
                 let mut command: Vec<String> = vec![
-                    "ctl".into(),
                     "throttle".into(),
                     "mv".into(),
                     table_id.table_id.to_string(),
@@ -441,10 +427,9 @@ impl Cluster {
                 if let Some(rate_limit) = rate_limit {
                     command.push(rate_limit.to_string());
                 }
-                let opts = risingwave_ctl::CliOpts::parse_from(command);
-                risingwave_ctl::start(opts).await;
+                start_ctl(command).await
             })
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -478,4 +463,15 @@ impl Cluster {
 
         Ok(resp)
     }
+}
+
+#[cfg_attr(not(madsim), allow(dead_code))]
+async fn start_ctl<S, I>(args: I) -> Result<()>
+where
+    S: Into<OsString>,
+    I: IntoIterator<Item = S>,
+{
+    let args = std::iter::once("ctl".into()).chain(args.into_iter().map(|s| s.into()));
+    let opts = risingwave_ctl::CliOpts::parse_from(args);
+    risingwave_ctl::start_fallible(opts).await
 }
