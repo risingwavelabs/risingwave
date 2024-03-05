@@ -29,7 +29,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import _, { sortBy } from "lodash"
+import _ from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
@@ -40,11 +40,9 @@ import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
   BackPressureInfo,
-  BackPressuresMetrics,
-  INTERVAL,
   calculateBPRate,
-  getActorBackPressures,
-  getBackPressureWithoutPrometheus,
+  fetchEmbeddedBackPressure,
+  fetchPrometheusBackPressure,
 } from "../lib/api/metric"
 import { getFragments, getStreamingJobs } from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
@@ -54,6 +52,9 @@ import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
 }
+
+// Refresh interval (ms) for back pressure stats
+const INTERVAL = 5000
 
 /** Associated data of each plan node in the fragment graph, including the dispatchers. */
 export interface PlanNodeDatum {
@@ -181,21 +182,21 @@ const backPressureDataSources: BackPressureDataSource[] = [
   "Prometheus",
 ]
 
+// The state of the embedded back pressure metrics.
+// The metrics from previous fetch are stored here to calculate the rate.
+interface EmbeddedBackPressureInfo {
+  previous: BackPressureInfo[]
+  current: BackPressureInfo[]
+}
+
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
   const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
-  // used to get the data source
-  const [backPressureDataSource, setBackPressureDataSource] =
-    useState<BackPressureDataSource>("Embedded")
 
-  const { response: actorBackPressures } = useFetch(
-    getActorBackPressures,
-    INTERVAL,
-    backPressureDataSource === "Prometheus"
-  )
+  const toast = useErrorToast()
 
   const fragmentDependencyCallback = useCallback(() => {
     if (fragmentList) {
@@ -211,7 +212,6 @@ export default function Streaming() {
         }
       }
     }
-    return undefined
   }, [fragmentList, relationId])
 
   useEffect(() => {
@@ -222,43 +222,7 @@ export default function Streaming() {
         }
       }
     }
-    return () => {}
   }, [relationId, relationList, setRelationId])
-
-  // get back pressure rate without prometheus
-  // TODO(bugen): extract the following logic to a hook and unify the interface
-  // with Prometheus data source.
-  const [backPressuresMetricsWithoutPromtheus, setBackPressuresMetrics] =
-    useState<BackPressuresMetrics>()
-  const [previousBP, setPreviousBP] = useState<BackPressureInfo[]>([])
-  const [currentBP, setCurrentBP] = useState<BackPressureInfo[]>([])
-  const toast = useErrorToast()
-
-  useEffect(() => {
-    if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
-        const fetchNewBP = async () => {
-          const newBP = await getBackPressureWithoutPrometheus()
-          setPreviousBP(currentBP)
-          setCurrentBP(newBP)
-        }
-
-        fetchNewBP().catch(console.error)
-      }, INTERVAL)
-      return () => clearInterval(interval)
-    }
-  }, [currentBP, backPressureDataSource])
-
-  useEffect(() => {
-    if (currentBP !== null && previousBP !== null) {
-      const metrics = calculateBPRate(currentBP, previousBP)
-      metrics.outputBufferBlockingDuration = sortBy(
-        metrics.outputBufferBlockingDuration,
-        (m) => (m.metric.fragmentId, m.metric.downstreamFragmentId)
-      )
-      setBackPressuresMetrics(metrics)
-    }
-  }, [currentBP, previousBP])
 
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
@@ -323,49 +287,86 @@ export default function Streaming() {
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
+  const [backPressureDataSource, setBackPressureDataSource] =
+    useState<BackPressureDataSource>("Embedded")
+
+  // Periodically fetch Prometheus back-pressure from Meta node
+  const { response: promethusMetrics } = useFetch(
+    fetchPrometheusBackPressure,
+    INTERVAL,
+    backPressureDataSource === "Prometheus"
+  )
+
+  // Periodically fetch embedded back-pressure from Meta node
+  // Didn't call `useFetch()` because the `setState` way is special.
+  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
+    useState<EmbeddedBackPressureInfo>()
+  useEffect(() => {
+    if (backPressureDataSource === "Embedded") {
+      const interval = setInterval(() => {
+        fetchEmbeddedBackPressure().then(
+          (newBP) => {
+            console.log(newBP)
+            setEmbeddedBackPressureInfo((prev) =>
+              prev
+                ? {
+                    previous: prev.current,
+                    current: newBP,
+                  }
+                : {
+                    previous: newBP, // Use current value to show zero rate, but it's fine
+                    current: newBP,
+                  }
+            )
+          },
+          (e) => {
+            console.error(e)
+            toast(e, "error")
+          }
+        )
+      }, INTERVAL)
+      return () => {
+        clearInterval(interval)
+      }
+    }
+  }, [backPressureDataSource])
+
   const backPressures = useMemo(() => {
-    if (actorBackPressures || backPressuresMetricsWithoutPromtheus) {
+    if (promethusMetrics || embeddedBackPressureInfo) {
       let map = new Map()
 
-      if (
-        backPressureDataSource === "Embedded" &&
-        backPressuresMetricsWithoutPromtheus
-      ) {
-        for (const m of backPressuresMetricsWithoutPromtheus.outputBufferBlockingDuration) {
+      if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
+        const metrics = calculateBPRate(
+          embeddedBackPressureInfo.current,
+          embeddedBackPressureInfo.previous,
+          INTERVAL
+        )
+        for (const m of metrics.outputBufferBlockingDuration) {
           map.set(
             `${m.metric.fragmentId}_${m.metric.downstreamFragmentId}`,
             m.sample[0].value
           )
         }
-      } else if (
-        backPressureDataSource === "Prometheus" &&
-        actorBackPressures
-      ) {
-        if (actorBackPressures) {
-          for (const m of actorBackPressures.outputBufferBlockingDuration) {
-            if (m.sample.length > 0) {
-              // Note: We issue an instant query to Prometheus to get the most recent value.
-              // So there should be only one sample here.
-              //
-              // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
-              // possible that an old version of meta service returns a range-query result.
-              // So we take the one with the latest timestamp here.
-              const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
-              map.set(
-                `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
-                value
-              )
-            }
+      } else if (backPressureDataSource === "Prometheus" && promethusMetrics) {
+        for (const m of promethusMetrics.outputBufferBlockingDuration) {
+          if (m.sample.length > 0) {
+            // Note: We issue an instant query to Prometheus to get the most recent value.
+            // So there should be only one sample here.
+            //
+            // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
+            // possible that an old version of meta service returns a range-query result.
+            // So we take the one with the latest timestamp here.
+            const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
+            map.set(
+              `${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`,
+              value
+            )
           }
         }
       }
       return map
     }
-  }, [
-    backPressureDataSource,
-    actorBackPressures,
-    backPressuresMetricsWithoutPromtheus,
-  ])
+  }, [backPressureDataSource, promethusMetrics, embeddedBackPressureInfo])
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -444,12 +445,14 @@ export default function Streaming() {
                   event.target.value as BackPressureDataSource
                 )
               }
+              defaultValue="Embedded"
             >
-              {backPressureDataSources.map((algo) => (
-                <option value={algo} key={algo}>
-                  {algo}
-                </option>
-              ))}
+              <option value="Embedded" key="Embedded">
+                Embedded (5 secs)
+              </option>
+              <option value="Prometheus" key="Prometheus">
+                Prometheus (1 min)
+              </option>
             </Select>
           </FormControl>
           <Flex height="full" width="full" flexDirection="column">
