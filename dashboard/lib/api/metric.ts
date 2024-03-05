@@ -126,7 +126,7 @@ export function calculateBPRate(
         // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
         ((value - (mapOld.get(key) || 0)) /
           ((intervalMs / 1000) * 1000000000)) *
-        100
+          100
       )
     } else {
       result.set(key, 0)

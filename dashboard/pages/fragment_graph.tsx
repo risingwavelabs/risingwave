@@ -29,7 +29,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import _, { sortBy } from "lodash"
+import _ from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
@@ -310,13 +310,13 @@ export default function Streaming() {
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
-                  previous: prev.current,
-                  current: newBP,
-                }
+                    previous: prev.current,
+                    current: newBP,
+                  }
                 : {
-                  previous: newBP, // Use current value to show zero rate, but it's fine
-                  current: newBP,
-                }
+                    previous: newBP, // Use current value to show zero rate, but it's fine
+                    current: newBP,
+                  }
             )
           },
           (e) => {
