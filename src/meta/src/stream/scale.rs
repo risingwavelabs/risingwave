@@ -2757,6 +2757,11 @@ impl GlobalStreamManager {
             }
         };
 
+        if table_parallelisms.is_empty() {
+            tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
+            return Ok(false);
+        }
+
         let batch_size = match self.env.opts.parallelism_control_batch_size {
             0 => table_parallelisms.len(),
             n => n,
