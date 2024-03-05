@@ -457,7 +457,10 @@ impl CompactorRunner {
                 // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
                 let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
                     && self.executor.last_key_is_delete;
-                if self.executor.builder.need_flush() || need_deleted || !self.executor.shall_copy_raw_block(&smallest_key.to_ref()) {
+                if self.executor.builder.need_flush()
+                    || need_deleted
+                    || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
+                {
                     let largest_key = sstable_iter.sstable.meta.largest_key.clone();
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
