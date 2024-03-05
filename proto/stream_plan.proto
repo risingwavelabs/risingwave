@@ -257,13 +257,6 @@ message SinkNode {
   SinkLogStoreType log_store_type = 3;
 }
 
-message SubscriptionNode {
-  // log store should have a table.
-  catalog.Table log_store_table = 1;
-  //retention time with seconds
-  uint64 retention_seconds = 2;
-}
-
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
@@ -744,6 +737,12 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
+message SubscriptionNode {
+  catalog.Subscription subscription_catalog = 1;
+  // log store should have a table.
+  catalog.Table log_store_table = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -883,7 +882,8 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
-  FRAGMENT_TYPE_FLAG_SOURCE_BACKFILL = 512;
+  FRAGMENT_TYPE_FLAG_SUBSCRIPTION = 512;
+  FRAGMENT_TYPE_FLAG_SOURCE_BACKFILL = 1024;
 }
 
 // The streaming context associated with a stream plan
