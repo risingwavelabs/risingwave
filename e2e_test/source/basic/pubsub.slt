@@ -77,3 +77,26 @@ select v1, v2 FROM s2;
 statement ok
 DROP TABLE s2;
 
+# redact pubsub.credentials
+statement ok
+CREATE TABLE s3 (v1 int, v2 varchar) WITH (
+    connector = 'google_pubsub',
+    pubsub.subscription = 'test-subscription-1',
+    pubsub.emulator_host = 'localhost:5980',
+    pubsub.credentials = '123456'
+) FORMAT PLAIN ENCODE JSON;
+
+# SELECT from system catalog always redact. TODO: make it consistent with SHOW CREATE
+query IT rowsort
+SELECT definition FROM rw_tables WHERE name='s3';
+----
+CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (pubsub.subscription = 'test-subscription-1', pubsub.emulator_host = 'localhost:5980', pubsub.credentials = '[REDACTED]') FORMAT PLAIN ENCODE JSON
+
+# pubsub.credentials is not redacted for table owner.
+query IT rowsort
+SHOW CREATE TABLE s3;
+----
+public.s3 CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (connector = 'google_pubsub', pubsub.subscription = 'test-subscription-1', pubsub.emulator_host = 'localhost:5980', pubsub.credentials = '123456') FORMAT PLAIN ENCODE JSON
+
+statement ok
+DROP TABLE s3;
