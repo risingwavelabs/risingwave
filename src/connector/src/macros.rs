@@ -200,7 +200,7 @@ macro_rules! dispatch_source_prop {
 #[macro_export]
 macro_rules! impl_connector_properties {
     ({$({ $variant_name:ident, $prop_name:ty, $split:ty}),*}) => {
-        #[derive(Clone, Debug)]
+        #[derive(Clone, Debug, serde::Serialize)]
         pub enum ConnectorProperties {
             $(
                 $variant_name(Box<$prop_name>),

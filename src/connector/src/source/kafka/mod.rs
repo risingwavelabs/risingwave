@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
 use crate::common::KafkaPrivateLinkCommon;
@@ -44,7 +44,7 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 ///
 /// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Default, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, WithOptions)]
 pub struct RdKafkaPropertiesConsumer {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
@@ -91,7 +91,7 @@ pub struct RdKafkaPropertiesConsumer {
     pub enable_auto_commit: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
     /// This parameter specifies only for one parallelism. The parallelism of kafka source

@@ -32,7 +32,7 @@ use crate::source::{
 
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct IcebergProperties {
     #[serde(rename = "catalog.type")]
     pub catalog_type: String,

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 pub use enumerator::*;
 use nexmark::config::{NexmarkConfig, RateShape};
 use nexmark::event::EventType;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 pub use split::*;
 use with_options::WithOptions;
@@ -44,7 +44,7 @@ const fn none<T>() -> Option<T> {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct NexmarkProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.split.num", default = "identity_i32::<1>")]

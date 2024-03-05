@@ -18,7 +18,7 @@ pub mod split;
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 
 use crate::common::NatsCommon;
@@ -28,7 +28,7 @@ use crate::source::SourceProperties;
 
 pub const NATS_CONNECTOR: &str = "nats";
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,

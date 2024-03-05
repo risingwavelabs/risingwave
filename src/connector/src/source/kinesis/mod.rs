@@ -18,7 +18,7 @@ pub mod split;
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 pub use source::KinesisMeta;
 use with_options::WithOptions;
@@ -32,7 +32,7 @@ use crate::source::SourceProperties;
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct KinesisProperties {
     #[serde(rename = "scan.startup.mode", alias = "kinesis.scan.startup.mode")]
     // accepted values: "latest", "earliest", "timestamp"

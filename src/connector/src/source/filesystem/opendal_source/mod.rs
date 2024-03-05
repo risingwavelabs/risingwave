@@ -18,7 +18,7 @@ pub mod gcs_source;
 pub mod posix_fs_source;
 pub mod s3_source;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
@@ -35,7 +35,7 @@ pub const GCS_CONNECTOR: &str = "gcs";
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
@@ -108,7 +108,7 @@ impl OpendalSource for OpendalPosixFs {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,
@@ -135,7 +135,7 @@ impl SourceProperties for OpendalS3Properties {
     const SOURCE_NAME: &'static str = OPENDAL_S3_CONNECTOR;
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, WithOptions)]
 pub struct PosixFsProperties {
     /// The root directly of the files to search. The files will be searched recursively.
     #[serde(rename = "posix_fs.root")]

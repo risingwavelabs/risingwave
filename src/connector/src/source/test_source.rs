@@ -116,8 +116,9 @@ pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
 
 pub const TEST_CONNECTOR: &str = "test";
 
-#[derive(Clone, Debug, Default, WithOptions)]
+#[derive(Clone, Debug, Default, WithOptions, serde::Serialize)]
 pub struct TestSourceProperties {
+    #[serde(flatten)]
     properties: HashMap<String, String>,
 }
 

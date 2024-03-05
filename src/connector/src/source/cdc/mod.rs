@@ -77,17 +77,21 @@ impl CdcSourceType {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
+    #[serde(flatten)]
     pub properties: HashMap<String, String>,
 
     /// Schema of the source specified by users
+    #[serde(skip)]
     pub table_schema: TableSchema,
 
     /// Whether the properties is shared by multiple tables
+    #[serde(skip)]
     pub is_multi_table_shared: bool,
 
+    #[serde(skip)]
     pub _phantom: PhantomData<T>,
 }
 

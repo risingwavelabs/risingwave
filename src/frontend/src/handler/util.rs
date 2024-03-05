@@ -434,16 +434,8 @@ mod tests {
                     value: Value::SingleQuotedString("pattern".into())
                 },
                 SqlOption {
-                    name: to_object_name("s3.credentials.access"),
-                    value: Value::Null
-                },
-                SqlOption {
                     name: to_object_name("s3.credentials.secret"),
                     value: Value::SingleQuotedString("[REDACTED]".into())
-                },
-                SqlOption {
-                    name: to_object_name("s3.endpoint_url"),
-                    value: Value::Null
                 },
             ]
         );

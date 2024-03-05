@@ -20,7 +20,7 @@ pub mod topic;
 use std::collections::HashMap;
 
 pub use enumerator::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 pub use split::*;
 use with_options::WithOptions;
@@ -45,7 +45,7 @@ impl crate::source::UnknownFields for PulsarProperties {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 #[serde_as]
 pub struct PulsarProperties {
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]

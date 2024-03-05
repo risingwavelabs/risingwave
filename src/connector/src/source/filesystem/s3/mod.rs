@@ -43,7 +43,7 @@ pub struct S3PropertiesCommon {
     pub endpoint_url: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct S3Properties {
     #[serde(flatten)]
     pub common: S3PropertiesCommon,

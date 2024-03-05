@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub mod enumerator;
 pub mod source;
@@ -25,11 +25,11 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::source::SourceProperties;
+use crate::source::{SecretString, SourceProperties};
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct PubsubProperties {
     /// pubsub subscription to consume messages from
     /// The subscription should be configured with the `retain-on-ack` property to enable
@@ -46,7 +46,7 @@ pub struct PubsubProperties {
     /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
-    pub credentials: Option<String>,
+    pub credentials: Option<SecretString>,
 
     /// `start_offset` is a numeric timestamp, ideally the publish timestamp of a message
     /// in the subscription. If present, the connector will attempt to seek the subscription
@@ -94,7 +94,10 @@ impl PubsubProperties {
             std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
         }
         if let Some(credentials) = &self.credentials {
-            std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials);
+            std::env::set_var(
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+                credentials.expose_secret(),
+            );
         }
     }
 }
@@ -142,7 +145,7 @@ mod tests {
         );
 
         let properties = PubsubProperties {
-            credentials: Some(CREDENTIALS.into()),
+            credentials: Some(SecretString::new(CREDENTIALS)),
             ..default_properties
         };
 

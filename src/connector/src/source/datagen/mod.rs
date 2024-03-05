@@ -19,7 +19,7 @@ pub mod split;
 use std::collections::HashMap;
 
 pub use enumerator::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
@@ -29,7 +29,7 @@ use crate::source::SourceProperties;
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, with_options::WithOptions)]
 pub struct DatagenProperties {
     /// split_num means data source partition
     #[serde(rename = "datagen.split.num")]

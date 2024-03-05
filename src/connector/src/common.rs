@@ -25,7 +25,7 @@ use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
 use tempfile::NamedTempFile;
@@ -44,7 +44,7 @@ use crate::source::nats::source::NatsOffset;
 pub const PRIVATE_LINK_BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
     pub port: u16,
@@ -59,7 +59,7 @@ use aws_types::SdkConfig;
 use crate::source::SecretString;
 
 /// A flatten config map for aws auth.
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Serialize, Deserialize, Debug, Clone, WithOptions)]
 pub struct AwsAuthProps {
     pub region: Option<String>,
     #[serde(alias = "endpoint_url")]
@@ -143,7 +143,7 @@ impl AwsAuthProps {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -181,7 +181,7 @@ pub struct KafkaCommon {
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
-    ssl_key_password: Option<String>,
+    ssl_key_password: Option<SecretString>,
 
     /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM and GSSAPI.
     #[serde(rename = "properties.sasl.mechanism")]
@@ -193,7 +193,7 @@ pub struct KafkaCommon {
 
     /// SASL password for SASL/PLAIN and SASL/SCRAM.
     #[serde(rename = "properties.sasl.password")]
-    sasl_password: Option<String>,
+    sasl_password: Option<SecretString>,
 
     /// Kafka server's Kerberos principal name under SASL/GSSAPI, not including /hostname@REALM.
     #[serde(rename = "properties.sasl.kerberos.service.name")]
@@ -221,7 +221,7 @@ pub struct KafkaCommon {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
@@ -234,7 +234,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
@@ -304,7 +304,7 @@ impl KafkaCommon {
             config.set("ssl.key.location", ssl_key_location);
         }
         if let Some(ssl_key_password) = self.ssl_key_password.as_ref() {
-            config.set("ssl.key.password", ssl_key_password);
+            config.set("ssl.key.password", ssl_key_password.expose_secret());
         }
         if let Some(ssl_endpoint_identification_algorithm) =
             self.ssl_endpoint_identification_algorithm.as_ref()
@@ -326,7 +326,7 @@ impl KafkaCommon {
             config.set("sasl.username", sasl_username);
         }
         if let Some(sasl_password) = self.sasl_password.as_ref() {
-            config.set("sasl.password", sasl_password);
+            config.set("sasl.password", sasl_password.expose_secret());
         }
 
         // SASL/GSSAPI
@@ -360,7 +360,7 @@ impl KafkaCommon {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct PulsarCommon {
     #[serde(rename = "topic", alias = "pulsar.topic")]
     pub topic: String,
@@ -369,10 +369,10 @@ pub struct PulsarCommon {
     pub service_url: String,
 
     #[serde(rename = "auth.token")]
-    pub auth_token: Option<String>,
+    pub auth_token: Option<SecretString>,
 }
 
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Serialize, Deserialize, WithOptions)]
 pub struct PulsarOauthCommon {
     #[serde(rename = "oauth.issuer.url")]
     pub issuer_url: String,
@@ -442,7 +442,7 @@ impl PulsarCommon {
         } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
                 name: "token".to_string(),
-                data: Vec::from(auth_token.as_str()),
+                data: Vec::from(auth_token.expose_secret()),
             });
         }
 
@@ -452,7 +452,7 @@ impl PulsarCommon {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Serialize, Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
@@ -504,7 +504,7 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub primary_key: Cow<'a, [u8]>,
@@ -513,7 +513,7 @@ pub struct UpsertMessage<'a> {
 }
 
 #[serde_as]
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Serialize, Deserialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
     #[serde(rename = "server_url")]
     pub server_url: String,
@@ -524,9 +524,9 @@ pub struct NatsCommon {
     #[serde(rename = "username")]
     pub user: Option<String>,
     #[serde(rename = "password")]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[serde(rename = "jwt")]
-    pub jwt: Option<String>,
+    pub jwt: Option<SecretString>,
     #[serde(rename = "nkey")]
     pub nkey: Option<String>,
     #[serde(rename = "max_bytes")]
@@ -554,8 +554,8 @@ impl NatsCommon {
                 if let (Some(v_user), Some(v_password)) =
                     (self.user.as_ref(), self.password.as_ref())
                 {
-                    connect_options =
-                        connect_options.user_and_password(v_user.into(), v_password.into())
+                    connect_options = connect_options
+                        .user_and_password(v_user.into(), v_password.expose_secret().into())
                 } else {
                     bail!("nats connect mode is user_and_password, but user or password is empty");
                 }
@@ -564,7 +564,7 @@ impl NatsCommon {
             "credential" => {
                 if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
                     connect_options = connect_options
-                        .credentials(&self.create_credential(v_nkey, v_jwt)?)
+                        .credentials(&self.create_credential(v_nkey, v_jwt.expose_secret())?)
                         .expect("failed to parse static creds")
                 } else {
                     bail!("nats connect mode is credential, but nkey or jwt is empty");

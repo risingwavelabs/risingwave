@@ -49,7 +49,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                 name: table.name().to_string(),
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
-                definition: table.create_sql(),
+                definition: table.redacted_create_sql(),
                 acl: get_acl_items(
                     &Object::TableId(table.id.table_id),
                     false,

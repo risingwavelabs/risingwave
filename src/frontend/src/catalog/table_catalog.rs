@@ -31,6 +31,7 @@ use crate::error::{ErrorCode, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
+use crate::utils::redact::try_redact_definition;
 
 /// Includes full information about a table.
 ///
@@ -394,6 +395,13 @@ impl TableCatalog {
     /// Returns the SQL statement that can be used to create this table.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    pub fn redacted_create_sql(&self) -> String {
+        try_redact_definition(&self.definition).unwrap_or_else(|err| {
+            tracing::error!(?err, "failed to redact definition");
+            self.definition.to_owned()
+        })
     }
 
     /// Get a reference to the table catalog's version.

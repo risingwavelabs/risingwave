@@ -22,6 +22,7 @@ use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
+use crate::utils::redact::try_redact_definition;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
@@ -51,6 +52,13 @@ impl SourceCatalog {
     /// Returns the SQL statement that can be used to create this source.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    pub fn redacted_create_sql(&self) -> String {
+        try_redact_definition(&self.definition).unwrap_or_else(|err| {
+            tracing::error!(?err, "failed to redact definition");
+            self.definition.to_owned()
+        })
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {

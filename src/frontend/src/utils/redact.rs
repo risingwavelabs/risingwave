@@ -12,16 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt::{Debug, Display, Formatter};
+use core::fmt::{Debug, Display};
 
-use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption, Value};
-use serde::ser::{Impossible, StdError};
+use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption, Statement, Value};
+use serde::ser::Impossible;
 use serde::{ser, Serialize};
 
-#[derive(Debug)]
+use crate::WithOptions;
+
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    Message(String),
+    #[error("NotSupported error: {0}")]
     NotSupported(String),
+    #[error("Serialize error: {0}")]
+    Serialize(String),
+    #[error(transparent)]
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl ser::Error for Error {
@@ -29,20 +39,9 @@ impl ser::Error for Error {
     where
         T: Display,
     {
-        Error::Message(msg.to_string())
+        Error::Serialize(msg.to_string())
     }
 }
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Error::Message(msg) => f.write_str(msg),
-            Error::NotSupported(msg) => f.write_str(msg),
-        }
-    }
-}
-
-impl StdError for Error {}
 
 #[derive(Default)]
 struct ValueSerializer {}
@@ -50,13 +49,13 @@ struct ValueSerializer {}
 impl serde::Serializer for ValueSerializer {
     type Error = Error;
     type Ok = Option<Value>;
-    type SerializeMap = Impossible<Option<Value>, Error>;
-    type SerializeSeq = Impossible<Option<Value>, Error>;
-    type SerializeStruct = Impossible<Option<Value>, Error>;
-    type SerializeStructVariant = Impossible<Option<Value>, Error>;
-    type SerializeTuple = Impossible<Option<Value>, Error>;
-    type SerializeTupleStruct = Impossible<Option<Value>, Error>;
-    type SerializeTupleVariant = Impossible<Option<Value>, Error>;
+    type SerializeMap = Impossible<Self::Ok, Error>;
+    type SerializeSeq = Impossible<Self::Ok, Error>;
+    type SerializeStruct = Impossible<Self::Ok, Error>;
+    type SerializeStructVariant = Impossible<Self::Ok, Error>;
+    type SerializeTuple = Impossible<Self::Ok, Error>;
+    type SerializeTupleStruct = Impossible<Self::Ok, Error>;
+    type SerializeTupleVariant = Impossible<Self::Ok, Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(Some(Value::Boolean(v)))
@@ -238,7 +237,9 @@ impl<'a> ser::SerializeMap for &'a mut SqlOptionVecSerializer {
         assert!(self.last_name.take().is_none());
         let Some(Value::SingleQuotedString(name)) = key.serialize(ValueSerializer::default())?
         else {
-            return Err(Error::Message("expect key of string type".into()));
+            return Err(Error::Internal(anyhow::anyhow!(
+                "expect key of string type"
+            )));
         };
         self.last_name = Some(ObjectName(vec![Ident::new_unchecked(name)]));
         Ok(())
@@ -251,7 +252,7 @@ impl<'a> ser::SerializeMap for &'a mut SqlOptionVecSerializer {
         let name = self
             .last_name
             .take()
-            .ok_or_else(|| Error::Message("expect name".into()))?;
+            .ok_or_else(|| Error::Internal(anyhow::anyhow!("expect name")))?;
         if let Some(value) = value.serialize(ValueSerializer::default())? {
             self.output.push(SqlOption { name, value });
         }
@@ -402,12 +403,12 @@ impl<'a> serde::Serializer for &'a mut SqlOptionVecSerializer {
         _name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
-        _value: &T,
+        value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
-        Err(Error::NotSupported("serialize_newtype_variant".into()))
+        value.serialize(self)
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
@@ -459,8 +460,46 @@ impl<'a> serde::Serializer for &'a mut SqlOptionVecSerializer {
     }
 }
 
+pub fn try_redact_definition(definition: &str) -> Result<String, Error> {
+    use itertools::Itertools;
+    let ast = risingwave_sqlparser::parser::Parser::parse_sql(definition)
+        .map_err(|e| Error::Internal(e.into()))?;
+    let stmt = ast
+        .into_iter()
+        .exactly_one()
+        .map_err(|e| Error::Internal(e.into()))?;
+    try_redact_statement(&stmt).map(|stmt| stmt.to_string())
+}
+
+fn try_redact_statement(stmt: &Statement) -> Result<Statement, Error> {
+    use risingwave_connector::source::ConnectorProperties;
+    let mut stmt = stmt.clone();
+    let sql_options = match &mut stmt {
+        Statement::CreateSource { stmt } => &mut stmt.with_properties.0,
+        Statement::CreateTable { with_options, .. } => with_options,
+        Statement::CreateSink { stmt } => &mut stmt.with_properties.0,
+        _ => {
+            return Ok(stmt);
+        }
+    };
+    let with_properties = WithOptions::try_from(sql_options.as_slice())
+        .map(WithOptions::into_inner)
+        .map_err(|e| Error::Internal(e.into()))?;
+    let props = ConnectorProperties::extract(with_properties.into_iter().collect(), false)
+        .map_err(|e| Error::Internal(e.into()))?;
+    let mut serializer = SqlOptionVecSerializer::default();
+    props.serialize(&mut serializer)?;
+    let redacted_sql_option: Vec<SqlOption> = serializer.into();
+    *sql_options = redacted_sql_option;
+    Ok(stmt)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use itertools::Itertools;
+    use maplit::hashmap;
     use risingwave_sqlparser::ast::{Ident, ObjectName, SqlOption, Value};
     use serde::Serialize;
 
@@ -504,6 +543,40 @@ mod tests {
                 SqlOption {
                     name: to_object_name("c"),
                     value: Value::Number("1.5".into())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_serializer_flatten_map() {
+        #[derive(Serialize)]
+        struct Foo {
+            #[serde(flatten)]
+            m: HashMap<String, String>,
+        }
+        let foo = Foo {
+            m: hashmap! {
+                "a".into() => "1".into(),
+                "b".into() => "2".into(),
+            },
+        };
+        let mut serializer = SqlOptionVecSerializer::default();
+        foo.serialize(&mut serializer).unwrap();
+        let sql_option: Vec<SqlOption> = serializer.into();
+        assert_eq!(
+            sql_option
+                .into_iter()
+                .sorted_by_key(|s| s.name.real_value())
+                .collect::<Vec<_>>(),
+            vec![
+                SqlOption {
+                    name: to_object_name("a"),
+                    value: Value::SingleQuotedString("1".into())
+                },
+                SqlOption {
+                    name: to_object_name("b"),
+                    value: Value::SingleQuotedString("2".into())
                 },
             ]
         );

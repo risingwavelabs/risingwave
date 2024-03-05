@@ -78,7 +78,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .map(|row_encode| row_encode.as_str_name().into()),
                     append_only: source.append_only,
                     connection_id: source.connection_id.map(|id| id as i32),
-                    definition: source.create_sql(),
+                    definition: source.redacted_create_sql(),
                     acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
                     initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
