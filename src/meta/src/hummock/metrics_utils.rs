@@ -45,28 +45,6 @@ pub struct LocalTableMetrics {
     total_value_size: IntGauge,
 }
 
-pub fn get_local_table_stats(
-    metrics: &MetaMetrics,
-    version_stats: &HummockVersionStats,
-) -> HashMap<u32, LocalTableMetrics> {
-    let mut m = HashMap::default();
-    for table_id in version_stats.table_stats.keys() {
-        let table_label = format!("{}", table_id);
-        let stats = LocalTableMetrics {
-            total_key_count: metrics
-                .version_stats
-                .with_label_values(&[&table_label, "total_key_count"]),
-            total_key_size: metrics
-                .version_stats
-                .with_label_values(&[&table_label, "total_key_size"]),
-            total_value_size: metrics
-                .version_stats
-                .with_label_values(&[&table_label, "total_value_size"]),
-        };
-        m.insert(*table_id, stats);
-    }
-    m
-}
 pub fn trigger_local_table_stat(
     metrics: &MetaMetrics,
     local_metrics: &mut HashMap<u32, LocalTableMetrics>,
@@ -99,35 +77,6 @@ pub fn trigger_local_table_stat(
                 .total_value_size
                 .set(table_stats.total_value_size);
             table_metrics.total_key_size.set(table_stats.total_key_size);
-        }
-    }
-}
-pub fn trigger_table_stat(
-    metrics: &MetaMetrics,
-    version_stats: &HummockVersionStats,
-    table_stats_change: &PbTableStatsMap,
-) {
-    for (table_id, stats) in table_stats_change {
-        let table_label = format!("{}", table_id);
-        let stats_value =
-            std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
-        metrics
-            .table_write_throughput
-            .with_label_values(&[&table_label])
-            .inc_by(stats_value as u64);
-        if let Some(table_stats) = version_stats.table_stats.get(table_id) {
-            metrics
-                .version_stats
-                .with_label_values(&[&table_label, "total_key_count"])
-                .set(table_stats.total_key_count);
-            metrics
-                .version_stats
-                .with_label_values(&[&table_label, "total_key_size"])
-                .set(table_stats.total_key_size);
-            metrics
-                .version_stats
-                .with_label_values(&[&table_label, "total_value_size"])
-                .set(table_stats.total_value_size);
         }
     }
 }

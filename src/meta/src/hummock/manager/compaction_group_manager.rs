@@ -705,7 +705,6 @@ impl HummockManager {
                     vec![],
                     &mut compaction_guard,
                     None,
-                    &mut HashMap::default(),
                 )
                 .await
                 .unwrap_or(false)

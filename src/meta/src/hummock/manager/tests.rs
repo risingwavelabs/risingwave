@@ -201,7 +201,6 @@ async fn test_hummock_compaction_task() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -233,7 +232,6 @@ async fn test_hummock_compaction_task() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -259,7 +257,6 @@ async fn test_hummock_compaction_task() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -268,13 +265,7 @@ async fn test_hummock_compaction_task() {
     // Finish the task and succeed.
 
     assert!(hummock_manager
-        .report_compact_task(
-            compact_task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            &mut HashMap::default(),
-        )
+        .report_compact_task(compact_task.task_id, TaskStatus::Success, vec![], None,)
         .await
         .unwrap());
 }
@@ -765,7 +756,6 @@ async fn test_print_compact_task() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -916,7 +906,6 @@ async fn test_hummock_compaction_task_heartbeat() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -948,7 +937,6 @@ async fn test_hummock_compaction_task_heartbeat() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -991,7 +979,6 @@ async fn test_hummock_compaction_task_heartbeat() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -1039,7 +1026,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -1071,7 +1057,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -1238,7 +1223,6 @@ async fn test_version_stats() {
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_compaction_selector(),
-            &mut HashMap::default(),
         )
         .await
         .unwrap()
@@ -1268,7 +1252,6 @@ async fn test_version_stats() {
             TaskStatus::Success,
             vec![],
             Some(to_prost_table_stats_map(compact_table_stats_change)),
-            &mut HashMap::default(),
         )
         .await
         .unwrap();
@@ -1688,11 +1671,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .await
         .unwrap();
     let task = hummock_manager
-        .get_compact_task(
-            2,
-            &mut default_compaction_selector(),
-            &mut HashMap::default(),
-        )
+        .get_compact_task(2, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -1704,7 +1683,7 @@ async fn test_split_compaction_group_trivial_expired() {
     let mut selector: Box<dyn CompactionSelector> =
         Box::<SpaceReclaimCompactionSelector>::default();
     let reclaim_task = hummock_manager
-        .get_compact_task_impl(2, &mut selector, &mut HashMap::default())
+        .get_compact_task_impl(2, &mut selector)
         .await
         .unwrap()
         .unwrap();
@@ -1728,11 +1707,7 @@ async fn test_split_compaction_group_trivial_expired() {
     );
 
     let task2 = hummock_manager
-        .get_compact_task(
-            new_group_id,
-            &mut default_compaction_selector(),
-            &mut HashMap::default(),
-        )
+        .get_compact_task(new_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -1751,19 +1726,12 @@ async fn test_split_compaction_group_trivial_expired() {
                 ..Default::default()
             }],
             None,
-            &mut HashMap::default(),
         )
         .await
         .unwrap();
     assert!(ret);
     let ret = hummock_manager
-        .report_compact_task(
-            task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            &mut HashMap::default(),
-        )
+        .report_compact_task(task.task_id, TaskStatus::Success, vec![], None)
         .await
         .unwrap();
     // the task has been canceld
@@ -1861,7 +1829,6 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                 },
             ],
             None,
-            &mut HashMap::default(),
         )
         .await
         .unwrap());
@@ -2005,13 +1972,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let version_1 = hummock_manager.get_current_version().await;
     // compaction_task.task_status = TaskStatus::Success.into();
     assert!(!hummock_manager
-        .report_compact_task(
-            compaction_task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            &mut HashMap::default(),
-        )
+        .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None,)
         .await
         .unwrap());
     let version_2 = hummock_manager.get_current_version().await;
@@ -2023,13 +1984,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .report_compact_task(
-            compaction_task.task_id,
-            TaskStatus::Success,
-            vec![],
-            None,
-            &mut HashMap::default(),
-        )
+        .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None)
         .await
         .unwrap();
 
@@ -2080,7 +2035,6 @@ async fn test_move_tables_between_compaction_group() {
                 gen_sstable_info(13, 3, vec![101, 102]),
             ],
             None,
-            &mut HashMap::default(),
         )
         .await
         .unwrap());
@@ -2130,7 +2084,7 @@ async fn test_move_tables_between_compaction_group() {
         Box::<SpaceReclaimCompactionSelector>::default();
 
     let compaction_task = hummock_manager
-        .get_compact_task(2, &mut selector, &mut HashMap::default())
+        .get_compact_task(2, &mut selector)
         .await
         .unwrap()
         .unwrap();
@@ -2144,7 +2098,6 @@ async fn test_move_tables_between_compaction_group() {
             TaskStatus::Success,
             vec![gen_sstable_info(20, 2, vec![101])],
             None,
-            &mut HashMap::default(),
         )
         .await
         .unwrap();

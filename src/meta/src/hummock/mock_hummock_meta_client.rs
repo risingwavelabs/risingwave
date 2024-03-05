@@ -89,7 +89,6 @@ impl MockHummockMetaClient {
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_compaction_selector(),
-                &mut HashMap::default(),
             )
             .await
             .unwrap_or(None)
@@ -267,7 +266,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         let mut join_handle_vec = vec![];
 
         let handle = tokio::spawn(async move {
-            let mut local_metrics = HashMap::default();
             loop {
                 let group_and_type = hummock_manager_compact
                     .auto_pick_compaction_group_and_type()
@@ -288,7 +286,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group, &mut selector, &mut local_metrics)
+                    .get_compact_task(group, &mut selector)
                     .await
                     .unwrap()
                 {
@@ -310,8 +308,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         let hummock_manager_compact = self.hummock_manager.clone();
         let report_handle = tokio::spawn(async move {
             tracing::info!("report_handle start");
-            let mut local_metrics = HashMap::default();
-
             loop {
                 if let Some(item) = request_receiver.recv().await {
                     if let Event::ReportTask(ReportTask {
@@ -327,7 +323,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                                 TaskStatus::try_from(task_status).unwrap(),
                                 sorted_output_ssts,
                                 Some(table_stats_change),
-                                &mut local_metrics,
                             )
                             .await
                         {

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(test)]
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -95,11 +93,7 @@ pub async fn add_test_tables(
     .await;
     let mut selector = default_compaction_selector();
     let mut compact_task = hummock_manager
-        .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
-            &mut selector,
-            &mut HashMap::default(),
-        )
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
         .await
         .unwrap()
         .unwrap();
