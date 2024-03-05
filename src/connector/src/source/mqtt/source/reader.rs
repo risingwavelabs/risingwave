@@ -51,9 +51,10 @@ impl SplitReader for MqttSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let (client, eventloop) = properties
-            .common
-            .build_client(source_ctx.source_info.actor_id, source_ctx.source_info.fragment_id)?;
+        let (client, eventloop) = properties.common.build_client(
+            source_ctx.source_info.actor_id,
+            source_ctx.source_info.fragment_id,
+        )?;
 
         let qos = properties.common.qos();
 

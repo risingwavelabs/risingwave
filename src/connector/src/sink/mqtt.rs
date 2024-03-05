@@ -178,7 +178,6 @@ impl MqttSinkWriter {
 
         let stopped = Arc::new(AtomicBool::new(false));
         let stopped_clone = stopped.clone();
-
         tokio::spawn(async move {
             while !stopped_clone.load(std::sync::atomic::Ordering::Relaxed) {
                 match eventloop.poll().await {
@@ -195,7 +194,6 @@ impl MqttSinkWriter {
                             continue;
                         }
                         err => {
-                            println!("Err: {:?}", err);
                             tracing::error!("Failed to poll mqtt eventloop: {}", err.as_report());
                             std::thread::sleep(std::time::Duration::from_secs(1));
                         }
