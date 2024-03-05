@@ -354,7 +354,7 @@ MqttConfig:
   fields:
   - name: protocol
     field_type: Protocol
-    comments: Protocol used for RisingWave to communicate with the mqtt brokers. Could be tcp or ssl
+    comments: Protocol used for RisingWave to communicate with the mqtt brokers. Could be `tcp` or `ssl`, defaults to `tcp`
     required: false
   - name: host
     field_type: String
@@ -378,17 +378,18 @@ MqttConfig:
     required: false
   - name: client_prefix
     field_type: String
-    comments: Prefix for the mqtt client id
+    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`id`_`timestamp`. Defaults to risingwave
     required: false
   - name: clean_start
     field_type: bool
     comments: '`clean_start = true` removes all the state from queues & instructs the broker  to clean all the client state when client disconnects.   When set `false`, broker will hold the client state and performs pending  operations on the client when reconnection with same `client_id`  happens. Local queue state is also held to retransmit packets after reconnection.'
-    required: true
+    required: false
+    default: Default::default
   - name: inflight_messages
     field_type: usize
     comments: The maximum number of inflight messages. Defaults to 100
     required: false
-  - name: tls.ca
+  - name: tls.client_key
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false

@@ -698,28 +698,24 @@ pub enum QualityOfService {
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
 pub enum Protocol {
-    Tls,
+    Tcp,
     Ssl,
 }
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MqttCommon {
-    /// Protocol used for RisingWave to communicate with the mqtt brokers. Could be tcp or ssl
+    /// Protocol used for RisingWave to communicate with the mqtt brokers. Could be `tcp` or `ssl`, defaults to `tcp`
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[serde(rename = "protocol")]
     pub protocol: Option<Protocol>,
 
     /// Hostname of the mqtt broker
-    #[serde(rename = "host")]
     pub host: String,
 
     /// Port of the mqtt broker, defaults to 1883 for tcp and 8883 for ssl
-    #[serde(rename = "port")]
     pub port: Option<i32>,
 
     /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
-    #[serde(rename = "topic")]
     pub topic: String,
 
     /// Username for the mqtt broker
@@ -727,11 +723,10 @@ pub struct MqttCommon {
     pub user: Option<String>,
 
     /// Password for the mqtt broker
-    #[serde(rename = "password")]
     pub password: Option<String>,
-    #[serde(rename = "client_prefix")]
 
-    /// Prefix for the mqtt client id
+    /// Prefix for the mqtt client id.
+    /// The client id will be generated as `client_prefix`_`id`_`timestamp`. Defaults to risingwave
     pub client_prefix: Option<String>,
 
     /// `clean_start = true` removes all the state from queues & instructs the broker
@@ -740,27 +735,24 @@ pub struct MqttCommon {
     /// When set `false`, broker will hold the client state and performs pending
     /// operations on the client when reconnection with same `client_id`
     /// happens. Local queue state is also held to retransmit packets after reconnection.
-    #[serde(rename = "clean_start")]
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub clean_start: bool,
 
     /// The maximum number of inflight messages. Defaults to 100
-    #[serde(rename = "inflight_messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub inflight_messages: Option<usize>,
-    #[serde(rename = "tls.ca")]
 
     /// Path to CA certificate file for verifying the broker's key.
+    #[serde(rename = "tls.client_key")]
     pub ca: Option<String>,
-    #[serde(rename = "tls.client_cert")]
-
     /// Path to client's certificate file (PEM). Required for client authentication.
     /// Can be a file path under fs:// or a string with the certificate content.
+    #[serde(rename = "tls.client_cert")]
     pub client_cert: Option<String>,
-    #[serde(rename = "tls.client_key")]
 
     /// Path to client's private key file (PEM). Required for client authentication.
     /// Can be a file path under fs:// or a string with the private key content.
+    #[serde(rename = "tls.client_key")]
     pub client_key: Option<String>,
 }
 
