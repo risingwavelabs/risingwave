@@ -144,6 +144,9 @@ main() {
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
+  # Assume we use the latest version, so we just set to some large number.
+  # The current $NEW_VERSION as of this change is 1.7.0, so we can't use that.
+  # See: https://github.com/risingwavelabs/risingwave/pull/15448
   configure_rw "99.99.99"
   validate_new_cluster "$NEW_VERSION"
 }
