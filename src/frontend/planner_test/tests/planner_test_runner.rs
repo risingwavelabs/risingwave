@@ -14,8 +14,9 @@
 
 use std::ffi::OsStr;
 
-use libtest_mimic::{Arguments, Trial};
+use libtest_mimic::{Arguments, Failed, Trial};
 use risingwave_planner_test::{run_test_file, test_data_dir};
+use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
@@ -47,8 +48,9 @@ fn main() {
                 let path = test_data_dir().join("input").join(file_name);
 
                 let file_content = std::fs::read_to_string(&path).unwrap();
-                build_runtime().block_on(run_test_file(&path, &file_content))?;
-                Ok(())
+                build_runtime()
+                    .block_on(run_test_file(&path, &file_content))
+                    .map_err(|e| Failed::from(e.as_report()))
             }));
         }
     }
