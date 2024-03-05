@@ -60,6 +60,7 @@ def_anyhow_newtype! {
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
     tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT error",
+    rumqttc::v5::OptionError => "MQTT error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

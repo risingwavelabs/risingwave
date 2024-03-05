@@ -45,7 +45,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
         properties: Self::Properties,
         context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<MqttSplitEnumerator> {
-        let (client, mut eventloop) = properties.common.build_client(context.info.source_id)?;
+        let (client, mut eventloop) = properties.common.build_client(context.info.source_id, 0)?;
 
         let topic = properties.common.topic.clone();
         let mut topics = HashSet::new();
@@ -92,7 +92,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
                             continue;
                         }
                         tracing::error!(
-                            "[Enumerator] Failed to subscribe to topic {}: {}",
+                            "Failed to subscribe to topic {}: {}",
                             topic,
                             err.as_report(),
                         );
@@ -127,7 +127,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
                     bail!("Failed to connect to mqtt broker");
                 }
 
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         }
 

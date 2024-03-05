@@ -695,28 +695,22 @@ pub enum QualityOfService {
     ExactlyOnce,
 }
 
-#[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
-#[strum(serialize_all = "snake_case")]
-pub enum Protocol {
-    Tcp,
-    Ssl,
-}
-
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct MqttCommon {
-    /// Protocol used for RisingWave to communicate with the mqtt brokers. Could be `tcp` or `ssl`, defaults to `tcp`
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub protocol: Option<Protocol>,
-
-    /// Hostname of the mqtt broker
-    pub host: String,
-
-    /// Port of the mqtt broker, defaults to 1883 for tcp and 8883 for ssl
-    pub port: Option<i32>,
+    /// The url of the broker to connect to. e.g. tcp://localhost.
+    /// Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
+    /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
+    /// `mqtts://`, `ssl://`, `wss://`
+    pub url: String,
 
     /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
     pub topic: String,
+
+    /// The quality of service to use when publishing messages. Defaults to at_most_once.
+    /// Could be at_most_once, at_least_once or exactly_once
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub qos: Option<QualityOfService>,
 
     /// Username for the mqtt broker
     #[serde(rename = "username")]
@@ -759,64 +753,32 @@ pub struct MqttCommon {
 impl MqttCommon {
     pub(crate) fn build_client(
         &self,
+        actor_id: u32,
         id: u32,
     ) -> ConnectorResult<(rumqttc::v5::AsyncClient, rumqttc::v5::EventLoop)> {
-        let ssl = self
-            .protocol
-            .as_ref()
-            .map(|p| p == &Protocol::Ssl)
-            .unwrap_or_default();
-
         let client_id = format!(
-            "{}_{}{}",
+            "{}_{}_{}",
             self.client_prefix.as_deref().unwrap_or("risingwave"),
-            id,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-                % 100000,
+            actor_id,
+            id
         );
 
-        let port = self.port.unwrap_or(if ssl { 8883 } else { 1883 }) as u16;
+        let mut url = url::Url::parse(&self.url)?;
 
-        let mut options = rumqttc::v5::MqttOptions::new(client_id, &self.host, port);
+        let ssl = match url.scheme() {
+            "mqtts" | "ssl" | "wss" => true,
+            _ => false,
+        };
+
+        url.query_pairs_mut().append_pair("client_id", &client_id);
+
+        let mut options = rumqttc::v5::MqttOptions::try_from(url)?;
         options.set_keep_alive(std::time::Duration::from_secs(10));
 
         options.set_clean_start(self.clean_start);
 
         if ssl {
-            let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
-            if let Some(ca) = &self.ca {
-                let certificates = load_certs(ca)?;
-                for cert in certificates {
-                    root_cert_store.add(&cert).unwrap();
-                }
-            } else {
-                for cert in
-                    rustls_native_certs::load_native_certs().expect("could not load platform certs")
-                {
-                    root_cert_store
-                        .add(&tokio_rustls::rustls::Certificate(cert.0))
-                        .unwrap();
-                }
-            }
-
-            let builder = tokio_rustls::rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_root_certificates(root_cert_store);
-
-            let tls_config = if let (Some(client_cert), Some(client_key)) =
-                (self.client_cert.as_ref(), self.client_key.as_ref())
-            {
-                let certs = load_certs(client_cert)?;
-                let key = load_private_key(client_key)?;
-
-                builder.with_client_auth_cert(certs, key)?
-            } else {
-                builder.with_no_client_auth()
-            };
-
+            let tls_config = self.get_tls_config()?;
             options.set_transport(rumqttc::Transport::tls_with_config(
                 rumqttc::TlsConfiguration::Rustls(std::sync::Arc::new(tls_config)),
             ));
@@ -830,6 +792,52 @@ impl MqttCommon {
             options,
             self.inflight_messages.unwrap_or(100),
         ))
+    }
+
+    pub(crate) fn qos(&self) -> rumqttc::v5::mqttbytes::QoS {
+        self.qos
+            .as_ref()
+            .map(|qos| match qos {
+                QualityOfService::AtMostOnce => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
+                QualityOfService::AtLeastOnce => rumqttc::v5::mqttbytes::QoS::AtLeastOnce,
+                QualityOfService::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
+            })
+            .unwrap_or(rumqttc::v5::mqttbytes::QoS::AtMostOnce)
+    }
+
+    fn get_tls_config(&self) -> ConnectorResult<tokio_rustls::rustls::ClientConfig> {
+        let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
+        if let Some(ca) = &self.ca {
+            let certificates = load_certs(ca)?;
+            for cert in certificates {
+                root_cert_store.add(&cert).unwrap();
+            }
+        } else {
+            for cert in
+                rustls_native_certs::load_native_certs().expect("could not load platform certs")
+            {
+                root_cert_store
+                    .add(&tokio_rustls::rustls::Certificate(cert.0))
+                    .unwrap();
+            }
+        }
+
+        let builder = tokio_rustls::rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(root_cert_store);
+
+        let tls_config = if let (Some(client_cert), Some(client_key)) =
+            (self.client_cert.as_ref(), self.client_key.as_ref())
+        {
+            let certs = load_certs(client_cert)?;
+            let key = load_private_key(client_key)?;
+
+            builder.with_client_auth_cert(certs, key)?
+        } else {
+            builder.with_no_client_auth()
+        };
+
+        Ok(tls_config)
     }
 }
 

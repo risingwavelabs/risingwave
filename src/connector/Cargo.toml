@@ -117,7 +117,7 @@ risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-rumqttc = "0.22.0"
+rumqttc = { version = "0.22.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs =  "0.6"
 rustls-pemfile = "1"

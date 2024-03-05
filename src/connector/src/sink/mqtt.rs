@@ -22,7 +22,7 @@ use risingwave_common::catalog::Schema;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::serde_as;
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -30,7 +30,7 @@ use super::catalog::SinkFormatDesc;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::{MqttCommon, QualityOfService};
+use crate::common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -46,11 +46,6 @@ pub const MQTT_SINK: &str = "mqtt";
 pub struct MqttConfig {
     #[serde(flatten)]
     pub common: MqttCommon,
-
-    /// The quality of service to use when publishing messages. Defaults to at_most_once.
-    /// Could be at_most_once, at_least_once or exactly_once
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub qos: Option<QualityOfService>,
 
     /// Whether the message should be retained by the broker
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
@@ -132,7 +127,7 @@ impl Sink for MqttSink {
             )));
         }
 
-        let _client = (self.config.common.build_client(0))
+        let _client = (self.config.common.build_client(0, 0))
             .context("validate mqtt sink error")
             .map_err(SinkError::Mqtt)?;
 
@@ -174,19 +169,11 @@ impl MqttSinkWriter {
         )
         .await?;
 
-        let qos = config
-            .qos
-            .as_ref()
-            .map(|qos| match qos {
-                QualityOfService::AtMostOnce => QoS::AtMostOnce,
-                QualityOfService::AtLeastOnce => QoS::AtLeastOnce,
-                QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
-            })
-            .unwrap_or(QoS::AtMostOnce);
+        let qos = config.common.qos();
 
         let (client, mut eventloop) = config
             .common
-            .build_client(id as u32)
+            .build_client(0, id as u32)
             .map_err(|e| SinkError::Mqtt(anyhow!(e)))?;
 
         let stopped = Arc::new(AtomicBool::new(false));
@@ -196,24 +183,23 @@ impl MqttSinkWriter {
             while !stopped_clone.load(std::sync::atomic::Ordering::Relaxed) {
                 match eventloop.poll().await {
                     Ok(_) => (),
-                    Err(err) => {
-                        if let ConnectionError::Timeout(_) = err {
+                    Err(err) => match err {
+                        ConnectionError::Timeout(_) => {
                             continue;
                         }
-
-                        if let ConnectionError::MqttState(rumqttc::v5::StateError::Io(err)) = err {
-                            if err.kind() != std::io::ErrorKind::ConnectionAborted {
-                                tracing::error!(
-                                    "Failed to poll mqtt eventloop: {}",
-                                    err.as_report()
-                                );
-                                std::thread::sleep(std::time::Duration::from_secs(1));
-                            }
-                        } else {
+                        ConnectionError::MqttState(rumqttc::v5::StateError::Io(err))
+                        | ConnectionError::Io(err)
+                            if err.kind() == std::io::ErrorKind::ConnectionAborted
+                                || err.kind() == std::io::ErrorKind::ConnectionReset =>
+                        {
+                            continue;
+                        }
+                        err => {
+                            println!("Err: {:?}", err);
                             tracing::error!("Failed to poll mqtt eventloop: {}", err.as_report());
                             std::thread::sleep(std::time::Duration::from_secs(1));
                         }
-                    }
+                    },
                 }
             }
         });

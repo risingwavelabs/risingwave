@@ -8,7 +8,7 @@ CREATE TABLE mqtt_source_table
 )
 WITH (
     connector='mqtt',
-    host='mqtt-server',
+    url='tcp://mqtt-server',
     topic= 'test',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
@@ -20,7 +20,7 @@ FROM
 WITH
   (
     connector='mqtt',
-    host='mqtt-server',
+    url='tcp://mqtt-server',
     topic= 'test',
     type = 'append-only',
     retain = 'false',

@@ -21,7 +21,6 @@ use thiserror_ext::AsReport;
 
 use super::message::MqttMessage;
 use super::MqttSplit;
-use crate::common::QualityOfService;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
@@ -54,17 +53,9 @@ impl SplitReader for MqttSplitReader {
     ) -> Result<Self> {
         let (client, eventloop) = properties
             .common
-            .build_client(source_ctx.actor_id, source_ctx.fragment_id)?;
+            .build_client(source_ctx.source_info.actor_id, source_ctx.source_info.fragment_id)?;
 
-        let qos = properties
-            .qos
-            .as_ref()
-            .map(|qos| match qos {
-                QualityOfService::AtMostOnce => QoS::AtMostOnce,
-                QualityOfService::AtLeastOnce => QoS::AtLeastOnce,
-                QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
-            })
-            .unwrap_or(QoS::AtMostOnce);
+        let qos = properties.common.qos();
 
         client
             .subscribe_many(

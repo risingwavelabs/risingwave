@@ -352,22 +352,18 @@ KinesisSinkConfig:
     alias: kinesis.assumerole.external_id
 MqttConfig:
   fields:
-  - name: protocol
-    field_type: Protocol
-    comments: Protocol used for RisingWave to communicate with the mqtt brokers. Could be `tcp` or `ssl`, defaults to `tcp`
-    required: false
-  - name: host
+  - name: url
     field_type: String
-    comments: Hostname of the mqtt broker
+    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://`, `wss://`
     required: true
-  - name: port
-    field_type: i32
-    comments: Port of the mqtt broker, defaults to 1883 for tcp and 8883 for ssl
-    required: false
   - name: topic
     field_type: String
     comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
     required: true
+  - name: qos
+    field_type: QualityOfService
+    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
+    required: false
   - name: username
     field_type: String
     comments: Username for the mqtt broker
@@ -400,10 +396,6 @@ MqttConfig:
   - name: tls.client_key
     field_type: String
     comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
-    required: false
-  - name: qos
-    field_type: QualityOfService
-    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
     required: false
   - name: retain
     field_type: bool
