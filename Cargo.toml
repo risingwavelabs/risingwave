@@ -110,7 +110,7 @@ aws-types = "1"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.3.1", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.3.3", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14.0", features = [
