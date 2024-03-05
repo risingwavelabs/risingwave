@@ -10,7 +10,7 @@ WITH (
     connector='mqtt',
     host='mqtt-server',
     topic= 'test',
-    qos = '1'
+    qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
 
 
@@ -23,9 +23,10 @@ WITH
     host='mqtt-server',
     topic= 'test',
     type = 'append-only',
-    force_append_only='true',
     retain = 'false',
-    qos = '1'
+    qos = 'at_least_once',
+  ) FORMAT PLAIN ENCODE JSON (
+      force_append_only='true',
   );
 
 INSERT INTO

@@ -353,42 +353,60 @@ KinesisSinkConfig:
 MqttConfig:
   fields:
   - name: protocol
-    field_type: String
-    comments: Protocol used for RisingWave to communicate with Kafka brokers. Could be tcp or ssl
+    field_type: Protocol
+    comments: Protocol used for RisingWave to communicate with the mqtt brokers. Could be tcp or ssl
     required: false
   - name: host
     field_type: String
+    comments: Hostname of the mqtt broker
     required: true
   - name: port
     field_type: i32
+    comments: Port of the mqtt broker, defaults to 1883 for tcp and 8883 for ssl
     required: false
   - name: topic
     field_type: String
+    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
     required: true
   - name: username
     field_type: String
+    comments: Username for the mqtt broker
     required: false
   - name: password
     field_type: String
+    comments: Password for the mqtt broker
     required: false
   - name: client_prefix
     field_type: String
+    comments: Prefix for the mqtt client id
+    required: false
+  - name: clean_start
+    field_type: bool
+    comments: '`clean_start = true` removes all the state from queues & instructs the broker  to clean all the client state when client disconnects.   When set `false`, broker will hold the client state and performs pending  operations on the client when reconnection with same `client_id`  happens. Local queue state is also held to retransmit packets after reconnection.'
+    required: true
+  - name: inflight_messages
+    field_type: usize
+    comments: The maximum number of inflight messages. Defaults to 100
     required: false
   - name: tls.ca
     field_type: String
+    comments: Path to CA certificate file for verifying the broker's key.
     required: false
   - name: tls.client_cert
     field_type: String
+    comments: Path to client's certificate file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the certificate content.
     required: false
   - name: tls.client_key
     field_type: String
+    comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
     required: false
   - name: qos
-    field_type: u32
+    field_type: QualityOfService
+    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
     required: false
-    default: Default::default
   - name: retain
     field_type: bool
+    comments: Whether the message should be retained by the broker
     required: false
     default: Default::default
   - name: r#type

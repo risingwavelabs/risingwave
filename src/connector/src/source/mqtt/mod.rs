@@ -18,25 +18,27 @@ pub mod split;
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde_derive::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
-use crate::common::MqttCommon;
-use crate::deserialize_u32_from_string;
+use crate::common::{MqttCommon, QualityOfService};
 use crate::source::mqtt::enumerator::MqttSplitEnumerator;
 use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;
 
 pub const MQTT_CONNECTOR: &str = "mqtt";
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct MqttProperties {
     #[serde(flatten)]
     pub common: MqttCommon,
 
-    // 0 - AtLeastOnce, 1 - AtMostOnce, 2 - ExactlyOnce
-    #[serde(default, deserialize_with = "deserialize_u32_from_string")]
-    pub qos: u32,
+    /// The quality of service to use when publishing messages. Defaults to at_most_once.
+    /// Could be at_most_once, at_least_once or exactly_once
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub qos: Option<QualityOfService>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,

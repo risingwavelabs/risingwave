@@ -14,7 +14,6 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
-use risingwave_common::bail;
 use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
@@ -22,6 +21,7 @@ use thiserror_ext::AsReport;
 
 use super::message::MqttMessage;
 use super::MqttSplit;
+use crate::common::QualityOfService;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
@@ -56,12 +56,15 @@ impl SplitReader for MqttSplitReader {
             .common
             .build_client(source_ctx.actor_id, source_ctx.fragment_id)?;
 
-        let qos = match properties.qos {
-            0 => QoS::AtMostOnce,
-            1 => QoS::AtLeastOnce,
-            2 => QoS::ExactlyOnce,
-            _ => bail!("Invalid QoS level: {}", properties.qos),
-        };
+        let qos = properties
+            .qos
+            .as_ref()
+            .map(|qos| match qos {
+                QualityOfService::AtLeastOnce => QoS::AtMostOnce,
+                QualityOfService::AtMostOnce => QoS::AtLeastOnce,
+                QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
+            })
+            .unwrap_or(QoS::AtMostOnce);
 
         client
             .subscribe_many(
@@ -108,7 +111,7 @@ impl CommonSplitReader for MqttSplitReader {
                     if let ConnectionError::Timeout(_) = e {
                         continue;
                     }
-                    tracing::error!("[Reader] Failed to poll mqtt eventloop: {}", e.as_report());
+                    tracing::error!("Failed to poll mqtt eventloop: {}", e.as_report());
                     client
                         .subscribe_many(
                             splits

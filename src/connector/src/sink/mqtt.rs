@@ -22,24 +22,22 @@ use risingwave_common::catalog::Schema;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
 use serde_derive::Deserialize;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tokio_retry::Retry;
 use with_options::WithOptions;
 
-use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
-use super::utils::chunk_to_json;
+use super::catalog::SinkFormatDesc;
+use super::formatter::SinkFormatterImpl;
+use super::writer::FormattedSink;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::MqttCommon;
+use crate::common::{MqttCommon, QualityOfService};
 use crate::sink::catalog::desc::SinkDesc;
-use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
-use crate::{deserialize_bool_from_string, deserialize_u32_from_string};
+use crate::{deserialize_bool_from_string, dispatch_sink_formatter_impl};
 
 pub const MQTT_SINK: &str = "mqtt";
 
@@ -49,10 +47,12 @@ pub struct MqttConfig {
     #[serde(flatten)]
     pub common: MqttCommon,
 
-    // 0 - AtLeastOnce, 1 - AtMostOnce, 2 - ExactlyOnce
-    #[serde(default, deserialize_with = "deserialize_u32_from_string")]
-    pub qos: u32,
+    /// The quality of service to use when publishing messages. Defaults to at_most_once.
+    /// Could be at_most_once, at_least_once or exactly_once
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub qos: Option<QualityOfService>,
 
+    /// Whether the message should be retained by the broker
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub retain: bool,
 
@@ -64,17 +64,19 @@ pub struct MqttConfig {
 pub struct MqttSink {
     pub config: MqttConfig,
     schema: Schema,
+    pk_indices: Vec<usize>,
+    format_desc: SinkFormatDesc,
+    db_name: String,
+    sink_from_name: String,
     is_append_only: bool,
 }
 
 // sink write
 pub struct MqttSinkWriter {
     pub config: MqttConfig,
-    client: rumqttc::v5::AsyncClient,
-    qos: QoS,
-    retain: bool,
+    payload_writer: MqttSinkPayloadWriter,
     schema: Schema,
-    json_encoder: JsonEncoder,
+    formatter: SinkFormatterImpl,
     stopped: Arc<AtomicBool>,
 }
 
@@ -102,6 +104,12 @@ impl TryFrom<SinkParam> for MqttSink {
         Ok(Self {
             config,
             schema,
+            pk_indices: param.downstream_pk,
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
             is_append_only: param.sink_type.is_append_only(),
         })
     }
@@ -135,25 +143,46 @@ impl Sink for MqttSink {
         Ok(MqttSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
+            self.pk_indices.clone(),
+            &self.format_desc,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
             writer_param.executor_id,
-        )?
+        )
+        .await?
         .into_log_sinker(usize::MAX))
     }
 }
 
 impl MqttSinkWriter {
-    pub fn new(config: MqttConfig, schema: Schema, id: u64) -> Result<Self> {
-        let qos = match config.qos {
-            0 => QoS::AtMostOnce,
-            1 => QoS::AtLeastOnce,
-            2 => QoS::ExactlyOnce,
-            _ => {
-                return Err(SinkError::Mqtt(anyhow!(
-                    "Invalid QoS level: {}",
-                    config.qos
-                )))
-            }
-        };
+    pub async fn new(
+        config: MqttConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        format_desc: &SinkFormatDesc,
+        db_name: String,
+        sink_from_name: String,
+        id: u64,
+    ) -> Result<Self> {
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
+            schema.clone(),
+            pk_indices.clone(),
+            db_name,
+            sink_from_name,
+            &config.common.topic,
+        )
+        .await?;
+
+        let qos = config
+            .qos
+            .as_ref()
+            .map(|qos| match qos {
+                QualityOfService::AtLeastOnce => QoS::AtMostOnce,
+                QualityOfService::AtMostOnce => QoS::AtLeastOnce,
+                QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
+            })
+            .unwrap_or(QoS::AtMostOnce);
 
         let (client, mut eventloop) = config
             .common
@@ -175,16 +204,13 @@ impl MqttSinkWriter {
                         if let ConnectionError::MqttState(rumqttc::v5::StateError::Io(err)) = err {
                             if err.kind() != std::io::ErrorKind::ConnectionAborted {
                                 tracing::error!(
-                                    "[Sink] Failed to poll mqtt eventloop: {}",
+                                    "Failed to poll mqtt eventloop: {}",
                                     err.as_report()
                                 );
                                 std::thread::sleep(std::time::Duration::from_secs(1));
                             }
                         } else {
-                            tracing::error!(
-                                "[Sink] Failed to poll mqtt eventloop: {}",
-                                err.as_report()
-                            );
+                            tracing::error!("Failed to poll mqtt eventloop: {}", err.as_report());
                             std::thread::sleep(std::time::Duration::from_secs(1));
                         }
                     }
@@ -192,47 +218,20 @@ impl MqttSinkWriter {
             }
         });
 
-        Ok::<_, SinkError>(Self {
-            config: config.clone(),
+        let payload_writer = MqttSinkPayloadWriter {
             client,
+            config: config.clone(),
             qos,
             retain: config.retain,
+        };
+
+        Ok::<_, SinkError>(Self {
+            config: config.clone(),
+            payload_writer,
             schema: schema.clone(),
             stopped,
-            json_encoder: JsonEncoder::new(
-                schema,
-                None,
-                DateHandlingMode::FromCe,
-                TimestampHandlingMode::Milli,
-                TimestamptzHandlingMode::UtcWithoutSuffix,
-                TimeHandlingMode::Milli,
-            ),
+            formatter,
         })
-    }
-
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        Retry::spawn(
-            ExponentialBackoff::from_millis(100).map(jitter).take(3),
-            || async {
-                let data = chunk_to_json(chunk.clone(), &self.json_encoder).unwrap();
-                for item in data {
-                    self.client
-                        .publish(
-                            &self.config.common.topic,
-                            self.qos,
-                            self.retain,
-                            item.into_bytes(),
-                        )
-                        .await
-                        .context("mqtt sink error")
-                        .map_err(SinkError::Mqtt)?;
-                }
-                Ok::<_, SinkError>(())
-            },
-        )
-        .await
-        .context("mqtts sink error")
-        .map_err(SinkError::Mqtt)
     }
 }
 
@@ -242,7 +241,9 @@ impl AsyncTruncateSinkWriter for MqttSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        self.append_only(chunk).await
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 }
 
@@ -250,5 +251,30 @@ impl Drop for MqttSinkWriter {
     fn drop(&mut self) {
         self.stopped
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+struct MqttSinkPayloadWriter {
+    // connection to mqtt, one per executor
+    client: rumqttc::v5::AsyncClient,
+    config: MqttConfig,
+    qos: QoS,
+    retain: bool,
+}
+
+impl FormattedSink for MqttSinkPayloadWriter {
+    type K = Vec<u8>;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, _k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        match v {
+            Some(v) => self
+                .client
+                .publish(&self.config.common.topic, self.qos, self.retain, v)
+                .await
+                .context("mqtt sink error")
+                .map_err(SinkError::Mqtt),
+            None => Ok(()),
+        }
     }
 }
