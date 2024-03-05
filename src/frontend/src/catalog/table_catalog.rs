@@ -398,8 +398,9 @@ impl TableCatalog {
     }
 
     pub fn redacted_create_sql(&self) -> String {
+        use thiserror_ext::AsReport;
         try_redact_definition(&self.definition).unwrap_or_else(|err| {
-            tracing::error!(?err, "failed to redact definition");
+            tracing::error!(error = %err.as_report(), "failed to redact definition");
             self.definition.to_owned()
         })
     }

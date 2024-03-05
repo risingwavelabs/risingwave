@@ -41,6 +41,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
+    let user_id = reader.user_id;
 
     Ok(schemas
         .flat_map(|schema| {
@@ -49,7 +50,11 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                 name: table.name().to_string(),
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
-                definition: table.redacted_create_sql(),
+                definition: if table.owner == user_id {
+                    table.create_sql()
+                } else {
+                    table.redacted_create_sql()
+                },
                 acl: get_acl_items(
                     &Object::TableId(table.id.table_id),
                     false,

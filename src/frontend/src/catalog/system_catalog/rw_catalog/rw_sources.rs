@@ -48,6 +48,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
+    let user_id = reader.user_id;
 
     Ok(schemas
         .flat_map(|schema| {
@@ -78,7 +79,11 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .map(|row_encode| row_encode.as_str_name().into()),
                     append_only: source.append_only,
                     connection_id: source.connection_id.map(|id| id as i32),
-                    definition: source.redacted_create_sql(),
+                    definition: if source.owner == user_id {
+                        source.create_sql()
+                    } else {
+                        source.redacted_create_sql()
+                    },
                     acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
                     initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
