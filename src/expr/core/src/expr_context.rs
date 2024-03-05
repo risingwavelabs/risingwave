@@ -20,6 +20,7 @@ use risingwave_pb::plan_common::ExprContext;
 // For all execution mode.
 define_context! {
     pub TIME_ZONE: String,
+    pub FRAGMENT_ID: u32,
 }
 
 pub fn capture_expr_context() -> ExprResult<ExprContext> {

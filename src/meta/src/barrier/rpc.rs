@@ -40,7 +40,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use super::command::CommandContext;
-use super::{BarrierCompletion, GlobalBarrierManagerContext};
+use super::{BarrierCollectResult, GlobalBarrierManagerContext};
 use crate::manager::{MetaSrvEnv, WorkerId};
 use crate::{MetaError, MetaResult};
 
@@ -48,7 +48,7 @@ pub(super) struct BarrierRpcManager {
     context: GlobalBarrierManagerContext,
 
     /// Futures that await on the completion of barrier.
-    injected_in_progress_barrier: FuturesUnordered<BarrierCompletionFuture>,
+    injected_in_progress_barrier: FuturesUnordered<BarrierCollectFuture>,
 
     prev_injecting_barrier: Option<oneshot::Receiver<()>>,
 }
@@ -80,12 +80,12 @@ impl BarrierRpcManager {
             .push(await_complete_future);
     }
 
-    pub(super) async fn next_complete_barrier(&mut self) -> BarrierCompletion {
+    pub(super) async fn next_collected_barrier(&mut self) -> BarrierCollectResult {
         pending_on_none(self.injected_in_progress_barrier.next()).await
     }
 }
 
-pub(super) type BarrierCompletionFuture = impl Future<Output = BarrierCompletion> + Send + 'static;
+pub(super) type BarrierCollectFuture = impl Future<Output = BarrierCollectResult> + Send + 'static;
 
 impl GlobalBarrierManagerContext {
     /// Inject a barrier to all CNs and spawn a task to collect it
@@ -94,7 +94,7 @@ impl GlobalBarrierManagerContext {
         command_context: Arc<CommandContext>,
         inject_tx: Option<oneshot::Sender<()>>,
         prev_inject_rx: Option<oneshot::Receiver<()>>,
-    ) -> BarrierCompletionFuture {
+    ) -> BarrierCollectFuture {
         let (tx, rx) = oneshot::channel();
         let prev_epoch = command_context.prev_epoch.value().0;
         let stream_rpc_manager = self.stream_rpc_manager.clone();
@@ -103,7 +103,7 @@ impl GlobalBarrierManagerContext {
             let span = command_context.span.clone();
             if let Some(prev_inject_rx) = prev_inject_rx {
                 if prev_inject_rx.await.is_err() {
-                    let _ = tx.send(BarrierCompletion {
+                    let _ = tx.send(BarrierCollectResult {
                         prev_epoch,
                         result: Err(anyhow!("prev barrier failed to be injected").into()),
                     });
@@ -125,7 +125,7 @@ impl GlobalBarrierManagerContext {
                         .await;
                 }
                 Err(e) => {
-                    let _ = tx.send(BarrierCompletion {
+                    let _ = tx.send(BarrierCollectResult {
                         prev_epoch,
                         result: Err(e),
                     });
@@ -134,7 +134,7 @@ impl GlobalBarrierManagerContext {
         });
         rx.map(move |result| match result {
             Ok(completion) => completion,
-            Err(_e) => BarrierCompletion {
+            Err(_e) => BarrierCollectResult {
                 prev_epoch,
                 result: Err(anyhow!("failed to receive barrier completion result").into()),
             },
@@ -222,7 +222,7 @@ impl StreamRpcManager {
         &self,
         node_need_collect: HashMap<WorkerId, bool>,
         command_context: Arc<CommandContext>,
-        barrier_complete_tx: oneshot::Sender<BarrierCompletion>,
+        barrier_collect_tx: oneshot::Sender<BarrierCollectResult>,
     ) {
         let prev_epoch = command_context.prev_epoch.value().0;
         let tracing_context =
@@ -272,8 +272,8 @@ impl StreamRpcManager {
                     .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
             })
             .map_err(Into::into);
-        let _ = barrier_complete_tx
-            .send(BarrierCompletion { prev_epoch, result })
+        let _ = barrier_collect_tx
+            .send(BarrierCollectResult { prev_epoch, result })
             .inspect_err(|_| tracing::warn!(prev_epoch, "failed to notify barrier completion"));
     }
 }

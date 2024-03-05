@@ -4082,12 +4082,12 @@ def section_udf(outer_panels):
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name)",
-                            "udf_success_count - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_success_count - {{link}} {{name}} {{fragment_id}}",
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name)",
-                            "udf_failure_count - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_failure_count - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4096,8 +4096,8 @@ def section_udf(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name)",
-                            "udf_input_chunk_rows_avg - {{link}} {{name}}",
+                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name, fragment_id) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_input_chunk_rows_avg - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4122,12 +4122,12 @@ def section_udf(outer_panels):
                             "udf_latency_avg - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, link, name))",
-                            "udf_latency_p99_by_name - {{link}} {{name}}",
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, link, name, fragment_id))",
+                            "udf_latency_p99_by_name - {{link}} {{name}} {{fragment_id}}",
                         ),
                         panels.target(
-                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by (link, name)",
-                            "udf_latency_avg_by_name - {{link}} {{name}}",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by (link, name, fragment_id) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_latency_avg_by_name - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4140,8 +4140,8 @@ def section_udf(outer_panels):
                             "udf_throughput_rows - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name)",
-                            "udf_throughput_rows - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_throughput_rows - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4154,8 +4154,8 @@ def section_udf(outer_panels):
                             "udf_throughput_bytes - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name) / (1024*1024)",
-                            "udf_throughput_bytes - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name, fragment_id) / (1024*1024)",
+                            "udf_throughput_bytes - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),

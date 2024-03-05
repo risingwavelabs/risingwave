@@ -14,9 +14,11 @@ message AuthInfo {
     PLAINTEXT = 1;
     SHA256 = 2;
     MD5 = 3;
+    OAUTH = 4;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
+  map<string, string> metadata = 3;
 }
 
 // User defines a user in the system.
