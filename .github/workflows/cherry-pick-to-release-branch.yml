@@ -1,55 +1,22 @@
-name: PR for release branch
+name: PR for release branch (test WIP)
 on:
   pull_request:
     branches:
-      - main
-    types: ["closed", "labeled"]
+      - test-cherry-pick-action-source
+    types: ["closed"]
 
 jobs:
-  release_pull_request_1_7_standalone:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-1.7-standalone')  &&  github.event.pull_request.merged == true"
+  release_pull_request_wip:
     runs-on: ubuntu-latest
-    name: release_pull_request
+    name: release_pull_request_wipx
     steps:
       - name: checkout
         uses: actions/checkout@v1
       - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
+        uses: risingwavelabs/github-action-cherry-pick@fix-pr-title-eval-backtick
         with:
-          pr_branch: 'release-1.7.0-standalone'
+          pr_branch: 'test-cherry-pick-action-target'
           pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-1.7.0-standalone', github.event.number) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release_pull_request_1_7:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-1.7')  &&  github.event.pull_request.merged == true"
-    runs-on: ubuntu-latest
-    name: release_pull_request
-    steps:
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
-        with:
-          pr_branch: 'release-1.7'
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-1.7', github.event.number) }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release_pull_request_1_6:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-release-1.6')  &&  github.event.pull_request.merged == true"
-    runs-on: ubuntu-latest
-    name: release_pull_request
-    steps:
-      - name: checkout
-        uses: actions/checkout@v1
-      - name: Create PR to branch
-        uses: risingwavelabs/github-action-cherry-pick@master
-        with:
-          pr_branch: 'release-1.6'
-          pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch release-1.6', github.event.number) }}
+          pr_body: ${{ format('Cherry picking \#{0} onto branch test-cherry-pick-action-target', github.event.number) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
