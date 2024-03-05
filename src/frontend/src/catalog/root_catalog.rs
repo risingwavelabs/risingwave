@@ -37,6 +37,7 @@ use crate::catalog::system_catalog::{
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -88,7 +89,7 @@ impl<'a> SchemaPath<'a> {
 /// - catalog (root catalog)
 ///   - database catalog
 ///     - schema catalog
-///       - function catalog
+///       - function catalog (i.e., user defined function)
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
@@ -140,23 +141,19 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_tables_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|sys_table| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_table(sys_table);
-            });
+        for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_table(sys_table);
         }
-        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
-            sys_views.into_iter().for_each(|sys_view| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_view(sys_view);
-            });
+        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_view(sys_view);
         }
     }
 
@@ -579,6 +576,21 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    /// This function is similar to `get_table_by_id` expect that a table must be in a given database.
+    pub fn get_table_by_id_with_db(
+        &self,
+        db_name: &str,
+        table_id: u32,
+    ) -> CatalogResult<&Arc<TableCatalog>> {
+        let table_id = TableId::from(table_id);
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(table) = schema.get_table_by_id(&table_id) {
+                return Ok(table);
+            }
+        }
+        Err(CatalogError::NotFound("table id", table_id.to_string()))
+    }
+
     pub fn get_schema_by_table_id(
         &self,
         db_name: &str,
@@ -714,6 +726,15 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
     }
 
+    pub fn get_view_by_id(&self, db_name: &str, view_id: u32) -> CatalogResult<Arc<ViewCatalog>> {
+        for schema in self.get_database_by_name(db_name)?.iter_schemas() {
+            if let Some(view) = schema.get_view_by_id(&ViewId::from(view_id)) {
+                return Ok(view.clone());
+            }
+        }
+        Err(CatalogError::NotFound("view", view_id.to_string()))
+    }
+
     pub fn get_connection_by_name<'a>(
         &self,
         db_name: &str,
@@ -727,6 +748,34 @@ impl Catalog {
                     .get_connection_by_name(connection_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("connection", connection_name.to_string()))
+    }
+
+    pub fn get_function_by_name_inputs<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+        inputs: &mut [ExprImpl],
+    ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_function_by_name_inputs(function_name, inputs))
+            })?
+            .ok_or_else(|| {
+                CatalogError::NotFound(
+                    "function",
+                    format!(
+                        "{}({})",
+                        function_name,
+                        inputs
+                            .iter()
+                            .map(|a| a.return_type().to_string())
+                            .join(", ")
+                    ),
+                )
+            })
     }
 
     pub fn get_function_by_name_args<'a>(

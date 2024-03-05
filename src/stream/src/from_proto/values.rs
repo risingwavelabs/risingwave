@@ -20,8 +20,8 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, ValuesExecutor};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::executor::{Executor, ValuesExecutor};
+use crate::task::ExecutorParams;
 
 /// Build a `ValuesExecutor` for stream. As is a leaf, current workaround registers a `sender` for
 /// this executor. May refractor with `BarrierRecvExecutor` in the near future.
@@ -34,15 +34,13 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         params: ExecutorParams,
         node: &ValuesNode,
         _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .lock_barrier_manager()
+        params
+            .local_barrier_manager
             .register_sender(params.actor_context.id, sender);
-        let progress = stream
-            .context
+        let progress = params
+            .local_barrier_manager
             .register_create_mview_progress(params.actor_context.id);
         let rows = node
             .get_tuples()
@@ -57,12 +55,13 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
                     .collect_vec()
             })
             .collect_vec();
-        Ok(Box::new(ValuesExecutor::new(
+        let exec = ValuesExecutor::new(
             params.actor_context,
-            params.info,
+            params.info.schema.clone(),
             progress,
             rows,
             barrier_receiver,
-        )))
+        );
+        Ok((params.info, exec).into())
     }
 }

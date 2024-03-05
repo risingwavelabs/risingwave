@@ -14,20 +14,27 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::meta::table_parallelism::{AutoParallelism, FixedParallelism, PbParallelism};
+use risingwave_pb::meta::table_parallelism::{
+    AdaptiveParallelism, FixedParallelism, PbParallelism,
+};
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 use risingwave_sqlparser::keywords::Keyword;
+use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableType;
+use crate::catalog::CatalogError;
+use crate::error::{ErrorCode, Result};
 use crate::Binder;
+
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
     obj_name: ObjectName,
     parallelism: SetVariableValue,
     stmt_type: StatementType,
+    deferred: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -41,9 +48,33 @@ pub async fn handle_alter_parallelism(
         let reader = session.env().catalog_reader().read_guard();
 
         match stmt_type {
-            StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
+            StatementType::ALTER_TABLE
+            | StatementType::ALTER_MATERIALIZED_VIEW
+            | StatementType::ALTER_INDEX => {
                 let (table, schema_name) =
                     reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+
+                match (table.table_type(), stmt_type) {
+                    (TableType::Internal, _) => {
+                        // we treat internal table as NOT FOUND
+                        return Err(
+                            CatalogError::NotFound("table", table.name().to_string()).into()
+                        );
+                    }
+                    (TableType::Table, StatementType::ALTER_TABLE)
+                    | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
+                    | (TableType::Index, StatementType::ALTER_INDEX) => {}
+                    _ => {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "cannot alter parallelism of {} {} by {}",
+                            table.table_type().to_prost().as_str_name(),
+                            table.name(),
+                            stmt_type,
+                        ))
+                        .into());
+                    }
+                }
+
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
                 table.id.table_id()
             }
@@ -65,15 +96,21 @@ pub async fn handle_alter_parallelism(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_parallelism(table_id, target_parallelism)
+        .alter_parallelism(table_id, target_parallelism, deferred)
         .await?;
 
-    Ok(RwPgResponse::empty_result(stmt_type))
+    let mut builder = RwPgResponse::builder(stmt_type);
+
+    if deferred {
+        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_string());
+    }
+
+    Ok(builder.into())
 }
 
 fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {
-    let auto_parallelism = PbTableParallelism {
-        parallelism: Some(PbParallelism::Auto(AutoParallelism {})),
+    let adaptive_parallelism = PbTableParallelism {
+        parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {})),
     };
 
     // If the target parallelism is set to 0/auto/default, we would consider it as auto parallelism.
@@ -81,22 +118,22 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
         SetVariableValue::Single(SetVariableValueSingle::Ident(ident))
             if ident
                 .real_value()
-                .eq_ignore_ascii_case(&Keyword::AUTO.to_string()) =>
+                .eq_ignore_ascii_case(&Keyword::ADAPTIVE.to_string()) =>
         {
-            auto_parallelism
+            adaptive_parallelism
         }
 
-        SetVariableValue::Default => auto_parallelism,
+        SetVariableValue::Default => adaptive_parallelism,
         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(v))) => {
-            let fixed_parallelism = v.parse().map_err(|e| {
+            let fixed_parallelism = v.parse::<u32>().map_err(|e| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "target parallelism must be a valid number or auto: {}",
-                    e
+                    "target parallelism must be a valid number or adaptive: {}",
+                    e.as_report()
                 ))
             })?;
 
             if fixed_parallelism == 0 {
-                auto_parallelism
+                adaptive_parallelism
             } else {
                 PbTableParallelism {
                     parallelism: Some(PbParallelism::Fixed(FixedParallelism {
@@ -108,7 +145,7 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
 
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a valid number or auto".to_string(),
+                "target parallelism must be a valid number or adaptive".to_string(),
             )
             .into());
         }

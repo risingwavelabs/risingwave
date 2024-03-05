@@ -16,7 +16,7 @@ use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::{Interval, Timestamp};
 use risingwave_expr::expr::test_utils::make_hop_window_expression;
 use risingwave_expr::expr::NonStrictExpression;
-use risingwave_stream::executor::{ExecutorInfo, HopWindowExecutor};
+use risingwave_stream::executor::HopWindowExecutor;
 
 use crate::prelude::*;
 
@@ -24,12 +24,15 @@ const TIME_COL_IDX: usize = 2;
 const CHUNK_SIZE: usize = 256;
 
 fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageStream) {
-    let field1 = Field::unnamed(DataType::Int64);
-    let field2 = Field::unnamed(DataType::Int64);
-    let field3 = Field::with_name(DataType::Timestamp, "created_at");
-    let schema = Schema::new(vec![field1, field2, field3]);
-    let pk_indices = vec![0];
-    let (tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(
+        Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+            Field::with_name(DataType::Timestamp, "created_at"),
+        ]),
+        vec![0],
+    );
 
     let window_slide = Interval::from_minutes(15);
     let window_size = Interval::from_minutes(30);
@@ -46,13 +49,8 @@ fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageSt
     (
         tx,
         HopWindowExecutor::new(
-            ActorContext::create(123),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "HopWindowExecutor".to_string(),
-            },
-            Box::new(source),
+            ActorContext::for_test(123),
+            source,
             TIME_COL_IDX,
             window_slide,
             window_size,

@@ -77,8 +77,7 @@ metrics_level = \"Disabled\"
         meta_nodes: 3,
         compactor_nodes: 2,
         compute_node_cores: 2,
-        etcd_timeout_rate: 0.0,
-        etcd_data_path: None,
+        ..Default::default()
     }
 }
 

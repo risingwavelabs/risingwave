@@ -17,6 +17,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use console::style;
+use thiserror_ext::AsReport;
 
 fn preflight_check_proxy() -> Result<()> {
     if env::var("http_proxy").is_ok()
@@ -72,7 +73,7 @@ pub fn preflight_check() -> Result<()> {
             "[{}] {} - failed to run proxy preflight check: {}",
             style("risedev-preflight-check").bold(),
             style("WARN").yellow().bold(),
-            e
+            e.as_report()
         );
     }
 
@@ -81,7 +82,7 @@ pub fn preflight_check() -> Result<()> {
             "[{}] {} - failed to run ulimit preflight check: {}",
             style("risedev-preflight-check").bold(),
             style("WARN").yellow().bold(),
-            e
+            e.as_report()
         );
     }
 

@@ -22,7 +22,9 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "d0846a16c
     "xz",
 ] }
 arrow-array = { workspace = true }
+arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-select = { workspace = true }
 async-nats = "0.33"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -34,8 +36,9 @@ aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
+aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
-base64 = "0.21"
+base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = [
@@ -54,7 +57,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-pubsub = "0.22"
+google-cloud-pubsub = "0.23"
 http = "0.2"
 hyper = { version = "0.14", features = [
     "client",
@@ -79,18 +82,20 @@ mysql_common = { version = "0.31", default-features = false, features = [
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
-opendal = { git = "https://github.com/apache/incubator-opendal", rev = "9a222e4d72b328a24d5775b1565292f4636bbe69" }
+opendal = "0.44"
 parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.12", features = ["no-recursion-limit"] }
-prost-reflect = "0.12"
+prost-reflect = "0.13"
 prost-types = "0.12"
 protobuf-native = "0.2.1"
 pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
+    "lz4",
+    "zstd",
 ] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
@@ -109,15 +114,17 @@ risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"
+rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
 simd-json = "0.13.3"
 strum = "0.25"
-strum_macros = "0.25"
+strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -128,15 +135,15 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-postgres = "0.7"
+tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = "0.10.2"
+tonic = { workspace = true }
 tracing = "0.1"
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
+uuid = { version = "1", features = ["v4", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 
@@ -144,9 +151,11 @@ yup-oauth2 = "8.3"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true, features = ["datafusion"] }
 expect-test = "1"
+paste = "1"
 pretty_assertions = "1"
 quote = "1"
 rand = "0.8"
@@ -168,6 +177,10 @@ harness = false
 
 [[bench]]
 name = "nexmark_integration"
+harness = false
+
+[[bench]]
+name = "json_parser"
 harness = false
 
 [lints]

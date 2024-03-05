@@ -27,7 +27,6 @@ message SinkParam {
   string db_name = 5;
   string sink_from_name = 6;
   catalog.SinkFormatDesc format_desc = 7;
-  optional uint32 target_table = 8;
 }
 
 enum SinkPayloadFormat {
@@ -40,6 +39,7 @@ message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
     SinkPayloadFormat format = 2;
+    TableSchema payload_schema = 3;
   }
 
   message WriteBatch {
@@ -156,11 +156,15 @@ message SinkCoordinatorStreamResponse {
 /* Source Service */
 
 message CdcMessage {
+  // The value of the Debezium message
   string payload = 1;
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
+  bool is_transaction_meta = 6;
+  // The key of the Debezium message, which only used by `mongodb-cdc` connector.
+  string key = 7;
 }
 
 enum SourceType {
@@ -168,6 +172,7 @@ enum SourceType {
   MYSQL = 1;
   POSTGRES = 2;
   CITUS = 3;
+  MONGODB = 4;
 }
 
 message SourceCommonParam {

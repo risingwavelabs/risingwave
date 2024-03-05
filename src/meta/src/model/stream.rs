@@ -23,14 +23,14 @@ use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
-    FixedParallelism, Parallelism, PbAutoParallelism, PbCustomParallelism, PbFixedParallelism,
+    FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
     PbParallelism,
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbStreamContext, StreamActor, StreamNode, StreamSource,
+    FragmentTypeFlag, PbFragmentTypeFlag, PbStreamContext, StreamActor, StreamNode, StreamSource,
 };
 
 use super::{ActorId, FragmentId};
@@ -41,10 +41,20 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
+/// The parallelism for a `TableFragments`.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum TableParallelism {
-    Auto,
+    /// This is when the system decides the parallelism, based on the available parallel units.
+    Adaptive,
+    /// We set this when the `TableFragments` parallelism is changed.
+    /// All fragments which are part of the `TableFragment` will have the same parallelism as this.
     Fixed(usize),
+    /// We set this when the individual parallelisms of the `Fragments`
+    /// can differ within a `TableFragments`.
+    /// This is set for `risectl`, since it has a low-level interface,
+    /// scale individual `Fragments` within `TableFragments`.
+    /// When that happens, the `TableFragments` no longer has a consistent
+    /// parallelism, so we set this to indicate that.
     Custom,
 }
 
@@ -53,9 +63,9 @@ impl From<PbTableParallelism> for TableParallelism {
         use Parallelism::*;
         match &value.parallelism {
             Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
-            Some(Auto(_)) => Self::Auto,
+            Some(Adaptive(_)) | Some(Auto(_)) => Self::Adaptive,
             Some(Custom(_)) => Self::Custom,
-            _ => Self::Auto,
+            _ => unreachable!(),
         }
     }
 }
@@ -65,7 +75,7 @@ impl From<TableParallelism> for PbTableParallelism {
         use TableParallelism::*;
 
         let parallelism = match value {
-            Auto => PbParallelism::Auto(PbAutoParallelism {}),
+            Adaptive => PbParallelism::Adaptive(PbAdaptiveParallelism {}),
             Fixed(n) => PbParallelism::Fixed(PbFixedParallelism {
                 parallelism: n as u32,
             }),
@@ -188,7 +198,7 @@ impl TableFragments {
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
-            TableParallelism::Auto,
+            TableParallelism::Adaptive,
         )
     }
 
@@ -337,14 +347,17 @@ impl TableFragments {
 
     /// Returns barrier inject actor ids.
     pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
-        Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask
-                & (FragmentTypeFlag::Source as u32
-                    | FragmentTypeFlag::Now as u32
-                    | FragmentTypeFlag::Values as u32
-                    | FragmentTypeFlag::BarrierRecv as u32))
-                != 0
-        })
+        Self::filter_actor_ids(self, Self::is_injectable)
+    }
+
+    /// Check if the fragment type mask is injectable.
+    pub fn is_injectable(fragment_type_mask: u32) -> bool {
+        (fragment_type_mask
+            & (PbFragmentTypeFlag::Source as u32
+                | PbFragmentTypeFlag::Now as u32
+                | PbFragmentTypeFlag::Values as u32
+                | PbFragmentTypeFlag::BarrierRecv as u32))
+            != 0
     }
 
     /// Returns mview actor ids.

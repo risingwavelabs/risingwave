@@ -39,7 +39,6 @@ use itertools::Itertools;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
@@ -50,6 +49,7 @@ use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
+use crate::error::{ErrorCode, Result};
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -678,7 +678,10 @@ impl dyn PlanNode {
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
+    pub fn to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<StreamPlanPb> {
         use stream::prelude::*;
 
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
@@ -691,14 +694,14 @@ impl dyn PlanNode {
             return stream_share.adhoc_to_stream_prost(state);
         }
 
-        let node = Some(self.to_stream_prost_body(state));
+        let node = Some(self.try_to_stream_prost_body(state)?);
         let input = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_stream_prost(state))
-            .collect();
+            .try_collect()?;
         // TODO: support pk_indices and operator_id
-        StreamPlanPb {
+        Ok(StreamPlanPb {
             input,
             identity: self.explain_myself_to_string(),
             node_body: node,
@@ -711,24 +714,24 @@ impl dyn PlanNode {
                 .collect(),
             fields: self.schema().to_prost(),
             append_only: self.plan_base().append_only(),
-        }
+        })
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> BatchPlanPb {
+    pub fn to_batch_prost(&self) -> SchedulerResult<BatchPlanPb> {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanPb {
-        let node_body = Some(self.to_batch_prost_body());
+    pub fn to_batch_prost_identity(&self, identity: bool) -> SchedulerResult<BatchPlanPb> {
+        let node_body = Some(self.try_to_batch_prost_body()?);
         let children = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_batch_prost_identity(identity))
-            .collect();
-        BatchPlanPb {
+            .try_collect()?;
+        Ok(BatchPlanPb {
             children,
             identity: if identity {
                 self.explain_myself_to_string()
@@ -736,7 +739,7 @@ impl dyn PlanNode {
                 "".into()
             },
             node_body,
-        }
+        })
     }
 
     pub fn explain_myself_to_string(&self) -> String {
@@ -940,7 +943,7 @@ pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
-pub use stream_sink::StreamSink;
+pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
@@ -956,6 +959,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 

@@ -33,6 +33,8 @@
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(round_ties_even)]
+#![feature(iterator_try_collect)]
+#![feature(used_with_arg)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -59,6 +61,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
+pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
 mod user;
@@ -104,6 +107,8 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: MetaAddressStrategy,
 
+    /// We will start a http server at this address via `MetricsManager`.
+    /// Then the prometheus instance will poll the metrics from this address.
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",
@@ -137,6 +142,16 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
+}
+
+impl risingwave_common::opts::Opts for FrontendOpts {
+    fn name() -> &'static str {
+        "frontend"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        self.meta_addr.clone()
+    }
 }
 
 impl Default for FrontendOpts {

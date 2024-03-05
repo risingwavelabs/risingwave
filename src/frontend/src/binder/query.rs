@@ -17,7 +17,6 @@ use std::rc::Rc;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
@@ -26,6 +25,7 @@ use thiserror_ext::AsReport;
 use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
 use crate::binder::{Binder, BoundSetExpr};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
@@ -82,11 +82,11 @@ impl BoundQuery {
     ///   goes out.
     /// * The last example is also correlated. because it cannot be evaluated independently either.
     pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.body.is_correlated(depth)
+        self.body.is_correlated(depth + 1)
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref_by_depth(depth))
+                .any(|e| e.has_correlated_input_ref_by_depth(depth + 1))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -98,11 +98,11 @@ impl BoundQuery {
 
         correlated_indices.extend(
             self.body
-                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
         );
 
         correlated_indices.extend(self.extra_order_exprs.iter_mut().flat_map(|expr| {
-            expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            expr.collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id)
         }));
         correlated_indices
     }

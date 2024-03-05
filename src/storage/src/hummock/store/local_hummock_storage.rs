@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use parking_lot::RwLock;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
@@ -26,20 +26,20 @@ use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
 
-use super::version::{HummockReadVersion, StagingData, VersionUpdate};
+use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
-use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
+use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
+    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
+    UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::{
-    cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, wait_for_epoch, ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, wait_for_epoch,
+    ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
@@ -64,7 +64,7 @@ pub struct LocalHummockStorage {
     instance_guard: LocalInstanceGuard,
 
     /// Read handle.
-    read_version: Arc<RwLock<HummockReadVersion>>,
+    read_version: HummockReadVersionRef,
 
     /// This indicates that this `LocalHummockStorage` replicates another `LocalHummockStorage`.
     /// It's used by executors in different CNs to synchronize states.
@@ -284,17 +284,10 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        debug_assert!(delete_ranges
-            .iter()
-            .map(|(key, _)| key)
-            .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
+    async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
-        for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter()) {
+        for (key, key_op) in buffer {
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
@@ -349,7 +342,6 @@ impl LocalStateStore for LocalHummockStorage {
         }
         self.flush_inner(
             kv_pairs,
-            delete_ranges,
             WriteOptions {
                 epoch: self.epoch(),
                 table_id: self.table_id,
@@ -359,10 +351,12 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        if self.mem_table.kv_size.size() > self.mem_table_spill_threshold {
+        if self.mem_table_spill_threshold != 0
+            && self.mem_table.kv_size.size() > self.mem_table_spill_threshold
+        {
             if self.spill_offset < MAX_SPILL_TIMES {
                 let table_id_label = self.table_id.table_id().to_string();
-                self.flush(vec![]).await?;
+                self.flush().await?;
                 self.stats
                     .mem_table_spill_counts
                     .with_label_values(&[table_id_label.as_str()])
@@ -393,12 +387,24 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        let prev_vnodes = self
+            .read_version
+            .write()
+            .update_vnode_bitmap(options.vnodes);
+        assert!(
+            prev_vnodes.is_none(),
+            "Vnode bitmap should be empty during init"
+        );
 
         Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, mut opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if let Some(new_level) = &opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(new_level);
+            self.op_consistency_level.update(new_level);
+        }
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
@@ -430,13 +436,21 @@ impl LocalStateStore for LocalHummockStorage {
             })
             .expect("should be able to send")
     }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        let mut read_version = self.read_version.write();
+        assert!(read_version.staging().is_empty(), "There is uncommitted staging data in read version table_id {:?} instance_id {:?} on vnode bitmap update",
+            self.table_id(), self.instance_id()
+        );
+        let prev_vnodes = read_version.update_vnode_bitmap(vnodes);
+        prev_vnodes.expect("Previous vnode bitmap should not be none")
+    }
 }
 
 impl LocalHummockStorage {
     async fn flush_inner(
         &mut self,
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         let epoch = write_options.epoch;
@@ -453,10 +467,9 @@ impl LocalHummockStorage {
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
 
-        let imm_size = if !kv_pairs.is_empty() || !delete_ranges.is_empty() {
+        let imm_size = if !kv_pairs.is_empty() {
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items)
-                + SharedBufferBatch::measure_delete_range_size(&delete_ranges);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             self.write_limiter.wait_permission(self.table_id).await;
             let limiter = self.memory_limiter.as_ref();
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
@@ -488,9 +501,8 @@ impl LocalHummockStorage {
                 self.spill_offset,
                 sorted_items,
                 size,
-                delete_ranges,
                 table_id,
-                Some(instance_id),
+                instance_id,
                 Some(tracker),
             );
             self.spill_offset += 1;
@@ -522,7 +534,7 @@ impl LocalHummockStorage {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         instance_guard: LocalInstanceGuard,
-        read_version: Arc<RwLock<HummockReadVersion>>,
+        read_version: HummockReadVersionRef,
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
@@ -553,7 +565,7 @@ impl LocalHummockStorage {
     }
 
     /// See `HummockReadVersion::update` for more details.
-    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+    pub fn read_version(&self) -> HummockReadVersionRef {
         self.read_version.clone()
     }
 
@@ -566,11 +578,11 @@ impl LocalHummockStorage {
     }
 }
 
-pub type StagingDataIterator = OrderedMergeIteratorInner<
+pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
 pub type HummockStorageIteratorPayloadInner<'a> = SkipWatermarkIterator<
-    UnorderedMergeIteratorInner<
+    MergeIterator<
         HummockIteratorUnion<
             Forward,
             StagingDataIterator,

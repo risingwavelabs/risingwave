@@ -15,14 +15,22 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::sync::{Arc, LazyLock, Weak};
+use std::time::Duration;
 
+use anyhow::Context;
 use arrow_schema::{Field, Fields, Schema};
+use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+#[cfg(feature = "embedded-python-udf")]
+use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
+use arrow_udf_wasm::Runtime as WasmRuntime;
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
+use moka::sync::Cache;
 use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
@@ -32,12 +40,13 @@ use crate::expr::Expression;
 use crate::{bail, Result};
 
 #[derive(Debug)]
-pub struct UdfExpression {
+pub struct UserDefinedFunction {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
+    #[expect(dead_code)]
     arg_schema: Arc<Schema>,
-    client: Arc<ArrowFlightUdfClient>,
+    imp: UdfImpl,
     identifier: String,
     span: await_tree::Span,
     /// Number of remaining successful calls until retry is enabled.
@@ -46,28 +55,43 @@ pub struct UdfExpression {
     /// On each successful call, the count will be decreased by 1.
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
     disable_retry_count: AtomicU8,
+    /// Always retry. Overrides `disable_retry_count`.
+    always_retry_on_network_error: bool,
 }
 
 const INITIAL_RETRY_COUNT: u8 = 16;
 
+#[derive(Debug)]
+pub enum UdfImpl {
+    External(Arc<ArrowFlightUdfClient>),
+    Wasm(Arc<WasmRuntime>),
+    JavaScript(JsRuntime),
+    #[cfg(feature = "embedded-python-udf")]
+    Python(PythonRuntime),
+}
+
 #[async_trait::async_trait]
-impl Expression for UdfExpression {
+impl Expression for UserDefinedFunction {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vis = input.visibility();
+        if input.cardinality() == 0 {
+            // early return for empty input
+            let mut builder = self.return_type.create_array_builder(input.capacity());
+            builder.append_n_null(input.capacity());
+            return Ok(builder.finish().into_ref());
+        }
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval(input).await?;
             columns.push(array);
         }
-        self.eval_inner(columns, vis).await
+        let chunk = DataChunk::new(columns, input.visibility().clone());
+        self.eval_inner(&chunk).await
     }
 
-    #[cfg_or_panic(not(madsim))]
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
@@ -76,77 +100,77 @@ impl Expression for UdfExpression {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk.columns().to_vec();
-        let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
+        let output_array = self.eval_inner(&chunk).await?;
         Ok(output_array.to_datum())
     }
 }
 
-impl UdfExpression {
-    async fn eval_inner(
-        &self,
-        columns: Vec<ArrayRef>,
-        vis: &risingwave_common::buffer::Bitmap,
-    ) -> Result<ArrayRef> {
-        let chunk = DataChunk::new(columns, vis.clone());
-        let compacted_chunk = chunk.compact_cow();
-        let compacted_columns: Vec<arrow_array::ArrayRef> = compacted_chunk
-            .columns()
-            .iter()
-            .map(|c| {
-                c.as_ref()
-                    .try_into()
-                    .expect("failed covert ArrayRef to arrow_array::ArrayRef")
-            })
-            .collect();
-        let opts = arrow_array::RecordBatchOptions::default()
-            .with_row_count(Some(compacted_chunk.capacity()));
-        let input = arrow_array::RecordBatch::try_new_with_options(
-            self.arg_schema.clone(),
-            compacted_columns,
-            &opts,
-        )
-        .expect("failed to build record batch");
+impl UserDefinedFunction {
+    async fn eval_inner(&self, input: &DataChunk) -> Result<ArrayRef> {
+        // this will drop invisible rows
+        let arrow_input = arrow_array::RecordBatch::try_from(input)?;
 
-        let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-        let result = if disable_retry_count != 0 {
-            self.client
-                .call(&self.identifier, input)
-                .instrument_await(self.span.clone())
-                .await
-        } else {
-            self.client
-                .call_with_retry(&self.identifier, input)
-                .instrument_await(self.span.clone())
-                .await
+        let arrow_output: arrow_array::RecordBatch = match &self.imp {
+            UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+            UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+            #[cfg(feature = "embedded-python-udf")]
+            UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+            UdfImpl::External(client) => {
+                // batch query does not have a fragment_id
+                let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or(0);
+
+                let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
+                let result = if self.always_retry_on_network_error {
+                    client
+                        .call_with_always_retry_on_network_error(
+                            &self.identifier,
+                            arrow_input,
+                            fragment_id,
+                        )
+                        .instrument_await(self.span.clone())
+                        .await
+                } else {
+                    let result = if disable_retry_count != 0 {
+                        client
+                            .call(&self.identifier, arrow_input, fragment_id)
+                            .instrument_await(self.span.clone())
+                            .await
+                    } else {
+                        client
+                            .call_with_retry(&self.identifier, arrow_input, fragment_id)
+                            .instrument_await(self.span.clone())
+                            .await
+                    };
+                    let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
+                    let connection_error = matches!(&result, Err(e) if e.is_connection_error());
+                    if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
+                        // reset count on connection error
+                        self.disable_retry_count
+                            .store(INITIAL_RETRY_COUNT, Ordering::Relaxed);
+                    } else if !connection_error && disable_retry_count != 0 {
+                        // decrease count on success, ignore if exchange failed
+                        _ = self.disable_retry_count.compare_exchange(
+                            disable_retry_count,
+                            disable_retry_count - 1,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        );
+                    }
+                    result
+                };
+                result?
+            }
         };
-        let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
-        let connection_error = matches!(&result, Err(e) if e.is_connection_error());
-        if connection_error && disable_retry_count != INITIAL_RETRY_COUNT {
-            // reset count on connection error
-            self.disable_retry_count
-                .store(INITIAL_RETRY_COUNT, Ordering::Relaxed);
-        } else if !connection_error && disable_retry_count != 0 {
-            // decrease count on success, ignore if exchange failed
-            _ = self.disable_retry_count.compare_exchange(
-                disable_retry_count,
-                disable_retry_count - 1,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
-        }
-        let output = result?;
-
-        if output.num_rows() != vis.count_ones() {
+        if arrow_output.num_rows() != input.cardinality() {
             bail!(
                 "UDF returned {} rows, but expected {}",
-                output.num_rows(),
-                vis.len(),
+                arrow_output.num_rows(),
+                input.cardinality(),
             );
         }
 
-        let data_chunk = DataChunk::try_from(&output)?;
-        let output = data_chunk.uncompact(vis.clone());
+        let output = DataChunk::try_from(&arrow_output)?;
+        let output = output.uncompact(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
@@ -163,8 +187,7 @@ impl UdfExpression {
     }
 }
 
-#[cfg_or_panic(not(madsim))]
-impl Build for UdfExpression {
+impl Build for UserDefinedFunction {
     fn build(
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
@@ -172,8 +195,52 @@ impl Build for UdfExpression {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
-        // connect to UDF service
-        let client = get_or_create_client(&udf.link)?;
+        let identifier = udf.get_identifier()?;
+        let imp = match udf.language.as_str() {
+            #[cfg(not(madsim))]
+            "wasm" | "rust" => {
+                let compressed_wasm_binary = udf.get_compressed_binary()?;
+                let wasm_binary = zstd::stream::decode_all(compressed_wasm_binary.as_slice())
+                    .context("failed to decompress wasm binary")?;
+                let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+                UdfImpl::Wasm(runtime)
+            }
+            "javascript" => {
+                let mut rt = JsRuntime::new()?;
+                let body = format!(
+                    "export function {}({}) {{ {} }}",
+                    identifier,
+                    udf.arg_names.join(","),
+                    udf.get_body()?
+                );
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    JsCallMode::CalledOnNullInput,
+                    &body,
+                )?;
+                UdfImpl::JavaScript(rt)
+            }
+            #[cfg(feature = "embedded-python-udf")]
+            "python" if udf.body.is_some() => {
+                let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+                let body = udf.get_body()?;
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    PythonCallMode::CalledOnNullInput,
+                    body,
+                )?;
+                UdfImpl::Python(rt)
+            }
+            #[cfg(not(madsim))]
+            _ => {
+                let link = udf.get_link()?;
+                UdfImpl::External(get_or_create_flight_client(link)?)
+            }
+            #[cfg(madsim)]
+            l => panic!("UDF language {l:?} is not supported on madsim"),
+        };
 
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
@@ -195,10 +262,11 @@ impl Build for UdfExpression {
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
             arg_schema,
-            client,
-            identifier: udf.identifier.clone(),
-            span: format!("expr_udf_call ({})", udf.identifier).into(),
+            imp,
+            identifier: identifier.clone(),
+            span: format!("udf_call({})", identifier).into(),
             disable_retry_count: AtomicU8::new(0),
+            always_retry_on_network_error: udf.always_retry_on_network_error,
         })
     }
 }
@@ -207,8 +275,8 @@ impl Build for UdfExpression {
 /// Get or create a client for the given UDF service.
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
-pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
-    static CLIENTS: LazyLock<Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
+pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
+    static CLIENTS: LazyLock<std::sync::Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
         LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();
     if let Some(client) = clients.get(link).and_then(|c| c.upgrade()) {
@@ -220,4 +288,26 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
     }
+}
+
+/// Get or create a wasm runtime.
+///
+/// Runtimes returned by this function are cached inside for at least 60 seconds.
+/// Later calls with the same binary will reuse the same runtime.
+#[cfg_or_panic(not(madsim))]
+pub fn get_or_create_wasm_runtime(binary: &[u8]) -> Result<Arc<WasmRuntime>> {
+    static RUNTIMES: LazyLock<Cache<md5::Digest, Arc<WasmRuntime>>> = LazyLock::new(|| {
+        Cache::builder()
+            .time_to_idle(Duration::from_secs(60))
+            .build()
+    });
+
+    let md5 = md5::compute(binary);
+    if let Some(runtime) = RUNTIMES.get(&md5) {
+        return Ok(runtime.clone());
+    }
+
+    let runtime = Arc::new(arrow_udf_wasm::Runtime::new(binary)?);
+    RUNTIMES.insert(md5, runtime.clone());
+    Ok(runtime)
 }

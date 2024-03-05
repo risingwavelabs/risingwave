@@ -35,6 +35,9 @@ statement ok
 drop materialized view nexmark_q14;
 
 statement ok
+drop function count_char;
+
+statement ok
 drop materialized view nexmark_q15;
 
 statement ok

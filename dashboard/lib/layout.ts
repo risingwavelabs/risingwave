@@ -15,9 +15,19 @@
  *
  */
 
-import { cloneDeep, max } from "lodash"
+import { max } from "lodash"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
+import { Relation } from "./api/streaming"
+
+export type Enter<Type> = Type extends d3.Selection<
+  any,
+  infer B,
+  infer C,
+  infer D
+>
+  ? d3.Selection<d3.EnterElement, B, C, D>
+  : never
 
 interface DagNode {
   node: GraphNode
@@ -210,122 +220,123 @@ function dagLayout(nodes: GraphNode[]) {
 }
 
 /**
- * @param fragments
- * @returns Layer and row of the actor
+ * @param items
+ * @returns Layer and row of the item
  */
-function gridLayout(
-  fragments: Array<ActorBox>
-): Map<ActorBox, [number, number]> {
-  // turn ActorBox to GraphNode
-  let actorBoxIdToActorBox = new Map<String, ActorBox>()
-  for (let fragment of fragments) {
-    actorBoxIdToActorBox.set(fragment.id, fragment)
+function gridLayout<I extends LayoutItemBase>(
+  items: Array<I>
+): Map<I, [number, number]> {
+  // turn item to GraphNode
+  let idToItem = new Map<String, I>()
+  for (let item of items) {
+    idToItem.set(item.id, item)
   }
 
-  let nodeToActorBoxId = new Map<GraphNode, String>()
-  let actorBoxIdToNode = new Map<String, GraphNode>()
-  const getActorBoxNode = (actorboxId: String): GraphNode => {
-    let rtn = actorBoxIdToNode.get(actorboxId)
+  let nodeToId = new Map<GraphNode, String>()
+  let idToNode = new Map<String, GraphNode>()
+  const getNode = (id: String): GraphNode => {
+    let rtn = idToNode.get(id)
     if (rtn !== undefined) {
       return rtn
     }
     let newNode = {
       nextNodes: new Array<GraphNode>(),
     }
-    let ab = actorBoxIdToActorBox.get(actorboxId)
-    if (ab === undefined) {
-      throw Error(`no such id ${actorboxId}`)
+    let item = idToItem.get(id)
+    if (item === undefined) {
+      throw Error(`no such id ${id}`)
     }
-    for (let id of ab.parentIds) {
-      // newNode.nextNodes.push(getActorBoxNode(id))
-      getActorBoxNode(id).nextNodes.push(newNode)
+    for (let id of item.parentIds) {
+      getNode(id).nextNodes.push(newNode)
     }
-    actorBoxIdToNode.set(actorboxId, newNode)
-    nodeToActorBoxId.set(newNode, actorboxId)
+    idToNode.set(id, newNode)
+    nodeToId.set(newNode, id)
     return newNode
   }
-  for (let fragment of fragments) {
-    getActorBoxNode(fragment.id)
+  for (let item of items) {
+    getNode(item.id)
   }
 
   // run daglayout on GraphNode
-  let rtn = new Map<ActorBox, [number, number]>()
+  let rtn = new Map<I, [number, number]>()
   let allNodes = new Array<GraphNode>()
-  for (let _n of nodeToActorBoxId.keys()) {
+  for (let _n of nodeToId.keys()) {
     allNodes.push(_n)
   }
   let resultMap = dagLayout(allNodes)
   for (let item of resultMap) {
-    let abId = nodeToActorBoxId.get(item[0])
-    if (!abId) {
-      throw Error(`no corresponding actorboxid of node ${item[0]}`)
+    let id = nodeToId.get(item[0])
+    if (!id) {
+      throw Error(`no corresponding item of node ${item[0]}`)
     }
-    let ab = actorBoxIdToActorBox.get(abId)
-    if (!ab) {
-      throw Error(`actorbox id ${abId} is not present in actorBoxIdToActorBox`)
+    let fb = idToItem.get(id)
+    if (!fb) {
+      throw Error(`item id ${id} is not present in idToBox`)
     }
-    rtn.set(ab, item[1])
+    rtn.set(fb, item[1])
   }
   return rtn
 }
 
-export interface ActorBox {
+export interface LayoutItemBase {
   id: string
-  name: string
-  order: number // preference order, actor box with larger order will be placed at right
+  order: number // preference order, item with larger order will be placed at right or down
   width: number
   height: number
   parentIds: string[]
+}
+
+export type FragmentBox = LayoutItemBase & {
+  name: string
+  externalParentIds: string[]
   fragment?: TableFragments_Fragment
 }
 
-export interface ActorPoint {
-  id: string
+export type RelationPoint = LayoutItemBase & {
   name: string
-  order: number // preference order, actor box with larger order will be placed at right
-  parentIds: string[]
+  relation: Relation
 }
 
-export interface ActorBoxPosition {
-  id: string
+export interface Position {
   x: number
   y: number
-  data: ActorBox
 }
 
-export interface ActorPointPosition {
-  id: string
-  x: number
-  y: number
-  data: ActorPoint
+export type FragmentBoxPosition = FragmentBox & Position
+export type RelationPointPosition = RelationPoint & Position
+
+export interface Edge {
+  points: Array<Position>
+  source: string
+  target: string
 }
 
 /**
- * @param fragments
- * @returns the coordination of the top-left corner of the actor box
+ * @param items
+ * @returns the coordination of the top-left corner of the fragment box
  */
-export function layout(
-  fragments: Array<ActorBox>,
+export function layoutItem<I extends LayoutItemBase>(
+  items: Array<I>,
   layerMargin: number,
   rowMargin: number
-): ActorBoxPosition[] {
-  let layoutMap = gridLayout(fragments)
+): (I & Position)[] {
+  let layoutMap = gridLayout(items)
   let layerRequiredWidth = new Map<number, number>()
   let rowRequiredHeight = new Map<number, number>()
   let maxLayer = 0,
     maxRow = 0
 
   for (let item of layoutMap) {
-    let ab = item[0],
+    let fb = item[0],
       layer = item[1][0],
       row = item[1][1]
     let currentWidth = layerRequiredWidth.get(layer) || 0
-    if (ab.width > currentWidth) {
-      layerRequiredWidth.set(layer, ab.width)
+    if (fb.width > currentWidth) {
+      layerRequiredWidth.set(layer, fb.width)
     }
     let currentHeight = rowRequiredHeight.get(row) || 0
-    if (ab.height > currentHeight) {
-      rowRequiredHeight.set(row, ab.height)
+    if (fb.height > currentHeight) {
+      rowRequiredHeight.set(row, fb.height)
     }
 
     maxLayer = max([layer, maxLayer]) || 0
@@ -373,17 +384,16 @@ export function layout(
     getCumulativeMargin(i, rowMargin, rowCumulativeHeight, rowRequiredHeight)
   }
 
-  let rtn: Array<ActorBoxPosition> = []
+  let rtn: Array<I & Position> = []
 
   for (let [data, [layer, row]] of layoutMap) {
     let x = layerCumulativeWidth.get(layer)
     let y = rowCumulativeHeight.get(row)
     if (x !== undefined && y !== undefined) {
       rtn.push({
-        id: data.id,
         x,
         y,
-        data,
+        ...data,
       })
     } else {
       throw Error(`x of layer ${layer}: ${x}, y of row ${row}: ${y} `)
@@ -392,86 +402,56 @@ export function layout(
   return rtn
 }
 
-export function flipLayout(
-  fragments: Array<ActorBox>,
-  layerMargin: number,
-  rowMargin: number
-): ActorBoxPosition[] {
-  const fragments_ = cloneDeep(fragments)
-  for (let fragment of fragments_) {
-    ;[fragment.width, fragment.height] = [fragment.height, fragment.width]
-  }
-  const actorPosition = layout(fragments_, rowMargin, layerMargin)
-  return actorPosition.map(({ id, x, y, data }) => ({
-    id,
-    data,
-    x: y,
-    y: x,
-  }))
-}
-
-export function layoutPoint(
-  fragments: Array<ActorPoint>,
+function layoutRelation(
+  relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
   nodeRadius: number
-): ActorPointPosition[] {
-  const fragmentBoxes: Array<ActorBox> = []
-  for (let { id, name, order, parentIds, ...others } of fragments) {
-    fragmentBoxes.push({
-      id,
-      name,
-      parentIds,
-      width: nodeRadius * 2,
-      height: nodeRadius * 2,
-      order,
-      ...others,
-    })
-  }
-  const result = layout(fragmentBoxes, layerMargin, rowMargin)
-  return result.map(({ id, x, y, data }) => ({
-    id,
-    data,
+): RelationPointPosition[] {
+  const result = layoutItem(relations, layerMargin, rowMargin)
+  return result.map(({ x, y, ...data }) => ({
     x: x + nodeRadius,
     y: y + nodeRadius,
+    ...data,
   }))
 }
 
-export function flipLayoutPoint(
-  fragments: Array<ActorPoint>,
+export function flipLayoutRelation(
+  relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
   nodeRadius: number
-): ActorPointPosition[] {
-  const actorPosition = layoutPoint(
-    fragments,
+): RelationPointPosition[] {
+  const fragmentPosition = layoutRelation(
+    relations,
     rowMargin,
     layerMargin,
     nodeRadius
   )
-  return actorPosition.map(({ id, x, y, data }) => ({
-    id,
-    data,
+  return fragmentPosition.map(({ x, y, ...data }) => ({
     x: y,
     y: x,
+    ...data,
   }))
 }
 
-export function generatePointLinks(layoutMap: ActorPointPosition[]) {
+export function generateRelationEdges(
+  layoutMap: RelationPointPosition[]
+): Edge[] {
   const links = []
-  const fragmentMap = new Map<string, ActorPointPosition>()
+  const relationMap = new Map<string, RelationPointPosition>()
   for (const x of layoutMap) {
-    fragmentMap.set(x.id, x)
+    relationMap.set(x.id, x)
   }
-  for (const fragment of layoutMap) {
-    for (const parentId of fragment.data.parentIds) {
-      const parentFragment = fragmentMap.get(parentId)!
+  for (const relation of layoutMap) {
+    for (const parentId of relation.parentIds) {
+      const parentRelation = relationMap.get(parentId)!
       links.push({
         points: [
-          { x: fragment.x, y: fragment.y },
-          { x: parentFragment.x, y: parentFragment.y },
+          { x: relation.x, y: relation.y },
+          { x: parentRelation.x, y: parentRelation.y },
         ],
-        source: fragment.id,
+        source: relation.id,
         target: parentId,
       })
     }
@@ -479,28 +459,51 @@ export function generatePointLinks(layoutMap: ActorPointPosition[]) {
   return links
 }
 
-export function generateBoxLinks(layoutMap: ActorBoxPosition[]) {
+export function generateFragmentEdges(
+  layoutMap: FragmentBoxPosition[]
+): Edge[] {
   const links = []
-  const fragmentMap = new Map<string, ActorBoxPosition>()
+  const fragmentMap = new Map<string, FragmentBoxPosition>()
   for (const x of layoutMap) {
     fragmentMap.set(x.id, x)
   }
   for (const fragment of layoutMap) {
-    for (const parentId of fragment.data.parentIds) {
+    for (const parentId of fragment.parentIds) {
       const parentFragment = fragmentMap.get(parentId)!
       links.push({
         points: [
           {
-            x: fragment.x + fragment.data.width / 2,
-            y: fragment.y + fragment.data.height / 2,
+            x: fragment.x + fragment.width / 2,
+            y: fragment.y + fragment.height / 2,
           },
           {
-            x: parentFragment.x + parentFragment.data.width / 2,
-            y: parentFragment.y + parentFragment.data.height / 2,
+            x: parentFragment.x + parentFragment.width / 2,
+            y: parentFragment.y + parentFragment.height / 2,
           },
         ],
         source: fragment.id,
         target: parentId,
+      })
+    }
+
+    // Simply draw a horizontal line here.
+    // Typically, external parent is only applicable to `StreamScan` fragment,
+    // and there'll be only one external parent due to `UpstreamShard` distribution
+    // and plan node sharing. So there's no overlapping issue.
+    for (const externalParentId of fragment.externalParentIds) {
+      links.push({
+        points: [
+          {
+            x: fragment.x,
+            y: fragment.y + fragment.height / 2,
+          },
+          {
+            x: fragment.x + 100,
+            y: fragment.y + fragment.height / 2,
+          },
+        ],
+        source: fragment.id,
+        target: externalParentId,
       })
     }
   }

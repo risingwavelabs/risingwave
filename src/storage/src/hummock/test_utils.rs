@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -93,17 +92,14 @@ pub fn gen_dummy_sst_info(
     epoch: HummockEpoch,
 ) -> SstableInfo {
     let mut min_table_key: Vec<u8> = batches[0].start_table_key().to_vec();
-    let mut max_table_key: Vec<u8> =
-        must_match!(batches[0].end_table_key(), Bound::Included(table_key) => table_key.to_vec());
+    let mut max_table_key: Vec<u8> = batches[0].end_table_key().to_vec();
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
         if min_table_key.as_slice() > *batch.start_table_key() {
             min_table_key = batch.start_table_key().to_vec();
         }
-        if max_table_key.as_slice()
-            < must_match!(batch.end_table_key(), Bound::Included(table_key) => *table_key)
-        {
-            max_table_key = must_match!(batch.end_table_key(), Bound::Included(table_key) => table_key.to_vec());
+        if max_table_key.as_slice() < *batch.end_table_key() {
+            max_table_key = batch.end_table_key().to_vec();
         }
         file_size += batch.size() as u64;
     }
@@ -116,8 +112,10 @@ pub fn gen_dummy_sst_info(
             right_exclusive: false,
         }),
         file_size,
-        table_ids: vec![],
+        table_ids: vec![table_id.table_id],
         uncompressed_file_size: file_size,
+        min_epoch: epoch,
+        max_epoch: epoch,
         ..Default::default()
     }
 }
@@ -392,6 +390,7 @@ pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Ss
 
 pub mod delete_range {
     use super::*;
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
 
     #[derive(Default)]
     pub struct CompactionDeleteRangesBuilder {
@@ -405,18 +404,12 @@ pub mod delete_range {
             table_id: TableId,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) {
-            let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
-            let batch = SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
-                0,
-                vec![],
-                size,
-                delete_ranges,
-                table_id,
-                None,
-                None,
-            );
-            self.iter.add_batch_iter(batch.delete_range_iter());
+            self.iter
+                .add_batch_iter(SharedBufferDeleteRangeIterator::new(
+                    epoch,
+                    table_id,
+                    delete_ranges,
+                ));
         }
 
         pub fn build_for_compaction(self) -> CompactionDeleteRangeIterator {

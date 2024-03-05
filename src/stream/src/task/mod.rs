@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
@@ -31,7 +30,6 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
-use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
@@ -42,6 +40,11 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 /// Stores the information which may be modified from the data plane.
+///
+/// The data structure is created in `LocalBarrierWorker` and is shared by actors created
+/// between two recoveries. In every recovery, the `LocalBarrierWorker` will create a new instance of
+/// `SharedContext`, and the original one becomes stale. The new one is shared by actors created after
+/// recovery.
 pub struct SharedContext {
     /// Stores the senders and receivers for later `Processor`'s usage.
     ///
@@ -77,9 +80,9 @@ pub struct SharedContext {
     // disconnected.
     pub(crate) compute_client_pool: ComputeClientPool,
 
-    pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
-
     pub(crate) config: StreamingConfig,
+
+    pub(super) local_barrier_manager: LocalBarrierManager,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -91,14 +94,18 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
+    pub fn new(
+        addr: HostAddr,
+        config: &StreamingConfig,
+        local_barrier_manager: LocalBarrierManager,
+    ) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
             config: config.clone(),
+            local_barrier_manager,
         }
     }
 
@@ -111,9 +118,6 @@ impl SharedContext {
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
             compute_client_pool: ComputeClientPool::default(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
-                StateStoreImpl::for_test(),
-            ))),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
                     exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
@@ -123,11 +127,8 @@ impl SharedContext {
                 },
                 ..Default::default()
             },
+            local_barrier_manager: LocalBarrierManager::for_test(),
         }
-    }
-
-    pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
-        self.barrier_manager.lock()
     }
 
     /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one
@@ -155,24 +156,11 @@ impl SharedContext {
             .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
     }
 
-    pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver> {
-        self.get_or_insert_channels(*ids)
+    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+        self.get_or_insert_channels(ids)
             .1
             .take()
             .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
-    }
-
-    pub fn retain_channel<F>(&self, mut f: F)
-    where
-        F: FnMut(&(u32, u32)) -> bool,
-    {
-        self.channel_map
-            .lock()
-            .retain(|up_down_ids, _| f(up_down_ids));
-    }
-
-    pub fn clear_channels(&self) {
-        self.channel_map.lock().clear()
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {
@@ -181,6 +169,20 @@ impl SharedContext {
             .get(actor_id)
             .cloned()
             .ok_or_else(|| anyhow!("actor {} not found in info table", actor_id).into())
+    }
+
+    pub fn config(&self) -> &StreamingConfig {
+        &self.config
+    }
+
+    pub fn drop_actors(&self, actors: &[ActorId]) {
+        self.channel_map
+            .lock()
+            .retain(|(up_id, _), _| !actors.contains(up_id));
+        let mut actor_infos = self.actor_infos.write();
+        for actor_id in actors {
+            actor_infos.remove(actor_id);
+        }
     }
 }
 

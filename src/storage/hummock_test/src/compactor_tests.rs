@@ -157,7 +157,6 @@ pub(crate) mod tests {
                         TableKey(key.clone()),
                         StorageValue::new_put(Bytes::from(new_val)),
                     )],
-                    vec![],
                     WriteOptions {
                         epoch,
                         table_id: Default::default(),
@@ -188,6 +187,12 @@ pub(crate) mod tests {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
+        let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
+        let max_task_parallelism = Arc::new(AtomicU32::new(
+            (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+                .ceil() as u32,
+        ));
+
         CompactorContext {
             storage_opts,
             sstable_store,
@@ -197,7 +202,8 @@ pub(crate) mod tests {
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
-            running_task_count: Arc::new(AtomicU32::new(0)),
+            running_task_parallelism: Arc::new(AtomicU32::new(0)),
+            max_task_parallelism,
         }
     }
 
@@ -284,13 +290,13 @@ pub(crate) mod tests {
             compact_task.table_options = BTreeMap::from([(
                 0,
                 TableOption {
-                    retention_seconds: 64,
+                    retention_seconds: Some(64),
                 },
             )]);
             compact_task.current_epoch_time = 0;
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (result_task, task_stats) = compact(
+            let ((result_task, task_stats), _) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -346,7 +352,7 @@ pub(crate) mod tests {
                 .sstable(&output_sst, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
-            table_key_count += table.value().meta.key_count;
+            table_key_count += table.meta.key_count;
         }
 
         // we have removed these 31 keys before watermark 32.
@@ -446,7 +452,7 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (result_task, task_stats) = compact(
+            let ((result_task, task_stats), _) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -482,9 +488,9 @@ pub(crate) mod tests {
                 .unwrap();
             let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
             assert!(
-                table.value().meta.estimated_size > target_table_size,
+                table.meta.estimated_size > target_table_size,
                 "table.meta.estimated_size {} <= target_table_size {}",
-                table.value().meta.estimated_size,
+                table.meta.estimated_size,
                 target_table_size
             );
         }
@@ -549,7 +555,7 @@ pub(crate) mod tests {
                     .insert(TableKey(Bytes::from(key)), val.clone(), None)
                     .unwrap();
             }
-            local.flush(Vec::new()).await.unwrap();
+            local.flush().await.unwrap();
             local.seal_current_epoch(epoch + 1, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
@@ -734,7 +740,7 @@ pub(crate) mod tests {
             storage
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
-            storage.flush(Vec::new()).await.unwrap();
+            storage.flush().await.unwrap();
             storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
@@ -778,7 +784,7 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -812,7 +818,6 @@ pub(crate) mod tests {
                 .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .value()
                 .meta
                 .key_count;
         }
@@ -925,7 +930,7 @@ pub(crate) mod tests {
             local
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
-            local.flush(Vec::new()).await.unwrap();
+            local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = storage
@@ -956,7 +961,7 @@ pub(crate) mod tests {
         compact_task.table_options = BTreeMap::from_iter([(
             existing_table_id,
             TableOption {
-                retention_seconds: retention_seconds_expire_second,
+                retention_seconds: Some(retention_seconds_expire_second),
             },
         )]);
         compact_task.current_epoch_time = epoch;
@@ -973,7 +978,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1007,7 +1012,6 @@ pub(crate) mod tests {
                 .sstable(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .value()
                 .meta
                 .key_count;
         }
@@ -1123,7 +1127,7 @@ pub(crate) mod tests {
             local
                 .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
-            local.flush(Vec::new()).await.unwrap();
+            local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -1162,7 +1166,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1197,7 +1201,6 @@ pub(crate) mod tests {
                 .sstable(table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
-                .value()
                 .meta
                 .key_count;
         }
@@ -1254,6 +1257,9 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
+    #[ignore]
+    // may update the test after https://github.com/risingwavelabs/risingwave/pull/14320 is merged.
+    // This PR will support
     #[tokio::test]
     async fn test_compaction_delete_range() {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -1284,17 +1290,20 @@ pub(crate) mod tests {
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
         local.init_for_test(130).await.unwrap();
-        let prefix_key_range = |k: u16| {
-            let key = k.to_be_bytes();
-            (
-                Bound::Included(Bytes::copy_from_slice(key.as_slice())),
-                Bound::Excluded(Bytes::copy_from_slice(next_key(key.as_slice()).as_slice())),
-            )
-        };
-        local
-            .flush(vec![prefix_key_range(1u16), prefix_key_range(2u16)])
-            .await
-            .unwrap();
+
+        local.flush().await.unwrap();
+        // TODO: seal with table watermark like the following code
+        // let prefix_key_range = |k: u16| {
+        //     let key = k.to_be_bytes();
+        //     (
+        //         Bound::Included(Bytes::copy_from_slice(key.as_slice())),
+        //         Bound::Excluded(Bytes::copy_from_slice(next_key(key.as_slice()).as_slice())),
+        //     )
+        // };
+        // local
+        //     .flush(vec![prefix_key_range(1u16), prefix_key_range(2u16)])
+        //     .await
+        //     .unwrap();
         local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
@@ -1327,7 +1336,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (result_task, task_stats) = compact(
+        let ((result_task, task_stats), _) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1420,14 +1429,10 @@ pub(crate) mod tests {
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key_ref = fast_iter.key().user_key.as_ref();
             assert!(normal_tables.iter().any(|table| {
-                table
-                    .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
             }));
             assert!(fast_tables.iter().any(|table| {
-                table
-                    .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
             }));
             normal_iter.next().await.unwrap();
             fast_iter.next().await.unwrap();

@@ -69,7 +69,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.11.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
@@ -77,7 +76,7 @@ zstd = { version = "0.13", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.16", default-features = false }
 libc = "0.2"
-nix = { version = "0.27", features = ["fs", "mman"] }
+nix = { version = "0.28", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
@@ -88,7 +87,7 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { workspace = true, features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 moka = { version = "0.12", features = ["future"] }
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
@@ -138,6 +137,10 @@ harness = false
 
 [[bench]]
 name = "bench_row"
+harness = false
+
+[[bench]]
+name = "bench_imm_compact"
 harness = false
 
 [lints]

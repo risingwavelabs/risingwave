@@ -21,7 +21,6 @@ pub mod source;
 pub mod split;
 
 pub use enumerator::*;
-use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
@@ -30,13 +29,8 @@ use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
-#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
-    #[serde_as(as = "DisplayFromStr")]
-    #[serde(rename = "pubsub.split_count")]
-    pub split_count: u32,
-
     /// pubsub subscription to consume messages from
     /// The subscription should be configured with the `retain-on-ack` property to enable
     /// message recovery within risingwave.
@@ -48,19 +42,19 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    /// credentials JSON object encoded with base64
+    /// `credentials` is a JSON string containing the service account credentials.
     /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
 
-    /// `start_offset` is a numeric timestamp, ideallly the publish timestamp of a message
+    /// `start_offset` is a numeric timestamp, ideally the publish timestamp of a message
     /// in the subscription. If present, the connector will attempt to seek the subscription
     /// to the timestamp and start consuming from there. Note that the seek operation is
     /// subject to limitations around the message retention policy of the subscription. See
     /// [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
     /// more details.
-    #[serde(rename = "pubsub.start_offset")]
+    #[serde(rename = "pubsub.start_offset.nanos")]
     pub start_offset: Option<String>,
 
     /// `start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek
@@ -107,9 +101,8 @@ impl PubsubProperties {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
     use super::*;
+    use crate::error::ConnectorResult as Result;
 
     const EMULATOR_HOST: &str = "localhost:8081";
     const CREDENTIALS: &str = "{}";
@@ -127,7 +120,6 @@ mod tests {
         let default_properties = PubsubProperties {
             credentials: None,
             emulator_host: None,
-            split_count: 1,
             start_offset: None,
             start_snapshot: None,
             subscription: String::from("test-subscription"),

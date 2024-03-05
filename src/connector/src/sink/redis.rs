@@ -30,6 +30,7 @@ use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
 use crate::dispatch_sink_formatter_str_key_impl;
+use crate::error::ConnectorResult;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -47,7 +48,7 @@ pub struct RedisCommon {
 }
 
 impl RedisCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<RedisClient> {
+    pub(crate) fn build_client(&self) -> ConnectorResult<RedisClient> {
         let client = RedisClient::open(self.url.clone())?;
         Ok(client)
     }
@@ -63,7 +64,7 @@ impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!("{:?}", e)))?;
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }

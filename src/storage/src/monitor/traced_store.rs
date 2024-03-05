@@ -11,18 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::ops::Bound;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
     TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
 };
+use thiserror_ext::AsReport;
 
 use super::identity;
 use crate::error::{StorageError, StorageResult};
@@ -176,12 +177,9 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
-        let res = self.inner.flush(delete_ranges).await;
+    async fn flush(&mut self) -> StorageResult<usize> {
+        let span = TraceSpan::new_flush_span(self.storage_type);
+        let res = self.inner.flush().await;
         span.may_send_result(OperationResult::Flush(
             res.as_ref().map(|o: &usize| *o).into(),
         ));
@@ -223,6 +221,11 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         span.may_send_result(OperationResult::TryFlush(res.as_ref().map(|o| *o).into()));
         res
     }
+
+    // TODO: add trace span
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        self.inner.update_vnode_bitmap(vnodes)
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {
@@ -254,13 +257,9 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
-        let span = TraceSpan::new_clear_shared_buffer_span();
-        let res = self.inner.clear_shared_buffer().await;
-        span.may_send_result(OperationResult::ClearSharedBuffer(
-            res.as_ref().map(|o| *o).into(),
-        ));
-        res
+    async fn clear_shared_buffer(&self, prev_epoch: u64) {
+        let _span = TraceSpan::new_clear_shared_buffer_span(prev_epoch);
+        self.inner.clear_shared_buffer(prev_epoch).await;
     }
 
     async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
@@ -357,7 +356,7 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
         while let Some((key, value)) = inner
             .try_next()
             .await
-            .inspect_err(|e| tracing::error!("Failed in next: {:?}", e))?
+            .inspect_err(|e| tracing::error!(error = %e.as_report(), "Failed in next"))?
         {
             self.span.may_send_iter_next();
             self.span

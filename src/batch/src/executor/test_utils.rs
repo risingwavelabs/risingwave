@@ -337,10 +337,10 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
     }
 }
 
-pub struct BlockExecutorBuidler {}
+pub struct BlockExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for BlockExecutorBuidler {
+impl BoxedExecutorBuilder for BlockExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         _source: &ExecutorBuilder<'_, C>,
         _inputs: Vec<BoxedExecutor>,
@@ -374,10 +374,10 @@ impl BlockExecutor {
     }
 }
 
-pub struct BusyLoopExecutorBuidler {}
+pub struct BusyLoopExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for BusyLoopExecutorBuidler {
+impl BoxedExecutorBuilder for BusyLoopExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         _source: &ExecutorBuilder<'_, C>,
         _inputs: Vec<BoxedExecutor>,

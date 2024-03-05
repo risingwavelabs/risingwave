@@ -14,6 +14,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import java.io.IOException;
@@ -33,6 +34,9 @@ public class DbzConnectorConfig {
     /* Debezium private configs */
     public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
             "debezium.embedded.shutdown.pause.before.interrupt.ms";
+
+    public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
+            "cdc.source.wait.streaming.before.exit.seconds";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -58,11 +62,17 @@ public class DbzConnectorConfig {
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
+    private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+
+    public static class MongoDb {
+        public static final String MONGO_URL = "mongodb.url";
+        public static final String MONGO_COLLECTION_NAME = "collection.name";
+    }
 
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
@@ -186,6 +196,12 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
+            if (isMultiTableShared) {
+                // remove table filtering for the shared Postgres source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Postgres source");
+                dbzProps.remove("table.include.list");
+            }
         } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -208,6 +224,27 @@ public class DbzConnectorConfig {
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
             dbzProps.putAll(postgresProps);
+        } else if (source == SourceTypeE.MONGODB) {
+            var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
+
+            // if snapshot phase is finished and offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                mongodbProps.setProperty("snapshot.mode", "never");
+                mongodbProps.setProperty(
+                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            }
+
+            var mongodbUrl = userProps.get("mongodb.url");
+            var collection = userProps.get("collection.name");
+            var connectionStr = new ConnectionString(mongodbUrl);
+            var connectorName =
+                    String.format(
+                            "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);
+            mongodbProps.setProperty("name", connectorName);
+
+            dbzProps.putAll(mongodbProps);
+
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }
@@ -217,20 +254,10 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (isMultiTableShared) {
-            adjustConfigForSharedCdcStream(dbzProps);
-        }
-
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
-    }
-
-    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
-        // disable table filtering for the shared cdc stream
-        LOG.info("Disable table filtering for the shared cdc stream");
-        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
