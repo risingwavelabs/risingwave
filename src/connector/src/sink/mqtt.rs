@@ -173,7 +173,7 @@ impl MqttSinkWriter {
 
         let (client, mut eventloop) = config
             .common
-            .build_client(0, id as u32)
+            .build_client(0, id)
             .map_err(|e| SinkError::Mqtt(anyhow!(e)))?;
 
         let stopped = Arc::new(AtomicBool::new(false));
@@ -183,9 +183,7 @@ impl MqttSinkWriter {
                 match eventloop.poll().await {
                     Ok(_) => (),
                     Err(err) => match err {
-                        ConnectionError::Timeout(_) => {
-                            continue;
-                        }
+                        ConnectionError::Timeout(_) => (),
                         ConnectionError::MqttState(rumqttc::v5::StateError::Io(err))
                         | ConnectionError::Io(err)
                             if err.kind() == std::io::ErrorKind::ConnectionAborted

@@ -354,7 +354,7 @@ MqttConfig:
   fields:
   - name: url
     field_type: String
-    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://`, `wss://`
+    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     required: true
   - name: topic
     field_type: String
@@ -374,7 +374,7 @@ MqttConfig:
     required: false
   - name: client_prefix
     field_type: String
-    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`id`_`timestamp`. Defaults to risingwave
+    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
     required: false
   - name: clean_start
     field_type: bool

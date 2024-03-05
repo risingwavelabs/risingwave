@@ -53,7 +53,7 @@ impl SplitReader for MqttSplitReader {
     ) -> Result<Self> {
         let (client, eventloop) = properties.common.build_client(
             source_ctx.source_info.actor_id,
-            source_ctx.source_info.fragment_id,
+            source_ctx.source_info.fragment_id as u64,
         )?;
 
         let qos = properties.common.qos();

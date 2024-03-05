@@ -700,8 +700,8 @@ pub enum QualityOfService {
 pub struct MqttCommon {
     /// The url of the broker to connect to. e.g. tcp://localhost.
     /// Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,
-    /// `ws://` or `wss://` to denote the protocol for establishing a connection with the broker.
-    /// `mqtts://`, `ssl://`, `wss://`
+    /// to denote the protocol for establishing a connection with the broker.
+    /// `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     pub url: String,
 
     /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
@@ -720,7 +720,7 @@ pub struct MqttCommon {
     pub password: Option<String>,
 
     /// Prefix for the mqtt client id.
-    /// The client id will be generated as `client_prefix`_`id`_`timestamp`. Defaults to risingwave
+    /// The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
     pub client_prefix: Option<String>,
 
     /// `clean_start = true` removes all the state from queues & instructs the broker
@@ -754,7 +754,7 @@ impl MqttCommon {
     pub(crate) fn build_client(
         &self,
         actor_id: u32,
-        id: u32,
+        id: u64,
     ) -> ConnectorResult<(rumqttc::v5::AsyncClient, rumqttc::v5::EventLoop)> {
         let client_id = format!(
             "{}_{}_{}",
@@ -765,12 +765,11 @@ impl MqttCommon {
 
         let mut url = url::Url::parse(&self.url)?;
 
-        let ssl = match url.scheme() {
-            "mqtts" | "ssl" | "wss" => true,
-            _ => false,
-        };
+        let ssl = matches!(url.scheme(), "mqtts" | "ssl");
 
         url.query_pairs_mut().append_pair("client_id", &client_id);
+
+        tracing::debug!("connecting mqtt using url: {}", url.as_str());
 
         let mut options = rumqttc::v5::MqttOptions::try_from(url)?;
         options.set_keep_alive(std::time::Duration::from_secs(10));
