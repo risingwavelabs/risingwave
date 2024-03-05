@@ -178,8 +178,8 @@ impl MqttSinkWriter {
             .qos
             .as_ref()
             .map(|qos| match qos {
-                QualityOfService::AtLeastOnce => QoS::AtMostOnce,
-                QualityOfService::AtMostOnce => QoS::AtLeastOnce,
+                QualityOfService::AtMostOnce => QoS::AtMostOnce,
+                QualityOfService::AtLeastOnce => QoS::AtLeastOnce,
                 QualityOfService::ExactlyOnce => QoS::ExactlyOnce,
             })
             .unwrap_or(QoS::AtMostOnce);

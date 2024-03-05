@@ -54,7 +54,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
         }
 
         client
-            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtLeastOnce)
+            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
             .await?;
 
         let cloned_client = client.clone();
@@ -98,7 +98,7 @@ impl SplitEnumerator for MqttSplitEnumerator {
                         );
                         connected_clone.store(false, std::sync::atomic::Ordering::Relaxed);
                         cloned_client
-                            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtLeastOnce)
+                            .subscribe(topic.clone(), rumqttc::v5::mqttbytes::QoS::AtMostOnce)
                             .await
                             .unwrap();
                     }
