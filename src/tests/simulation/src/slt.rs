@@ -26,8 +26,8 @@ use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
-// retry up to 10 times until it succeed
-const MAX_RETRY: usize = 10;
+// retry a maximum times until it succeed
+const MAX_RETRY: usize = 5;
 
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
@@ -280,7 +280,7 @@ pub async fn run_slt_task(
                         let should_retry = (err_string.contains("no reader for dml in table")
                             || err_string
                                 .contains("error reading a body from connection: broken pipe"))
-                            && i < MAX_RETRY;
+                            || err_string.contains("failed to inject barrier") && i < MAX_RETRY;
                         if !should_retry {
                             panic!("{}", err);
                         }

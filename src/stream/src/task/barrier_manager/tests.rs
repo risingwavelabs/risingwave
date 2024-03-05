@@ -29,7 +29,7 @@ use super::*;
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {
-    let (actor_op_tx, manager) = LocalBarrierManager::spawn_for_test().await;
+    let actor_op_tx = LocalBarrierManager::spawn_for_test();
 
     let (request_tx, request_rx) = unbounded_channel();
     let (response_tx, mut response_rx) = unbounded_channel();
@@ -46,6 +46,13 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         response_rx.recv().await.unwrap().unwrap().response.unwrap(),
         streaming_control_stream_response::Response::Init(_)
     );
+
+    let context = actor_op_tx
+        .send_and_await(LocalActorOperation::GetCurrentSharedContext)
+        .await
+        .unwrap();
+
+    let manager = &context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -111,7 +118,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
 #[tokio::test]
 async fn test_managed_barrier_collection_before_send_request() -> StreamResult<()> {
-    let (actor_op_tx, manager) = LocalBarrierManager::spawn_for_test().await;
+    let actor_op_tx = LocalBarrierManager::spawn_for_test();
 
     let (request_tx, request_rx) = unbounded_channel();
     let (response_tx, mut response_rx) = unbounded_channel();
@@ -128,6 +135,13 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         response_rx.recv().await.unwrap().unwrap().response.unwrap(),
         streaming_control_stream_response::Response::Init(_)
     );
+
+    let context = actor_op_tx
+        .send_and_await(LocalActorOperation::GetCurrentSharedContext)
+        .await
+        .unwrap();
+
+    let manager = &context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();

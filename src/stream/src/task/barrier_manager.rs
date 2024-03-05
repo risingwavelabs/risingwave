@@ -789,7 +789,7 @@ pub fn try_find_root_actor_failure<'a>(
 
 #[cfg(test)]
 impl LocalBarrierManager {
-    pub(super) async fn spawn_for_test() -> (EventSender<LocalActorOperation>, Self) {
+    pub(super) fn spawn_for_test() -> EventSender<LocalActorOperation> {
         use std::sync::atomic::AtomicU64;
         let (tx, rx) = unbounded_channel();
         let _join_handle = LocalBarrierWorker::spawn(
@@ -799,13 +799,7 @@ impl LocalBarrierManager {
             Arc::new(AtomicU64::new(0)),
             rx,
         );
-        let sender = EventSender(tx);
-        let context = sender
-            .send_and_await(LocalActorOperation::GetCurrentSharedContext)
-            .await
-            .unwrap();
-
-        (sender, context.local_barrier_manager.clone())
+        EventSender(tx)
     }
 
     pub fn for_test() -> Self {
