@@ -203,7 +203,7 @@ pub async fn sst_dump_via_sstable_store(
     let sstable_cache = sstable_store
         .sstable(&sstable_info, &mut StoreLocalStatistic::default())
         .await?;
-    let sstable = sstable_cache.value().as_ref();
+    let sstable = sstable_cache.as_ref();
     let sstable_meta = &sstable.meta;
     let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
     let largest_key = FullKey::decode(&sstable_meta.largest_key);

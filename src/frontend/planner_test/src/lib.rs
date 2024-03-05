@@ -430,6 +430,7 @@ impl TestCase {
                     append_only,
                     cdc_table_info,
                     include_column_options,
+                    wildcard_idx,
                     ..
                 } => {
                     let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
@@ -438,6 +439,7 @@ impl TestCase {
                         handler_args,
                         name,
                         columns,
+                        wildcard_idx,
                         constraints,
                         if_not_exists,
                         source_schema,
@@ -831,6 +833,7 @@ impl TestCase {
                     format_desc,
                     false,
                     None,
+                    None,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -941,7 +944,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
                     "Test #{i} (id: {}) failed, SQL:\n{}\nError: {}",
                     c.id().clone().unwrap_or_else(|| "<none>".to_string()),
                     c.sql(),
-                    e
+                    e.as_report()
                 );
                 failed_num += 1;
             }

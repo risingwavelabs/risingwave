@@ -25,6 +25,11 @@ use tokio::signal;
 use crate::common::osstrs;
 
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
+#[command(
+    version,
+    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service",
+    hide = true
+)]
 pub struct StandaloneOpts {
     /// Compute node options
     /// If missing, compute node won't start
@@ -141,7 +146,7 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
             compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+            meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
         }
     }
 
@@ -161,6 +166,9 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
+/// For `standalone` mode, we can configure and start multiple services in one process.
+/// `standalone` mode is meant to be used by our cloud service and docker,
+/// where we can configure and start multiple services in one process.
 pub async fn standalone(
     ParsedStandaloneOpts {
         meta_opts,
@@ -246,6 +254,7 @@ mod test {
 
         // Test parsing into node-level opts.
         let actual = parse_standalone_opt_args(&opts);
+
         check(
             actual,
             expect![[r#"
@@ -257,7 +266,7 @@ mod test {
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_host: Some(
+                            prometheus_listener_addr: Some(
                                 "127.0.0.1:1234",
                             ),
                             etcd_endpoints: "",
@@ -300,7 +309,6 @@ mod test {
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
-                            mem_table_spill_threshold: 4194304,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,

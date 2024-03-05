@@ -14,32 +14,30 @@
 
 use std::fmt::{Debug, Formatter};
 
-use auto_enums::auto_enum;
-use futures::stream::Stream;
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
-use rw_futures_util::{RwFutureExt, RwTryStreamExt};
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
+    StreamExecutorResult, Watermark,
+};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
-    /// The mutable parts of inner fields.
-    vars: ExecutionVars,
 }
 
 struct Inner {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Expressions of the current projection.
     exprs: Vec<NonStrictExpression>,
@@ -48,23 +46,19 @@ struct Inner {
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.
     nondecreasing_expr_indices: Vec<usize>,
+    /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
+    last_nondec_expr_values: Vec<Option<ScalarImpl>>,
 
     /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
 }
 
-struct ExecutionVars {
-    /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
-    last_nondec_expr_values: Vec<Option<ScalarImpl>>,
-}
-
 impl ProjectExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Executor,
         exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -75,14 +69,11 @@ impl ProjectExecutor {
             input,
             inner: Inner {
                 _ctx: ctx,
-                info,
                 exprs,
                 watermark_derivations,
                 nondecreasing_expr_indices,
-                materialize_selectivity_threshold,
-            },
-            vars: ExecutionVars {
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
+                materialize_selectivity_threshold,
             },
         }
     }
@@ -96,21 +87,9 @@ impl Debug for ProjectExecutor {
     }
 }
 
-impl Executor for ProjectExecutor {
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
-    }
-
+impl Execute for ProjectExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.inner.execute(self.input, self.vars).boxed()
+        self.inner.execute(self.input).boxed()
     }
 }
 
@@ -152,118 +131,62 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, out_col_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    out_col_idx
                 );
             }
         }
         Ok(ret)
     }
 
-    fn execute(
-        self,
-        input: BoxedExecutor,
-        mut vars: ExecutionVars,
-    ) -> impl Stream<Item = MessageStreamItem> {
-        let return_types: Vec<_> = self.exprs.iter().map(|expr| expr.return_type()).collect();
-
-        // Phase 1: only evaluating the expression, which can be concurrent.
-
-        enum Phase1Item {
-            Chunk(Option<StreamChunk>),
-            Barrier(Barrier),
-            Watermark(Vec<Watermark>),
-        }
-
-        let this = Arc::new(self);
-
-        let this2 = this.clone();
-
-        let st = input.execute().map(move |msg| {
-            let this = this.clone();
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute(mut self, input: Executor) {
+        #[for_await]
+        for msg in input.execute() {
             let msg = msg?;
-            let is_fence: bool;
-            #[auto_enum(Future)]
-            let fut = match msg {
-                Message::Chunk(chunk) => {
-                    is_fence = false;
-                    async move {
-                        let new_chunk = this.map_filter_chunk(chunk).await?;
-                        Ok(Phase1Item::Chunk(new_chunk)) as StreamExecutorResult<_>
+            match msg {
+                Message::Watermark(w) => {
+                    let watermarks = self.handle_watermark(w).await?;
+                    for watermark in watermarks {
+                        yield Message::Watermark(watermark)
                     }
                 }
-                Message::Watermark(watermark) => {
-                    is_fence = false;
-                    async move {
-                        let watermarks = this.handle_watermark(watermark).await?;
-                        Ok(Phase1Item::Watermark(watermarks))
-                    }
-                }
-                Message::Barrier(barrier) => {
-                    is_fence = true;
-                    async { Ok(Phase1Item::Barrier(barrier)) }
-                }
-            };
-
-            let fut = fut.with_fence(is_fence);
-
-            Ok(fut) as StreamExecutorResult<_>
-        });
-
-        // Make the phase 1 concurrent.
-        let st = st.try_buffered_with_fence(16);
-
-        let this = this2;
-
-        // Phase 2: Handle the watermark related logicals, and output them all. The phase is executed one by one.
-        #[try_stream]
-        async move {
-            #[for_await]
-            for msg in st {
-                let msg = msg?;
-                match msg {
-                    Phase1Item::Watermark(watermarks) => {
-                        for watermark in watermarks {
-                            yield Message::Watermark(watermark)
-                        }
-                    }
-                    Phase1Item::Chunk(new_chunk) => match new_chunk {
-                        Some(new_chunk) => {
-                            if !this.nondecreasing_expr_indices.is_empty() {
-                                if let Some((_, first_visible_row)) = new_chunk.rows().next() {
-                                    // it's ok to use the first row here, just one chunk delay
-                                    first_visible_row
-                                        .project(&this.nondecreasing_expr_indices)
-                                        .iter()
-                                        .enumerate()
-                                        .for_each(|(idx, value)| {
-                                            vars.last_nondec_expr_values[idx] =
-                                                Some(value.to_owned_datum().expect(
-                                                    "non-decreasing expression should never be NULL",
-                                                ));
-                                        });
-                                }
-                            }
-                            yield Message::Chunk(new_chunk)
-                        }
-                        None => continue,
-                    },
-                    Phase1Item::Barrier(barrier) => {
-                        for (&expr_idx, value) in this
-                            .nondecreasing_expr_indices
-                            .iter()
-                            .zip_eq_fast(&mut vars.last_nondec_expr_values)
-                        {
-                            if let Some(value) = std::mem::take(value) {
-                                yield Message::Watermark(Watermark::new(
-                                    expr_idx,
-                                    return_types[expr_idx].clone(),
-                                    value,
-                                ))
+                Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
+                    Some(new_chunk) => {
+                        if !self.nondecreasing_expr_indices.is_empty() {
+                            if let Some((_, first_visible_row)) = new_chunk.rows().next() {
+                                // it's ok to use the first row here, just one chunk delay
+                                first_visible_row
+                                    .project(&self.nondecreasing_expr_indices)
+                                    .iter()
+                                    .enumerate()
+                                    .for_each(|(idx, value)| {
+                                        self.last_nondec_expr_values[idx] =
+                                            Some(value.to_owned_datum().expect(
+                                                "non-decreasing expression should never be NULL",
+                                            ));
+                                    });
                             }
                         }
-                        yield Message::Barrier(barrier);
+                        yield Message::Chunk(new_chunk)
                     }
+                    None => continue,
+                },
+                barrier @ Message::Barrier(_) => {
+                    for (&expr_idx, value) in self
+                        .nondecreasing_expr_indices
+                        .iter()
+                        .zip_eq_fast(&mut self.last_nondec_expr_values)
+                    {
+                        if let Some(value) = std::mem::take(value) {
+                            yield Message::Watermark(Watermark::new(
+                                expr_idx,
+                                self.exprs[expr_idx].return_type(),
+                                value,
+                            ))
+                        }
+                    }
+                    yield barrier;
                 }
             }
         }
@@ -307,28 +230,20 @@ mod tests {
             ],
         };
         let pk_indices = vec![0];
-        let (mut tx, source) = MockSource::channel(schema, pk_indices);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, pk_indices);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
-        let info = ExecutorInfo {
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            pk_indices: vec![],
-            identity: "ProjectExecutor".to_string(),
-        };
-
-        let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
-            info,
-            Box::new(source),
+        let project = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
             vec![test_expr],
             MultiMap::new(),
             vec![],
             0.0,
-        ));
-        let mut project = project.execute();
+        );
+        let mut project = project.boxed().execute();
 
         tx.push_barrier(1, false);
         let barrier = project.next().await.unwrap().unwrap();
@@ -395,34 +310,22 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, PkIndices::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
         let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
-        let info = ExecutorInfo {
-            schema: Schema {
-                fields: vec![
-                    Field::unnamed(DataType::Int64),
-                    Field::unnamed(DataType::Int64),
-                    Field::unnamed(DataType::Int64),
-                ],
-            },
-            pk_indices: vec![],
-            identity: "ProjectExecutor".to_string(),
-        };
-
-        let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(123),
-            info,
-            Box::new(source),
+        let project = ProjectExecutor::new(
+            ActorContext::for_test(123),
+            source,
             vec![a_expr, b_expr, c_expr],
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,
-        ));
-        let mut project = project.execute();
+        );
+        let mut project = project.boxed().execute();
 
         tx.push_barrier(1, false);
         tx.push_int64_watermark(0, 100);

@@ -20,6 +20,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use opendal::services::Memory;
 use opendal::{Metakey, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
+use thiserror_ext::AsReport;
 
 use crate::object::{
     BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
@@ -37,6 +38,7 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    S3,
     Obs,
     Oss,
     Webhdfs,
@@ -116,9 +118,9 @@ impl ObjectStore for OpendalObjectStore {
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
         let reader = self.op.reader_with(path).range(range).await?;
-        let stream = reader
-            .into_stream()
-            .map(|item| item.map_err(|e| ObjectError::internal(format!("OpendalError: {:?}", e))));
+        let stream = reader.into_stream().map(|item| {
+            item.map_err(|e| ObjectError::internal(format!("OpendalError: {}", e.as_report())))
+        });
 
         Ok(Box::pin(stream))
     }
@@ -157,7 +159,7 @@ impl ObjectStore for OpendalObjectStore {
             .op
             .lister_with(prefix)
             .recursive(true)
-            .metakey(Metakey::ContentLength | Metakey::ContentType)
+            .metakey(Metakey::ContentLength)
             .await?;
 
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
@@ -189,6 +191,7 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::S3 => "S3",
             EngineType::Gcs => "Gcs",
             EngineType::Obs => "Obs",
             EngineType::Oss => "Oss",
@@ -205,7 +208,11 @@ pub struct OpendalStreamingUploader {
 }
 impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op.writer_with(&path).buffer(OPENDAL_BUFFER_SIZE).await?;
+        let writer = op
+            .writer_with(&path)
+            .concurrent(8)
+            .buffer(OPENDAL_BUFFER_SIZE)
+            .await?;
         Ok(Self { writer })
     }
 }

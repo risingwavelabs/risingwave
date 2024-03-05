@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -45,8 +46,22 @@ impl Binder {
         // to the name of the defined sql udf parameters stored in `udf_context`.
         // If so, we will treat this bind as an special bind, the actual expression
         // stored in `udf_context` will then be bound instead of binding the non-existing column.
-        if let Some(expr) = self.udf_context.get_expr(&column_name) {
-            return Ok(expr.clone());
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&column_name) {
+                return Ok(expr.clone());
+            } else {
+                // The reason that we directly return error here,
+                // is because during a valid sql udf binding,
+                // there will not exist any column identifiers
+                // And invalid cases should already be caught
+                // during semantic check phase
+                // Note: the error message here also help with hint display
+                // when invalid definition occurs at sql udf creation time
+                return Err(ErrorCode::BindError(format!(
+                    "{SQL_UDF_PATTERN} failed to find named parameter {column_name}"
+                ))
+                .into());
+            }
         }
 
         match self

@@ -160,6 +160,20 @@ impl<const N: usize> LabelGuardedMetricsInfo<N> {
     }
 }
 
+/// `LabelGuardedMetricVec` enhances the [`MetricVec`] to ensure the set of labels to be
+/// correctly removed from the Prometheus client once being dropped. This is useful for metrics
+/// that are associated with an object that can be dropped, such as streaming jobs, fragments,
+/// actors, batch tasks, etc.
+///
+/// When a set labels is dropped, it will record it in the `uncollected_removed_labels` set.
+/// Once the metrics has been collected, it will finally remove the metrics of the labels.
+///
+/// See also [`LabelGuardedMetricsInfo`] and [`LabelGuard::drop`].
+///
+/// # Arguments
+///
+/// * `T` - The type of the raw metrics vec.
+/// * `N` - The number of labels.
 #[derive(Clone)]
 pub struct LabelGuardedMetricVec<T: MetricVecBuilder, const N: usize> {
     inner: MetricVec<T>,

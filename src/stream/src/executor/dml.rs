@@ -16,28 +16,23 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use either::Either;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_dml::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
-use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    Mutation, PkIndicesRef,
-};
+use super::{expect_first_barrier, BoxedMessageStream, Execute, Executor, Message, Mutation};
 use crate::common::StreamChunkBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
 pub struct DmlExecutor {
-    info: ExecutorInfo,
-
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// Stores the information of batch data channels.
     dml_manager: DmlManagerRef,
@@ -71,10 +66,8 @@ struct TxnBuffer {
 }
 
 impl DmlExecutor {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        info: ExecutorInfo,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         dml_manager: DmlManagerRef,
         table_id: TableId,
         table_version_id: TableVersionId,
@@ -82,7 +75,6 @@ impl DmlExecutor {
         chunk_size: usize,
     ) -> Self {
         Self {
-            info,
             upstream,
             dml_manager,
             table_id,
@@ -106,16 +98,21 @@ impl DmlExecutor {
         // Note(bugen): Only register after the first barrier message is received, which means the
         // current executor is activated. This avoids the new reader overwriting the old one during
         // the preparation of schema change.
-        let batch_reader = self
-            .dml_manager
-            .register_reader(self.table_id, self.table_version_id, &self.column_descs)
-            .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let handle = self.dml_manager.register_reader(
+            self.table_id,
+            self.table_version_id,
+            &self.column_descs,
+        )?;
+        let reader = handle
+            .stream_reader()
+            .into_stream()
+            .map_err(StreamExecutorError::from)
+            .boxed();
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
+        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
@@ -272,21 +269,9 @@ impl DmlExecutor {
     }
 }
 
-impl Executor for DmlExecutor {
+impl Execute for DmlExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -295,11 +280,11 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
+    use risingwave_common::catalog::{ColumnId, Field, Schema, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -321,23 +306,18 @@ mod tests {
         let pk_indices = vec![0];
         let dml_manager = Arc::new(DmlManager::for_test());
 
-        let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "DmlExecutor".to_string(),
-        };
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, pk_indices);
 
-        let dml_executor = Box::new(DmlExecutor::new(
-            info,
-            Box::new(source),
+        let dml_executor = DmlExecutor::new(
+            source,
             dml_manager.clone(),
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs,
             1024,
-        ));
-        let mut dml_executor = dml_executor.execute();
+        );
+        let mut dml_executor = dml_executor.boxed().execute();
 
         let stream_chunk1 = StreamChunk::from_pretty(
             " I I

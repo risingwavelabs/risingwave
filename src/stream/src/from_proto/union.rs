@@ -26,8 +26,7 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         params: ExecutorParams,
         _node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
-        Ok(UnionExecutor::new(params.info, params.input).boxed())
+    ) -> StreamResult<Executor> {
+        Ok((params.info, UnionExecutor::new(params.input)).into())
     }
 }

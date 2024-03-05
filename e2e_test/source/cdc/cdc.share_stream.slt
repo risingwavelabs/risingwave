@@ -105,7 +105,30 @@ create materialized view orders_test_cnt as select count(*) as cnt from orders_t
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Juice', '100ml Juice');"
 
+system ok
+mysql --protocol=tcp -u root mytest -e "FLUSH LOGS"
+
+# Should not contain records inserted before the table is created (e.g. 'Bob' inserted above)
+statement ok
+create table orders_no_backfill (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) with (
+  snapshot = 'false'
+) from mysql_mytest table 'mytest.orders';
+
 sleep 5s
+
+# table without backfill should not contain historical records
+query I
+select count(*) from orders_no_backfill
+----
+0
 
 # check ingestion results
 query I
@@ -182,6 +205,7 @@ CREATE TABLE IF NOT EXISTS postgres_all_types(
  c_timestamptz_array timestamptz[],
  c_interval_array interval[],
  c_jsonb_array jsonb[],
+ c_uuid varchar,
  PRIMARY KEY (c_boolean,c_bigint,c_date)
 ) from pg_source table 'public.postgres_all_types';
 
@@ -211,9 +235,9 @@ CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_ne
 sleep 3s
 
 query TTTTTTT
-SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array FROM postgres_all_types where c_bigint=-9223372036854775807
+SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array,c_uuid FROM postgres_all_types where c_bigint=-9223372036854775807
 ----
-f 0001-01-01 00:00:00 0001-01-01 00:00:00 {} {-32767} {"0001-01-01 00:00:00"}
+f 0001-01-01 00:00:00 0001-01-01 00:00:00 {} {-32767} {"0001-01-01 00:00:00"} bb488f9b-330d-4012-b849-12adeb49e57e
 
 
 # postgres streaming test

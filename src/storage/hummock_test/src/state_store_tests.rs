@@ -134,7 +134,6 @@ async fn test_basic_inner(
     let size = local
         .ingest_batch(
             vec![],
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -149,7 +148,6 @@ async fn test_basic_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -207,7 +205,6 @@ async fn test_basic_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -239,7 +236,6 @@ async fn test_basic_inner(
     local
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -433,7 +429,6 @@ async fn test_state_store_sync_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -461,7 +456,6 @@ async fn test_state_store_sync_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -491,7 +485,6 @@ async fn test_state_store_sync_inner(
     local
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -534,7 +527,7 @@ async fn test_reload_storage() {
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
 
     // First batch inserts the anchor and others.
-    let mut batch1 = vec![
+    let mut batch1 = [
         (anchor.clone(), StorageValue::new_put("111")),
         (
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -546,7 +539,7 @@ async fn test_reload_storage() {
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // Second batch modifies the anchor.
-    let mut batch2 = vec![
+    let mut batch2 = [
         (
             gen_key_from_str(VirtualNode::ZERO, "cc"),
             StorageValue::new_put("333"),
@@ -565,7 +558,6 @@ async fn test_reload_storage() {
     // hummock_storage
     //     .ingest_batch(
     //         batch1,
-    //         vec![],
     //         WriteOptions {
     //             epoch: epoch1,
     //             table_id: Default::default(),
@@ -620,7 +612,6 @@ async fn test_reload_storage() {
     // hummock_storage
     //     .ingest_batch(
     //         batch2,
-    //         vec![],
     //         WriteOptions {
     //             epoch: epoch2,
     //             table_id: Default::default(),
@@ -850,7 +841,6 @@ async fn test_reload_storage() {
 //     local
 //         .ingest_batch(
 //             batch1.clone(),
-//             vec![],
 //             WriteOptions {
 //                 epoch: epoch1,
 //                 table_id: Default::default(),
@@ -963,7 +953,6 @@ async fn test_reload_storage() {
 //     local
 //         .ingest_batch(
 //             batch2,
-//             vec![],
 //             WriteOptions {
 //                 epoch: epoch1,
 //                 table_id: Default::default(),
@@ -981,7 +970,6 @@ async fn test_reload_storage() {
 //     local
 //         .ingest_batch(
 //             batch1,
-//             vec![],
 //             WriteOptions {
 //                 epoch: epoch2,
 //                 table_id: Default::default(),
@@ -1042,7 +1030,6 @@ async fn test_delete_get_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1066,7 +1053,6 @@ async fn test_delete_get_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1127,7 +1113,6 @@ async fn test_multiple_epoch_sync_inner(
     local
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1145,7 +1130,6 @@ async fn test_multiple_epoch_sync_inner(
     local
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1169,7 +1153,6 @@ async fn test_multiple_epoch_sync_inner(
     local
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1279,7 +1262,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             None,
         )
         .unwrap();
-    local_hummock_storage.flush(Vec::new()).await.unwrap();
+    local_hummock_storage.flush().await.unwrap();
 
     assert_eq!(
         hummock_storage
@@ -1296,7 +1279,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             Bytes::from("222"),
         )
         .unwrap();
-    local_hummock_storage.flush(Vec::new()).await.unwrap();
+    local_hummock_storage.flush().await.unwrap();
 
     assert_eq!(
         hummock_storage
@@ -1345,14 +1328,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         min_object_id_epoch2,
     );
 
-    hummock_storage.clear_shared_buffer().await.unwrap();
+    drop(local_hummock_storage);
 
-    let read_version = local_hummock_storage.read_version();
+    hummock_storage.clear_shared_buffer(epoch1).await;
 
-    let read_version = read_version.read();
-    assert!(read_version.staging().imm.is_empty());
-    assert!(read_version.staging().sst.is_empty());
-    assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
     assert_eq!(
         hummock_storage
             .sstable_object_id_manager()
@@ -1413,7 +1392,6 @@ async fn test_replicated_local_hummock_storage() {
     local_hummock_storage
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -1440,13 +1418,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000061616161 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"1111",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1},
+                        FullKey { UserKey { 233, TableKey { 000062626262 } }, epoch: 1, epoch_with_gap: 1, spill_offset: 0},
                         b"2222",
                     ),
                 ),
@@ -1479,7 +1457,6 @@ async fn test_replicated_local_hummock_storage() {
     local_hummock_storage_2
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -1501,13 +1478,13 @@ async fn test_replicated_local_hummock_storage() {
             [
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000063636363 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"3333",
                     ),
                 ),
                 Ok(
                     (
-                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2},
+                        FullKey { UserKey { 233, TableKey { 000064646464 } }, epoch: 2, epoch_with_gap: 2, spill_offset: 0},
                         b"4444",
                     ),
                 ),

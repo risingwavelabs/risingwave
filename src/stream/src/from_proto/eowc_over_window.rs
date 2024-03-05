@@ -21,10 +21,8 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{
-    BoxedExecutor, EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Executor,
-};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs, Executor};
+use crate::task::ExecutorParams;
 
 pub struct EowcOverWindowExecutorBuilder;
 
@@ -35,8 +33,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let calls: Vec<_> = node
             .get_calls()
@@ -57,18 +54,18 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog_inconsistent_op(node.get_state_table()?, store, vnodes)
                 .await;
-        Ok(EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
+        let exec = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
             actor_ctx: params.actor_context,
-            info: params.info,
 
             input,
 
+            schema: params.info.schema.clone(),
             calls,
             partition_key_indices,
             order_key_index,
             state_table,
-            watermark_epoch: stream.get_watermark_epoch(),
-        })
-        .boxed())
+            watermark_epoch: params.watermark_epoch,
+        });
+        Ok((params.info, exec).into())
     }
 }

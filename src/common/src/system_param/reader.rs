@@ -12,10 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
+
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{default, system_params_to_kv, ParamValue};
+use super::{default, ParamValue};
 use crate::for_all_params;
+
+/// Information about a system parameter.
+pub struct ParameterInfo {
+    pub name: &'static str,
+    pub mutable: bool,
+    pub value: String,
+    pub description: &'static str,
+}
 
 macro_rules! define_system_params_read_trait {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $doc:literal, $($rest:tt)* },)*) => {
@@ -30,6 +40,20 @@ macro_rules! define_system_params_read_trait {
                 #[doc = $doc]
                 fn $field(&self) -> <$type as ParamValue>::Borrowed<'_>;
             )*
+
+            /// Return the information of all parameters.
+            fn get_all(&self) -> Vec<ParameterInfo> {
+                vec![
+                    $(
+                        ParameterInfo {
+                            name: stringify!($field),
+                            mutable: $is_mutable,
+                            value: self.$field().to_string(),
+                            description: $doc,
+                        },
+                    )*
+                ]
+            }
         }
     };
 }
@@ -40,13 +64,36 @@ for_all_params!(define_system_params_read_trait);
 ///
 /// See [`SystemParamsRead`] for more details.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SystemParamsReader {
-    prost: PbSystemParams,
+pub struct SystemParamsReader<I = PbSystemParams> {
+    inner: I,
 }
 
-impl From<PbSystemParams> for SystemParamsReader {
-    fn from(prost: PbSystemParams) -> Self {
-        Self { prost }
+impl<I> From<I> for SystemParamsReader<I>
+where
+    I: Borrow<PbSystemParams>,
+{
+    fn from(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I> SystemParamsReader<I>
+where
+    I: Borrow<PbSystemParams>,
+{
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+
+    /// Return a new reader with the reference to the inner system params.
+    pub fn as_ref(&self) -> SystemParamsReader<&PbSystemParams> {
+        SystemParamsReader {
+            inner: self.inner(),
+        }
+    }
+
+    fn inner(&self) -> &PbSystemParams {
+        self.inner.borrow()
     }
 }
 
@@ -54,73 +101,63 @@ impl From<PbSystemParams> for SystemParamsReader {
 ///   For example, if a parameter is introduced before the initial public release.
 ///
 /// - Otherwise, specify the fallback logic when the field is missing.
-impl SystemParamsRead for SystemParamsReader {
+impl<I> SystemParamsRead for SystemParamsReader<I>
+where
+    I: Borrow<PbSystemParams>,
+{
     fn barrier_interval_ms(&self) -> u32 {
-        self.prost.barrier_interval_ms.unwrap()
+        self.inner().barrier_interval_ms.unwrap()
     }
 
     fn checkpoint_frequency(&self) -> u64 {
-        self.prost.checkpoint_frequency.unwrap()
+        self.inner().checkpoint_frequency.unwrap()
     }
 
     fn parallel_compact_size_mb(&self) -> u32 {
-        self.prost.parallel_compact_size_mb.unwrap()
+        self.inner().parallel_compact_size_mb.unwrap()
     }
 
     fn sstable_size_mb(&self) -> u32 {
-        self.prost.sstable_size_mb.unwrap()
+        self.inner().sstable_size_mb.unwrap()
     }
 
     fn block_size_kb(&self) -> u32 {
-        self.prost.block_size_kb.unwrap()
+        self.inner().block_size_kb.unwrap()
     }
 
     fn bloom_false_positive(&self) -> f64 {
-        self.prost.bloom_false_positive.unwrap()
+        self.inner().bloom_false_positive.unwrap()
     }
 
     fn state_store(&self) -> &str {
-        self.prost.state_store.as_ref().unwrap()
+        self.inner().state_store.as_ref().unwrap()
     }
 
     fn data_directory(&self) -> &str {
-        self.prost.data_directory.as_ref().unwrap()
+        self.inner().data_directory.as_ref().unwrap()
     }
 
     fn backup_storage_url(&self) -> &str {
-        self.prost.backup_storage_url.as_ref().unwrap()
+        self.inner().backup_storage_url.as_ref().unwrap()
     }
 
     fn backup_storage_directory(&self) -> &str {
-        self.prost.backup_storage_directory.as_ref().unwrap()
+        self.inner().backup_storage_directory.as_ref().unwrap()
     }
 
     fn max_concurrent_creating_streaming_jobs(&self) -> u32 {
-        self.prost.max_concurrent_creating_streaming_jobs.unwrap()
+        self.inner().max_concurrent_creating_streaming_jobs.unwrap()
     }
 
     fn pause_on_next_bootstrap(&self) -> bool {
-        self.prost
+        self.inner()
             .pause_on_next_bootstrap
             .unwrap_or_else(default::pause_on_next_bootstrap)
     }
 
     fn enable_tracing(&self) -> bool {
-        self.prost
+        self.inner()
             .enable_tracing
             .unwrap_or_else(default::enable_tracing)
-    }
-
-    fn wasm_storage_url(&self) -> &str {
-        self.prost
-            .wasm_storage_url
-            .as_ref()
-            .unwrap_or(&default::WASM_STORAGE_URL)
-    }
-}
-
-impl SystemParamsReader {
-    pub fn to_kv(&self) -> Vec<(String, String)> {
-        system_params_to_kv(&self.prost).unwrap()
     }
 }

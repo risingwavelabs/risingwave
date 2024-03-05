@@ -24,22 +24,21 @@ logging.basicConfig(level=logging.WARN)
 
 def section_actor_info(outer_panels):
     panels = outer_panels.sub_panel()
-    excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
     return [
         outer_panels.row_collapsed(
             "Actor/Table Id Info",
             [
                 panels.table_info(
-                    "Actor Id Info",
-                    "Mapping from actor id to fragment id",
-                    [panels.table_target(f"{metric('actor_info')}")],
-                    excluded_cols,
+                    "Actor Info",
+                    "Information about actors",
+                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    ["actor_id", "fragment_id", "compute_node"],
                 ),
                 panels.table_info(
-                    "Materialized View Info",
-                    "Mapping from materialized view table id to it's internal table ids",
-                    [panels.table_target(f"{metric('table_info')}")],
-                    excluded_cols,
+                    "State Table Info",
+                    "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
+                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
+                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
                 ),
             ],
         )
@@ -684,9 +683,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows read by each source per second.",
                     [
                         panels.target(
-                            f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
+                            f"sum(rate({metric('stream_source_output_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         ),
                     ],
                 ),
@@ -697,7 +695,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('source_partition_input_count')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
                         )
                     ],
                 ),
@@ -706,8 +704,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
-                            f"(sum by (source_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
-                            "source={{source_id}}",
+                            f"(sum by (source_id, source_name, fragment_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
                         )
                     ],
                 ),
@@ -718,7 +716,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
-                            "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                            "actor={{actor_id}} source={{source_id}} partition={{partition}} fragmend_id={{fragment_id}}",
                         )
                     ],
                 ),
@@ -1013,6 +1011,16 @@ def section_streaming_cdc(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "CDC Source Errors",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
+                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
@@ -1242,7 +1250,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
                             "fragment {{fragment_id}}",
                         ),
                         panels.target_hidden(
@@ -1256,7 +1264,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,side)",
                             "fragment {{fragment_id}} {{side}}",
                         ),
                         panels.target_hidden(
@@ -3671,6 +3679,26 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
+                    "The resident memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_resident_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The metadata memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_metadata_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
                     "The allocated memory of jvm",
                     "",
                     [
@@ -4090,8 +4118,16 @@ def section_udf(outer_panels):
                             "udf_latency_p99 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_latency_avg - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, link, name))",
+                            "udf_latency_p99_by_name - {{link}} {{name}}",
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by (link, name)",
+                            "udf_latency_avg_by_name - {{link}} {{name}}",
                         ),
                     ],
                 ),

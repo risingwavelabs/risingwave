@@ -34,15 +34,9 @@ impl CompactorService {
     fn compactor(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE")
-            && x == "true"
-        {
-            Ok(Command::new(
-                Path::new(&prefix_bin).join("risingwave").join("compactor"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("compactor")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin).join("risingwave").join("compactor"),
+        ))
     }
 
     /// Apply command args according to config

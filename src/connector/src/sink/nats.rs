@@ -14,11 +14,10 @@
 use core::fmt::Debug;
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::anyhow_error;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -108,15 +107,9 @@ impl Sink for NatsSink {
                 "Nats sink only support append-only mode"
             )));
         }
-        match self.config.common.build_client().await {
-            Ok(_client) => {}
-            Err(error) => {
-                return Err(SinkError::Nats(anyhow_error!(
-                    "validate nats sink error: {:?}",
-                    error
-                )));
-            }
-        }
+        let _client = (self.config.common.build_client().await)
+            .context("validate nats sink error")
+            .map_err(SinkError::Nats)?;
         Ok(())
     }
 
@@ -135,7 +128,7 @@ impl NatsSinkWriter {
             .common
             .build_context()
             .await
-            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+            .map_err(|e| SinkError::Nats(anyhow!(e)))?;
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
@@ -160,13 +153,15 @@ impl NatsSinkWriter {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
                         .await
-                        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
+                        .context("nats sink error")
+                        .map_err(SinkError::Nats)?;
                 }
                 Ok::<_, SinkError>(())
             },
         )
         .await
-        .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))
+        .context("nats sink error")
+        .map_err(SinkError::Nats)
     }
 }
 

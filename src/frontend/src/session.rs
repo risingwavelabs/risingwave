@@ -42,16 +42,19 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::local_manager::{
+    LocalSystemParamsManager, LocalSystemParamsManagerRef,
+};
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
@@ -77,11 +80,15 @@ use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
+use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
 use crate::handler::privilege::ObjectCheckItem;
+use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
+use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -98,7 +105,6 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
@@ -117,6 +123,8 @@ pub struct FrontendEnv {
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
+
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
@@ -157,6 +165,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -189,6 +198,7 @@ impl FrontendEnv {
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
+            system_params_manager,
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
@@ -365,6 +375,12 @@ impl FrontendEnv {
         });
         join_handles.push(join_handle);
 
+        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
+        let heap_profiler =
+            HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+        // Run a background heap profiler
+        heap_profiler.start();
+
         Ok((
             Self {
                 catalog_reader,
@@ -375,6 +391,7 @@ impl FrontendEnv {
                 meta_client: frontend_meta_client,
                 query_manager,
                 hummock_snapshot_manager,
+                system_params_manager,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
@@ -438,6 +455,10 @@ impl FrontendEnv {
 
     pub fn hummock_snapshot_manager(&self) -> &HummockSnapshotManagerRef {
         &self.hummock_snapshot_manager
+    }
+
+    pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
+        &self.system_params_manager
     }
 
     pub fn server_address(&self) -> &HostAddr {
@@ -1223,18 +1244,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             object: show_object,
             ..
         } => Ok(infer_show_object(&show_object)),
-        Statement::ShowCreateObject { .. } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::ShowCreateObject { .. } => Ok(infer_show_create_object()),
         Statement::ShowTransactionIsolationLevel => {
             let name = "transaction_isolation";
             Ok(infer_show_variable(name))
@@ -1243,28 +1253,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))
         }
-        Statement::Describe { name: _ } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Type".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Is Hidden".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Description".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::Describe { name: _ } => Ok(infer_describe()),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),

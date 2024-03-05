@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
@@ -22,6 +23,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
@@ -30,8 +32,8 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedBitmap, TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel,
+    TracedPrefetchOptions, TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -190,7 +192,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 
     /// Clears contents in shared buffer.
     /// This method should only be called when dropping all actors in the local compute node.
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_;
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
 
@@ -235,10 +237,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
-    fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
+    fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
     fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_;
     fn epoch(&self) -> u64;
@@ -272,6 +271,10 @@ pub trait LocalStateStore: StaticSendSync {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
+
+    // Updates the vnode bitmap corresponding to the local state store
+    // Returns the previous vnode bitmap
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
 }
 
 /// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
@@ -409,6 +412,41 @@ pub enum OpConsistencyLevel {
     ConsistentOldValue(Arc<dyn CheckOldValueEquality>),
 }
 
+impl Debug for OpConsistencyLevel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpConsistencyLevel::Inconsistent => f.write_str("OpConsistencyLevel::Inconsistent"),
+            OpConsistencyLevel::ConsistentOldValue(_) => {
+                f.write_str("OpConsistencyLevel::ConsistentOldValue")
+            }
+        }
+    }
+}
+
+impl PartialEq<Self> for OpConsistencyLevel {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                OpConsistencyLevel::Inconsistent,
+                OpConsistencyLevel::Inconsistent
+            ) | (
+                OpConsistencyLevel::ConsistentOldValue(_),
+                OpConsistencyLevel::ConsistentOldValue(_),
+            )
+        )
+    }
+}
+
+impl Eq for OpConsistencyLevel {}
+
+impl OpConsistencyLevel {
+    pub fn update(&mut self, new_level: &OpConsistencyLevel) {
+        assert_ne!(self, new_level);
+        *self = new_level.clone()
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -501,17 +539,14 @@ impl NewLocalOptions {
 #[derive(Clone)]
 pub struct InitOptions {
     pub epoch: EpochPair,
+
+    /// The vnode bitmap for the local state store instance
+    pub vnodes: Arc<Bitmap>,
 }
 
 impl InitOptions {
-    pub fn new_with_epoch(epoch: EpochPair) -> Self {
-        Self { epoch }
-    }
-}
-
-impl From<EpochPair> for InitOptions {
-    fn from(value: EpochPair) -> Self {
-        Self { epoch: value }
+    pub fn new(epoch: EpochPair, vnodes: Arc<Bitmap>) -> Self {
+        Self { epoch, vnodes }
     }
 }
 
@@ -519,6 +554,7 @@ impl From<InitOptions> for TracedInitOptions {
     fn from(value: InitOptions) -> Self {
         TracedInitOptions {
             epoch: value.epoch.into(),
+            vnodes: TracedBitmap::from(value.vnodes.as_ref().clone()),
         }
     }
 }
@@ -527,6 +563,7 @@ impl From<TracedInitOptions> for InitOptions {
     fn from(value: TracedInitOptions) -> Self {
         InitOptions {
             epoch: value.epoch.into(),
+            vnodes: Arc::new(Bitmap::from(value.vnodes)),
         }
     }
 }
@@ -534,6 +571,7 @@ impl From<TracedInitOptions> for InitOptions {
 #[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
     pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
+    pub switch_op_consistency_level: Option<OpConsistencyLevel>,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -548,6 +586,9 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            switch_op_consistency_level: value
+                .switch_op_consistency_level
+                .map(|level| matches!(level, OpConsistencyLevel::ConsistentOldValue(_))),
         }
     }
 }
@@ -572,24 +613,22 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                         .collect(),
                 )
             }),
+            switch_op_consistency_level: value.switch_op_consistency_level.map(|enable| {
+                if enable {
+                    OpConsistencyLevel::ConsistentOldValue(CHECK_BYTES_EQUAL.clone())
+                } else {
+                    OpConsistencyLevel::Inconsistent
+                }
+            }),
         }
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
-        Self {
-            table_watermarks: Some((direction, watermarks)),
-        }
-    }
-
-    pub fn no_watermark() -> Self {
+    pub fn for_test() -> Self {
         Self {
             table_watermarks: None,
+            switch_op_consistency_level: None,
         }
-    }
-
-    pub fn for_test() -> Self {
-        Self::no_watermark()
     }
 }

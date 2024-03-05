@@ -20,10 +20,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
@@ -31,6 +32,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -80,12 +82,12 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     source_is_up: LabelGuardedIntGauge<2>,
 }
 
-fn extract_prop_from_existing_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
+fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
-fn extract_prop_from_new_source(source: &Source) -> anyhow::Result<ConnectorProperties> {
+fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
@@ -95,7 +97,7 @@ const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
 impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
-    async fn refresh(&mut self) -> anyhow::Result<()> {
+    async fn refresh(&mut self) -> MetaResult<()> {
         let enumerator = P::SplitEnumerator::new(
             self.connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
@@ -123,7 +125,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
-    ) -> anyhow::Result<Self> {
+    ) -> MetaResult<Self> {
         let enumerator = P::SplitEnumerator::new(
             connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
@@ -172,11 +174,11 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 _ = interval.tick() => {
                     if self.fail_cnt > MAX_FAIL_CNT {
                         if let Err(e) = self.refresh().await {
-                            tracing::error!("error happened when refresh from connector source worker: {}", e.to_string());
+                            tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
                         }
                     }
                     if let Err(e) = self.tick().await {
-                        tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
+                        tracing::error!(error = %e.as_report(), "error happened when tick from connector source worker");
                     }
                 }
             }
@@ -289,7 +291,7 @@ impl SourceManagerCore {
                 {
                     Ok(actor_ids) => actor_ids,
                     Err(err) => {
-                        tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
+                        tracing::warn!(error = %err.as_report(), "Failed to get the actor of the fragment, maybe the fragment doesn't exist anymore");
                         continue;
                     }
                 };
@@ -360,7 +362,7 @@ impl SourceManagerCore {
     fn drop_source_fragments(
         &mut self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        actor_splits: &HashSet<ActorId>,
+        removed_actors: &HashSet<ActorId>,
     ) {
         for (source_id, fragment_ids) in source_fragments {
             if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
@@ -379,7 +381,7 @@ impl SourceManagerCore {
             }
         }
 
-        for actor_id in actor_splits {
+        for actor_id in removed_actors {
             self.actor_splits.remove(actor_id);
         }
     }
@@ -612,6 +614,15 @@ impl SourceManager {
         })
     }
 
+    pub async fn drop_source_fragments_v2(
+        &self,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        removed_actors: HashSet<ActorId>,
+    ) {
+        let mut core = self.core.lock().await;
+        core.drop_source_fragments(source_fragments, &removed_actors);
+    }
+
     /// For dropping MV.
     pub async fn drop_source_fragments(&self, table_fragments: &[TableFragments]) {
         let mut core = self.core.lock().await;
@@ -701,7 +712,7 @@ impl SourceManager {
             let handle = core
                 .managed_sources
                 .get(&source_id)
-                .ok_or_else(|| anyhow!("could not found source {}", source_id))?;
+                .with_context(|| format!("could not find source {}", source_id))?;
 
             if handle.splits.lock().await.splits.is_none() {
                 // force refresh source
@@ -709,8 +720,11 @@ impl SourceManager {
                 handle
                     .sync_call_tx
                     .send(tx)
-                    .map_err(|e| anyhow!(e.to_string()))?;
-                rx.await.map_err(|e| anyhow!(e.to_string()))??;
+                    .ok()
+                    .context("failed to send sync call")?;
+                rx.await
+                    .ok()
+                    .context("failed to receive sync call response")??;
             }
 
             let splits = handle.discovered_splits().await.unwrap();
@@ -745,7 +759,7 @@ impl SourceManager {
     }
 
     /// register connector worker for source.
-    pub async fn register_source(&self, source: &Source) -> anyhow::Result<()> {
+    pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
@@ -810,7 +824,7 @@ impl SourceManager {
                             break worker;
                         }
                         Err(e) => {
-                            tracing::warn!("failed to create source worker: {}", e);
+                            tracing::warn!(error = %e.as_report(), "failed to create source worker");
                         }
                     }
                 };
@@ -839,7 +853,7 @@ impl SourceManager {
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
-    ) -> anyhow::Result<()> {
+    ) -> MetaResult<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
@@ -866,11 +880,12 @@ impl SourceManager {
             // in kafka
             tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
                 .await
-                .map_err(|_e| {
-                    anyhow!(
-                        "failed to fetch meta info for source {}, error: timeout {}",
+                .ok()
+                .with_context(|| {
+                    format!(
+                        "failed to fetch meta info for source {}, timeout {:?}",
                         source.id,
-                        Self::DEFAULT_SOURCE_TICK_TIMEOUT.as_secs()
+                        Self::DEFAULT_SOURCE_TICK_TIMEOUT
                     )
                 })??;
 
@@ -926,8 +941,8 @@ impl SourceManager {
             let _pause_guard = self.paused.lock().await;
             if let Err(e) = self.tick().await {
                 tracing::error!(
-                    "error happened while running source manager tick: {}",
-                    e.to_string()
+                    error = %e.as_report(),
+                    "error happened while running source manager tick",
                 );
             }
         }
@@ -971,8 +986,8 @@ pub fn build_actor_split_impls(
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
-    use anyhow::anyhow;
     use risingwave_common::types::JsonbVal;
+    use risingwave_connector::error::ConnectorResult;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
@@ -993,11 +1008,11 @@ mod tests {
             serde_json::to_value(*self).unwrap().into()
         }
 
-        fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-            serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+            serde_json::from_value(value.take()).map_err(Into::into)
         }
 
-        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+        fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
             Ok(())
         }
     }

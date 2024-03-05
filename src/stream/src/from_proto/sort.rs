@@ -29,19 +29,19 @@ impl ExecutorBuilder for SortExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for sort"));
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, Some(vnodes)).await;
-        Ok(Box::new(SortExecutor::new(SortExecutorArgs {
+        let exec = SortExecutor::new(SortExecutorArgs {
             actor_ctx: params.actor_context,
-            info: params.info,
+            schema: params.info.schema.clone(),
             input,
             buffer_table: state_table,
             chunk_size: params.env.config().developer.chunk_size,
             sort_column_index: node.sort_column_index as _,
-        })))
+        });
+        Ok((params.info, exec).into())
     }
 }

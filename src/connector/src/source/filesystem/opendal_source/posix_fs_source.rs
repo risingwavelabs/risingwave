@@ -21,6 +21,7 @@ use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::{OpendalSource, PosixFsProperties};
+use crate::error::ConnectorResult;
 
 // Posix fs source should only be used for testing.
 // For a single-CN cluster, the behavior is well-defined. It will read from the local file system.
@@ -28,7 +29,7 @@ use super::{OpendalSource, PosixFsProperties};
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal posix fs source.
-    pub fn new_posix_fs_source(posix_fs_properties: PosixFsProperties) -> anyhow::Result<Self> {
+    pub fn new_posix_fs_source(posix_fs_properties: PosixFsProperties) -> ConnectorResult<Self> {
         // Create Fs builder.
         let mut builder = Fs::default();
 

@@ -14,19 +14,20 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use maplit::hashmap;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use nexmark::EventGenerator;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::error::RwError;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::time::Instant;
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::nexmark::source::combined_event::{
@@ -34,8 +35,7 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
-    StreamChunkWithState,
+    BoxChunkSourceStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
@@ -65,7 +65,7 @@ impl SplitReader for NexmarkSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
@@ -106,27 +106,40 @@ impl SplitReader for NexmarkSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         let actor_id = self.source_ctx.source_info.actor_id.to_string();
+        let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
         let source_id = self.source_ctx.source_info.source_id.to_string();
+        let source_name = self.source_ctx.source_info.source_name.to_string();
         let split_id = self.split_id.clone();
         let metrics = self.source_ctx.metrics.clone();
 
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
-            self.into_native_stream().inspect_ok(
-                move |chunk_with_states: &StreamChunkWithState| {
+            self.into_native_stream()
+                .inspect_ok(move |chunk: &StreamChunk| {
                     metrics
                         .partition_input_count
-                        .with_label_values(&[&actor_id, &source_id, &split_id])
-                        .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                        .with_label_values(&[
+                            &actor_id,
+                            &source_id,
+                            &split_id,
+                            &source_name,
+                            &fragment_id,
+                        ])
+                        .inc_by(chunk.cardinality() as u64);
                     metrics
                         .partition_input_bytes
-                        .with_label_values(&[&actor_id, &source_id, &split_id])
-                        .inc_by(chunk_with_states.chunk.estimated_size() as u64);
-                },
-            ),
+                        .with_label_values(&[
+                            &actor_id,
+                            &source_id,
+                            &split_id,
+                            &source_name,
+                            &fragment_id,
+                        ])
+                        .inc_by(chunk.estimated_size() as u64);
+                }),
             BUFFER_SIZE,
         )
         .boxed()
@@ -134,49 +147,60 @@ impl SplitReader for NexmarkSplitReader {
 }
 
 impl NexmarkSplitReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    async fn sleep_til_next_event(&self, start_time: Instant, start_offset: u64, start_ts: u64) {
+        if self.use_real_time {
+            tokio::time::sleep_until(
+                start_time + Duration::from_millis(self.generator.timestamp() - start_ts),
+            )
+            .await;
+        } else if self.min_event_gap_in_ns > 0 {
+            tokio::time::sleep_until(
+                start_time
+                    + Duration::from_nanos(
+                        self.min_event_gap_in_ns * (self.generator.global_offset() - start_offset),
+                    ),
+            )
+            .await;
+        }
+    }
+
+    #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_native_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
         let start_ts = self.generator.timestamp();
-        let event_dtypes = get_event_data_types(self.event_type, self.row_id_index);
+        let mut event_dtypes_with_offset = get_event_data_types(self.event_type, self.row_id_index);
+        event_dtypes_with_offset.extend([DataType::Varchar, DataType::Varchar]);
+
+        let mut chunk_builder =
+            StreamChunkBuilder::new(self.max_chunk_size as usize, event_dtypes_with_offset);
         loop {
-            let mut rows = vec![];
-            while (rows.len() as u64) < self.max_chunk_size {
-                if self.generator.global_offset() >= self.event_num {
-                    break;
-                }
-                let event = self.generator.next().unwrap();
-                let row = match self.event_type {
-                    Some(_) => event_to_row(event, self.row_id_index),
-                    None => combined_event_to_row(new_combined_event(event), self.row_id_index),
-                };
-                rows.push((Op::Insert, row));
-            }
-            if rows.is_empty() {
+            if self.generator.global_offset() >= self.event_num {
                 break;
             }
-            if self.use_real_time {
-                tokio::time::sleep_until(
-                    start_time + Duration::from_millis(self.generator.timestamp() - start_ts),
-                )
-                .await;
-            } else if self.min_event_gap_in_ns > 0 {
-                tokio::time::sleep_until(
-                    start_time
-                        + Duration::from_nanos(
-                            self.min_event_gap_in_ns
-                                * (self.generator.global_offset() - start_offset),
-                        ),
-                )
-                .await;
-            }
-            let mapping = hashmap! {self.split_id.clone() => self.generator.offset().to_string()};
-            let stream_chunk = StreamChunk::from_rows(&rows, &event_dtypes);
-            yield StreamChunkWithState {
-                chunk: stream_chunk,
-                split_offset_mapping: Some(mapping),
+            let event = self.generator.next().unwrap();
+            let mut fields = match self.event_type {
+                Some(_) => event_to_row(event, self.row_id_index),
+                None => combined_event_to_row(new_combined_event(event), self.row_id_index),
             };
+            fields.extend([
+                Some(ScalarImpl::Utf8(self.split_id.as_ref().into())),
+                Some(ScalarImpl::Utf8(
+                    self.generator.offset().to_string().into_boxed_str(),
+                )),
+            ]);
+
+            if let Some(chunk) = chunk_builder.append_row(Op::Insert, OwnedRow::new(fields)) {
+                self.sleep_til_next_event(start_time, start_offset, start_ts)
+                    .await;
+                yield chunk;
+            }
+        }
+
+        if let Some(chunk) = chunk_builder.take() {
+            self.sleep_til_next_event(start_time, start_offset, start_ts)
+                .await;
+            yield chunk;
         }
 
         tracing::debug!(?self.event_type, "nexmark generator finished");
@@ -185,14 +209,12 @@ impl NexmarkSplitReader {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
     use super::*;
     use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
     use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
-    async fn test_nexmark_split_reader() -> Result<()> {
+    async fn test_nexmark_split_reader() -> crate::error::ConnectorResult<()> {
         let props = NexmarkProperties {
             split_num: 2,
             min_event_gap_in_ns: 0,
@@ -220,6 +242,47 @@ mod tests {
             .await?
             .into_stream();
             let _chunk = reader.next().await.unwrap()?;
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_nexmark_event_num() -> crate::error::ConnectorResult<()> {
+        let max_chunk_size = 32;
+        let event_num = max_chunk_size * 128 + 1;
+        let props = NexmarkProperties {
+            split_num: 1,
+            min_event_gap_in_ns: 0,
+            table_type: None,
+            max_chunk_size,
+            event_num,
+            ..Default::default()
+        };
+
+        let mut enumerator =
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await?;
+        let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
+
+        for split in list_splits_resp {
+            let state = vec![split];
+            let reader = NexmarkSplitReader::new(
+                props.clone(),
+                state,
+                Default::default(),
+                Default::default(),
+                None,
+            )
+            .await?
+            .into_stream();
+            let (rows_count, chunk_count) = reader
+                .fold((0, 0), |acc, x| async move {
+                    (acc.0 + x.unwrap().cardinality(), acc.1 + 1)
+                })
+                .await;
+            assert_eq!(rows_count as u64, event_num);
+            assert_eq!(chunk_count as u64, event_num / max_chunk_size + 1);
         }
 
         Ok(())

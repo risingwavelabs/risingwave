@@ -21,20 +21,23 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, FileSelector, IcebergScanExecutor,
+};
 use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
-    connector_source: ConnectorSource,
+    source: SourceReader,
 
     // used to create reader
     column_ids: Vec<ColumnId>,
@@ -75,18 +78,9 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
 
-        let connector_source = ConnectorSource {
-            config,
-            columns,
-            parser_config,
-            connector_message_buffer_size: source
-                .context()
-                .get_config()
-                .developer
-                .connector_message_buffer_size,
-        };
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: source.context().get_config().developer.chunk_size,
+            rate_limit: None,
         };
 
         let column_ids: Vec<_> = source_node
@@ -109,16 +103,44 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .collect();
         let schema = Schema::new(fields);
 
-        Ok(Box::new(SourceExecutor {
-            connector_source,
-            column_ids,
-            metrics: source.context().source_metrics(),
-            source_id: TableId::new(source_node.source_id),
-            split,
-            schema,
-            identity: source.plan_node().get_identity().clone(),
-            source_ctrl_opts,
-        }))
+        if let ConnectorProperties::Iceberg(iceberg_properties) = config {
+            let iceberg_properties: IcebergProperties = *iceberg_properties;
+            if let SplitImpl::Iceberg(split) = split {
+                let split: IcebergSplit = split;
+                Ok(Box::new(IcebergScanExecutor::new(
+                    iceberg_properties.to_iceberg_config(),
+                    Some(split.snapshot_id),
+                    FileSelector::FileList(split.files),
+                    source.context.get_config().developer.chunk_size,
+                    schema,
+                    source.plan_node().get_identity().clone(),
+                )))
+            } else {
+                unreachable!()
+            }
+        } else {
+            let source_reader = SourceReader {
+                config,
+                columns,
+                parser_config,
+                connector_message_buffer_size: source
+                    .context()
+                    .get_config()
+                    .developer
+                    .connector_message_buffer_size,
+            };
+
+            Ok(Box::new(SourceExecutor {
+                source: source_reader,
+                column_ids,
+                metrics: source.context().source_metrics(),
+                source_id: TableId::new(source_node.source_id),
+                split,
+                schema,
+                identity: source.plan_node().get_identity().clone(),
+                source_ctrl_opts,
+            }))
+        }
     }
 }
 
@@ -147,16 +169,17 @@ impl SourceExecutor {
             self.source_ctrl_opts.clone(),
             None,
             ConnectorProperties::default(),
+            "NA".to_owned(), // FIXME: source name was not passed in batch plan
         ));
         let stream = self
-            .connector_source
-            .stream_reader(Some(vec![self.split]), self.column_ids, source_ctx)
+            .source
+            .to_stream(Some(vec![self.split]), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]
         for chunk in stream {
             let chunk = chunk.map_err(BatchError::connector)?;
-            let data_chunk = covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
+            let data_chunk = covert_stream_chunk_to_batch_chunk(chunk)?;
             if data_chunk.capacity() > 0 {
                 yield data_chunk;
             }
