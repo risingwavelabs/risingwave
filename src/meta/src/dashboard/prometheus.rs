@@ -54,22 +54,13 @@ impl From<&RangeVector> for PrometheusVector {
     }
 }
 
-impl From<&InstantVector> for PrometheusVector {
-    fn from(value: &InstantVector) -> Self {
-        PrometheusVector {
-            metric: value.metric().clone(),
-            sample: vec![value.sample().into()],
-        }
-    }
-}
-
 // Note(eric): For backward compatibility, we store the `InstantVector` as a single sample,
 // instead of defining a new struct.
 impl From<&InstantVector> for PrometheusVector {
     fn from(value: &InstantVector) -> Self {
         PrometheusVector {
             metric: value.metric().clone(),
-            sample: vec![PrometheusSample::from(value.sample())],
+            sample: vec![value.sample().into()],
         }
     }
 }
