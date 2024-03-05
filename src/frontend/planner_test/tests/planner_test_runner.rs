@@ -50,6 +50,8 @@ fn main() {
                 let file_content = std::fs::read_to_string(&path).unwrap();
                 build_runtime()
                     .block_on(run_test_file(&path, &file_content))
+                    // Manually convert to `Failed`, otherwise it will use `Display` impl of
+                    // `anyhow::Error` which loses the source chain.
                     .map_err(|e| Failed::from(e.as_report()))
             }));
         }
