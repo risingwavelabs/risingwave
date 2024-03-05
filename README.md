@@ -59,10 +59,10 @@ RisingWave is a Postgres-compatible streaming database engineered to provide the
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
-## Try it out in 5 minutes
+## Try it out in 60 seconds
 Docker pull:
 ```
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:latest playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:v1.7.0-standalone single_node
 ```
 Now connect to RisingWave using `psql`:
 ```
