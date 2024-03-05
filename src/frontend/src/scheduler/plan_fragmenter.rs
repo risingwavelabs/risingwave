@@ -56,6 +56,7 @@ use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
+const TASK_MIN_PARALLELISM: u32 = 32;
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
     pub id: String,
@@ -689,10 +690,12 @@ impl StageGraph {
                 .await?;
             // For file source batch read, all the files  to be read are divide into several parts to prevent the task from taking up too many resources.
             // todo(wcy-fdu): Currently it will be divided into half of batch_parallelism groups, and this will be changed to configurable later.
+            let task_parallelism =
+                std::cmp::max((self.batch_parallelism / 2) as u32, TASK_MIN_PARALLELISM);
             let complete_stage = Arc::new(stage.clone_with_exchange_info_and_complete_source_info(
                 exchange_info,
                 complete_source_info,
-                (self.batch_parallelism / 2) as u32,
+                task_parallelism,
             ));
             let parallelism = complete_stage.parallelism;
             complete_stages.insert(stage.id, complete_stage);
