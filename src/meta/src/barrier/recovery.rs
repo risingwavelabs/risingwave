@@ -721,7 +721,7 @@ impl GlobalBarrierManagerContext {
             return Err(e);
         }
 
-        debug!("scaling-in actors succeed.");
+        debug!("scaling actors succeed.");
         Ok(())
     }
 
@@ -855,7 +855,7 @@ impl GlobalBarrierManagerContext {
             );
         }
 
-        debug!("scaling-in actors succeed.");
+        debug!("scaling actors succeed.");
         Ok(())
     }
 
