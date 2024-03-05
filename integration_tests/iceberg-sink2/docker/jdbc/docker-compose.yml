@@ -18,7 +18,7 @@ services:
     depends_on:
       - minio-0
       - postgres
-    image: ghcr.io/icelake-io/icelake-spark:1.0
+    image: ghcr.io/icelake-io/icelake-spark:0.1
     environment:
       - AWS_ACCESS_KEY_ID=hummockadmin
       - AWS_SECRET_ACCESS_KEY=hummockadmin

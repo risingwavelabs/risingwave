@@ -387,7 +387,7 @@ where
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
-            FeMessage::Password(msg) => self.process_password_msg(msg)?,
+            FeMessage::Password(msg) => self.process_password_msg(msg).await?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
@@ -508,7 +508,7 @@ where
                     })?;
                 self.ready_for_query()?;
             }
-            UserAuthenticator::ClearText(_) => {
+            UserAuthenticator::ClearText(_) | UserAuthenticator::OAuth(_) => {
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)?;
             }
@@ -523,11 +523,9 @@ where
         Ok(())
     }
 
-    fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
+    async fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
         let authenticator = self.session.as_ref().unwrap().user_authenticator();
-        if !authenticator.authenticate(&msg.password) {
-            return Err(PsqlError::PasswordError);
-        }
+        authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
