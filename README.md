@@ -60,15 +60,19 @@ RisingWave is a Postgres-compatible streaming database engineered to provide the
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
 ## Try it out in 60 seconds
-Docker pull:
+
+Start RisingWave:
+
+```shell
+curl https://risingwave.com/sh | sh
 ```
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:v1.7.0-standalone single_node
-```
+This command starts RisingWave in standalone mode. In this mode, data will be stored in the local file system while metadata will be stored in the embedded SQLite database.
+
 Now connect to RisingWave using `psql`:
 ```
 psql -h localhost -p 4566 -d dev -U root
 ```
-Don’t have Docker? Learn how to install RisingWave on Mac, Ubuntu, and other environments at [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
+To learn about other installation options such as Docker, see [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## Production deployments
 
