@@ -68,7 +68,7 @@ ENABLE_RELEASE_PROFILE=false
 EOF
 
 if version_le "${VERSION:-}" "1.7.0" ; then
-  echo "ENABLE_ALL_IN_ONE=true"
+  echo "ENABLE_ALL_IN_ONE=true" >> risedev-components.user.env
 fi
 }
 
