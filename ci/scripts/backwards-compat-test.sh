@@ -37,6 +37,8 @@ source backwards-compat-tests/scripts/utils.sh
 ################################### Main
 
 configure_rw() {
+VERSION="$1"
+
 echo "--- Setting up cluster config"
 cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
@@ -64,6 +66,10 @@ ENABLE_BUILD_RUST=false
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
+
+if version_le "${VERSION:-}" "1.7.0" ; then
+  echo "ENABLE_ALL_IN_ONE=true"
+fi
 }
 
 configure_rw_build() {
@@ -116,7 +122,7 @@ setup_old_cluster() {
 
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
-    configure_rw
+    configure_rw $OLD_VERSION
   fi
 }
 
@@ -138,7 +144,7 @@ main() {
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
-  configure_rw
+  configure_rw "99.99.99"
   validate_new_cluster "$NEW_VERSION"
 }
 
