@@ -62,11 +62,9 @@ RisingWave is a Postgres-compatible streaming database engineered to provide the
 ## Try it out in 60 seconds
 
 Start RisingWave:
-
 ```shell
 curl https://risingwave.com/sh | sh
 ```
-This command starts RisingWave in standalone mode. In this mode, data will be stored in the local file system while metadata will be stored in the embedded SQLite database.
 
 Now connect to RisingWave using `psql`:
 ```
