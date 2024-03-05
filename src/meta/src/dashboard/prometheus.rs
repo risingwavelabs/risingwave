@@ -54,6 +54,8 @@ impl From<&RangeVector> for PrometheusVector {
     }
 }
 
+// Note(eric): For backward compatibility, we store the `InstantVector` as a single sample,
+// instead of defining a new struct.
 impl From<&InstantVector> for PrometheusVector {
     fn from(value: &InstantVector) -> Self {
         PrometheusVector {
