@@ -143,6 +143,7 @@ impl SharedContext {
                     self.config.developer.exchange_initial_permits,
                     self.config.developer.exchange_batched_permits,
                     self.config.developer.exchange_concurrent_barriers,
+                    ids,
                 );
                 (Some(tx), Some(rx))
             })

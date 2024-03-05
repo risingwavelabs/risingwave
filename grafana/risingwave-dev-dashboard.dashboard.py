@@ -31,14 +31,29 @@ def section_actor_info(outer_panels):
                 panels.table_info(
                     "Actor Info",
                     "Information about actors",
-                    [panels.table_target(f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)")],
+                    [
+                        panels.table_target(
+                            f"group({metric('actor_info')}) by (actor_id, fragment_id, compute_node)"
+                        )
+                    ],
                     ["actor_id", "fragment_id", "compute_node"],
                 ),
                 panels.table_info(
                     "State Table Info",
                     "Information about state tables. Column `materialized_view_id` is the id of the materialized view that this state table belongs to.",
-                    [panels.table_target(f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)")],
-                    ["table_id", "table_name", "table_type", "materialized_view_id", "fragment_id", "compaction_group_id"],
+                    [
+                        panels.table_target(
+                            f"group({metric('table_info')}) by (table_id, table_name, table_type, materialized_view_id, fragment_id, compaction_group_id)"
+                        )
+                    ],
+                    [
+                        "table_id",
+                        "table_name",
+                        "table_type",
+                        "materialized_view_id",
+                        "fragment_id",
+                        "compaction_group_id",
+                    ],
                 ),
             ],
         )
@@ -267,7 +282,6 @@ def section_compaction(outer_panels):
                             "compactor_task_count - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
-
                         panels.target(
                             f"avg({metric('storage_compact_task_pending_parallelism')}) by({COMPONENT_LABEL}, {NODE_LABEL})",
                             "compactor_task_pending_parallelism - {{%s}} @ {{%s}}"
@@ -1633,7 +1647,7 @@ def section_streaming_exchange(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_exchange_frag_send_size')}[$__rate_interval])",
-                            "{{up_fragment_id}}->{{down_fragment_id}}",
+                            "fragment {{up_fragment_id}} -> fragment {{down_fragment_id}}",
                         ),
                     ],
                 ),
@@ -1643,7 +1657,27 @@ def section_streaming_exchange(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_exchange_frag_recv_size')}[$__rate_interval])",
-                            "{{up_fragment_id}}->{{down_fragment_id}}",
+                            "fragment {{up_fragment_id}} -> fragment {{down_fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Actor-level Exchange Memory Size",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('stream_exchange_memory_size')}",
+                            "actor {{up_actor_id}} -> actor {{down_actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Actor-level Exchange Number of Rows",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('stream_exchange_num_rows')}",
+                            "actor {{up_actor_id}} -> actor {{down_actor_id}}",
                         ),
                     ],
                 ),
@@ -2225,20 +2259,23 @@ def section_hummock_write(outer_panels):
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_sync_duration_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " Sync duration - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                                + " Sync duration - {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
                             f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_duration_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}) (rate({metric('state_store_sync_duration_count')}[$__rate_interval]))",
-                            "avg Sync duration - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "avg Sync duration - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_uploader_upload_task_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " upload task duration - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                                ),
+                                + " upload task duration - {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                             [50, 99, "max"],
                         ),
                     ],
@@ -2278,7 +2315,7 @@ def section_hummock_write(outer_panels):
                             f"sum({metric('state_store_uploader_syncing_epoch_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "syncing epoch count - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
+                        ),
                     ],
                 ),
                 panels.timeseries_bytes(
@@ -2422,8 +2459,7 @@ def section_hummock_write(outer_panels):
                     [
                         panels.target(
                             f"sum({metric('state_store_event_handler_pending_event')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "{{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
+                            "{{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -2435,16 +2471,18 @@ def section_hummock_write(outer_panels):
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_event_handler_latency_bucket')}[$__rate_interval])) by (le, event_type, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " {{event_type}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                                ),
+                                + " {{event_type}} {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                             [50, 99, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('state_store_uploader_wait_poll_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
-                                + " finished_task_wait_poll {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                                ),
+                                + " finished_task_wait_poll {{%s}} @ {{%s}}"
+                                % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                             [50, 99, "max"],
                         ),
                     ],
@@ -2539,8 +2577,7 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('refill_bytes')}[$__rate_interval])) by (foyer, op, {NODE_LABEL})",
-                            "{{type}} file cache - {{op}} @ {{%s}}"
-                            % NODE_LABEL,
+                            "{{type}} file cache - {{op}} @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -2626,8 +2663,7 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('refill_total', inheritance_parent_lookup_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
-                            "parent meta lookup {{op}} @ {{%s}}"
-                            % NODE_LABEL,
+                            "parent meta lookup {{op}} @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -2647,8 +2683,7 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('refill_total', unit_inheritance_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
-                            "unit inheritance {{op}} @ {{%s}}"
-                            % NODE_LABEL,
+                            "unit inheritance {{op}} @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -2668,8 +2703,7 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('refill_total', block_refill_filter)}[$__rate_interval])) by (op, {NODE_LABEL})",
-                            "block refill {{op}} @ {{%s}}"
-                            % NODE_LABEL,
+                            "block refill {{op}} @ {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
