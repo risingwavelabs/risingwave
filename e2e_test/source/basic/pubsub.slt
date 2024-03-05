@@ -118,3 +118,6 @@ CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (pubsub.subscription = 'test
 
 statement ok
 DROP TABLE s3;
+
+statement ok
+DROP USER other_user;

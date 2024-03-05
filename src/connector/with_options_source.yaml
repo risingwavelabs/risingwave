@@ -118,7 +118,7 @@ KafkaProperties:
     comments: Path to client's private key file (PEM).
     required: false
   - name: properties.ssl.key.password
-    field_type: String
+    field_type: SecretString
     comments: Passphrase of client's private key.
     required: false
   - name: properties.sasl.mechanism
@@ -130,7 +130,7 @@ KafkaProperties:
     comments: SASL username for SASL/PLAIN and SASL/SCRAM.
     required: false
   - name: properties.sasl.password
-    field_type: String
+    field_type: SecretString
     comments: SASL password for SASL/PLAIN and SASL/SCRAM.
     required: false
   - name: properties.sasl.kerberos.service.name
@@ -258,10 +258,10 @@ NatsProperties:
     field_type: String
     required: false
   - name: password
-    field_type: String
+    field_type: SecretString
     required: false
   - name: jwt
-    field_type: String
+    field_type: SecretString
     required: false
   - name: nkey
     field_type: String
@@ -513,7 +513,7 @@ PubsubProperties:
     comments: use the connector with a pubsub emulator  <https://cloud.google.com/pubsub/docs/emulator>
     required: false
   - name: pubsub.credentials
-    field_type: String
+    field_type: SecretString
     comments: '`credentials` is a JSON string containing the service account credentials.  See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).  The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).'
     required: false
   - name: pubsub.start_offset.nanos
@@ -543,7 +543,7 @@ PulsarProperties:
     required: true
     alias: pulsar.service.url
   - name: auth.token
-    field_type: String
+    field_type: SecretString
     required: false
   - name: oauth.issuer.url
     field_type: String

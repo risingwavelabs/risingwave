@@ -189,7 +189,7 @@ KafkaConfig:
     comments: Path to client's private key file (PEM).
     required: false
   - name: properties.ssl.key.password
-    field_type: String
+    field_type: SecretString
     comments: Passphrase of client's private key.
     required: false
   - name: properties.sasl.mechanism
@@ -201,7 +201,7 @@ KafkaConfig:
     comments: SASL username for SASL/PLAIN and SASL/SCRAM.
     required: false
   - name: properties.sasl.password
-    field_type: String
+    field_type: SecretString
     comments: SASL password for SASL/PLAIN and SASL/SCRAM.
     required: false
   - name: properties.sasl.kerberos.service.name
@@ -361,10 +361,10 @@ NatsConfig:
     field_type: String
     required: false
   - name: password
-    field_type: String
+    field_type: SecretString
     required: false
   - name: jwt
-    field_type: String
+    field_type: SecretString
     required: false
   - name: nkey
     field_type: String
@@ -406,7 +406,7 @@ PulsarConfig:
     required: true
     alias: pulsar.service.url
   - name: auth.token
-    field_type: String
+    field_type: SecretString
     required: false
   - name: oauth.issuer.url
     field_type: String
