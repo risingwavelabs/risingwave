@@ -134,7 +134,6 @@ mod tests {
     #[test]
     fn test_with_options_yaml_up_to_date() {
         expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
-
         expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
     }
 
