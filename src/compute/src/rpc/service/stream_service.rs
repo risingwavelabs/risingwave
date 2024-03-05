@@ -13,18 +13,16 @@
 // limitations under the License.
 
 use await_tree::InstrumentAwait;
-use itertools::Itertools;
-use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::LocalSstableInfo;
-use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
+use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
-use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{BarrierCompleteResult, LocalStreamManager, StreamEnvironment};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use thiserror_ext::AsReport;
-use tonic::{Request, Response, Status};
+use tokio::sync::mpsc::unbounded_channel;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tonic::{Request, Response, Status, Streaming};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -40,6 +38,9 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
+    type StreamingControlStreamStream =
+        impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
+
     #[cfg_attr(coverage, coverage(off))]
     async fn update_actors(
         &self,
@@ -111,86 +112,6 @@ impl StreamService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn force_stop_actors(
-        &self,
-        request: Request<ForceStopActorsRequest>,
-    ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
-        let req = request.into_inner();
-        self.mgr.reset(req.prev_epoch).await;
-        Ok(Response::new(ForceStopActorsResponse {
-            request_id: req.request_id,
-            status: None,
-        }))
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn inject_barrier(
-        &self,
-        request: Request<InjectBarrierRequest>,
-    ) -> Result<Response<InjectBarrierResponse>, Status> {
-        let req = request.into_inner();
-        let barrier =
-            Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
-
-        self.mgr
-            .send_barrier(barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
-            .await?;
-
-        Ok(Response::new(InjectBarrierResponse {
-            request_id: req.request_id,
-            status: None,
-        }))
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn barrier_complete(
-        &self,
-        request: Request<BarrierCompleteRequest>,
-    ) -> Result<Response<BarrierCompleteResponse>, Status> {
-        let req = request.into_inner();
-        let BarrierCompleteResult {
-            create_mview_progress,
-            sync_result,
-        } = self
-            .mgr
-            .collect_barrier(req.prev_epoch)
-            .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
-            .await
-            .inspect_err(
-                |err| tracing::error!(error = %err.as_report(), "failed to collect barrier"),
-            )?;
-
-        let (synced_sstables, table_watermarks) = sync_result
-            .map(|sync_result| (sync_result.uncommitted_ssts, sync_result.table_watermarks))
-            .unwrap_or_default();
-
-        Ok(Response::new(BarrierCompleteResponse {
-            request_id: req.request_id,
-            status: None,
-            create_mview_progress,
-            synced_sstables: synced_sstables
-                .into_iter()
-                .map(
-                    |LocalSstableInfo {
-                         compaction_group_id,
-                         sst_info,
-                         table_stats,
-                     }| GroupedSstableInfo {
-                        compaction_group_id,
-                        sst: Some(sst_info),
-                        table_stats_map: to_prost_table_stats_map(table_stats),
-                    },
-                )
-                .collect_vec(),
-            worker_id: self.env.worker_id(),
-            table_watermarks: table_watermarks
-                .into_iter()
-                .map(|(key, value)| (key.table_id, value.to_protobuf()))
-                .collect(),
-        }))
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
     async fn wait_epoch_commit(
         &self,
         request: Request<WaitEpochCommitRequest>,
@@ -209,5 +130,28 @@ impl StreamService for StreamServiceImpl {
         });
 
         Ok(Response::new(WaitEpochCommitResponse { status: None }))
+    }
+
+    async fn streaming_control_stream(
+        &self,
+        request: Request<Streaming<StreamingControlStreamRequest>>,
+    ) -> Result<Response<Self::StreamingControlStreamStream>, Status> {
+        let mut stream = request.into_inner().boxed();
+        let first_request = stream
+            .try_next()
+            .await?
+            .ok_or_else(|| Status::invalid_argument("failed to receive first request"))?;
+        let StreamingControlStreamRequest {
+            request: Some(streaming_control_stream_request::Request::Init(init_request)),
+        } = first_request
+        else {
+            return Err(Status::invalid_argument(format!(
+                "unexpected first request: {:?}",
+                first_request
+            )));
+        };
+        let (tx, rx) = unbounded_channel();
+        self.mgr.handle_new_control_stream(tx, stream, init_request);
+        Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
 }

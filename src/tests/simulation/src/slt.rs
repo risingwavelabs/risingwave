@@ -26,6 +26,9 @@ use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
+// retry up to 10 times until it succeed
+const MAX_RETRY: usize = 10;
+
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
 
@@ -271,10 +274,13 @@ pub async fn run_slt_task(
                         })
                         .await
                     {
+                        let err_string = err.to_string();
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
-                        let should_retry =
-                            err.to_string().contains("no reader for dml in table") && i < 5;
+                        let should_retry = (err_string.contains("no reader for dml in table")
+                            || err_string
+                                .contains("error reading a body from connection: broken pipe"))
+                            && i < MAX_RETRY;
                         if !should_retry {
                             panic!("{}", err);
                         }
@@ -302,8 +308,6 @@ pub async fn run_slt_task(
                 None
             };
 
-            // retry up to 5 times until it succeed
-            let max_retry = 5;
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
@@ -348,7 +352,7 @@ pub async fn run_slt_task(
                                         ?err,
                                         "failed to wait for background mv to finish creating"
                                     );
-                                    if i >= max_retry {
+                                    if i >= MAX_RETRY {
                                         panic!("failed to run test after retry {i} times, error={err:#?}");
                                     }
                                     continue;
@@ -379,8 +383,8 @@ pub async fn run_slt_task(
                                 break
                             }
 
-                            // Keep i >= max_retry for other errors. Since these errors indicate that the MV might not yet be created.
-                            _ if i >= max_retry => {
+                            // Keep i >= MAX_RETRY for other errors. Since these errors indicate that the MV might not yet be created.
+                            _ if i >= MAX_RETRY => {
                                 panic!("failed to run test after retry {i} times: {e}")
                             }
                             SqlCmd::CreateMaterializedView { ref name }
@@ -404,7 +408,7 @@ pub async fn run_slt_task(
                                             ?err,
                                             "failed to wait for background mv to finish creating"
                                         );
-                                        if i >= max_retry {
+                                        if i >= MAX_RETRY {
                                             panic!("failed to run test after retry {i} times, error={err:#?}");
                                         }
                                         continue;

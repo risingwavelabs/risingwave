@@ -43,7 +43,9 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{
+    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+};
 
 pub mod error;
 use error::Result;
@@ -63,7 +65,9 @@ pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use rw_futures_util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;
-pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
+pub use stream_client::{
+    StreamClient, StreamClientPool, StreamClientPoolRef, StreamingControlHandle,
+};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
@@ -272,5 +276,63 @@ impl<REQ, RSP> BidiStreamHandle<REQ, RSP> {
             Err(None) => Err(anyhow!("end of response stream").into()),
             Err(Some(e)) => Err(e),
         }
+    }
+}
+
+pub struct UnboundedBidiStreamHandle<REQ, RSP> {
+    pub request_sender: UnboundedSender<REQ>,
+    pub response_stream: BoxStream<'static, Result<RSP>>,
+}
+
+impl<REQ, RSP> Debug for UnboundedBidiStreamHandle<REQ, RSP> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(type_name::<Self>())
+    }
+}
+
+impl<REQ, RSP> UnboundedBidiStreamHandle<REQ, RSP> {
+    pub async fn initialize<
+        F: FnOnce(UnboundedReceiver<REQ>) -> Fut,
+        St: Stream<Item = Result<RSP>> + Send + Unpin + 'static,
+        Fut: Future<Output = Result<St>> + Send,
+        R: Into<REQ>,
+    >(
+        first_request: R,
+        init_stream_fn: F,
+    ) -> Result<(Self, RSP)> {
+        let (request_sender, request_receiver) = unbounded_channel();
+
+        // Send initial request in case of the blocking receive call from creating streaming request
+        request_sender
+            .send(first_request.into())
+            .map_err(|_err| anyhow!("unable to send first request of {}", type_name::<REQ>()))?;
+
+        let mut response_stream = init_stream_fn(request_receiver).await?;
+
+        let first_response = response_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("get empty response from first request"))??;
+
+        Ok((
+            Self {
+                request_sender,
+                response_stream: response_stream.boxed(),
+            },
+            first_response,
+        ))
+    }
+
+    pub async fn next_response(&mut self) -> Result<RSP> {
+        self.response_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("end of response stream"))?
+    }
+
+    pub fn send_request(&mut self, request: REQ) -> Result<()> {
+        self.request_sender
+            .send(request)
+            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
     }
 }
