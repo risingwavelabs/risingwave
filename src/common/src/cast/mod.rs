@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use libc::abs;
+use num_traits::Signed;
 
 use crate::types::{Timestamp, Timestamptz};
 
@@ -63,7 +65,7 @@ pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
     const E11: i64 = 100_000_000_000;
     const E14: i64 = 100_000_000_000_000;
     const E17: i64 = 100_000_000_000_000_000;
-    match t {
+    match t.abs() {
         0..E11 => Ok(Timestamptz::from_secs(t).unwrap()), // s
         E11..E14 => Ok(Timestamptz::from_millis(t).unwrap()), // ms
         E14..E17 => Ok(Timestamptz::from_micros(t)),      // us
