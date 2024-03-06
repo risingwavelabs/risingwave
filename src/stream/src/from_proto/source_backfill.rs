@@ -12,14 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{default_key_column_name_version_mapping, ColumnId, TableId};
-use risingwave_connector::source::reader::desc::SourceDescBuilder;
+use risingwave_common::catalog::TableId;
 use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_pb::data::data_type::TypeName as PbTypeName;
-use risingwave_pb::plan_common::additional_column::ColumnType;
-use risingwave_pb::plan_common::{
-    AdditionalColumn, AdditionalColumnKey, ColumnDescVersion, FormatType, PbEncodeType,
-};
 use risingwave_pb::stream_plan::SourceBackfillNode;
 
 use super::*;
