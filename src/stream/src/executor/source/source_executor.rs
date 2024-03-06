@@ -546,7 +546,6 @@ impl<S: StateStore> SourceExecutor<S> {
                             .updated_splits_in_epoch
                             .extend(state);
                     }
-                    metric_row_per_barrier += chunk.cardinality() as u64;
 
                     self.metrics
                         .source_output_row_count
