@@ -66,6 +66,21 @@ pub struct LateralBindContext {
     pub context: BindContext,
 }
 
+/// CTE during binding.
+enum BindingCte {
+    /// This is only used while defining recursive CTE.
+    ///
+    /// ```sql
+    /// WITH RECURSIVE t(n) AS (
+    ///     VALUES (1)
+    ///   UNION ALL
+    ///     SELECT n+1 FROM t WHERE n < 100
+    /// )
+    /// SELECT sum(n) FROM t;
+    /// ```
+    RecursiveDefining { id: ShareId },
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct BindContext {
     // Columns of all tables.

@@ -30,6 +30,7 @@ use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
+mod cte_ref;
 mod join;
 mod share;
 mod subquery;
