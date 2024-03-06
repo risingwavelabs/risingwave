@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory;
 
 public class CassandraSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(CassandraSink.class);
-    private static final Integer MAX_BATCH_SIZE = 1024 * 16;
 
     private final CqlSession session;
     private final List<SinkRow> updateRowCache = new ArrayList<>(1);
@@ -163,7 +162,7 @@ public class CassandraSink extends SinkWriterBase {
     }
 
     private void tryCommit() {
-        if (batchBuilder.getStatementsCount() >= MAX_BATCH_SIZE) {
+        if (batchBuilder.getStatementsCount() >= config.getMaxBatchRows()) {
             sync();
         }
     }

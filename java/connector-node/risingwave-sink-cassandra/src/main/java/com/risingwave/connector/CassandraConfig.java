@@ -42,6 +42,9 @@ public class CassandraConfig extends CommonSinkConfig {
     @JsonProperty(value = "cassandra.password")
     private String password;
 
+    @JsonProperty(value = "cassandra.max_batch_rows")
+    private Integer maxBatchRows = 512;
+
     @JsonCreator
     public CassandraConfig(
             @JsonProperty(value = "cassandra.url") String url,
@@ -91,6 +94,15 @@ public class CassandraConfig extends CommonSinkConfig {
 
     public CassandraConfig withPassword(String password) {
         this.password = password;
+        return this;
+    }
+
+    public Integer getMaxBatchRows() {
+        return maxBatchRows;
+    }
+
+    public CassandraConfig withMaxBatchRows(Integer maxBatchRows) {
+        this.maxBatchRows = maxBatchRows;
         return this;
     }
 }
