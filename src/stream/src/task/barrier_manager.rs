@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use parking_lot::Mutex;
@@ -162,15 +162,7 @@ impl StreamActorManagerState {
         let (join_result, sender) = pending_on_none(self.creating_actors.next()).await;
         (
             sender,
-            join_result
-                .map_err(|join_error| {
-                    anyhow!(
-                        "failed to join creating actors futures: {:?}",
-                        join_error.as_report()
-                    )
-                    .into()
-                })
-                .and_then(|result| result),
+            try { join_result.context("failed to join creating actors futures")?? },
         )
     }
 }
