@@ -144,11 +144,11 @@ impl ComputeClient {
             .await
             .inspect_err(|err| {
                 tracing::error!(
-                    "failed to create stream from remote_input {} from actor {} to actor {}: {}",
+                    "failed to create stream from remote_input {} from actor {} to actor {}: {:?}",
                     self.addr,
                     up_actor_id,
                     down_actor_id,
-                    err.as_report(),
+                    err,
                 )
             })?
             .into_inner();
