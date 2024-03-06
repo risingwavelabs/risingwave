@@ -65,6 +65,7 @@ const TRACING_FIELD_DISPLAY: [&str; 3] = ["tracing_core", "field", "display"];
 const TRACING_MACROS_EVENT: [&str; 3] = ["tracing", "macros", "event"];
 const ANYHOW_MACROS_ANYHOW: [&str; 3] = ["anyhow", "macros", "anyhow"];
 const ANYHOW_ERROR: [&str; 2] = ["anyhow", "Error"];
+const THISERROR_EXT_REPORT_REPORT: [&str; 3] = ["thiserror_ext", "report", "Report"];
 
 impl<'tcx> LateLintPass<'tcx> for FormatError {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
@@ -147,6 +148,7 @@ fn check_fmt_arg_in_anyhow_error(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
         (
             "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting it",
             "consider removing the redundant wrapping of `anyhow::anyhow!(..)`",
+            "consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting its report",
         ),
     );
 }
@@ -159,6 +161,8 @@ fn check_fmt_arg_in_anyhow_context(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
             "consider using `anyhow::Context::(with_)context` to \
         attach additional message to the error and make it an error source instead",
             "consider using `.context(..)` to \
+        attach additional message to the error and make it an error source instead",
+            "consider using `anyhow::Context::(with_)context` to \
         attach additional message to the error and make it an error source instead",
         ),
     );
@@ -188,6 +192,12 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl H
         help.normal_help()
     } else if match_type(cx, ty, &ANYHOW_ERROR) {
         help.anyhow_help()
+    } else if match_type(cx, ty, &THISERROR_EXT_REPORT_REPORT) {
+        if let Some(help) = help.report_help() {
+            help
+        } else {
+            return;
+        }
     } else {
         return;
     };
@@ -212,6 +222,9 @@ trait Help {
     fn anyhow_help(&self) -> &str {
         self.normal_help()
     }
+    fn report_help(&self) -> Option<&str> {
+        None
+    }
 }
 
 impl Help for &str {
@@ -220,13 +233,17 @@ impl Help for &str {
     }
 }
 
-impl Help for (&str, &str) {
+impl Help for (&str, &str, &str) {
     fn normal_help(&self) -> &str {
         self.0
     }
 
     fn anyhow_help(&self) -> &str {
         self.1
+    }
+
+    fn report_help(&self) -> Option<&str> {
+        Some(self.2)
     }
 }
 

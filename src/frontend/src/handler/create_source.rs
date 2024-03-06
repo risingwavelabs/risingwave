@@ -21,9 +21,10 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, Schema, TableId, INITIAL_SOURCE_VERSION_ID,
-    KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
@@ -31,11 +32,12 @@ use risingwave_connector::parser::additional_columns::{
 };
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig,
+    SpecificParserConfig, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
@@ -66,7 +68,6 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::ColumnId;
 use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -75,7 +76,8 @@ use crate::handler::create_table::{
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    connector_need_pk, get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
+    connector_need_pk, get_connector, is_cdc_connector, is_iceberg_connector, is_kafka_connector,
+    SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
@@ -150,6 +152,15 @@ async fn extract_avro_table_schema(
         let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
     } else {
+        if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
+            &parser_config.encoding_config
+            && !avro_props.use_schema_registry
+            && !format_encode_options
+                .get("with_deprecated_file_header")
+                .is_some_and(|v| v == "true")
+        {
+            bail_not_implemented!(issue = 12871, "avro without schema registry");
+        }
         let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
     };
@@ -317,9 +328,12 @@ pub(crate) async fn bind_columns_from_source(
         ..Default::default()
     };
 
+    if source_schema.format == Format::Debezium {
+        try_consume_string_from_options(&mut format_encode_options_to_consume, DEBEZIUM_IGNORE_KEY);
+    }
+
     let columns = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native)
-        | (Format::None, Encode::None)
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) => {
@@ -429,6 +443,17 @@ pub(crate) async fn bind_columns_from_source(
                 &mut format_encode_options_to_consume,
             )
             .await?
+        }
+        (Format::None, Encode::None) => {
+            if is_iceberg_connector(with_properties) {
+                Some(
+                    extract_iceberg_columns(with_properties)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else {
+                None
+            }
         }
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
@@ -982,7 +1007,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
                 ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
@@ -1142,6 +1167,46 @@ pub(super) fn check_nexmark_schema(
         ))));
     }
     Ok(())
+}
+
+pub async fn extract_iceberg_columns(
+    with_properties: &HashMap<String, String>,
+) -> anyhow::Result<Vec<ColumnCatalog>> {
+    let props = ConnectorProperties::extract(with_properties.clone(), true)?;
+    if let ConnectorProperties::Iceberg(properties) = props {
+        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
+        let table = iceberg_config.load_table().await?;
+        let iceberg_schema: arrow_schema::Schema = table
+            .current_table_metadata()
+            .current_schema()?
+            .clone()
+            .try_into()?;
+
+        let columns = iceberg_schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let data_type = field.data_type().clone();
+                let column_desc = ColumnDesc::named(
+                    field.name(),
+                    ColumnId::new((i as u32).try_into().unwrap()),
+                    data_type.into(),
+                );
+                ColumnCatalog {
+                    column_desc,
+                    is_hidden: false,
+                }
+            })
+            .collect();
+
+        Ok(columns)
+    } else {
+        Err(anyhow!(format!(
+            "Invalid properties for iceberg source: {:?}",
+            props
+        )))
+    }
 }
 
 pub async fn check_iceberg_source(

@@ -30,6 +30,15 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: message_queue
+  datagen:
+    build: ../datagen
+    depends_on: [message_queue]
+    command:
+      - /bin/sh
+      - -c
+      - /datagen --mode livestream --qps 10 nats --url nats-server:4222 --jetstream
+    restart: always
+    container_name: datagen
 volumes:
   compute-node-0:
     external: false

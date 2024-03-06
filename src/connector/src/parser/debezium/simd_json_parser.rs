@@ -102,8 +102,8 @@ mod tests {
     use thiserror_ext::AsReport;
 
     use crate::parser::{
-        DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
-        SourceStreamChunkBuilder, SpecificParserConfig,
+        DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
+        SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceContextRef;
 
@@ -129,7 +129,7 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         DebeziumParser::new(props, rw_columns, source_ctx)
             .await
