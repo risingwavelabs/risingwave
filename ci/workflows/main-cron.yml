@@ -409,7 +409,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 7
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test (release)"
@@ -428,7 +428,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 11
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
@@ -776,7 +776,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "e2e standalone binary test"

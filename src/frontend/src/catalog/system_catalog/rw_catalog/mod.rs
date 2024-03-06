@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod rw_actor_infos;
 mod rw_actors;
 mod rw_columns;
 mod rw_connections;
 mod rw_databases;
 mod rw_ddl_progress;
+mod rw_depend;
 mod rw_description;
 mod rw_event_logs;
 mod rw_fragment_parallelism;

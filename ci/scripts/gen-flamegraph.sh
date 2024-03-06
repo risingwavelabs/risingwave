@@ -97,7 +97,7 @@ install_all() {
   promql --version
 
   echo ">>> Installing Kafka"
-  wget https://downloads.apache.org/kafka/3.4.1/kafka_2.13-3.4.1.tgz
+  wget https://archive.apache.org/dist/kafka/3.4.1/kafka_2.13-3.4.1.tgz
   tar -zxvf kafka_2.13-3.4.1.tgz
 
   echo ">>> Installing nexmark bench"
@@ -159,7 +159,6 @@ ENABLE_KAFKA=true
 ENABLE_COMPUTE_TRACING=true
 ENABLE_BUILD_RUST=true
 ENABLE_RELEASE_PROFILE=true
-ENABLE_ALL_IN_ONE=true
 EOF
 popd
 }

@@ -30,7 +30,7 @@ use crate::barrier::{
 };
 use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, TableFragments};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 type ConsumedRows = u64;
 
@@ -216,6 +216,20 @@ impl TrackingJob {
         }
     }
 
+    pub(crate) fn notify_finish_failed(self, err: MetaError) {
+        match self {
+            TrackingJob::New(command) => {
+                command
+                    .notifiers
+                    .into_iter()
+                    .for_each(|n| n.notify_finish_failed(err.clone()));
+            }
+            TrackingJob::Recovered(recovered) => {
+                recovered.finished.notify_finish_failed(err);
+            }
+        }
+    }
+
     pub(crate) fn table_to_create(&self) -> Option<TableId> {
         match self {
             TrackingJob::New(command) => command.context.table_to_create(),
@@ -369,6 +383,17 @@ impl CreateMviewProgressTracker {
         self.finished_jobs
             .retain(|x| x.table_to_create() != Some(id));
         self.actor_map.retain(|_, table_id| *table_id != id);
+    }
+
+    /// Notify all tracked commands that error encountered and clear them.
+    pub fn abort_all(&mut self, err: &MetaError) {
+        self.actor_map.clear();
+        self.finished_jobs.drain(..).for_each(|job| {
+            job.notify_finish_failed(err.clone());
+        });
+        self.progress_map
+            .drain()
+            .for_each(|(_, (_, job))| job.notify_finish_failed(err.clone()));
     }
 
     /// Add a new create-mview DDL command to track.

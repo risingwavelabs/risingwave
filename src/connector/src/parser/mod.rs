@@ -50,6 +50,7 @@ use self::util::get_kafka_topic;
 use crate::common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
+use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::util::{
     extract_header_inner_from_meta, extract_headers_from_meta, extreact_timestamp_from_meta,
 };
@@ -77,6 +78,7 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+pub use debezium::DEBEZIUM_IGNORE_KEY;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
@@ -770,6 +772,7 @@ pub enum AccessBuilderImpl {
     Bytes(BytesAccessBuilder),
     DebeziumAvro(DebeziumAvroAccessBuilder),
     DebeziumJson(DebeziumJsonAccessBuilder),
+    DebeziumMongoJson(DebeziumMongoJsonAccessBuilder),
 }
 
 impl AccessBuilderImpl {
@@ -808,6 +811,7 @@ impl AccessBuilderImpl {
             Self::Bytes(builder) => builder.generate_accessor(payload).await?,
             Self::DebeziumAvro(builder) => builder.generate_accessor(payload).await?,
             Self::DebeziumJson(builder) => builder.generate_accessor(payload).await?,
+            Self::DebeziumMongoJson(builder) => builder.generate_accessor(payload).await?,
         };
         Ok(accessor)
     }
@@ -874,7 +878,7 @@ impl ByteStreamSourceParserImpl {
                     PlainParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Plain(parser))
             }
-            (ProtocolProperties::Debezium, _) => {
+            (ProtocolProperties::Debezium(_), _) => {
                 let parser =
                     DebeziumParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Debezium(parser))
@@ -972,6 +976,7 @@ pub enum EncodingProperties {
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
     Json(JsonProperties),
+    MongoJson(JsonProperties),
     Bytes(BytesProperties),
     Native,
     /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
@@ -982,7 +987,7 @@ pub enum EncodingProperties {
 
 #[derive(Debug, Default, Clone)]
 pub enum ProtocolProperties {
-    Debezium,
+    Debezium(DebeziumProps),
     DebeziumMongo,
     Maxwell,
     Canal,
@@ -1009,7 +1014,10 @@ impl SpecificParserConfig {
         let protocol_config = match format {
             SourceFormat::Native => ProtocolProperties::Native,
             SourceFormat::None => ProtocolProperties::None,
-            SourceFormat::Debezium => ProtocolProperties::Debezium,
+            SourceFormat::Debezium => {
+                let debezium_props = DebeziumProps::from(&info.format_encode_options);
+                ProtocolProperties::Debezium(debezium_props)
+            }
             SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,
             SourceFormat::Maxwell => ProtocolProperties::Maxwell,
             SourceFormat::Canal => ProtocolProperties::Canal,

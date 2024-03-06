@@ -30,6 +30,7 @@ use moka::sync::Cache;
 use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
@@ -115,21 +116,28 @@ impl UserDefinedFunction {
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input)?,
             UdfImpl::External(client) => {
+                // batch query does not have a fragment_id
+                let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or(0);
+
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
                     client
-                        .call_with_always_retry_on_network_error(&self.identifier, arrow_input)
+                        .call_with_always_retry_on_network_error(
+                            &self.identifier,
+                            arrow_input,
+                            fragment_id,
+                        )
                         .instrument_await(self.span.clone())
                         .await
                 } else {
                     let result = if disable_retry_count != 0 {
                         client
-                            .call(&self.identifier, arrow_input)
+                            .call(&self.identifier, arrow_input, fragment_id)
                             .instrument_await(self.span.clone())
                             .await
                     } else {
                         client
-                            .call_with_retry(&self.identifier, arrow_input)
+                            .call_with_retry(&self.identifier, arrow_input, fragment_id)
                             .instrument_await(self.span.clone())
                             .await
                     };
