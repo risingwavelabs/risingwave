@@ -225,8 +225,8 @@ impl ArrowFlightUdfClient {
         let mut backoff = Duration::from_millis(100);
         loop {
             match self.call(id, input.clone(), fragment_id).await {
-                Err(err) if err.is_connection_error() => {
-                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+                Err(err) if err.is_tonic_error() => {
+                    tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
                 }
                 ret => {
                     if ret.is_err() {

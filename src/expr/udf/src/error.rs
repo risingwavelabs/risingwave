@@ -58,6 +58,13 @@ impl Error {
             _ => false,
         }
     }
+
+    pub fn is_tonic_error(&self) -> bool {
+        match self.inner() {
+            ErrorInner::Tonic(_) | ErrorInner::Connect(_) => true,
+            _ => false,
+        }
+    }
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 8);
