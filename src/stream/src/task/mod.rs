@@ -147,6 +147,7 @@ impl SharedContext {
     }
 
     pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
+        tracing::debug!("taking sender {:?}", ids);
         self.get_or_insert_channels(*ids)
             .0
             .take()
@@ -154,6 +155,7 @@ impl SharedContext {
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+        tracing::debug!("taking receiver {:?}", ids);
         self.get_or_insert_channels(ids)
             .1
             .take()
