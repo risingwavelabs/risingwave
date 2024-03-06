@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::try_join_all;
+use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
@@ -268,11 +268,17 @@ impl StreamRpcManager {
     ) -> MetaResult<Vec<RSP>> {
         let pool = self.env.stream_client_pool();
         let f = &f;
-        Ok(try_join_all(request.map(|(node, input)| async move {
+        let results = join_all(request.map(|(node, input)| async move {
             let client = pool.get(node).await?;
             f(client, input).await
         }))
-        .await?)
+        .await;
+        let mut resps = vec![];
+        for res in results {
+            let x = res?;
+            resps.push(x);
+        }
+        Ok(resps)
     }
 
     async fn broadcast<RSP, Fut: Future<Output = Result<RSP, RpcError>> + 'static>(
