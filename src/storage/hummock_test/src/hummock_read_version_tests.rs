@@ -66,7 +66,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of((1) as usize);
+        let key = iterator_test_table_key_of(1_usize);
         let key_range = map_table_key_range((
             Bound::Included(Bytes::from(key.to_vec())),
             Bound::Included(Bytes::from(key.to_vec())),

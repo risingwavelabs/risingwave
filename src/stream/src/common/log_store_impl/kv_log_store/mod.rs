@@ -328,14 +328,12 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = test_epoch(
-            test_env
-                .storage
-                .get_pinned_version()
-                .version()
-                .max_committed_epoch
-                + 1,
-        );
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -424,14 +422,12 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = test_epoch(
-            test_env
-                .storage
-                .get_pinned_version()
-                .version()
-                .max_committed_epoch
-                + 1,
-        );
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -610,14 +606,12 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = test_epoch(
-            test_env
-                .storage
-                .get_pinned_version()
-                .version()
-                .max_committed_epoch
-                + 1,
-        );
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -838,14 +832,12 @@ mod tests {
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
 
-        let epoch1 = test_epoch(
-            test_env
-                .storage
-                .get_pinned_version()
-                .version()
-                .max_committed_epoch
-                + 1,
-        );
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
         writer1
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1032,14 +1024,12 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = test_epoch(
-            test_env
-                .storage
-                .get_pinned_version()
-                .version()
-                .max_committed_epoch
-                + 1,
-        );
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1175,14 +1165,12 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        let epoch1 = test_epoch(
-            test_env
-                .storage
-                .get_pinned_version()
-                .version()
-                .max_committed_epoch
-                + 1,
-        );
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            .next_epoch();
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::{test_epoch, EpochPair, INVALID_EPOCH};
+use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
 };
@@ -133,10 +133,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         assert_eq!(self.epoch_progress, UNINITIALIZED);
         self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
         self.latest_offset = TruncateOffset::Barrier {
-            epoch: epoch - test_epoch(1),
+            epoch: epoch.prev_epoch(),
         };
         self.truncate_offset = TruncateOffset::Barrier {
-            epoch: epoch - test_epoch(1),
+            epoch: epoch.prev_epoch(),
         };
         Ok(())
     }
