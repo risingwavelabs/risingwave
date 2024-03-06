@@ -92,7 +92,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         runtime
             .block_on(hummock_storage.ingest_batch(
                 batch,
-                vec![],
                 WriteOptions {
                     epoch,
                     table_id: Default::default(),

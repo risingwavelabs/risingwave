@@ -22,8 +22,8 @@ use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
 use super::{
-    Barrier, BoxedMessageStream, Executor, Message, MessageStream, PkIndices, StreamChunk,
-    StreamExecutorResult, Watermark,
+    Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, MessageStream,
+    StreamChunk, StreamExecutorResult, Watermark,
 };
 
 pub mod prelude {
@@ -41,12 +41,10 @@ pub mod prelude {
     pub use crate::common::table::state_table::StateTable;
     pub use crate::executor::test_utils::expr::build_from_pretty;
     pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    pub use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
+    pub use crate::executor::{ActorContext, BoxedMessageStream, Execute, PkIndices};
 }
 
 pub struct MockSource {
-    schema: Schema,
-    pk_indices: PkIndices,
     rx: mpsc::UnboundedReceiver<Message>,
 
     /// Whether to send a `Stop` barrier on stream finish.
@@ -108,20 +106,15 @@ impl MessageSender {
 
 impl std::fmt::Debug for MockSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MockSource")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .finish()
+        f.debug_struct("MockSource").finish()
     }
 }
 
 impl MockSource {
     #[allow(dead_code)]
-    pub fn channel(schema: Schema, pk_indices: PkIndices) -> (MessageSender, Self) {
+    pub fn channel() -> (MessageSender, Self) {
         let (tx, rx) = mpsc::unbounded_channel();
         let source = Self {
-            schema,
-            pk_indices,
             rx,
             stop_on_finish: true,
         };
@@ -129,16 +122,16 @@ impl MockSource {
     }
 
     #[allow(dead_code)]
-    pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
-        let (tx, source) = Self::channel(schema, pk_indices);
+    pub fn with_messages(msgs: Vec<Message>) -> Self {
+        let (tx, source) = Self::channel();
         for msg in msgs {
             tx.0.send(msg).unwrap();
         }
         source
     }
 
-    pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
-        let (tx, source) = Self::channel(schema, pk_indices);
+    pub fn with_chunks(chunks: Vec<StreamChunk>) -> Self {
+        let (tx, source) = Self::channel();
         for chunk in chunks {
             tx.0.send(Message::Chunk(chunk)).unwrap();
         }
@@ -152,6 +145,17 @@ impl MockSource {
             stop_on_finish,
             ..self
         }
+    }
+
+    pub fn into_executor(self, schema: Schema, pk_indices: Vec<usize>) -> Executor {
+        Executor::new(
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "MockSource".to_string(),
+            },
+            self.boxed(),
+        )
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -169,21 +173,9 @@ impl MockSource {
     }
 }
 
-impl Executor for MockSource {
+impl Execute for MockSource {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        "MockSource"
     }
 }
 
@@ -296,14 +288,14 @@ pub mod agg_executor {
     };
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, HashAggExecutor,
-        PkIndices, SimpleAggExecutor,
+        ActorContext, ActorContextRef, Executor, ExecutorInfo, HashAggExecutor, PkIndices,
+        SimpleAggExecutor,
     };
 
-    /// Generate agg executor's schema from `input`, `agg_calls` and `group_key_indices`.
+    /// Generate aggExecuter's schema from `input`, `agg_calls` and `group_key_indices`.
     /// For [`crate::executor::HashAggExecutor`], the group key indices should be provided.
     pub fn generate_agg_schema(
-        input: &dyn Executor,
+        input_ref: &Executor,
         agg_calls: &[AggCall],
         group_key_indices: Option<&[usize]>,
     ) -> Schema {
@@ -314,7 +306,7 @@ pub mod agg_executor {
         let fields = if let Some(key_indices) = group_key_indices {
             let keys = key_indices
                 .iter()
-                .map(|idx| input.schema().fields[*idx].clone());
+                .map(|idx| input_ref.schema().fields[*idx].clone());
 
             keys.chain(aggs).collect()
         } else {
@@ -332,7 +324,7 @@ pub mod agg_executor {
         agg_call: &AggCall,
         group_key_indices: &[usize],
         pk_indices: &[usize],
-        input_ref: &dyn Executor,
+        input_ref: &Executor,
         is_append_only: bool,
     ) -> AggStateStorage<S> {
         match agg_call.kind {
@@ -403,7 +395,7 @@ pub mod agg_executor {
         table_id: TableId,
         agg_calls: &[AggCall],
         group_key_indices: &[usize],
-        input_ref: &dyn Executor,
+        input_ref: &Executor,
     ) -> StateTable<S> {
         let input_fields = input_ref.schema().fields();
 
@@ -442,7 +434,7 @@ pub mod agg_executor {
     #[allow(clippy::too_many_arguments)]
     pub async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
-        input: Box<dyn Executor>,
+        input: Executor,
         is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
@@ -451,7 +443,7 @@ pub mod agg_executor {
         extreme_cache_size: usize,
         emit_on_window_close: bool,
         executor_id: u64,
-    ) -> Box<dyn Executor> {
+    ) -> Executor {
         let mut storages = Vec::with_capacity(agg_calls.iter().len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
             storages.push(
@@ -461,7 +453,7 @@ pub mod agg_executor {
                     agg_call,
                     &group_key_indices,
                     &pk_indices,
-                    input.as_ref(),
+                    &input,
                     is_append_only,
                 )
                 .await,
@@ -473,23 +465,23 @@ pub mod agg_executor {
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &group_key_indices,
-            input.as_ref(),
+            &input,
         )
         .await;
 
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
+        let schema = generate_agg_schema(&input, &agg_calls, Some(&group_key_indices));
         let info = ExecutorInfo {
             schema,
             pk_indices,
             identity: format!("HashAggExecutor {:X}", executor_id),
         };
 
-        HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
+        let exec = HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
             version: PbAggNodeVersion::Max,
 
             input,
-            actor_ctx: ActorContext::create(123),
-            info,
+            actor_ctx: ActorContext::for_test(123),
+            info: info.clone(),
 
             extreme_cache_size,
 
@@ -507,21 +499,21 @@ pub mod agg_executor {
                 emit_on_window_close,
             },
         })
-        .unwrap()
-        .boxed()
+        .unwrap();
+        (info, exec).into()
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         actor_ctx: ActorContextRef,
         store: S,
-        input: BoxedExecutor,
+        input: Executor,
         is_append_only: bool,
         agg_calls: Vec<AggCall>,
         row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-    ) -> Box<dyn Executor> {
+    ) -> Executor {
         let storages = future::join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
             create_agg_state_storage(
                 store.clone(),
@@ -529,7 +521,7 @@ pub mod agg_executor {
                 agg_call,
                 &[],
                 &pk_indices,
-                input.as_ref(),
+                &input,
                 is_append_only,
             )
         }))
@@ -540,23 +532,23 @@ pub mod agg_executor {
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &[],
-            input.as_ref(),
+            &input,
         )
         .await;
 
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+        let schema = generate_agg_schema(&input, &agg_calls, None);
         let info = ExecutorInfo {
             schema,
             pk_indices,
             identity: format!("SimpleAggExecutor {:X}", executor_id),
         };
 
-        SimpleAggExecutor::new(AggExecutorArgs {
+        let exec = SimpleAggExecutor::new(AggExecutorArgs {
             version: PbAggNodeVersion::Max,
 
             input,
             actor_ctx,
-            info,
+            info: info.clone(),
 
             extreme_cache_size: 1024,
 
@@ -568,8 +560,8 @@ pub mod agg_executor {
             watermark_epoch: Arc::new(AtomicU64::new(0)),
             extra: SimpleAggExecutorExtraArgs {},
         })
-        .unwrap()
-        .boxed()
+        .unwrap();
+        (info, exec).into()
     }
 }
 

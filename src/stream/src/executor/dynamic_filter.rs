@@ -38,10 +38,7 @@ use risingwave_storage::StateStore;
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
-use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndicesRef,
-};
+use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message};
 use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
@@ -49,10 +46,12 @@ use crate::task::ActorEvalErrorReport;
 
 pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    source_l: Option<BoxedExecutor>,
-    source_r: Option<BoxedExecutor>,
+    eval_error_report: ActorEvalErrorReport,
+
+    schema: Schema,
+    source_l: Option<Executor>,
+    source_r: Option<Executor>,
     key_l: usize,
     comparator: ExprNodeType,
     left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
@@ -71,9 +70,9 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        source_l: BoxedExecutor,
-        source_r: BoxedExecutor,
+        info: &ExecutorInfo,
+        source_l: Executor,
+        source_r: Executor,
         key_l: usize,
         comparator: ExprNodeType,
         state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
@@ -83,9 +82,14 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         condition_always_relax: bool,
         cleaned_by_watermark: bool,
     ) -> Self {
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: Arc::from(info.identity.as_str()),
+        };
         Self {
             ctx,
-            info,
+            eval_error_report,
+            schema: info.schema.clone(),
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
@@ -263,7 +267,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(mut self) {
+    async fn execute_inner(mut self) {
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
 
@@ -273,10 +277,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         // The types are aligned by frontend.
         assert_eq!(l_data_type, r_data_type);
         let dynamic_cond = {
-            let eval_error_report = ActorEvalErrorReport {
-                actor_context: self.ctx.clone(),
-                identity: Arc::from(self.info.identity.as_str()),
-            };
+            let eval_error_report = self.eval_error_report.clone();
             move |literal: Datum| {
                 literal.map(|scalar| {
                     build_func_non_strict(
@@ -319,7 +320,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(self.chunk_size, self.info.schema.data_types());
+            StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
@@ -462,17 +463,13 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row);
                             }
-                            self.right_table.commit(barrier.epoch).await?;
-                        } else {
-                            self.right_table.commit_no_data_expected(barrier.epoch);
                         }
                         // Update the last committed row since it has changed
                         last_committed_epoch_row = current_epoch_row.clone();
-                    } else {
-                        self.right_table.commit_no_data_expected(barrier.epoch);
                     }
 
                     self.left_table.commit(barrier.epoch).await?;
+                    self.right_table.commit(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
@@ -491,23 +488,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     }
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Executor
+impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
     for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+        self.execute_inner().boxed()
     }
 }
 
@@ -566,21 +551,20 @@ mod tests {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![]);
-
-        let schema = source_l.schema().clone();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![0],
-            identity: "DynamicFilterExecutor".to_string(),
-        };
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.into_executor(schema.clone(), vec![0]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.into_executor(schema, vec![]);
 
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
-            ActorContext::create(123),
-            info,
-            Box::new(source_l),
-            Box::new(source_r),
+            ActorContext::for_test(123),
+            &ExecutorInfo {
+                schema: source_l.schema().clone(),
+                pk_indices: vec![0],
+                identity: "DynamicFilterExecutor".to_string(),
+            },
+            source_l,
+            source_r,
             0,
             comparator,
             mem_state_l,
@@ -590,7 +574,7 @@ mod tests {
             always_relax,
             false,
         );
-        (tx_l, tx_r, Box::new(executor).execute())
+        (tx_l, tx_r, executor.boxed().execute())
     }
 
     #[tokio::test]

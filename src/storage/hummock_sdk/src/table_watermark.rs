@@ -282,6 +282,15 @@ pub enum WatermarkDirection {
     Descending,
 }
 
+impl ToString for WatermarkDirection {
+    fn to_string(&self) -> String {
+        match self {
+            WatermarkDirection::Ascending => "Ascending".to_string(),
+            WatermarkDirection::Descending => "Descending".to_string(),
+        }
+    }
+}
+
 impl WatermarkDirection {
     pub fn filter_by_watermark(&self, key: impl AsRef<[u8]>, watermark: impl AsRef<[u8]>) -> bool {
         let key = key.as_ref();
@@ -340,8 +349,8 @@ impl VnodeWatermark {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableWatermarks {
     // later epoch at the back
-    pub(crate) watermarks: Vec<(HummockEpoch, Vec<VnodeWatermark>)>,
-    pub(crate) direction: WatermarkDirection,
+    pub watermarks: Vec<(HummockEpoch, Vec<VnodeWatermark>)>,
+    pub direction: WatermarkDirection,
 }
 
 impl TableWatermarks {

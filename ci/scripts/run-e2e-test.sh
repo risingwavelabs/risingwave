@@ -26,6 +26,10 @@ if [[ $mode == "standalone" ]]; then
   source ci/scripts/standalone-utils.sh
 fi
 
+if [[ $mode == "single-node" ]]; then
+  source ci/scripts/single-node-utils.sh
+fi
+
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
     mkdir -p "$PREFIX_LOG"
@@ -33,6 +37,13 @@ cluster_start() {
     cargo make pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
     cargo make dev standalone-minio-etcd
+  elif [[ $mode == "single-node" ]]; then
+    mkdir -p "$PREFIX_LOG"
+    cargo make clean-data
+    cargo make pre-start-dev
+    start_single_node "$PREFIX_LOG"/single-node.log &
+    # Give it a while to make sure the single-node is ready.
+    sleep 3
   else
     cargo make ci-start "$mode"
   fi
@@ -44,6 +55,9 @@ cluster_stop() {
     stop_standalone
     # Don't check standalone logs, they will exceed the limit.
     cargo make kill
+  elif [[ $mode == "single-node" ]]
+  then
+    stop_single_node
   else
     cargo make ci-kill
   fi
@@ -76,31 +90,35 @@ cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
 echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
-echo "--- e2e, $mode, python udf"
+echo "--- e2e, $mode, external python udf"
 python3 e2e_test/udf/test.py &
 sleep 1
-sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
 # FIXME: flaky test
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
-echo "--- e2e, $mode, java udf"
+echo "--- e2e, $mode, external java udf"
 java -jar risingwave-udf-example.jar &
 sleep 1
-sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
-echo "--- e2e, $mode, wasm udf"
+echo "--- e2e, $mode, embedded udf"
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -132,22 +150,6 @@ RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1
 
 echo "--- Kill cluster"
 cluster_stop
-
-if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
-    echo "--- e2e, ci-delete-range-test"
-    cargo make clean-data
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make ci-start ci-delete-range-test
-    download-and-decompress-artifact delete-range-test-"$profile" target/debug/
-    mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
-    chmod +x ./target/debug/delete-range-test
-
-    config_path=".risingwave/config/risingwave.toml"
-    ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
-
-    echo "--- Kill cluster"
-    cluster_stop
-fi
 
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"

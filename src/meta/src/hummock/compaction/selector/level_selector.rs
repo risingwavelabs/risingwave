@@ -33,7 +33,9 @@ use crate::hummock::compaction::picker::{
     CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, LocalPickerStatistic,
     MinOverlappingPicker,
 };
-use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
+use crate::hummock::compaction::{
+    create_overlap_strategy, CompactionDeveloperConfig, CompactionTask, LocalSelectorStatistic,
+};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
@@ -48,14 +50,14 @@ pub enum PickerType {
     BottomLevel,
 }
 
-impl ToString for PickerType {
-    fn to_string(&self) -> String {
-        match self {
-            PickerType::Tier => String::from("Tier"),
-            PickerType::Intra => String::from("Intra"),
-            PickerType::ToBase => String::from("ToBase"),
-            PickerType::BottomLevel => String::from("BottomLevel"),
-        }
+impl std::fmt::Display for PickerType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PickerType::Tier => "Tier",
+            PickerType::Intra => "Intra",
+            PickerType::ToBase => "ToBase",
+            PickerType::BottomLevel => "BottomLevel",
+        })
     }
 }
 
@@ -81,14 +83,21 @@ pub struct SelectContext {
 
 pub struct DynamicLevelSelectorCore {
     config: Arc<CompactionConfig>,
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 #[derive(Default)]
 pub struct DynamicLevelSelector {}
 
 impl DynamicLevelSelectorCore {
-    pub fn new(config: Arc<CompactionConfig>) -> Self {
-        Self { config }
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> Self {
+        Self {
+            config,
+            developer_config,
+        }
     }
 
     pub fn get_config(&self) -> &CompactionConfig {
@@ -110,10 +119,12 @@ impl DynamicLevelSelectorCore {
                 picker_info.target_level,
                 self.config.clone(),
                 compaction_task_validator,
+                self.developer_config.clone(),
             )),
             PickerType::Intra => Box::new(IntraCompactionPicker::new_with_validator(
                 self.config.clone(),
                 compaction_task_validator,
+                self.developer_config.clone(),
             )),
             PickerType::BottomLevel => {
                 assert_eq!(picker_info.select_level + 1, picker_info.target_level);
@@ -419,9 +430,12 @@ impl CompactionSelector for DynamicLevelSelector {
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> Option<CompactionTask> {
-        let dynamic_level_core =
-            DynamicLevelSelectorCore::new(compaction_group.compaction_config.clone());
+        let dynamic_level_core = DynamicLevelSelectorCore::new(
+            compaction_group.compaction_config.clone(),
+            developer_config,
+        );
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
@@ -485,6 +499,7 @@ pub mod tests {
     use crate::hummock::compaction::selector::{
         CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
     };
+    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
 
@@ -498,7 +513,10 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
-        let selector = DynamicLevelSelectorCore::new(Arc::new(config));
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
         let levels = vec![
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
@@ -602,6 +620,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -628,6 +647,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -646,6 +666,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 HashMap::default(),
+                Arc::new(CompactionDeveloperConfig::default()),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -681,6 +702,7 @@ pub mod tests {
             &mut levels_handlers,
             &mut local_stats,
             HashMap::default(),
+            Arc::new(CompactionDeveloperConfig::default()),
         );
         assert!(compaction.is_none());
     }
@@ -710,7 +732,10 @@ pub mod tests {
             ..Default::default()
         };
 
-        let dynamic_level_core = DynamicLevelSelectorCore::new(Arc::new(config));
+        let dynamic_level_core = DynamicLevelSelectorCore::new(
+            Arc::new(config),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
         let ctx = dynamic_level_core.calculate_level_base_size(&levels);
         assert_eq!(1, ctx.base_level);
         assert_eq!(1000, levels.l0.as_ref().unwrap().total_file_size); // l0

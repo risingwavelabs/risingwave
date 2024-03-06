@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "icelake_integration_tests"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.8"
 pyspark = { version = "3.4.1", extras = ["sql", "connect"] }
 psycopg2-binary = "^2.9"
 

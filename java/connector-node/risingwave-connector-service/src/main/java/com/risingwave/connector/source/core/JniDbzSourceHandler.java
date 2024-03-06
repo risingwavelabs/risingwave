@@ -72,7 +72,7 @@ public class JniDbzSourceHandler {
     }
 
     public void start(long channelPtr) {
-        var runner = DbzCdcEngineRunner.create(config);
+        var runner = DbzCdcEngineRunner.create(config, channelPtr);
         if (runner == null) {
             return;
         }

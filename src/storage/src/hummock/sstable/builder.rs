@@ -200,12 +200,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
         if is_max_epoch(event.new_epoch)
             && self.monotonic_deletes.last().map_or(true, |last| {
-                is_max_epoch(last.new_epoch)
-                    && last.event_key.left_user_key.table_id
-                        == event.event_key.left_user_key.table_id
+                last.event_key.left_user_key.table_id != event.event_key.left_user_key.table_id
+                    || is_max_epoch(last.new_epoch)
             })
         {
-            // This range would never delete any key so we can merge it with last range.
+            // There are two case we shall skip the right end of delete-range.
+            //   1, it belongs the same table-id with the last event, and the last event is also right-end of some delete-range so we can merge them into one point.
+            //   2, this point does not belong the same table-id with the last event. It means that the left end of this delete-range may be dropped, so we can not add it.
             return;
         }
         if !is_max_epoch(event.new_epoch) {
@@ -239,7 +240,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.add(full_key, value).await
     }
 
-    /// only for test
     pub fn current_block_size(&self) -> usize {
         self.block_builder.approximate_len()
     }
@@ -343,6 +343,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             || !user_key(&self.raw_key).eq(user_key(&self.last_full_key));
         let table_id = full_key.user_key.table_id.table_id();
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
+        let current_block_size = self.current_block_size();
+        let is_block_full = current_block_size >= self.options.block_capacity
+            || (current_block_size > self.options.block_capacity / 4 * 3
+                && current_block_size + self.raw_value.len() + self.raw_key.len()
+                    > self.options.block_capacity);
+
         if is_new_table {
             assert!(
                 could_switch_block,
@@ -355,10 +361,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
-        } else if is_new_user_key
-            && self.block_builder.approximate_len() >= self.options.block_capacity
-            && could_switch_block
-        {
+        } else if is_block_full && could_switch_block {
             self.build_block().await?;
         }
         self.last_table_stats.total_key_count += 1;
@@ -704,6 +707,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 data_len, block_meta.offset
             )
         });
+
+        if data_len as usize > self.options.capacity * 2 {
+            tracing::warn!(
+                "WARN unexpected block size {} table {:?}",
+                data_len,
+                self.block_builder.table_id()
+            );
+        }
+
         self.block_builder.clear();
         Ok(())
     }
@@ -852,14 +864,14 @@ pub(super) mod tests {
             .await
             .unwrap();
 
-        assert_eq!(table.value().has_bloom_filter(), with_blooms);
+        assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            if table.value().has_bloom_filter() {
+            if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
                 let key_ref = full_key.user_key.as_ref();
                 assert!(
-                    table.value().may_match_hash(
+                    table.may_match_hash(
                         &(Bound::Included(key_ref), Bound::Included(key_ref)),
                         hash
                     ),
@@ -941,9 +953,9 @@ pub(super) mod tests {
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
             let hash = Sstable::hash_for_bloom_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
-            assert!(table
-                .value()
-                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+            assert!(
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            );
         }
     }
 }

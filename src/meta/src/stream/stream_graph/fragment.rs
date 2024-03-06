@@ -51,10 +51,12 @@ pub(super) struct BuildingFragment {
     /// The fragment structure from the frontend, with the global fragment ID.
     inner: StreamFragment,
 
-    /// The ID of the job if it's materialized in this fragment.
+    /// The ID of the job if it contains the streaming job node.
     table_id: Option<u32>,
 
     /// The required columns of each upstream table.
+    ///
+    /// For shared CDC table on source, its `vec![]`, since the upstream source's output schema is fixed.
     upstream_table_columns: HashMap<TableId, Vec<i32>>,
 }
 
@@ -145,6 +147,11 @@ impl BuildingFragment {
 
                 has_table = true;
             }
+            NodeBody::Subscription(subscription_node) => {
+                subscription_node.subscription_catalog.as_mut().unwrap().id = table_id;
+
+                has_table = true;
+            }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
@@ -174,10 +181,7 @@ impl BuildingFragment {
                     stream_scan.table_id.into(),
                     stream_scan.upstream_column_ids.clone(),
                 ),
-                NodeBody::CdcFilter(cdc_filter) => (
-                    cdc_filter.upstream_source_id.into(),
-                    cdc_filter.upstream_column_ids.clone(),
-                ),
+                NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
                 _ => return,
             };
             table_columns
@@ -457,14 +461,14 @@ impl StreamFragmentGraph {
         Ok(())
     }
 
-    /// Returns the fragment id where the table is materialized.
+    /// Returns the fragment id where the streaming job node located.
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments
             .values()
             .filter(|b| b.table_id.is_some())
             .map(|b| b.fragment_id)
             .exactly_one()
-            .expect("require exactly 1 materialize/sink node when creating the streaming job")
+            .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
     }
 
     /// Returns the fragment id where the table dml is received.
@@ -655,7 +659,10 @@ impl CompleteStreamFragmentGraph {
 
                             (source_job_id, edge)
                         }
-                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
+                        DdlType::MaterializedView
+                        | DdlType::Sink
+                        | DdlType::Index
+                        | DdlType::Subscription => {
                             // handle MV on MV
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
@@ -670,22 +677,8 @@ impl CompleteStreamFragmentGraph {
                                 let nodes = mview_fragment.actors[0].get_nodes().unwrap();
                                 let mview_node =
                                     nodes.get_node_body().unwrap().as_materialize().unwrap();
-                                let all_column_ids = mview_node
-                                    .get_table()
-                                    .unwrap()
-                                    .columns
-                                    .iter()
-                                    .map(|c| c.column_desc.as_ref().unwrap().column_id)
-                                    .collect_vec();
-                                let dist_key_indices: Vec<_> = mview_node
-                                    .table
-                                    .as_ref()
-                                    .unwrap()
-                                    .distribution_key
-                                    .iter()
-                                    .map(|i| *i as u32)
-                                    .collect();
-
+                                let all_column_ids = mview_node.column_ids();
+                                let dist_key_indices = mview_node.dist_key_indices();
                                 let output_indices = output_columns
                                     .iter()
                                     .map(|c| {
@@ -700,27 +693,11 @@ impl CompleteStreamFragmentGraph {
                                     )?;
                                 (dist_key_indices, output_indices)
                             };
-                            let dispatch_strategy = if uses_arrangement_backfill {
-                                if !dist_key_indices.is_empty() {
-                                    DispatchStrategy {
-                                        r#type: DispatcherType::Hash as _,
-                                        dist_key_indices,
-                                        output_indices,
-                                    }
-                                } else {
-                                    DispatchStrategy {
-                                        r#type: DispatcherType::Simple as _,
-                                        dist_key_indices: vec![], // empty for Simple
-                                        output_indices,
-                                    }
-                                }
-                            } else {
-                                DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle as _,
-                                    dist_key_indices: vec![], // not used for `NoShuffle`
-                                    output_indices,
-                                }
-                            };
+                            let dispatch_strategy = mv_on_mv_dispatch_strategy(
+                                uses_arrangement_backfill,
+                                dist_key_indices,
+                                output_indices,
+                            );
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
@@ -803,6 +780,34 @@ impl CompleteStreamFragmentGraph {
             extra_downstreams,
             extra_upstreams,
         })
+    }
+}
+
+fn mv_on_mv_dispatch_strategy(
+    uses_arrangement_backfill: bool,
+    dist_key_indices: Vec<u32>,
+    output_indices: Vec<u32>,
+) -> DispatchStrategy {
+    if uses_arrangement_backfill {
+        if !dist_key_indices.is_empty() {
+            DispatchStrategy {
+                r#type: DispatcherType::Hash as _,
+                dist_key_indices,
+                output_indices,
+            }
+        } else {
+            DispatchStrategy {
+                r#type: DispatcherType::Simple as _,
+                dist_key_indices: vec![], // empty for Simple
+                output_indices,
+            }
+        }
+    } else {
+        DispatchStrategy {
+            r#type: DispatcherType::NoShuffle as _,
+            dist_key_indices: vec![], // not used for `NoShuffle`
+            output_indices,
+        }
     }
 }
 
@@ -896,11 +901,17 @@ impl CompleteStreamFragmentGraph {
         } = building_fragment;
 
         let distribution_type = distribution.to_distribution_type() as i32;
+        let materialized_fragment_id =
+            if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
+                table_id
+            } else {
+                None
+            };
 
         let state_table_ids = internal_tables
             .iter()
             .map(|t| t.id)
-            .chain(table_id)
+            .chain(materialized_fragment_id)
             .collect();
 
         let upstream_fragment_ids = self

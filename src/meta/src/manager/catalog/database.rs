@@ -21,11 +21,14 @@ use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
-    StreamJobStatus, Table, View,
+    StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::data::DataType;
 
-use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
+use super::{
+    ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, SubscriptionId,
+    ViewId,
+};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::{MetaError, MetaResult};
@@ -36,6 +39,7 @@ pub type Catalog = (
     Vec<Table>,
     Vec<Source>,
     Vec<Sink>,
+    Vec<Subscription>,
     Vec<Index>,
     Vec<View>,
     Vec<Function>,
@@ -58,6 +62,8 @@ pub struct DatabaseManager {
     pub(super) sources: BTreeMap<SourceId, Source>,
     /// Cached sink information.
     pub(super) sinks: BTreeMap<SinkId, Sink>,
+    /// Cached subscription information.
+    pub(super) subscriptions: BTreeMap<SubscriptionId, Subscription>,
     /// Cached index information.
     pub(super) indexes: BTreeMap<IndexId, Index>,
     /// Cached table information.
@@ -83,15 +89,16 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let databases = Database::list(env.meta_store()).await?;
-        let schemas = Schema::list(env.meta_store()).await?;
-        let sources = Source::list(env.meta_store()).await?;
-        let sinks = Sink::list(env.meta_store()).await?;
-        let tables = Table::list(env.meta_store()).await?;
-        let indexes = Index::list(env.meta_store()).await?;
-        let views = View::list(env.meta_store()).await?;
-        let functions = Function::list(env.meta_store()).await?;
-        let connections = Connection::list(env.meta_store()).await?;
+        let databases = Database::list(env.meta_store_checked()).await?;
+        let schemas = Schema::list(env.meta_store_checked()).await?;
+        let sources = Source::list(env.meta_store_checked()).await?;
+        let sinks = Sink::list(env.meta_store_checked()).await?;
+        let tables = Table::list(env.meta_store_checked()).await?;
+        let indexes = Index::list(env.meta_store_checked()).await?;
+        let views = View::list(env.meta_store_checked()).await?;
+        let functions = Function::list(env.meta_store_checked()).await?;
+        let connections = Connection::list(env.meta_store_checked()).await?;
+        let subscriptions = Subscription::list(env.meta_store_checked()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -114,6 +121,12 @@ impl DatabaseManager {
             }
             (sink.id, sink)
         }));
+        let subscriptions = BTreeMap::from_iter(subscriptions.into_iter().map(|subscription| {
+            for depend_relation_id in &subscription.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (subscription.id, subscription)
+        }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
@@ -135,6 +148,7 @@ impl DatabaseManager {
             schemas,
             sources,
             sinks,
+            subscriptions,
             views,
             tables,
             indexes,
@@ -161,6 +175,14 @@ impl DatabaseManager {
                 .collect_vec(),
             self.sources.values().cloned().collect_vec(),
             self.sinks
+                .values()
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
+                .cloned()
+                .collect_vec(),
+            self.subscriptions
                 .values()
                 .filter(|t| {
                     t.stream_job_status == PbStreamJobStatus::Unspecified as i32
@@ -226,6 +248,15 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
+        } else if self.subscriptions.values().any(|x| {
+            x.database_id == relation_key.0
+                && x.schema_id == relation_key.1
+                && x.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated(
+                "subscription",
+                &relation_key.2,
+            ))
         } else if self.views.values().any(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
@@ -298,10 +329,14 @@ impl DatabaseManager {
         self.sinks.get(&sink_id)
     }
 
+    pub fn get_subscription(&self, subscription_id: SubscriptionId) -> Option<&Subscription> {
+        self.subscriptions.get(&subscription_id)
+    }
+
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
+            .map(|(id, table)| (*id, TableOption::new(table.retention_seconds)))
             .collect()
     }
 
@@ -333,6 +368,10 @@ impl DatabaseManager {
         self.sinks.values().cloned().collect_vec()
     }
 
+    pub fn list_subscriptions(&self) -> Vec<Subscription> {
+        self.subscriptions.values().cloned().collect_vec()
+    }
+
     pub fn list_views(&self) -> Vec<View> {
         self.views.values().cloned().collect_vec()
     }
@@ -358,6 +397,7 @@ impl DatabaseManager {
             .keys()
             .copied()
             .chain(self.sinks.keys().copied())
+            .chain(self.subscriptions.keys().copied())
             .chain(self.indexes.keys().copied())
             .chain(self.sources.keys().copied())
             .chain(
@@ -396,6 +436,10 @@ impl DatabaseManager {
         self.tables.values().all(|t| t.schema_id != schema_id)
             && self.sources.values().all(|s| s.schema_id != schema_id)
             && self.sinks.values().all(|s| s.schema_id != schema_id)
+            && self
+                .subscriptions
+                .values()
+                .all(|s| s.schema_id != schema_id)
             && self.indexes.values().all(|i| i.schema_id != schema_id)
             && self.views.values().all(|v| v.schema_id != schema_id)
     }
@@ -444,7 +488,7 @@ impl DatabaseManager {
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
-        self.in_progress_creation_tracker.remove(&relation.clone());
+        self.in_progress_creation_tracker.remove(relation);
     }
 
     pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
@@ -530,6 +574,17 @@ impl DatabaseManager {
             Ok(())
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
+        }
+    }
+
+    pub fn ensure_subscription_id(&self, subscription_id: SubscriptionId) -> MetaResult<()> {
+        if self.subscriptions.contains_key(&subscription_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found(
+                "subscription",
+                subscription_id,
+            ))
         }
     }
 

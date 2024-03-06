@@ -26,9 +26,11 @@ use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -131,7 +133,7 @@ impl ClickHouseEngine {
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<ClickHouseClient> {
+    pub(crate) fn build_client(&self) -> ConnectorResult<ClickHouseClient> {
         use hyper_tls::HttpsConnector;
 
         let https = HttpsConnector::new();
@@ -260,9 +262,11 @@ impl ClickHouseSink {
     ) -> Result<()> {
         let is_match = match fields_type {
             risingwave_common::types::DataType::Boolean => Ok(ck_column.r#type.contains("Bool")),
-            risingwave_common::types::DataType::Int16 => {
-                Ok(ck_column.r#type.contains("UInt16") | ck_column.r#type.contains("Int16"))
-            }
+            risingwave_common::types::DataType::Int16 => Ok(ck_column.r#type.contains("UInt16")
+                | ck_column.r#type.contains("Int16")
+                // Allow Int16 to be pushed to Enum16, they share an encoding and value range
+                // No special care is taken to ensure values are valid.
+                | ck_column.r#type.contains("Enum16")),
             risingwave_common::types::DataType::Int32 => {
                 Ok(ck_column.r#type.contains("UInt32") | ck_column.r#type.contains("Int32"))
             }
@@ -436,7 +440,7 @@ impl ClickHouseSinkWriter {
                 .next()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?
+                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?
         } else {
             0_u8
         };
@@ -455,7 +459,7 @@ impl ClickHouseSinkWriter {
                 .first()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?;
+                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?;
 
             if length > 38 {
                 return Err(SinkError::ClickHouse(
@@ -467,7 +471,7 @@ impl ClickHouseSinkWriter {
                 .last()
                 .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
                 .parse::<u8>()
-                .map_err(|e| SinkError::ClickHouse(format!("clickhouse sink error {}", e)))?;
+                .map_err(|e| SinkError::ClickHouse(e.to_report_string()))?;
             (length, scale)
         } else {
             (0_u8, 0_u8)

@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use futures::Stream;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 
+use crate::error::Result;
 use crate::session::SessionImpl;
 
 mod distributed;
@@ -66,6 +66,6 @@ impl ExecutionContext {
     }
 
     pub fn to_batch_task_context(&self) -> FrontendBatchTaskContext {
-        FrontendBatchTaskContext::new(self.session.env().clone(), self.session.auth_context())
+        FrontendBatchTaskContext::new(self.session.clone())
     }
 }

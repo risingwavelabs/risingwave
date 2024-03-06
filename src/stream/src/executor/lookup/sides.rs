@@ -211,10 +211,7 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
 /// * Barrier (prev = `[2`], current = `[3`])
 /// * `[Msg`] Arrangement (batch)
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
-pub async fn stream_lookup_arrange_prev_epoch(
-    stream: Box<dyn Executor>,
-    arrangement: Box<dyn Executor>,
-) {
+pub async fn stream_lookup_arrange_prev_epoch(stream: Executor, arrangement: Executor) {
     let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
     let mut arrange_buf = vec![];
     let mut stream_side_end = false;
@@ -295,10 +292,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
 /// * `[Do`] lookup `a` in arrangement of epoch `[2`] (current epoch)
 /// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
-pub async fn stream_lookup_arrange_this_epoch(
-    stream: Box<dyn Executor>,
-    arrangement: Box<dyn Executor>,
-) {
+pub async fn stream_lookup_arrange_this_epoch(stream: Executor, arrangement: Executor) {
     let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
     let mut stream_buf = vec![];
     let mut arrange_buf = vec![];
@@ -433,14 +427,16 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
-        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+        let (mut tx_l, source_l) = MockSource::channel();
+        let source_l = source_l
+            .stop_on_finish(false)
+            .into_executor(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r
+            .stop_on_finish(false)
+            .into_executor(schema, vec![1]);
 
-        let mut stream = stream_lookup_arrange_this_epoch(
-            Box::new(source_l.stop_on_finish(false)),
-            Box::new(source_r.stop_on_finish(false)),
-        )
-        .boxed();
+        let mut stream = stream_lookup_arrange_this_epoch(source_l, source_r).boxed();
 
         // Simulate recovery test
         drop(tx_r);

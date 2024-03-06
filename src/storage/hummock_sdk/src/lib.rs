@@ -264,9 +264,14 @@ pub fn can_concat(ssts: &[SstableInfo]) -> bool {
 
 const CHECKPOINT_DIR: &str = "checkpoint";
 const CHECKPOINT_NAME: &str = "0";
+const ARCHIVE_DIR: &str = "archive";
 
 pub fn version_checkpoint_path(root_dir: &str) -> String {
     format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_archive_dir(root_dir: &str) -> String {
+    format!("{}/{}", root_dir, ARCHIVE_DIR)
 }
 
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {

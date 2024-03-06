@@ -107,7 +107,6 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -170,7 +169,6 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -203,7 +201,6 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: TEST_TABLE_ID,
@@ -475,7 +472,6 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -503,7 +499,6 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -524,7 +519,6 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -769,7 +763,6 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -793,7 +786,6 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -855,7 +847,6 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -873,7 +864,6 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -897,7 +887,6 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: TEST_TABLE_ID,
@@ -1006,7 +995,6 @@ async fn test_iter_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -1025,7 +1013,6 @@ async fn test_iter_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -1228,7 +1215,6 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
-                vec![],
                 WriteOptions {
                     epoch: epoch1,
                     table_id: TEST_TABLE_ID,
@@ -1241,7 +1227,6 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch2,
-                vec![],
                 WriteOptions {
                     epoch: epoch2,
                     table_id: TEST_TABLE_ID,
@@ -1254,7 +1239,6 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch3,
-                vec![],
                 WriteOptions {
                     epoch: epoch3,
                     table_id: TEST_TABLE_ID,
@@ -1618,7 +1602,6 @@ async fn test_get_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch1,
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: TEST_TABLE_ID,
@@ -1637,7 +1620,6 @@ async fn test_get_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch2,
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: TEST_TABLE_ID,
@@ -1950,16 +1932,19 @@ async fn test_table_watermark() {
         (&mut local1, vnode_bitmap1.clone()),
         (&mut local2, vnode_bitmap2.clone()),
     ] {
-        local.flush(vec![]).await.unwrap();
+        local.flush().await.unwrap();
         local.seal_current_epoch(
             epoch2,
-            SealCurrentEpochOptions::new(
-                vec![VnodeWatermark::new(
-                    Arc::new(vnode_bitmap),
-                    gen_inner_key(watermark1),
-                )],
-                WatermarkDirection::Ascending,
-            ),
+            SealCurrentEpochOptions {
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    vec![VnodeWatermark::new(
+                        Arc::new(vnode_bitmap),
+                        gen_inner_key(watermark1),
+                    )],
+                )),
+                switch_op_consistency_level: None,
+            },
         );
     }
 
@@ -2051,8 +2036,14 @@ async fn test_table_watermark() {
         for (key, value) in batch {
             local.insert(key, value, None).unwrap();
         }
-        local.flush(vec![]).await.unwrap();
-        local.seal_current_epoch(epoch3, SealCurrentEpochOptions::no_watermark());
+        local.flush().await.unwrap();
+        local.seal_current_epoch(
+            epoch3,
+            SealCurrentEpochOptions {
+                table_watermarks: None,
+                switch_op_consistency_level: None,
+            },
+        );
     }
 
     let indexes_after_epoch2 = || gen_range().filter(|index| index % 3 == 0 || index % 3 == 1);
@@ -2293,13 +2284,16 @@ async fn test_table_watermark() {
         // regress watermark
         local.seal_current_epoch(
             epoch4,
-            SealCurrentEpochOptions::new(
-                vec![VnodeWatermark::new(
-                    Arc::new(vnode_bitmap),
-                    gen_inner_key(5),
-                )],
-                WatermarkDirection::Ascending,
-            ),
+            SealCurrentEpochOptions {
+                table_watermarks: Some((
+                    WatermarkDirection::Ascending,
+                    vec![VnodeWatermark::new(
+                        Arc::new(vnode_bitmap),
+                        gen_inner_key(5),
+                    )],
+                )),
+                switch_op_consistency_level: None,
+            },
         );
     }
 

@@ -19,7 +19,7 @@ use risingwave_common::catalog::{
     TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
-use risingwave_pb::plan_common::{AdditionalColumnType, ColumnDescVersion};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
 /// counterpart in `StreamScan`
@@ -31,13 +31,16 @@ pub struct SourceColumnDesc {
     pub fields: Vec<ColumnDesc>,
     pub column_type: SourceColumnType,
 
-    // `is_pk` is used to indicate whether the column is part of the primary key columns.
+    /// `is_pk` is used to indicate whether the column is part of the primary key columns.
     pub is_pk: bool,
 
-    // `additional_column_type` and `column_type` are orthogonal
-    // `additional_column_type` is used to indicate the column is from which part of the message
-    // `column_type` is used to indicate the type of the column, only used in cdc scenario
-    pub additional_column_type: AdditionalColumnType,
+    /// `is_hidden_addition_col` is used to indicate whether the column is a hidden addition column.
+    pub is_hidden_addition_col: bool,
+
+    /// `additional_column` and `column_type` are orthogonal
+    /// `additional_column` is used to indicate the column is from which part of the message
+    /// `column_type` is used to indicate the type of the column, only used in cdc scenario
+    pub additional_column: AdditionalColumn,
 }
 
 /// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
@@ -87,7 +90,15 @@ impl SourceColumnDesc {
             fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
-            additional_column_type: AdditionalColumnType::Normal,
+            is_hidden_addition_col: false,
+            additional_column: AdditionalColumn { column_type: None },
+        }
+    }
+
+    pub fn hidden_addition_col_from_column_desc(c: &ColumnDesc) -> Self {
+        Self {
+            is_hidden_addition_col: true,
+            ..c.into()
         }
     }
 
@@ -105,7 +116,7 @@ impl SourceColumnDesc {
 
     #[inline]
     pub fn is_visible(&self) -> bool {
-        self.column_type == SourceColumnType::Normal
+        !self.is_hidden_addition_col && self.column_type == SourceColumnType::Normal
     }
 }
 
@@ -119,7 +130,8 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             column_type,
             is_pk: false,
-            additional_column_type: c.additional_column_type,
+            is_hidden_addition_col: false,
+            additional_column: c.additional_column.clone(),
         }
     }
 }
@@ -134,7 +146,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_column_type: s.additional_column_type,
+            additional_column: s.additional_column.clone(),
             version: ColumnDescVersion::Pr13707,
         }
     }

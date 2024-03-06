@@ -22,6 +22,7 @@ use cmd_impl::hummock::SstDumpArgs;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -266,10 +267,31 @@ enum HummockCommands {
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
-
     CancelCompactTask {
         #[clap(short, long)]
         task_id: u64,
+    },
+    PrintUserKeyInArchive {
+        /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
+        #[clap(long, value_delimiter = ',')]
+        archive_ids: Vec<u64>,
+        /// The data directory of Hummock storage, where SSTable objects can be found.
+        #[clap(long)]
+        data_dir: String,
+        /// KVs that are matched with the user key are printed.
+        #[clap(long)]
+        user_key: String,
+    },
+    PrintVersionDeltaInArchive {
+        /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
+        #[clap(long, value_delimiter = ',')]
+        archive_ids: Vec<u64>,
+        /// The data directory of Hummock storage, where SSTable objects can be found.
+        #[clap(long)]
+        data_dir: String,
+        /// Version deltas that are related to the SST id are printed.
+        #[clap(long)]
+        sst_id: u64,
     },
 }
 
@@ -529,14 +551,28 @@ pub enum ProfileCommands {
     },
 }
 
-pub async fn start(opts: CliOpts) -> Result<()> {
+/// Start `risectl` with the given options.
+/// Log and abort the process if any error occurs.
+///
+/// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
+/// in an embedded manner.
+pub async fn start(opts: CliOpts) {
+    if let Err(e) = start_fallible(opts).await {
+        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+        std::process::exit(1);
+    }
+}
+
+/// Start `risectl` with the given options.
+/// Return `Err` if any error occurs.
+pub async fn start_fallible(opts: CliOpts) -> Result<()> {
     let context = CtlContext::default();
     let result = start_impl(opts, &context).await;
     context.try_close().await;
     result
 }
 
-pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
+async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?
@@ -666,6 +702,27 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::CancelCompactTask { task_id }) => {
             cmd_impl::hummock::cancel_compact_task(context, task_id).await?;
+        }
+        Commands::Hummock(HummockCommands::PrintVersionDeltaInArchive {
+            archive_ids,
+            data_dir,
+            sst_id,
+        }) => {
+            cmd_impl::hummock::print_version_delta_in_archive(
+                context,
+                archive_ids,
+                data_dir,
+                sst_id,
+            )
+            .await?;
+        }
+        Commands::Hummock(HummockCommands::PrintUserKeyInArchive {
+            archive_ids,
+            data_dir,
+            user_key,
+        }) => {
+            cmd_impl::hummock::print_user_key_in_archive(context, archive_ids, data_dir, user_key)
+                .await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?

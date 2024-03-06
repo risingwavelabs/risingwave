@@ -1,4 +1,4 @@
 query T
-select substring(version() from 1 for 14);
+select substring(version() from 1 for 16);
 ----
-PostgreSQL 9.5
+PostgreSQL 13.14

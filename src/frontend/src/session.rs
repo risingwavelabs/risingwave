@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use pgwire::error::{PsqlError, PsqlResult};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
@@ -41,16 +42,19 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::local_manager::{
+    LocalSystemParamsManager, LocalSystemParamsManagerRef,
+};
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
@@ -76,11 +80,15 @@ use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
+use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
 use crate::handler::privilege::ObjectCheckItem;
+use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
+use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -97,7 +105,6 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
@@ -116,6 +123,8 @@ pub struct FrontendEnv {
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
+
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
@@ -156,6 +165,7 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
@@ -167,6 +177,18 @@ impl FrontendEnv {
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
         let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(
+                    load_config("", FrontendOpts::default())
+                        .batch
+                        .frontend_compute_runtime_worker_threads,
+                )
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
         Self {
             meta_client,
             catalog_writer,
@@ -176,6 +198,7 @@ impl FrontendEnv {
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
+            system_params_manager,
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
@@ -184,7 +207,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
-            compute_runtime: Self::create_compute_runtime(),
+            compute_runtime,
         }
     }
 
@@ -325,6 +348,39 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(batch_config.frontend_compute_runtime_worker_threads)
+                .thread_name("rw-batch-local")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ));
+
+        let sessions_map: SessionMapRef = Arc::new(RwLock::new(HashMap::new()));
+        let sessions = sessions_map.clone();
+
+        // Idle transaction background monitor
+        let join_handle = tokio::spawn(async move {
+            let mut check_idle_txn_interval =
+                tokio::time::interval(core::time::Duration::from_secs(10));
+            check_idle_txn_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            check_idle_txn_interval.reset();
+            loop {
+                check_idle_txn_interval.tick().await;
+                sessions.read().values().for_each(|session| {
+                    let _ = session.check_idle_in_transaction_timeout();
+                })
+            }
+        });
+        join_handles.push(join_handle);
+
+        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
+        let heap_profiler =
+            HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+        // Run a background heap profiler
+        heap_profiler.start();
+
         Ok((
             Self {
                 catalog_reader,
@@ -335,15 +391,16 @@ impl FrontendEnv {
                 meta_client: frontend_meta_client,
                 query_manager,
                 hummock_snapshot_manager,
+                system_params_manager,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
-                sessions_map: Arc::new(RwLock::new(HashMap::new())),
+                sessions_map,
                 batch_config,
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
-                compute_runtime: Self::create_compute_runtime(),
+                compute_runtime,
             },
             join_handles,
             shutdown_senders,
@@ -400,6 +457,10 @@ impl FrontendEnv {
         &self.hummock_snapshot_manager
     }
 
+    pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
+        &self.system_params_manager
+    }
+
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
@@ -430,17 +491,6 @@ impl FrontendEnv {
 
     pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
         self.compute_runtime.clone()
-    }
-
-    fn create_compute_runtime() -> Arc<BackgroundShutdownRuntime> {
-        Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(4)
-                .thread_name("rw-batch-local")
-                .enable_all()
-                .build()
-                .unwrap(),
-        ))
     }
 
     /// Cancel queries (i.e. batch queries) in session.
@@ -514,6 +564,9 @@ pub struct SessionImpl {
 
     /// execution context represents the lifetime of a running SQL in the current session
     exec_context: Mutex<Option<Weak<ExecContext>>>,
+
+    /// Last idle instant
+    last_idle_instant: Arc<Mutex<Option<Instant>>>,
 }
 
 #[derive(Error, Debug)]
@@ -552,6 +605,7 @@ impl SessionImpl {
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
             exec_context: Mutex::new(None),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -577,6 +631,7 @@ impl SessionImpl {
                 8080,
             ))
             .into(),
+            last_idle_instant: Default::default(),
         }
     }
 
@@ -656,6 +711,13 @@ impl SessionImpl {
             .as_ref()
             .and_then(|weak| weak.upgrade())
             .map(|context| context.last_instant.elapsed().as_millis())
+    }
+
+    pub fn elapse_since_last_idle_instant(&self) -> Option<u128> {
+        self.last_idle_instant
+            .lock()
+            .as_ref()
+            .map(|x| x.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -914,6 +976,8 @@ impl SessionManager for SessionManagerImpl {
                             ),
                             salt,
                         }
+                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                        UserAuthenticator::OAuth(auth_info.metadata.clone())
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,
@@ -1129,9 +1193,40 @@ impl Session for SessionImpl {
         let exec_context = Arc::new(ExecContext {
             running_sql: sql,
             last_instant: Instant::now(),
+            last_idle_instant: self.last_idle_instant.clone(),
         });
         *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
+        // unset idle state, since there is a sql running
+        *self.last_idle_instant.lock() = None;
         ExecContextGuard::new(exec_context)
+    }
+
+    /// Check whether idle transaction timeout.
+    /// If yes, unpin snapshot and return an `IdleInTxnTimeout` error.
+    fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
+        // In transaction.
+        if matches!(self.transaction_status(), TransactionStatus::InTransaction) {
+            let idle_in_transaction_session_timeout =
+                self.config().idle_in_transaction_session_timeout() as u128;
+            // Idle transaction timeout has been enabled.
+            if idle_in_transaction_session_timeout != 0 {
+                // Hold the `exec_context` lock to ensure no new sql coming when unpin_snapshot.
+                let guard = self.exec_context.lock();
+                // No running sql i.e. idle
+                if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
+                    // Idle timeout.
+                    if let Some(elapse_since_last_idle_instant) =
+                        self.elapse_since_last_idle_instant()
+                    {
+                        if elapse_since_last_idle_instant > idle_in_transaction_session_timeout {
+                            self.unpin_snapshot();
+                            return Err(PsqlError::IdleInTxnTimeout);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1151,18 +1246,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             object: show_object,
             ..
         } => Ok(infer_show_object(&show_object)),
-        Statement::ShowCreateObject { .. } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::ShowCreateObject { .. } => Ok(infer_show_create_object()),
         Statement::ShowTransactionIsolationLevel => {
             let name = "transaction_isolation";
             Ok(infer_show_variable(name))
@@ -1171,28 +1255,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))
         }
-        Statement::Describe { name: _ } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Type".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Is Hidden".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Description".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::Describe { name: _ } => Ok(infer_describe()),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),

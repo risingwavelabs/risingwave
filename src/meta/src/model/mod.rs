@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod barrier;
 mod catalog;
 mod cluster;
 mod error;
@@ -28,7 +27,6 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-pub use barrier::*;
 pub use cluster::*;
 pub use error::*;
 pub use migration_plan::*;
@@ -174,6 +172,7 @@ macro_rules! for_all_metadata_models {
             { risingwave_pb::catalog::Table },
             { risingwave_pb::catalog::Index },
             { risingwave_pb::catalog::Sink },
+            { risingwave_pb::catalog::Subscription },
             { risingwave_pb::catalog::Source },
             { risingwave_pb::catalog::View },
             { crate::model::stream::TableFragments },

@@ -37,6 +37,38 @@ impl<T> Sentinelled<T> {
     pub fn is_sentinel(&self) -> bool {
         matches!(self, Self::Smallest | Self::Largest)
     }
+
+    pub fn cmp_by(
+        &self,
+        other: &Self,
+        cmp_fn: impl FnOnce(&T, &T) -> std::cmp::Ordering,
+    ) -> std::cmp::Ordering {
+        use Sentinelled::*;
+        match (self, other) {
+            (Smallest, Smallest) => std::cmp::Ordering::Equal,
+            (Smallest, _) => std::cmp::Ordering::Less,
+            (_, Smallest) => std::cmp::Ordering::Greater,
+            (Largest, Largest) => std::cmp::Ordering::Equal,
+            (Largest, _) => std::cmp::Ordering::Greater,
+            (_, Largest) => std::cmp::Ordering::Less,
+            (Normal(a), Normal(b)) => cmp_fn(a, b),
+        }
+    }
+
+    pub fn map<U>(self, map_fn: impl FnOnce(T) -> U) -> Sentinelled<U> {
+        use Sentinelled::*;
+        match self {
+            Smallest => Smallest,
+            Normal(inner) => Normal(map_fn(inner)),
+            Largest => Largest,
+        }
+    }
+}
+
+impl<T> From<T> for Sentinelled<T> {
+    fn from(inner: T) -> Self {
+        Self::Normal(inner)
+    }
 }
 
 impl<T> PartialOrd for Sentinelled<T>
@@ -53,16 +85,7 @@ where
     T: Ord,
 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use Sentinelled::*;
-        match (self, other) {
-            (Smallest, Smallest) => std::cmp::Ordering::Equal,
-            (Smallest, _) => std::cmp::Ordering::Less,
-            (_, Smallest) => std::cmp::Ordering::Greater,
-            (Largest, Largest) => std::cmp::Ordering::Equal,
-            (Largest, _) => std::cmp::Ordering::Greater,
-            (_, Largest) => std::cmp::Ordering::Less,
-            (Normal(a), Normal(b)) => a.cmp(b),
-        }
+        self.cmp_by(other, T::cmp)
     }
 }
 

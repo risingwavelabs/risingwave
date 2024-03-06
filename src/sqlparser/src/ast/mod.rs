@@ -26,6 +26,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use core::fmt::Display;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -55,7 +56,7 @@ pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -814,10 +815,10 @@ impl fmt::Display for WindowFrameUnits {
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
-    /// `<N> PRECEDING` or `UNBOUNDED PRECEDING`
-    Preceding(Option<u64>),
-    /// `<N> FOLLOWING` or `UNBOUNDED FOLLOWING`.
-    Following(Option<u64>),
+    /// `<offset> PRECEDING` or `UNBOUNDED PRECEDING`
+    Preceding(Option<Box<Expr>>),
+    /// `<offset> FOLLOWING` or `UNBOUNDED FOLLOWING`.
+    Following(Option<Box<Expr>>),
 }
 
 impl fmt::Display for WindowFrameBound {
@@ -1117,6 +1118,8 @@ pub enum Statement {
         name: ObjectName,
         /// Optional schema
         columns: Vec<ColumnDef>,
+        // The wildchar position in columns defined in sql. Only exist when using external schema.
+        wildcard_idx: Option<usize>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
@@ -1130,7 +1133,7 @@ pub enum Statement {
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
-        include_column_options: Vec<(Ident, Option<Ident>)>,
+        include_column_options: IncludeOption,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1166,6 +1169,7 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
+        with_options: CreateFunctionWithOptions,
     },
     /// CREATE AGGREGATE
     ///
@@ -1534,6 +1538,7 @@ impl fmt::Display for Statement {
                 args,
                 returns,
                 params,
+                with_options,
             } => {
                 write!(
                     f,
@@ -1548,6 +1553,7 @@ impl fmt::Display for Statement {
                     write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
+                write!(f, "{with_options}")?;
                 Ok(())
             }
             Statement::CreateAggregate {
@@ -1606,6 +1612,7 @@ impl fmt::Display for Statement {
             Statement::CreateTable {
                 name,
                 columns,
+                wildcard_idx,
                 constraints,
                 with_options,
                 or_replace,
@@ -1634,7 +1641,7 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks)?)?;
+                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks, *wildcard_idx)?)?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
@@ -1644,12 +1651,20 @@ impl fmt::Display for Statement {
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
-                        include_column_options.iter().map(|(a, b)| {
-                            if let Some(b) = b {
-                                format!("INCLUDE {} AS {}", a, b)
-                            } else {
-                                format!("INCLUDE {}", a)
-                            }
+                        include_column_options.iter().map(|option_item: &IncludeOptionItem| {
+                            format!("INCLUDE {}{}{}",
+                            option_item.column_type,
+                                    if let Some(inner_field) = &option_item.inner_field {
+                                        format!(" {}", inner_field)
+                                    } else {
+                                        "".into()
+                                    }
+                                    , if let Some(alias) = &option_item.column_alias {
+                                        format!(" AS {}", alias)
+                                    } else {
+                                        "".into()
+                                    }
+                                )
                         }).collect_vec().as_slice()
                     ))?;
                 }
@@ -2631,6 +2646,24 @@ impl fmt::Display for FunctionDefinition {
     }
 }
 
+impl FunctionDefinition {
+    /// Returns the function definition as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+
+    /// Returns the function definition as a string.
+    pub fn into_string(self) -> String {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+}
+
 /// Return types of a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2705,6 +2738,57 @@ impl fmt::Display for CreateFunctionBody {
             write!(f, " {using}")?;
         }
         Ok(())
+    }
+}
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionWithOptions {
+    /// Always retry on network errors.
+    pub always_retry_on_network_error: Option<bool>,
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl CreateFunctionWithOptions {
+    fn is_empty(&self) -> bool {
+        self.always_retry_on_network_error.is_none()
+    }
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
+    type Error = ParserError;
+
+    fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
+        let mut always_retry_on_network_error = None;
+        for option in with_options {
+            if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
+                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+            } else {
+                return Err(ParserError::ParserError(format!(
+                    "Unsupported option: {}",
+                    option.name
+                )));
+            }
+        }
+        Ok(Self {
+            always_retry_on_network_error,
+        })
+    }
+}
+
+impl Display for CreateFunctionWithOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_empty() {
+            return Ok(());
+        }
+        let mut options = vec![];
+        if let Some(always_retry_on_network_error) = self.always_retry_on_network_error {
+            options.push(format!(
+                "ALWAYS_RETRY_NETWORK_ERRORS = {}",
+                always_retry_on_network_error
+            ));
+        }
+        write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
 }
 
@@ -2906,5 +2990,51 @@ mod tests {
             ))))),
         };
         assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
+    }
+
+    #[test]
+    fn test_create_function_display() {
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1'",
+            format!("{}", create_function)
+        );
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: Some(true),
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
     }
 }

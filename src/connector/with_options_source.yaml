@@ -33,6 +33,35 @@ GcsProperties:
     field_type: String
     required: false
     default: Default::default
+IcebergProperties:
+  fields:
+  - name: catalog.type
+    field_type: String
+    required: true
+  - name: s3.region
+    field_type: String
+    required: true
+  - name: s3.endpoint
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.access.key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: s3.secret.key
+    field_type: String
+    required: false
+    default: Default::default
+  - name: warehouse.path
+    field_type: String
+    required: true
+  - name: database.name
+    field_type: String
+    required: true
+  - name: table.name
+    field_type: String
+    required: true
 KafkaProperties:
   fields:
   - name: bytes.per.second
@@ -61,9 +90,6 @@ KafkaProperties:
     field_type: String
     required: true
     alias: kafka.brokers
-  - name: broker.rewrite.endpoints
-    field_type: HashMap<String,String>
-    required: false
   - name: topic
     field_type: String
     required: true
@@ -146,6 +172,9 @@ KafkaProperties:
     field_type: String
     comments: Client identifier
     required: false
+  - name: properties.enable.ssl.certificate.verification
+    field_type: bool
+    required: false
   - name: properties.queued.min.messages
     field_type: usize
     comments: Minimum number of messages per topic+partition librdkafka tries to maintain in the local  consumer queue.
@@ -168,6 +197,10 @@ KafkaProperties:
   - name: properties.enable.auto.commit
     field_type: bool
     comments: 'Automatically and periodically commit offsets in the background.  Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.  To circumvent this behaviour set specific start offsets per partition in the call to assign().  default: true'
+    required: false
+  - name: broker.rewrite.endpoints
+    field_type: HashMap<String,String>
+    comments: This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     required: false
 KinesisProperties:
   fields:

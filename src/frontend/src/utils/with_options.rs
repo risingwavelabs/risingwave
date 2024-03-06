@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_connector::source::kafka::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
@@ -28,13 +27,13 @@ use risingwave_sqlparser::ast::{
 
 use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
+use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::SessionImpl;
 
 mod options {
-    use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 
-    pub const RETENTION_SECONDS: &str = PROPERTIES_RETENTION_SECOND_KEY;
+    pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
@@ -102,13 +101,6 @@ impl WithOptions {
             .collect();
 
         Self { inner }
-    }
-
-    /// Get the subset of the options for internal table catalogs.
-    ///
-    /// Currently only `retention_seconds` is included.
-    pub fn internal_table_subset(&self) -> Self {
-        self.subset([options::RETENTION_SECONDS])
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {

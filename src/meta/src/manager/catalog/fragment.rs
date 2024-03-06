@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store()).await?;
+        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store()).await?;
+        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
 
         Ok(Self {
             env,
@@ -561,7 +561,7 @@ impl FragmentManager {
         let mut table_fragments = BTreeMapTransaction::new(map);
         for table_fragment in &to_delete_table_fragments {
             table_fragments.remove(table_fragment.table_id());
-            let backfill_actor_ids = table_fragment.backfill_actor_ids();
+            let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
             for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
@@ -581,12 +581,11 @@ impl FragmentManager {
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| (f.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
                             d.downstream_actor_id
-                                .retain(|x| !backfill_actor_ids.contains(x));
+                                .retain(|x| !to_remove_actor_ids.contains(x));
                             !d.downstream_actor_id.is_empty()
                         })
                     });
@@ -722,12 +721,9 @@ impl FragmentManager {
         Ok(())
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(
-        &self,
-        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
-    ) -> ActorInfos {
+    pub async fn load_all_actors(&self) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
@@ -735,7 +731,7 @@ impl FragmentManager {
         for fragments in map.values() {
             for (worker_id, actor_states) in fragments.worker_actor_states() {
                 for (actor_id, actor_state) in actor_states {
-                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                    if actor_state == ActorState::Running {
                         actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
@@ -747,7 +743,7 @@ impl FragmentManager {
             let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
             for (worker_id, actor_states) in barrier_inject_actors {
                 for (actor_id, actor_state) in actor_states {
-                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                    if actor_state == ActorState::Running {
                         barrier_inject_actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
@@ -860,6 +856,22 @@ impl FragmentManager {
         }
 
         actor_maps
+    }
+
+    pub async fn node_actor_count(&self) -> HashMap<WorkerId, usize> {
+        let mut actor_count = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for actor_status in fragments.actor_status.values() {
+                if let Some(pu) = &actor_status.parallel_unit {
+                    let e = actor_count.entry(pu.worker_node_id).or_insert(0);
+                    *e += 1;
+                }
+            }
+        }
+
+        actor_count
     }
 
     // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
@@ -1111,7 +1123,7 @@ impl FragmentManager {
 
         let new_created_actors: HashSet<_> = reschedules
             .values()
-            .flat_map(|reschedule| reschedule.added_actors.clone())
+            .flat_map(|reschedule| reschedule.added_actors.values().flatten().cloned())
             .collect();
 
         let to_update_table_fragments = map
@@ -1157,7 +1169,7 @@ impl FragmentManager {
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
-                for actor_id in added_actors {
+                for actor_id in added_actors.values().flatten() {
                     table_fragment
                         .actor_status
                         .get_mut(actor_id)
@@ -1240,6 +1252,7 @@ impl FragmentManager {
                 } = reschedule;
 
                 let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
+                let added_actor_ids = added_actors.values().flatten().cloned().collect_vec();
 
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
@@ -1272,7 +1285,7 @@ impl FragmentManager {
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,
-                                    added_actors,
+                                    &added_actor_ids,
                                 );
                             }
                         }
@@ -1301,7 +1314,7 @@ impl FragmentManager {
                         update_actors(
                             downstream_actor.upstream_actor_id.as_mut(),
                             &removed_actor_ids,
-                            added_actors,
+                            &added_actor_ids,
                         );
 
                         if let Some(node) = downstream_actor.nodes.as_mut() {
@@ -1309,7 +1322,7 @@ impl FragmentManager {
                                 node,
                                 fragment_id,
                                 &removed_actor_ids,
-                                added_actors,
+                                &added_actor_ids,
                             );
                         }
                     }
@@ -1319,7 +1332,9 @@ impl FragmentManager {
 
         for (table_id, parallelism) in table_parallelism_assignment {
             if let Some(mut table) = table_fragments.get_mut(table_id) {
-                table.assigned_parallelism = parallelism;
+                if table.assigned_parallelism != parallelism {
+                    table.assigned_parallelism = parallelism;
+                }
             }
         }
 
@@ -1491,5 +1506,9 @@ impl FragmentManager {
             .read()
             .await
             .running_fragment_parallelisms(id_filter)
+    }
+
+    pub async fn count_streaming_job(&self) -> usize {
+        self.core.read().await.table_fragments().len()
     }
 }

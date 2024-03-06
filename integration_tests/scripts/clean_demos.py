@@ -4,6 +4,7 @@ from os.path import (dirname, abspath)
 import os
 import subprocess
 import argparse
+import sys
 
 
 def clean_demo(demo: str):
@@ -22,5 +23,10 @@ arg_parser.add_argument('--case',
                         type=str,
                         help='the test case')
 args = arg_parser.parse_args()
+demo = args.case
 
-clean_demo(args.case)
+if demo in ['iceberg-sink']:
+    print('Skip for running test for `%s`' % demo)
+    sys.exit(0)
+
+clean_demo(demo)

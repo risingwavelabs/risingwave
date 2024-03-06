@@ -50,3 +50,16 @@ werwerwwe 8 NULL NULL 4 NULL
 yjtyjtyyy 9 NULL NULL 4 NULL
 yjtyjtyyy 9 NULL NULL 4 NULL
 
+# kafka_table should do the upsert and overwrite the existing records
+query I rowsort
+SELECT action, user_id, obj_id, name, page_id, age, _rw_key FROM kafka_table;
+----
+6786745ge 6 NULL NULL 3 NULL \x7b22757365725f6964223a20367d
+erwerhghj 4 NULL NULL 2 NULL \x7b22757365725f6964223a20347d
+fgbgfnyyy 7 NULL NULL 3 NULL \x7b22757365725f6964223a20377d
+fsdfgerrg 2 NULL NULL 1 NULL \x7b22757365725f6964223a20327d
+gtrgretrg 1 NULL NULL 1 NULL \x7b22757365725f6964223a20317d
+kiku7ikkk 5 NULL NULL 2 NULL \x7b22757365725f6964223a20357d
+sdfergtth 3 NULL NULL 1 NULL \x7b22757365725f6964223a20337d
+werwerwwe 8 NULL NULL 4 NULL \x7b22757365725f6964223a20387d
+yjtyjtyyy 9 NULL NULL 4 NULL \x7b22757365725f6964223a20397d

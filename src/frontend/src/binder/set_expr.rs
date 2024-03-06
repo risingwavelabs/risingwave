@@ -14,12 +14,12 @@
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, CorrelatedId, Depth};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller

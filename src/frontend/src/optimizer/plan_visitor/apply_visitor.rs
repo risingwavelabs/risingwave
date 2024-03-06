@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
-
 use super::{DefaultBehavior, Merge};
+use crate::error::{ErrorCode, RwError};
 use crate::optimizer::plan_node::{LogicalApply, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;

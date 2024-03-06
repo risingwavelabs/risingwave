@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::bail;
 
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
+use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
 use crate::parser::simd_json_parser::DebeziumJsonAccessBuilder;
 use crate::parser::unified::debezium::parse_transaction_meta;
@@ -44,7 +44,7 @@ impl PlainParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
+    ) -> ConnectorResult<Self> {
         let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
             Some(AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
                 EncodingProperties::Bytes(BytesProperties {
@@ -62,11 +62,7 @@ impl PlainParser {
             | EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?
             }
-            _ => {
-                return Err(RwError::from(ProtocolError(
-                    "unsupported encoding for Plain".to_string(),
-                )));
-            }
+            _ => bail!("Unsupported encoding for Plain"),
         };
 
         let transaction_meta_builder = Some(AccessBuilderImpl::DebeziumJson(
@@ -86,7 +82,7 @@ impl PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         // if the message is transaction metadata, parse it and return
         if let Some(msg_meta) = writer.row_meta
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
@@ -150,7 +146,7 @@ impl ByteStreamSourceParser for PlainParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -159,7 +155,7 @@ impl ByteStreamSourceParser for PlainParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }
@@ -218,18 +214,18 @@ mod tests {
         let output = output
             .unwrap()
             .into_iter()
-            .filter(|c| c.chunk.cardinality() > 0)
+            .filter(|c| c.cardinality() > 0)
             .enumerate()
             .map(|(i, c)| {
                 if i == 0 {
                     // begin + 3 data messages
-                    assert_eq!(4, c.chunk.cardinality());
+                    assert_eq!(4, c.cardinality());
                 }
                 if i == 1 {
                     // 2 data messages + 1 end
-                    assert_eq!(3, c.chunk.cardinality());
+                    assert_eq!(3, c.cardinality());
                 }
-                c.chunk
+                c
             })
             .collect_vec();
 
@@ -255,11 +251,11 @@ mod tests {
         let output = output
             .unwrap()
             .into_iter()
-            .filter(|c| c.chunk.cardinality() > 0)
+            .filter(|c| c.cardinality() > 0)
             .map(|c| {
                 // 5 data messages in a single chunk
-                assert_eq!(5, c.chunk.cardinality());
-                c.chunk
+                assert_eq!(5, c.cardinality());
+                c
             })
             .collect_vec();
 
@@ -267,11 +263,11 @@ mod tests {
         assert_eq!(1, output.len());
     }
 
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn source_message_stream(transactional: bool) {
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"35352:3962950064","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
-        let data_batches = vec![
+        let data_batches = [
             vec![
                 r#"{ "schema": null, "payload": {"after": {"customer_name": "a1", "order_date": "2020-01-30", "order_id": 10021, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
                 r#"{ "schema": null, "payload": {"after": {"customer_name": "a2", "order_date": "2020-02-30", "order_id": 10022, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
