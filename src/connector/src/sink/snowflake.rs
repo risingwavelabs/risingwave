@@ -12,18 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
+use async_trait::async_trait;
+use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
-use async_trait::async_trait;
 use with_options::WithOptions;
-use risingwave_common::{array::StreamChunk, buffer::Bitmap, catalog::Schema};
 
-use super::{encoder::JsonEncoder, writer::LogSinkerOf, SinkError, SinkParam};
+use super::encoder::JsonEncoder;
+use super::writer::LogSinkerOf;
+use super::{SinkError, SinkParam};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
@@ -136,10 +141,6 @@ impl SinkWriter for SnowflakeSinkWriter {
     }
 }
 
-pub struct SnowflakeClient {
+pub struct SnowflakeClient {}
 
-}
-
-impl SnowflakeClient {
-
-}
+impl SnowflakeClient {}
