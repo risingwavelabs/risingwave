@@ -776,9 +776,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 MqttSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json,Encode::Bytes],
-                    Format::Upsert => vec![Encode::Json,Encode::Bytes],
-                    Format::Debezium => vec![Encode::Json,Encode::Bytes],
+                    Format::Plain => vec![Encode::Json],
+                    Format::Upsert => vec![Encode::Json],
+                    Format::Debezium => vec![Encode::Json],
                 ),
                 PulsarSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],

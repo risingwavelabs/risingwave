@@ -22,7 +22,7 @@ use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
-use crate::common::{MqttCommon, QualityOfService};
+use crate::mqtt_common::{MqttCommon, QualityOfService};
 use crate::source::mqtt::enumerator::MqttSplitEnumerator;
 use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;

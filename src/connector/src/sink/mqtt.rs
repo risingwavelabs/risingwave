@@ -30,7 +30,7 @@ use super::catalog::SinkFormatDesc;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::MqttCommon;
+use crate::mqtt_common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -123,7 +123,7 @@ impl Sink for MqttSink {
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(
-                "Nats sink only support append-only mode"
+                "Mqtt sink only support append-only mode"
             )));
         }
 
