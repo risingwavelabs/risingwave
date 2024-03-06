@@ -103,6 +103,18 @@ def init_risingwave_mv(docker):
         """
     ]
 
+    if 'source' in config:
+        source_config = config['source']
+        source_param = ",\n".join([f"{k}='{v}'" for k, v in source_config.items()])
+        sqls.append(
+            f"""
+            CREATE SOURCE iceberg_source
+            WITH (
+                {source_param}
+            );
+            """
+        )
+
     rw_config = config['risingwave']
     with psycopg2.connect(database=rw_config['db'], user=rw_config['user'], host=rw_config['host'],
                           port=rw_config['port']) as conn:
@@ -127,6 +139,24 @@ def check_spark_table(docker):
         result = spark.sql(sql).collect()
         assert result[0][0] > 100, f"Inserted result is too small: {result[0][0]}, test failed"
 
+def check_risingwave_iceberg_source(docker):
+    config = read_config(f"{docker.case_dir()}/config.ini")
+
+    sqls = [
+        "select count(*) from iceberg_source"
+    ]
+
+    rw_config = config['risingwave']
+    with psycopg2.connect(database=rw_config['db'], user=rw_config['user'], host=rw_config['host'],
+                          port=rw_config['port']) as conn:
+        with conn.cursor() as cursor:
+            for sql in sqls:
+                print(f"Executing sql {sql}")
+                # execute sql and collect result
+                cursor.execute(sql)
+                result = cursor.fetchall()
+                assert result[0][0] > 100, f"Inserted result is too small: {result[0][0]}, test failed"
+
 
 def run_case(case):
     with DockerCompose(case) as docker:
@@ -135,6 +165,8 @@ def run_case(case):
         print("Let risingwave to run")
         time.sleep(5)
         check_spark_table(docker)
+        if case == "storage":
+            check_risingwave_iceberg_source(docker)
 
 
 if __name__ == "__main__":
