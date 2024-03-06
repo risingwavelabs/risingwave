@@ -20,7 +20,6 @@ use std::ops::Bound::Included;
 use std::sync::Arc;
 use std::time::Instant;
 
-use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -37,7 +36,6 @@ use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
-use tracing::Instrument;
 
 use super::StagingDataIterator;
 use crate::error::StorageResult;
@@ -894,7 +892,6 @@ impl HummockVersionReader {
             let table_holder = self
                 .sstable_store
                 .sstable(sstable_info, &mut local_stats)
-                .instrument(tracing::trace_span!("get_sstable"))
                 .await?;
 
             if !table_holder.meta.monotonic_tombstone_events.is_empty()
@@ -969,7 +966,6 @@ impl HummockVersionReader {
                     let sstable = self
                         .sstable_store
                         .sstable(&sstables[0], &mut local_stats)
-                        .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
                     if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -1014,7 +1010,6 @@ impl HummockVersionReader {
                     let sstable = self
                         .sstable_store
                         .sstable(sstable_info, &mut local_stats)
-                        .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
                     assert_eq!(sstable_info.get_object_id(), sstable.id);
                     if !sstable.meta.monotonic_tombstone_events.is_empty()
@@ -1092,7 +1087,6 @@ impl HummockVersionReader {
         );
         user_iter
             .rewind()
-            .verbose_instrument_await("rewind")
             .await?;
         local_stats.found_key = user_iter.is_valid();
         local_stats.sub_iter_count = local_stats.staging_imm_iter_count

@@ -225,7 +225,6 @@ impl StateStoreRead for LocalHummockStorage {
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         assert!(epoch <= self.epoch());
         self.iter_flushed(key_range, epoch, read_options)
-            .instrument(tracing::trace_span!("hummock_iter"))
     }
 }
 

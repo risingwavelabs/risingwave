@@ -94,7 +94,6 @@ impl<S> MonitoredStateStore<S> {
         // start time takes iterator build time into account
         // wait for iterator creation (e.g. seek)
         let iter_stream = iter_stream_future
-            .verbose_instrument_await("store_create_iter")
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in iter"))?;
 
@@ -384,8 +383,6 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
-        use risingwave_common::util::tracing::InstrumentStream;
-
-        Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
+        Self::into_stream_inner(self)
     }
 }
