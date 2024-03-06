@@ -103,9 +103,7 @@ pub enum AlterTableOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
-    FormatEncode {
-        connector_schema: ConnectorSchema,
-    },
+    RefreshSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -279,8 +277,8 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
-            AlterTableOperation::FormatEncode { connector_schema } => {
-                write!(f, "{connector_schema}")
+            AlterTableOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
             }
         }
     }

@@ -559,11 +559,8 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::FormatEncode { connector_schema },
-        } => {
-            alter_table_with_sr::handle_alter_table_with_sr(handler_args, name, connector_schema)
-                .await
-        }
+            operation: AlterTableOperation::RefreshSchema,
+        } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
