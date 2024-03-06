@@ -734,7 +734,7 @@ mod test {
 
         let source = MockSource::with_messages(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .into_executor(schema.clone(), pk_indices.clone());
@@ -783,7 +783,7 @@ mod test {
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2)))
         );
 
         // The last barrier message.

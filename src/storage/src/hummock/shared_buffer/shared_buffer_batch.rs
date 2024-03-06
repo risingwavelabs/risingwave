@@ -777,9 +777,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 mod tests {
     use std::ops::Bound::{Excluded, Included};
 
-    use risingwave_common::util::epoch::{
-        test_epoch, EpochExt, EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST,
-    };
+    use risingwave_common::util::epoch::{test_epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST};
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -1030,7 +1028,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_batch_range_existx() {
-        let epoch = 1 << EPOCH_AVAILABLE_BITS;
+        let epoch = test_epoch(1);
         let shared_buffer_items = vec![
             (Vec::from("a_1"), HummockValue::put(Bytes::from("value1"))),
             (Vec::from("a_3"), HummockValue::put(Bytes::from("value2"))),

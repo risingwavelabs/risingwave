@@ -1733,7 +1733,7 @@ pub(crate) mod tests {
                 let (k, epoch) = if rand_v == 0 {
                     (last_k + 1000 * object_id, init_epoch)
                 } else if rand_v < 5 {
-                    (last_k, last_epoch - EPOCH_INC_MIN_STEP_FOR_TEST)
+                    (last_k, last_epoch.prev_epoch())
                 } else {
                     (last_k + 1, init_epoch)
                 };

@@ -171,7 +171,7 @@ impl EpochPair {
 }
 /// As most unit tests initializ a new epoch from a random value (e.g. 1, 2, 233 etc.), but the correct epoch in the system is a u64 with the last `EPOCH_AVAILABLE_BITS` bits set to 0.
 /// This method is to turn a a random epoch into a well shifted value.
-pub fn test_epoch(value: u64) -> u64 {
+pub const fn test_epoch(value: u64) -> u64 {
     value << EPOCH_AVAILABLE_BITS
 }
 

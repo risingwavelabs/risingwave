@@ -768,9 +768,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::epoch::{
-        test_epoch, EpochExt, EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST,
-    };
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
@@ -788,9 +786,9 @@ mod tests {
         KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType, KV_LOG_STORE_V2_INFO,
     };
 
-    const EPOCH0: u64 = 1 << EPOCH_AVAILABLE_BITS;
-    const EPOCH1: u64 = EPOCH0 + EPOCH_INC_MIN_STEP_FOR_TEST;
-    const EPOCH2: u64 = EPOCH1 + EPOCH_INC_MIN_STEP_FOR_TEST;
+    const EPOCH0: u64 = test_epoch(1);
+    const EPOCH1: u64 = test_epoch(2);
+    const EPOCH2: u64 = test_epoch(3);
 
     #[test]
     fn test_serde_v1() {
