@@ -355,8 +355,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
-        } else if is_new_user_key
-            && self.block_builder.approximate_len() >= self.options.block_capacity
+        } else if self.block_builder.approximate_len() >= self.options.block_capacity
             && could_switch_block
         {
             self.build_block().await?;
