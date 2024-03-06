@@ -667,7 +667,9 @@ mod tests {
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::{
+        EpochExt, EPOCH_AVAILABLE_BITS, EPOCH_INC_MIN_STEP_FOR_TEST,
+    };
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -930,7 +932,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a later epoch, the first key is not skipped
-        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH + EPOCH_INC_MIN_STEP_FOR_TEST);
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {
