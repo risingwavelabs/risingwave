@@ -715,6 +715,7 @@ pub enum UserOption {
     NoLogin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
+    OAuth(Vec<SqlOption>),
 }
 
 impl fmt::Display for UserOption {
@@ -731,6 +732,9 @@ impl fmt::Display for UserOption {
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::OAuth(options) => {
+                write!(f, "({})", display_comma_separated(options.as_slice()))
+            }
         }
     }
 }
@@ -818,10 +822,14 @@ impl ParseTo for UserOptions {
                             UserOption::EncryptedPassword(AstString::parse_to(parser)?),
                         )
                     }
+                    Keyword::OAUTH => {
+                        let options = parser.parse_options()?;
+                        (&mut builder.password, UserOption::OAuth(options))
+                    }
                     _ => {
                         parser.expected(
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                             token,
                         )?;
                         unreachable!()
@@ -831,7 +839,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                     token,
                 )?
             }
