@@ -2818,6 +2818,7 @@ impl GlobalStreamManager {
             reschedules,
             RescheduleOptions {
                 resolve_no_shuffle_upstream: false,
+                skip_create_new_actors: false,
             },
             None,
         )
