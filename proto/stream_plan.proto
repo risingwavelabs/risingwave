@@ -214,7 +214,7 @@ message SourceBackfillNode {
   string source_name = 8;
   map<string, string> with_properties = 6;
   // Streaming rate limit
-  // optional uint32 rate_limit = 9;
+  optional uint32 rate_limit = 9;
 
   // fields above are the same as StreamSource
 

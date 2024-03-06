@@ -52,7 +52,7 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
 
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: params.env.config().developer.chunk_size,
-            rate_limit: None,
+            rate_limit: node.rate_limit,
         };
 
         let source_column_ids: Vec<_> = source_desc_builder
