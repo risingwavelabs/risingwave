@@ -29,6 +29,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         _store: impl StateStore,
     ) -> StreamResult<BoxedExecutor> {
         let upstreams = node.get_upstream_actor_id();
+
+        assert!(upstreams.iter().all_unique(), "heiheihei");
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
         let inputs: Vec<_> = upstreams

@@ -1201,7 +1201,6 @@ impl ScaleController {
 
             tracing::debug!("creating actors on worker {}: {:?}", worker_id, actors);
         }
-
         self.create_actors_on_compute_node(
             &ctx.worker_nodes,
             actor_infos_to_broadcast,

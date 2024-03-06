@@ -239,6 +239,10 @@ impl LocalStreamManager {
     }
 
     pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
+        assert!(
+            actors.iter().map(|a| a.actor_id).all_unique(),
+            "update actors"
+        );
         self.local_barrier_manager
             .send_and_await(|result_sender| LocalBarrierEvent::UpdateActors {
                 actors,
@@ -248,6 +252,7 @@ impl LocalStreamManager {
     }
 
     pub async fn build_actors(&self, actors: Vec<ActorId>) -> StreamResult<()> {
+        assert!(actors.iter().all_unique(), "build actors");
         self.local_barrier_manager
             .send_and_await(|result_sender| LocalBarrierEvent::BuildActors {
                 actors,
