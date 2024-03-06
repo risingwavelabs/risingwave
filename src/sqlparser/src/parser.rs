@@ -2379,7 +2379,7 @@ impl Parser {
     //     | CREATEDB | NOCREATEDB
     //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }

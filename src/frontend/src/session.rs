@@ -963,6 +963,8 @@ impl SessionManager for SessionManagerImpl {
                             ),
                             salt,
                         }
+                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                        UserAuthenticator::OAuth(auth_info.metadata.clone())
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,
