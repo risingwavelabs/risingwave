@@ -727,6 +727,7 @@ impl GlobalStreamManager {
                     reschedules,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: false,
+                        skip_create: false,
                     },
                     Some(table_parallelism_assignment),
                 )

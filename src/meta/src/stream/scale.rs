@@ -437,6 +437,8 @@ pub fn rebalance_actor_vnode(
 pub struct RescheduleOptions {
     /// Whether to resolve the upstream of NoShuffle when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
     pub resolve_no_shuffle_upstream: bool,
+
+    pub skip_create: bool,
 }
 
 pub type ScaleControllerRef = Arc<ScaleController>;
@@ -1201,13 +1203,18 @@ impl ScaleController {
 
             tracing::debug!("creating actors on worker {}: {:?}", worker_id, actors);
         }
-        self.create_actors_on_compute_node(
-            &ctx.worker_nodes,
-            actor_infos_to_broadcast,
-            node_actors_to_create,
-            broadcast_worker_ids,
-        )
-        .await?;
+
+        if !options.skip_create {
+            self.create_actors_on_compute_node(
+                &ctx.worker_nodes,
+                actor_infos_to_broadcast,
+                node_actors_to_create,
+                broadcast_worker_ids,
+            )
+            .await?;
+        } else {
+            tracing::debug!("skipping create");
+        }
 
         // For stream source fragments, we need to reallocate the splits.
         // Because we are in the Pause state, so it's no problem to reallocate
@@ -2733,6 +2740,7 @@ impl GlobalStreamManager {
                     reschedules,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create: false,
                     },
                     None,
                 )
@@ -2792,6 +2800,7 @@ impl GlobalStreamManager {
                     reschedules,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create: false,
                     },
                     None,
                 )

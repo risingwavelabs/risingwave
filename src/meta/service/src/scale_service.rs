@@ -210,6 +210,7 @@ impl ScaleService for ScaleServiceImpl {
                     .collect(),
                 RescheduleOptions {
                     resolve_no_shuffle_upstream,
+                    skip_create: false,
                 },
                 Some(table_parallelisms),
             )
