@@ -142,12 +142,13 @@ impl ComputeClient {
             .to_owned()
             .get_stream(request_stream)
             .await
-            .inspect_err(|_| {
+            .inspect_err(|err| {
                 tracing::error!(
-                    "failed to create stream from remote_input {} from actor {} to actor {}",
+                    "failed to create stream from remote_input {} from actor {} to actor {}: {}",
                     self.addr,
                     up_actor_id,
-                    down_actor_id
+                    down_actor_id,
+                    err.as_report(),
                 )
             })?
             .into_inner();
