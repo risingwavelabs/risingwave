@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 cat -vt $1 \
  | LC_ALL=C LANG=C sed -E \
   -e 's/\^\[_bk\;t=[0-9]+//g' \
