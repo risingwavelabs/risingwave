@@ -25,9 +25,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::mqtt::MqttProperties;
-use crate::source::{
-    self, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitReader,
-};
+use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitReader};
 
 pub struct MqttSplitReader {
     eventloop: rumqttc::v5::EventLoop,
@@ -51,10 +49,9 @@ impl SplitReader for MqttSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let (client, eventloop) = properties.common.build_client(
-            source_ctx.source_info.actor_id,
-            source_ctx.source_info.fragment_id as u64,
-        )?;
+        let (client, eventloop) = properties
+            .common
+            .build_client(source_ctx.actor_id, source_ctx.fragment_id as u64)?;
 
         let qos = properties.common.qos();
 
