@@ -1038,3 +1038,71 @@
               └─BatchHashAgg { group_key: [array_types.x], aggs: [] }
                 └─BatchExchange { order: [], dist: HashShard(array_types.x) }
                   └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b AND ($expr1 > count(1:Int32)), output: [t.a, t.b] }
+      ├─BatchExchange { order: [], dist: HashShard(t.b) }
+      │ └─BatchProject { exprs: [t.a, t.b, t.a::Int64 as $expr1] }
+      │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [t.b], aggs: [count(1:Int32)] }
+        └─BatchHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, 1:Int32] }
+          ├─BatchHashAgg { group_key: [t.b], aggs: [] }
+          │ └─BatchExchange { order: [], dist: HashShard(t.b) }
+          │   └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t2.d) }
+            └─BatchProject { exprs: [t2.d, 1:Int32] }
+              └─BatchFilter { predicate: IsNotNull(t2.d) }
+                └─BatchScan { table: t2, columns: [t2.d], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, t._row_id(hidden), t.b(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t._row_id, t.b] }
+      └─StreamFilter { predicate: ($expr1 > count(1:Int32)) }
+        └─StreamHashJoin { type: Inner, predicate: t.b IS NOT DISTINCT FROM t.b, output: all }
+          ├─StreamExchange { dist: HashShard(t.b) }
+          │ └─StreamProject { exprs: [t.a, t.b, t.a::Int64 as $expr1, t._row_id] }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [t.b, count(1:Int32)] }
+            └─StreamHashAgg { group_key: [t.b], aggs: [count(1:Int32), count] }
+              └─StreamHashJoin { type: LeftOuter, predicate: t.b IS NOT DISTINCT FROM t2.d, output: [t.b, 1:Int32, t2._row_id] }
+                ├─StreamProject { exprs: [t.b] }
+                │ └─StreamHashAgg { group_key: [t.b], aggs: [count] }
+                │   └─StreamExchange { dist: HashShard(t.b) }
+                │     └─StreamTableScan { table: t, columns: [t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamExchange { dist: HashShard(t2.d) }
+                  └─StreamProject { exprs: [t2.d, 1:Int32, t2._row_id] }
+                    └─StreamFilter { predicate: IsNotNull(t2.d) }
+                      └─StreamTableScan { table: t2, columns: [t2.d, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: a case could be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.b = t2.d AND ($expr1 > $expr2), output: [t.a, t.b] }
+      ├─BatchExchange { order: [], dist: HashShard(t.b) }
+      │ └─BatchProject { exprs: [t.a, t.b, t.a::Decimal as $expr1] }
+      │   └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+      └─BatchProject { exprs: [(sum(t2.c)::Decimal / count(t2.c)::Decimal) as $expr2, t2.d] }
+        └─BatchHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c)] }
+          └─BatchExchange { order: [], dist: HashShard(t2.d) }
+            └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, t._row_id(hidden), t2.d(hidden)], stream_key: [t._row_id, b], pk_columns: [t._row_id, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t._row_id, t2.d] }
+      └─StreamFilter { predicate: ($expr1 > $expr2) }
+        └─StreamHashJoin { type: Inner, predicate: t.b = t2.d, output: all }
+          ├─StreamExchange { dist: HashShard(t.b) }
+          │ └─StreamProject { exprs: [t.a, t.b, t.a::Decimal as $expr1, t._row_id] }
+          │   └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [(sum(t2.c)::Decimal / count(t2.c)::Decimal) as $expr2, t2.d] }
+            └─StreamHashAgg { group_key: [t2.d], aggs: [sum(t2.c), count(t2.c), count] }
+              └─StreamExchange { dist: HashShard(t2.d) }
+                └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

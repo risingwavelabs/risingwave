@@ -619,7 +619,7 @@ impl CommandContext {
                         actor_splits,
                         actor_new_dispatchers,
                     });
-                    tracing::debug!("update mutation: {mutation:#?}");
+                    tracing::debug!("update mutation: {mutation:?}");
                     Some(mutation)
                 }
             };

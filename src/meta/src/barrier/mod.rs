@@ -20,7 +20,7 @@ use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use arc_swap::ArcSwap;
 use fail::fail_point;
 use itertools::Itertools;
@@ -991,12 +991,11 @@ impl CheckpointControl {
         }
 
         if let CompletingCommand::Completing { join_handle, .. } = &mut self.completing_command {
-            let join_result = join_handle
-                .await
-                .map_err(|e| {
-                    anyhow!("failed to join completing command: {:?}", e.as_report()).into()
-                })
-                .and_then(|result| result);
+            let join_result: MetaResult<_> = try {
+                join_handle
+                    .await
+                    .context("failed to join completing command")??
+            };
             // It's important to reset the completing_command after await no matter the result is err
             // or not, and otherwise the join handle will be polled again after ready.
             if let Err(e) = &join_result {
