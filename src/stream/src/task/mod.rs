@@ -125,6 +125,16 @@ impl SharedContext {
         ids: UpDownActorIds,
     ) -> MappedMutexGuard<'_, ConsumableChannelPair> {
         MutexGuard::map(self.channel_map.lock(), |map| {
+            if let Some(x) = map.get(&ids) {
+                if let (_, Some(_)) = x {
+                    tracing::debug!("should take: ids={:?}", ids);
+                } else {
+                    tracing::debug!("bong: ids={:?}", ids);
+                }
+            } else {
+                tracing::debug!("should insert: ids={:?}", ids);
+            }
+
             map.entry(ids).or_insert_with(|| {
                 let (tx, rx) = permit::channel(
                     self.config.developer.exchange_initial_permits,
