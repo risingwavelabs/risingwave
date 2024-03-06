@@ -32,10 +32,14 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private final Connection jdbcConnection;
 
-    private final boolean isMultiTableShared;
+    private final boolean isCdcSourceJob;
+    private final boolean isBackfillTable;
 
     public MySqlValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isMultiTableShared)
+            Map<String, String> userProps,
+            TableSchema tableSchema,
+            boolean isCdcSourceJob,
+            boolean isBackfillTable)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -48,7 +52,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
-        this.isMultiTableShared = isMultiTableShared;
+        this.isCdcSourceJob = isCdcSourceJob;
+        this.isBackfillTable = isBackfillTable;
     }
 
     @Override
@@ -115,8 +120,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     @Override
-    boolean isMultiTableShared() {
-        return isMultiTableShared;
+    boolean isCdcSourceJob() {
+        return isCdcSourceJob;
     }
 
     private void validateTableSchema() throws SQLException {
@@ -181,10 +186,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private void validatePrivileges() throws SQLException {
-        String[] privilegesRequired = {
-            "SELECT", "RELOAD", "REPLICATION SLAVE", "REPLICATION CLIENT",
-        };
-
+        String[] privilegesRequired = getRequiredPrivileges();
         var hashSet = new HashSet<>(List.of(privilegesRequired));
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
@@ -205,6 +207,20 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 throw ValidatorUtils.invalidArgument(
                         "MySQL user doesn't have enough privileges: " + hashSet);
             }
+        }
+    }
+
+    private String[] getRequiredPrivileges() {
+        if (isCdcSourceJob) {
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else if (isBackfillTable) {
+            // check privilege again to ensure the user has the privilege for backfill
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else {
+            // dedicated source needs more privileges to acquire global lock
+            return new String[] {
+                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT"
+            };
         }
     }
 

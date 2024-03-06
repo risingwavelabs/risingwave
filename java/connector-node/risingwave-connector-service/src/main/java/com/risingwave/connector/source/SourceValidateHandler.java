@@ -84,25 +84,24 @@ public class SourceValidateHandler {
     public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
-        var commonParam = request.getCommonParam();
-        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
+
+        boolean isCdcSourceJob = request.getIsSourceJob();
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
-                ensureRequiredProps(props, isMultiTableShared);
+                ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
-                try (var validator =
-                        new PostgresValidator(props, tableSchema, isMultiTableShared)) {
+                try (var validator = new PostgresValidator(props, tableSchema, isCdcSourceJob)) {
                     validator.validateAll();
                 }
                 break;
 
             case CITUS:
-                ensureRequiredProps(props, isMultiTableShared);
+                ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
@@ -131,9 +130,9 @@ public class SourceValidateHandler {
 
                 break;
             case MYSQL:
-                ensureRequiredProps(props, isMultiTableShared);
+                ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
-                try (var validator = new MySqlValidator(props, tableSchema, isMultiTableShared)) {
+                try (var validator = new MySqlValidator(props, tableSchema, isCdcSourceJob)) {
                     validator.validateAll();
                 }
                 break;

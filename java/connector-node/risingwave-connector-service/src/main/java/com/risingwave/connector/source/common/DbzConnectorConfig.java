@@ -115,7 +115,7 @@ public class DbzConnectorConfig {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            boolean isMultiTableShared) {
+            boolean isCdcSourceJob) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
@@ -124,13 +124,13 @@ public class DbzConnectorConfig {
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isMultiTableShared={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
                 isCdcBackfill,
-                isMultiTableShared);
+                isCdcSourceJob);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -196,7 +196,7 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
-            if (isMultiTableShared) {
+            if (isCdcSourceJob) {
                 // remove table filtering for the shared Postgres source, since we
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Postgres source");

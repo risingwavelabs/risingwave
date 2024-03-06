@@ -19,9 +19,9 @@ public abstract class DatabaseValidator {
     public void validateAll() {
         validateDbConfig();
         validateUserPrivilege();
-        // If the source connector is shared by multiple tables, it will capture events from
+        // If the source connector is created by share source, it will capture events from
         // multiple tables, skip validate its schema
-        if (!isMultiTableShared()) {
+        if (!isCdcSourceJob()) {
             validateTable();
         }
     }
@@ -35,5 +35,5 @@ public abstract class DatabaseValidator {
     /** Validate the properties of the source table */
     abstract void validateTable();
 
-    abstract boolean isMultiTableShared();
+    abstract boolean isCdcSourceJob();
 }

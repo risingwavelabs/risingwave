@@ -55,7 +55,7 @@ public class MongoDbValidator extends DatabaseValidator {
     }
 
     @Override
-    boolean isMultiTableShared() {
+    boolean isCdcSourceJob() {
         return false;
     }
 }
