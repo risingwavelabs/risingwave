@@ -1193,6 +1193,15 @@ impl ScaleController {
             }
         }
 
+        for (worker_id, actors) in &node_actors_to_create {
+            let actors: HashMap<_, _> = actors
+                .iter()
+                .map(|actor| (actor.actor_id, actor.upstream_actor_id.clone()))
+                .collect();
+
+            tracing::debug!("creating actors on worker {}: {:?}", worker_id, actors);
+        }
+
         self.create_actors_on_compute_node(
             &ctx.worker_nodes,
             actor_infos_to_broadcast,

@@ -651,7 +651,7 @@ impl GlobalBarrierManagerContext {
             })
             .await?;
 
-        tracing::debug!("generated plan {:?}", plan);
+        println!("generated plan {:?}", plan);
 
         let table_parallelisms: HashMap<_, _> = table_parallelisms
             .into_iter()
