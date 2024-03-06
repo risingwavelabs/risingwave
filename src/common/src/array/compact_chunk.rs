@@ -241,7 +241,7 @@ impl StreamChunkCompactor {
         chunks.into_iter().map(|(_, c)| c.into())
     }
 
-    /// re-construct the stream chunks to compacte them with the stream key.
+    /// re-construct the stream chunks to compact them with the stream key.
     pub fn reconstructed_compacted_chunks(
         self,
         chunk_size: usize,
