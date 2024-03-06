@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::iter::once;
 use std::ops::Bound::Included;
 use std::sync::Arc;
+use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -858,8 +859,6 @@ impl HummockVersionReader {
         read_version_tuple: ReadVersionTuple,
         mem_table: Option<MemTableHummockIterator<'b>>,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
-        let table_id_string = read_options.table_id.to_string();
-        let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed, watermark) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();
@@ -927,11 +926,7 @@ impl HummockVersionReader {
 
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
-        let timer = self
-            .state_store_metrics
-            .iter_fetch_meta_duration
-            .with_label_values(&[table_id_label])
-            .start_timer();
+        let timer = Instant::now();
 
         for level in committed.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -1047,8 +1042,9 @@ impl HummockVersionReader {
                 }
             }
         }
-        let fetch_meta_duration_sec = timer.stop_and_record();
+        let fetch_meta_duration_sec = timer.elapsed().as_secs_f64();
         if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
+            let table_id_string = read_options.table_id.to_string();
             tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.",
                 table_id_string, epoch, fetch_meta_duration_sec, local_stats.cache_meta_block_miss);
             self.state_store_metrics

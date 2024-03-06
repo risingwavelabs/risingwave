@@ -92,24 +92,11 @@ impl<S> MonitoredStateStore<S> {
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
     ) -> StorageResult<MonitoredStateStoreIterStream<St>> {
         // start time takes iterator build time into account
-        let start_time = Instant::now();
-        let table_id_label = table_id.to_string();
-
         // wait for iterator creation (e.g. seek)
         let iter_stream = iter_stream_future
             .verbose_instrument_await("store_create_iter")
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in iter"))?;
-
-        self.storage_metrics
-            .iter_init_duration
-            .with_label_values(&[table_id_label.as_str()])
-            .observe(start_time.elapsed().as_secs_f64());
-        // statistics of iter in process count to estimate the read ops in the same time
-        self.storage_metrics
-            .iter_in_process_counts
-            .with_label_values(&[table_id_label.as_str()])
-            .inc();
 
         // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
@@ -400,24 +387,5 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
         use risingwave_common::util::tracing::InstrumentStream;
 
         Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
-    }
-}
-
-impl Drop for MonitoredStateStoreIterStats {
-    fn drop(&mut self) {
-        let table_id_label = self.table_id.to_string();
-
-        self.storage_metrics
-            .iter_scan_duration
-            .with_label_values(&[table_id_label.as_str()])
-            .observe(self.scan_time.elapsed().as_secs_f64());
-        self.storage_metrics
-            .iter_item
-            .with_label_values(&[table_id_label.as_str()])
-            .observe(self.total_items as f64);
-        self.storage_metrics
-            .iter_size
-            .with_label_values(&[table_id_label.as_str()])
-            .observe(self.total_size as f64);
     }
 }
