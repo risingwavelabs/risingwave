@@ -1181,7 +1181,7 @@ mod tests {
     use futures::FutureExt;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -1524,7 +1524,7 @@ mod tests {
                 assert_eq!(2, imms.len());
             }
 
-            let epoch_cnt = (epoch / EPOCH_INC_MIN_STEP_FOR_TEST - INITIAL_EPOCH) as usize;
+            let epoch_cnt = (epoch / test_epoch(1) - INITIAL_EPOCH) as usize;
             if epoch_cnt < imm_merge_threshold {
                 assert!(uploader.sealed_data.merging_tasks.is_empty());
                 assert!(uploader.sealed_data.spilled_data.is_empty());

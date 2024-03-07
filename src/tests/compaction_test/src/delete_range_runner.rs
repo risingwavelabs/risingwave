@@ -29,7 +29,7 @@ use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST};
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -317,7 +317,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = test_epoch(init_epoch / EPOCH_INC_MIN_STEP_FOR_TEST + epoch_idx);
+        let epoch = test_epoch(init_epoch / test_epoch(1) + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -375,7 +375,7 @@ async fn run_compare_result(
             .commit_epoch(epoch, ret.uncommitted_ssts)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if (epoch / EPOCH_INC_MIN_STEP_FOR_TEST) % 200 == 0 {
+        if (epoch / test_epoch(1)) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }

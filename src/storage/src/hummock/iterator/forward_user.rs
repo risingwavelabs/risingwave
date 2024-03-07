@@ -325,7 +325,7 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -850,7 +850,7 @@ mod tests {
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - (min_epoch / EPOCH_INC_MIN_STEP_FOR_TEST) as usize + 1;
+        let expect_count = TEST_KEYS_COUNT - (min_epoch / test_epoch(1)) as usize + 1;
         assert_eq!(i, expect_count);
     }
 

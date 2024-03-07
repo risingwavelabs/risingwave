@@ -300,7 +300,7 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::{test_epoch, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::prev_key;
 
     use super::*;
@@ -1085,7 +1085,7 @@ mod tests {
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - (min_epoch / EPOCH_INC_MIN_STEP_FOR_TEST) as usize;
+        let expect_count = TEST_KEYS_COUNT - (min_epoch / test_epoch(1)) as usize;
         assert_eq!(i, expect_count);
     }
 }

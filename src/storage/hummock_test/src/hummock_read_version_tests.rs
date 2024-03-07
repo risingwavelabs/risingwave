@@ -19,7 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::{test_epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST};
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -99,7 +99,7 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        let repeat_num = epoch / EPOCH_INC_MIN_STEP_FOR_TEST;
+        let repeat_num = epoch / test_epoch(1);
         for e in 1..repeat_num {
             let epoch = test_epoch(6);
             let key = iterator_test_table_key_of(e as usize);

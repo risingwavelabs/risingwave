@@ -777,7 +777,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 mod tests {
     use std::ops::Bound::{Excluded, Included};
 
-    use risingwave_common::util::epoch::{test_epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST};
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -1198,7 +1198,7 @@ mod tests {
             }
             assert_eq!(
                 output,
-                batch_items[(snapshot_epoch / EPOCH_INC_MIN_STEP_FOR_TEST) as usize - 1]
+                batch_items[(snapshot_epoch / test_epoch(1)) as usize - 1]
             );
         }
 

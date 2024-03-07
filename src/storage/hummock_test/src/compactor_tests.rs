@@ -28,9 +28,7 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{
-        test_epoch, Epoch, EpochExt, EPOCH_INC_MIN_STEP_FOR_TEST,
-    };
+    use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -164,7 +162,7 @@ pub(crate) mod tests {
         local.init_for_test(epochs[0]).await.unwrap();
         for (i, &e) in epochs.iter().enumerate() {
             let epoch = e;
-            let val_str = e / EPOCH_INC_MIN_STEP_FOR_TEST;
+            let val_str = e / test_epoch(1);
             let mut new_val = val.clone();
             new_val.extend_from_slice(&val_str.to_be_bytes());
             local

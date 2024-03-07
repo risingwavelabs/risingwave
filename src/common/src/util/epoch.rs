@@ -126,7 +126,7 @@ pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
 // EPOCH_INC_MIN_STEP_FOR_TEST is the minimum increment step for epoch in unit tests.
 // We need to keep the lower 16 bits of the epoch unchanged during each increment,
 // and only increase the upper 48 bits.
-pub const EPOCH_INC_MIN_STEP_FOR_TEST: u64 = 1 << EPOCH_PHYSICAL_SHIFT_BITS;
+const EPOCH_INC_MIN_STEP_FOR_TEST: u64 = test_epoch(1);
 
 pub fn is_max_epoch(epoch: u64) -> bool {
     // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version,
