@@ -23,11 +23,9 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::Stream;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
@@ -169,7 +167,6 @@ pub struct SourceContext {
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
-    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
     pub fn new(
@@ -192,53 +189,17 @@ impl SourceContext {
             },
             metrics,
             source_ctrl_opts,
-            error_suppressor: None,
             connector_props,
         }
-    }
-
-    pub fn new_with_suppressor(
-        actor_id: u32,
-        table_id: TableId,
-        fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
-        source_ctrl_opts: SourceCtrlOpts,
-        connector_client: Option<ConnectorClient>,
-        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
-        connector_props: ConnectorProperties,
-        source_name: String,
-    ) -> Self {
-        let mut ctx = Self::new(
-            actor_id,
-            table_id,
-            fragment_id,
-            metrics,
-            source_ctrl_opts,
-            connector_client,
-            connector_props,
-            source_name,
-        );
-        ctx.error_suppressor = Some(error_suppressor);
-        ctx
     }
 
     pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
         if self.source_info.fragment_id == u32::MAX {
+            // batch query
             return;
-        }
-        let mut err_str = e.to_report_string();
-        if let Some(suppressor) = &self.error_suppressor
-            && suppressor.lock().suppress_error(&err_str)
-        {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                suppressor.lock().max()
-            );
         }
         GLOBAL_ERROR_METRICS.user_source_error.report([
             "SourceError".to_owned(),
-            // TODO(jon-chuang): add the error msg truncator to truncate these
-            err_str,
             // Let's be a bit more specific for SourceExecutor
             "SourceExecutor".to_owned(),
             self.source_info.fragment_id.to_string(),

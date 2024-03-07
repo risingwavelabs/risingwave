@@ -382,21 +382,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .await
         {
             let mut err_str = e.to_report_string();
-            if actor_context
-                .error_suppressor
-                .lock()
-                .suppress_error(&err_str)
-            {
-                err_str = format!(
-                    "error msg suppressed (due to per-actor error limit: {})",
-                    actor_context.error_suppressor.lock().max()
-                );
-            }
-            GLOBAL_ERROR_METRICS.user_sink_error.report([
-                S::SINK_NAME.to_owned(),
-                info.identity.clone(),
-                err_str,
-            ]);
+            GLOBAL_ERROR_METRICS
+                .user_sink_error
+                .report([S::SINK_NAME.to_owned(), info.identity.clone()]);
 
             match log_reader.rewind().await {
                 Ok((true, curr_vnode_bitmap)) => {

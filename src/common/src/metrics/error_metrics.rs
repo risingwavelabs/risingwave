@@ -80,13 +80,17 @@ impl<const N: usize> ErrorMetric<N> {
 
 pub type ErrorMetricRef<const N: usize> = Arc<ErrorMetric<N>>;
 
+/// Metrics for counting errors in the system.
+/// The detailed error messages are not supposed to be stored in the metrics, but in the logs.
+///
+/// Please avoid adding new error metrics here. Instead, introduce new `error_type` for new errors.
 #[derive(Clone)]
 pub struct ErrorMetrics {
-    pub user_sink_error: ErrorMetricRef<3>,
-    pub user_compute_error: ErrorMetricRef<4>,
-    pub user_source_reader_error: ErrorMetricRef<5>,
-    pub user_source_error: ErrorMetricRef<5>,
-    pub cdc_source_error: ErrorMetricRef<3>,
+    pub user_sink_error: ErrorMetricRef<2>,
+    pub user_compute_error: ErrorMetricRef<3>,
+    pub user_source_reader_error: ErrorMetricRef<4>,
+    pub user_source_error: ErrorMetricRef<4>,
+    pub cdc_source_error: ErrorMetricRef<2>,
 }
 
 impl ErrorMetrics {
@@ -95,40 +99,30 @@ impl ErrorMetrics {
             user_sink_error: Arc::new(ErrorMetric::new(
                 "user_sink_error",
                 "Sink errors in the system, queryable by tags",
-                &["connector_name", "executor_id", "error_msg"],
+                &["connector_name", "executor_id"],
             )),
             user_compute_error: Arc::new(ErrorMetric::new(
                 "user_compute_error",
                 "Compute errors in the system, queryable by tags",
-                &["error_type", "error_msg", "executor_name", "fragment_id"],
+                &["error_type", "executor_name", "fragment_id"],
             )),
+            // TODO: merge it to source_error
             user_source_reader_error: Arc::new(ErrorMetric::new(
                 "user_source_reader_error",
                 "Source reader error count",
-                &[
-                    "error_type",
-                    "error_msg",
-                    "executor_name",
-                    "actor_id",
-                    "source_id",
-                ],
+                &["error_type", "executor_name", "actor_id", "source_id"],
             )),
             user_source_error: Arc::new(ErrorMetric::new(
                 "user_source_error_count",
                 "Source errors in the system, queryable by tags",
-                &[
-                    "error_type",
-                    "error_msg",
-                    "executor_name",
-                    "fragment_id",
-                    "table_id",
-                ],
+                &["error_type", "executor_name", "fragment_id", "table_id"],
             )),
             // cdc source is singleton, so we use source_id to identify the connector
+            // TODO: merge it to source_error
             cdc_source_error: Arc::new(ErrorMetric::new(
                 "cdc_source_error",
                 "CDC source errors in the system, queryable by tags",
-                &["connector_name", "source_id", "error_msg"],
+                &["connector_name", "source_id"],
             )),
         }
     }
