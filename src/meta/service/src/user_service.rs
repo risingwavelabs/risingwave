@@ -254,6 +254,7 @@ impl UserService for UserServiceImpl {
         request: Request<RevokePrivilegeRequest>,
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
+        println!("heiheihei: {:?}", req);
         let privileges = self.expand_privilege(req.get_privileges(), None).await?;
         let version = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
@@ -274,7 +275,7 @@ impl UserService for UserServiceImpl {
                     .revoke_privilege(
                         user_ids,
                         &privileges,
-                        Some(req.granted_by as _),
+                        req.granted_by as _,
                         req.revoke_by as _,
                         req.revoke_grant_option,
                         req.cascade,
