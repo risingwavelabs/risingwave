@@ -596,14 +596,10 @@ impl NatsCommon {
 
     pub(crate) async fn build_consumer(
         &self,
-        stream: String,
+        stream: jetstream::stream::Stream,
         split_id: String,
         start_sequence: NatsOffset,
-    ) -> ConnectorResult<
-        async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
-    > {
-        let context = self.build_context().await?;
-        let stream = self.build_or_get_stream(context.clone(), stream).await?;
+    ) -> ConnectorResult<jetstream::consumer::Consumer<jetstream::consumer::pull::Config>> {
         let subject_name = self
             .subject
             .replace(',', "-")

@@ -77,13 +77,15 @@ impl SplitReader for NatsSplitReader {
             start_position => start_position.to_owned(),
         };
 
+        let context = properties.common.build_context().await?;
+        let stream = match context.get_stream(&properties.stream).await {
+            Ok(stream) => stream,
+            Err(_) => bail!("stream not exist"),
+        };
+
         let consumer = properties
             .common
-            .build_consumer(
-                properties.stream.clone(),
-                split_id.to_string(),
-                start_position.clone(),
-            )
+            .build_consumer(stream, split_id.to_string(), start_position.clone())
             .await?;
         Ok(Self {
             consumer,
