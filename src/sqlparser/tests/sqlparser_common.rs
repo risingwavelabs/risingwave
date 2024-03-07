@@ -1721,7 +1721,7 @@ fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: Ex
         } => {
             assert_eq!(analyze, expected_analyze);
             assert_eq!(options, expected_options);
-            assert_eq!("SELECT sqrt(id) FROM foo", statement.to_string());
+            assert_eq!("SELECT sqrt(id) FROM foo", statement.to_unredacted_string());
         }
         _ => panic!("Unexpected Statement, must be Explain"),
     }

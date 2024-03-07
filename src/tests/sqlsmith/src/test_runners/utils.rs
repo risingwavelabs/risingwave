@@ -41,7 +41,7 @@ pub(super) async fn update_base_tables<R: Rng>(
 ) {
     let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
     for update_statement in update_statements {
-        let sql = update_statement.to_string();
+        let sql = update_statement.to_unredacted_string();
         tracing::info!("[EXECUTING UPDATES]: {}", &sql);
         client.simple_query(&sql).await.unwrap();
     }
