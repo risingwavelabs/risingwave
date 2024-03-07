@@ -30,7 +30,7 @@ use tracing::Instrument;
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
+use crate::manager::{DdlType, LocalNotification, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -424,10 +424,13 @@ impl GlobalStreamManager {
             registered_table_ids.len(),
             table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
         );
+        let notification_manager_ref = self.env.notification_manager_ref();
         revert_funcs.push(Box::pin(async move {
             if create_type == CreateType::Foreground {
-                hummock_manager_ref
-                    .unregister_table_ids_fail_fast(&registered_table_ids)
+                notification_manager_ref
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        registered_table_ids,
+                    ))
                     .await;
             }
         }));
@@ -568,8 +571,11 @@ impl GlobalStreamManager {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
 
-            self.hummock_manager
-                .unregister_table_ids_fail_fast(&state_table_ids)
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                    state_table_ids,
+                ))
                 .await;
         }
     }
@@ -586,7 +592,8 @@ impl GlobalStreamManager {
             .await;
 
         // Drop table fragments directly.
-        mgr.fragment_manager
+        let unregister_table_ids = mgr
+            .fragment_manager
             .drop_table_fragments_vec(&table_ids.into_iter().collect())
             .await?;
 
@@ -604,8 +611,11 @@ impl GlobalStreamManager {
             });
 
         // Unregister from compaction group afterwards.
-        self.hummock_manager
-            .unregister_table_fragments_vec(&table_fragments_vec)
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                unregister_table_ids,
+            ))
             .await;
 
         Ok(())
