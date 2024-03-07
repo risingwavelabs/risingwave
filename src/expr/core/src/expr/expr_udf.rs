@@ -144,12 +144,8 @@ impl UserDefinedFunction {
         let timer = metrics.udf_latency.with_label_values(labels).start_timer();
 
         let arrow_output_result: Result<arrow_array::RecordBatch, Error> = match &self.imp {
-            UdfImpl::Wasm(runtime) => runtime
-                .call(&self.identifier, &arrow_input)
-                .map_err(|e| e.into()),
-            UdfImpl::JavaScript(runtime) => runtime
-                .call(&self.identifier, &arrow_input)
-                .map_err(|e| e.into()),
+            UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input),
+            UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input),
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input),
             UdfImpl::External(client) => {
