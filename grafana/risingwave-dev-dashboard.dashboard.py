@@ -756,16 +756,26 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "Kafka high watermark and source latest message",
+                    "Kafka high watermark by source and partition and source latest message by partition, source and actor",
+                    [
+                        panels.target(
+                            f"{metric('source_kafka_high_watermark')}",
+                            "high watermark: source={{source_id}} partition={{partition}}",
+                        ),
+                        panels.target(
+                            f"{metric('source_latest_message_id')}",
+                            "latest msg: source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "Kafka Consumer Lag Size",
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
                     [
                         panels.target(
-                            f"{metric('source_kafka_high_watermark')}",
+                            f"{metric('source_kafka_high_watermark')} - on(source_id, partition) group_right() {metric('source_latest_message_id')}",
                             "source={{source_id}} partition={{partition}}",
-                        ),
-                        panels.target(
-                            f"{metric('source_latest_message_id')}",
-                            "source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
                         ),
                     ],
                 ),
