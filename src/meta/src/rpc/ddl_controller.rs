@@ -1389,9 +1389,11 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        let table_parallelism = match default_parallelism {
-            None => TableParallelism::Adaptive,
-            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
+        // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
+        // Otherwise, it defaults to FIXED based on deduction.
+        let table_parallelism = match (default_parallelism, &self.env.opts.default_parallelism) {
+            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
+            _ => TableParallelism::Fixed(parallelism.get()),
         };
 
         let table_fragments = TableFragments::new(
