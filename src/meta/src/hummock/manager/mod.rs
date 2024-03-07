@@ -76,9 +76,10 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
-    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
-    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_local_table_stat,
+    trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
+    trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
@@ -1315,10 +1316,6 @@ impl HummockManager {
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
-                if let Some(table_stats_change) = &table_stats_change {
-                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
-                }
-
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
 
@@ -1329,6 +1326,19 @@ impl HummockManager {
                     .hummock_manager_latency
                     .with_label_values(&["commit_transaction"])
                     .start_timer();
+                if purge_prost_table_stats(&mut version_stats.table_stats, &current_version) {
+                    self.metrics.version_stats.reset();
+                    versioning.local_metrics.clear();
+                }
+                if let Some(table_stats_change) = &table_stats_change {
+                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
+                    trigger_local_table_stat(
+                        &self.metrics,
+                        &mut versioning.local_metrics,
+                        &version_stats,
+                        table_stats_change,
+                    );
+                }
                 commit_multi_var!(
                     self,
                     None,
@@ -1346,7 +1356,7 @@ impl HummockManager {
                     .start_timer();
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
+                trigger_version_stat(&self.metrics, &current_version);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
@@ -1613,15 +1623,9 @@ impl HummockManager {
         // Apply stats changes.
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
-        for (table_id, stats) in &table_stats_change {
-            let table_id_str = table_id.to_string();
-            let stats_value =
-                std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
-            self.metrics
-                .table_write_throughput
-                .with_label_values(&[table_id_str.as_str()])
-                .inc_by(stats_value as u64);
+        if purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version) {
+            self.metrics.version_stats.reset();
+            versioning.local_metrics.clear();
         }
 
         let commit_etcd_timer = self
@@ -1629,6 +1633,12 @@ impl HummockManager {
             .hummock_manager_latency
             .with_label_values(&["commit_etcd"])
             .start_timer();
+        trigger_local_table_stat(
+            &self.metrics,
+            &mut versioning.local_metrics,
+            &version_stats,
+            &table_stats_change,
+        );
         commit_multi_var!(
             self,
             None,
@@ -1649,11 +1659,7 @@ impl HummockManager {
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(
-            &self.metrics,
-            &versioning.current_version,
-            &versioning.version_stats,
-        );
+        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,

@@ -1796,7 +1796,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                     ..Default::default()
                 },
             ],
-            None
+            None,
         )
         .await
         .unwrap());
@@ -2002,7 +2002,7 @@ async fn test_move_tables_between_compaction_group() {
                 gen_sstable_info(12, 2, vec![100, 101]),
                 gen_sstable_info(13, 3, vec![101, 102]),
             ],
-            None
+            None,
         )
         .await
         .unwrap());
