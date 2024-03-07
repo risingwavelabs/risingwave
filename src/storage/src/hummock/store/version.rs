@@ -1085,9 +1085,7 @@ impl HummockVersionReader {
             Some(committed),
             delete_range_iter,
         );
-        user_iter
-            .rewind()
-            .await?;
+        user_iter.rewind().await?;
         local_stats.found_key = user_iter.is_valid();
         local_stats.sub_iter_count = local_stats.staging_imm_iter_count
             + local_stats.staging_sst_iter_count
