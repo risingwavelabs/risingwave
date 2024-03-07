@@ -121,7 +121,14 @@ impl UserDefinedFunction {
             UdfImpl::External(client) => client.get_addr(),
             _ => "",
         };
-        let labels: &[&str; 3] = &[addr, &self.identifier, fragment_id.as_str()];
+        let language = match &self.imp {
+            UdfImpl::Wasm(_) => "wasm",
+            UdfImpl::JavaScript(_) => "javascript",
+            #[cfg(feature = "embedded-python-udf")]
+            UdfImpl::Python(_) => "python",
+            UdfImpl::External(_) => "external",
+        };
+        let labels: &[&str; 4] = &[addr, language, &self.identifier, fragment_id.as_str()];
         metrics
             .udf_input_chunk_rows
             .with_label_values(labels)
