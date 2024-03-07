@@ -144,9 +144,15 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function.
-    pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+    pub async fn call(
+        &self,
+        id: &str,
+        input: RecordBatch,
+        fragment_id: u32,
+    ) -> Result<RecordBatch> {
         let metrics = &*GLOBAL_METRICS;
-        let labels = &[self.addr.as_str(), id];
+        let fragment_id_str = fragment_id.to_string();
+        let labels = &[self.addr.as_str(), id, fragment_id_str.as_str()];
         metrics
             .udf_input_chunk_rows
             .with_label_values(labels)
@@ -189,10 +195,15 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function, retry up to 5 times / 3s if connection is broken.
-    pub async fn call_with_retry(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+    pub async fn call_with_retry(
+        &self,
+        id: &str,
+        input: RecordBatch,
+        fragment_id: u32,
+    ) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
-            match self.call(id, input.clone()).await {
+            match self.call(id, input.clone(), fragment_id).await {
                 Err(err) if err.is_connection_error() && i != 4 => {
                     tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
@@ -209,14 +220,20 @@ impl ArrowFlightUdfClient {
         &self,
         id: &str,
         input: RecordBatch,
+        fragment_id: u32,
     ) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
         loop {
-            match self.call(id, input.clone()).await {
-                Err(err) if err.is_connection_error() => {
-                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+            match self.call(id, input.clone(), fragment_id).await {
+                Err(err) if err.is_tonic_error() => {
+                    tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
                 }
-                ret => return ret,
+                ret => {
+                    if ret.is_err() {
+                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    }
+                    return ret;
+                }
             }
             tokio::time::sleep(backoff).await;
             backoff *= 2;

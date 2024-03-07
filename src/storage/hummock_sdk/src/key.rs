@@ -78,6 +78,13 @@ pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
     (left, right)
 }
 
+// Ensure there is only one vnode involved in table key range and return the vnode
+pub fn vnode(range: &TableKeyRange) -> VirtualNode {
+    let (l, r_exclusive) = vnode_range(range);
+    assert_eq!(r_exclusive - l, 1);
+    VirtualNode::from_index(l)
+}
+
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
     let res = epoch.to_be();
@@ -932,24 +939,18 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     (start, end)
 }
 
-pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq> {
+/// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool = false> {
     pub latest_full_key: FullKey<T>,
     last_observed_epoch_with_gap: EpochWithGap,
-    /// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
-    allow_same_full_key: bool,
 }
 
-impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
+impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_DEDUP> {
     pub fn new(init_full_key: FullKey<T>) -> Self {
-        Self::with_config(init_full_key, false)
-    }
-
-    pub fn with_config(init_full_key: FullKey<T>, allow_same_full_key: bool) -> Self {
         let epoch_with_gap = init_full_key.epoch_with_gap;
         Self {
             latest_full_key: init_full_key,
             last_observed_epoch_with_gap: epoch_with_gap,
-            allow_same_full_key,
         }
     }
 
@@ -965,7 +966,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     ///
     /// let table_id = TableId { table_id: 1 };
     /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
-    /// let mut a = FullKeyTracker::<Bytes>::new(full_key1.clone());
+    /// let mut a: FullKeyTracker<_> = FullKeyTracker::<Bytes>::new(full_key1.clone());
     ///
     /// // Panic on non-decreasing epoch observed for the same user key.
     /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6 << EPOCH_AVAILABLE_BITS);
@@ -976,16 +977,18 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     /// // a.observe(full_key_with_smaller_user_key);
     ///
     /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3 << EPOCH_AVAILABLE_BITS);
-    /// assert_eq!(a.observe(full_key2), None);
+    /// assert_eq!(a.observe(full_key2.clone()), None);
+    /// assert_eq!(a.latest_user_key(), &full_key2.user_key);
     ///
     /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4 << EPOCH_AVAILABLE_BITS);
-    /// assert_eq!(a.observe(full_key3), Some(full_key1));
+    /// assert_eq!(a.observe(full_key3.clone()), Some(full_key1.user_key));
+    /// assert_eq!(a.latest_user_key(), &full_key3.user_key);
     /// ```
     ///
     /// Return:
     /// - If the provided `key` contains a new user key, return the latest full key observed for the previous user key.
     /// - Otherwise: return None
-    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<FullKey<T>>
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<UserKey<T>>
     where
         UserKey<F>: Into<UserKey<T>>,
         F: AsRef<[u8]>,
@@ -998,7 +1001,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
         &mut self,
         user_key: UserKey<F>,
         mut epochs: impl Iterator<Item = EpochWithGap>,
-    ) -> Option<FullKey<T>>
+    ) -> Option<UserKey<T>>
     where
         UserKey<F>: Into<UserKey<T>>,
         F: AsRef<[u8]>,
@@ -1030,18 +1033,20 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
                 self.last_observed_epoch_with_gap = min_epoch_with_gap;
 
                 // Take the previous key and set latest key
-                Some(std::mem::replace(
-                    &mut self.latest_full_key,
-                    FullKey {
-                        user_key: user_key.into(),
-                        epoch_with_gap: min_epoch_with_gap,
-                    },
-                ))
+                Some(
+                    std::mem::replace(
+                        &mut self.latest_full_key,
+                        FullKey {
+                            user_key: user_key.into(),
+                            epoch_with_gap: min_epoch_with_gap,
+                        },
+                    )
+                    .user_key,
+                )
             }
             Ordering::Equal => {
                 if max_epoch_with_gap > self.last_observed_epoch_with_gap
-                    || (!self.allow_same_full_key
-                        && max_epoch_with_gap == self.last_observed_epoch_with_gap)
+                    || (!SKIP_DEDUP && max_epoch_with_gap == self.last_observed_epoch_with_gap)
                 {
                     // Epoch from the same user key should be monotonically decreasing
                     panic!(
@@ -1064,6 +1069,10 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
                 );
             }
         }
+    }
+
+    pub fn latest_user_key(&self) -> &UserKey<T> {
+        &self.latest_full_key.user_key
     }
 }
 
