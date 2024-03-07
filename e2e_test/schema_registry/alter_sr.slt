@@ -5,11 +5,11 @@ statement ok
 CREATE SOURCE src_user WITH (
     connector = 'kafka',
     topic = 'sr_pb_test',
-    properties.bootstrap.server = 'localhost:9092',
+    properties.bootstrap.server = 'localhost:29092',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://localhost:8081',
+    schema.registry = 'http://message_queue:8081',
     message = 'test.User'
 );
 
@@ -20,7 +20,7 @@ statement ok
 CREATE TABLE t_user WITH (
     connector = 'kafka',
     topic = 'sr_pb_test',
-    properties.bootstrap.server = 'localhost:9092',
+    properties.bootstrap.server = 'localhost:29092',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
@@ -36,7 +36,7 @@ SELECT age FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "localhost:9092" "http://localhost:8081" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/schema_registry/pb.py "localhost:29092" "http://localhost:8081" "sr_pb_test" 5 user_with_more_fields
 
 # Refresh source schema
 statement ok
@@ -59,7 +59,7 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "localhost:9092" "http://localhost:8081" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/schema_registry/pb.py "localhost:29092" "http://localhost:8081" "sr_pb_test" 5 user_with_more_fields
 
 query IIII
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
