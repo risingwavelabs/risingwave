@@ -18,7 +18,7 @@ use risingwave_sqlparser::ast::REDACT_SQL_OPTION;
 use crate::error::Result;
 
 pub fn redact_definition(definition: &str) -> Result<String> {
-    let [stmt]: [_; 1] = risingwave_sqlparser::parser::Parser::parse_sql(&definition)
+    let [stmt]: [_; 1] = risingwave_sqlparser::parser::Parser::parse_sql(definition)
         .context("unable to parse definition")?
         .try_into()
         .unwrap();
