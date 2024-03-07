@@ -30,6 +30,7 @@ use thiserror_ext::AsReport;
 use tokio::time::Duration as TokioDuration;
 use tonic::transport::Channel;
 
+use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
 
 // Interval between two successive probes of the UDF DNS.
@@ -182,8 +183,11 @@ impl ArrowFlightUdfClient {
         &self,
         id: &str,
         input: RecordBatch,
+        fragment_id: &str,
     ) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
+        let metrics = &*GLOBAL_METRICS;
+        let labels: &[&str; 4] = &[&self.addr, "external", &id, &fragment_id];
         loop {
             match self.call(id, input.clone()).await {
                 Err(err) if err.is_tonic_error() => {
@@ -196,6 +200,7 @@ impl ArrowFlightUdfClient {
                     return ret;
                 }
             }
+            metrics.udf_failure_count.with_label_values(labels).inc();
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         }
