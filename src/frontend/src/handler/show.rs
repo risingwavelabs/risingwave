@@ -37,6 +37,7 @@ use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
+use crate::utils::redact::redact_definition;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -462,6 +463,7 @@ pub fn handle_show_create_object(
         Binder::resolve_schema_qualified_name(session.database(), name.clone())?;
     let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
     let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+    let user_id = session.user_id();
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
             let mv = schema
@@ -481,20 +483,32 @@ pub fn handle_show_create_object(
                 .get_table_by_name(&object_name)
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
-            table.create_sql()
+            if table.owner != user_id {
+                table.redacted_create_sql()?
+            } else {
+                table.create_sql()
+            }
         }
         ShowCreateType::Sink => {
             let sink = schema
                 .get_sink_by_name(&object_name)
                 .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
-            sink.create_sql()
+            if sink.owner.user_id != user_id {
+                sink.create_sql()
+            } else {
+                redact_definition(&sink.create_sql())?
+            }
         }
         ShowCreateType::Source => {
             let source = schema
                 .get_source_by_name(&object_name)
                 .filter(|s| s.associated_table_id.is_none())
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
-            source.create_sql()
+            if source.owner != user_id {
+                source.redacted_create_sql()?
+            } else {
+                source.create_sql()
+            }
         }
         ShowCreateType::Index => {
             let index = schema

@@ -27,10 +27,11 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
-use crate::error::{ErrorCode, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
+use crate::utils::redact::redact_definition;
 
 /// Includes full information about a table.
 ///
@@ -394,6 +395,10 @@ impl TableCatalog {
     /// Returns the SQL statement that can be used to create this table.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    pub fn redacted_create_sql(&self) -> Result<String> {
+        redact_definition(&self.definition)
     }
 
     /// Get a reference to the table catalog's version.
