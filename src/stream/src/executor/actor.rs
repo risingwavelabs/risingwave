@@ -73,7 +73,7 @@ impl ActorContext {
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        unique_user_errors: usize,
+        _unique_user_errors: usize,
         dispatch_num: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
@@ -95,7 +95,7 @@ impl ActorContext {
         }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_report_string();
+        let _err_str = err.to_report_string();
 
         GLOBAL_ERROR_METRICS.user_compute_error.report([
             "ExprError".to_owned(),

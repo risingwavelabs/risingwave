@@ -193,7 +193,7 @@ impl SourceContext {
         }
     }
 
-    pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
+    pub(crate) fn report_user_source_error(&self, _e: &(impl AsReport + ?Sized)) {
         if self.source_info.fragment_id == u32::MAX {
             // batch query
             return;

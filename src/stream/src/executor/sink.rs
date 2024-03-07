@@ -351,7 +351,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_reader: R,
         columns: Vec<ColumnCatalog>,
         mut sink_writer_param: SinkWriterParam,
-        actor_context: ActorContextRef,
+        _actor_context: ActorContextRef,
         info: ExecutorInfo,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
@@ -381,7 +381,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
             .await
         {
-            let mut err_str = e.to_report_string();
+            let _err_str = e.to_report_string();
             GLOBAL_ERROR_METRICS
                 .user_sink_error
                 .report([S::SINK_NAME.to_owned(), info.identity.clone()]);
