@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 pub mod gcs_source;
+pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
@@ -26,20 +27,27 @@ use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
 use super::s3::S3PropertiesCommon;
 use super::OpendalFsSplit;
+use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, UnknownFields};
 
 pub const GCS_CONNECTOR: &str = "gcs";
 // The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
+pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
+
+    /// The base64 encoded credential key. If not set, ADC will be used.
     #[serde(rename = "gcs.credential")]
     pub credential: Option<String>,
+
+    /// If credential/ADC is not set. The service account can be used to provide the credential info.
     #[serde(rename = "gcs.service_account", default)]
     pub service_account: Option<String>,
+
     #[serde(rename = "match_pattern", default)]
     pub match_pattern: Option<String>,
 
@@ -64,7 +72,7 @@ impl SourceProperties for GcsProperties {
 pub trait OpendalSource: Send + Sync + 'static + Clone + PartialEq {
     type Properties: SourceProperties + Send + Sync;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>>;
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +81,7 @@ pub struct OpendalS3;
 impl OpendalSource for OpendalS3 {
     type Properties = OpendalS3Properties;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
     }
 }
@@ -84,8 +92,19 @@ pub struct OpendalGcs;
 impl OpendalSource for OpendalGcs {
     type Properties = GcsProperties;
 
-    fn new_enumerator(properties: Self::Properties) -> anyhow::Result<OpendalEnumerator<Self>> {
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_gcs_source(properties)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpendalPosixFs;
+
+impl OpendalSource for OpendalPosixFs {
+    type Properties = PosixFsProperties;
+
+    fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_posix_fs_source(properties)
     }
 }
 
@@ -94,7 +113,7 @@ pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,
 
-    // The following are only supported by s3_v2 (opendal) source.
+    /// The following are only supported by s3_v2 (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 
@@ -114,4 +133,32 @@ impl SourceProperties for OpendalS3Properties {
     type SplitReader = OpendalReader<OpendalS3>;
 
     const SOURCE_NAME: &'static str = OPENDAL_S3_CONNECTOR;
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct PosixFsProperties {
+    /// The root directly of the files to search. The files will be searched recursively.
+    #[serde(rename = "posix_fs.root")]
+    pub root: String,
+
+    /// The regex pattern to match files under root directory.
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl UnknownFields for PosixFsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
+impl SourceProperties for PosixFsProperties {
+    type Split = OpendalFsSplit<OpendalPosixFs>;
+    type SplitEnumerator = OpendalEnumerator<OpendalPosixFs>;
+    type SplitReader = OpendalReader<OpendalPosixFs>;
+
+    const SOURCE_NAME: &'static str = POSIX_FS_CONNECTOR;
 }

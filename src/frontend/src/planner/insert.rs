@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
+use crate::error::Result;
 use crate::optimizer::plan_node::{generic, LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -23,7 +23,7 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        let mut input = self.plan_query(insert.source)?.into_subplan();
+        let mut input = self.plan_query(insert.source)?.into_unordered_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }

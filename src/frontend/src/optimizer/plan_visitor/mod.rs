@@ -37,6 +37,10 @@ mod side_effect_visitor;
 pub use side_effect_visitor::*;
 mod cardinality_visitor;
 pub use cardinality_visitor::*;
+mod jsonb_stream_key_checker;
+pub use jsonb_stream_key_checker::*;
+mod distributed_dml_visitor;
+pub use distributed_dml_visitor::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;

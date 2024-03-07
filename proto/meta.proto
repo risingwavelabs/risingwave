@@ -288,11 +288,12 @@ message AddWorkerNodeResponse {
   reserved 3;
   reserved "system_params";
   common.Status status = 1;
-  common.WorkerNode node = 2;
+  optional uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeRequest {
   common.HostAddress host = 1;
+  uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeResponse {
@@ -372,6 +373,7 @@ message MetaSnapshot {
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
+  repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   // for streaming
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
@@ -393,6 +395,7 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
+    catalog.Subscription subscription = 6;
   }
 }
 
@@ -468,7 +471,10 @@ message TableParallelism {
     uint32 parallelism = 1;
   }
 
+  // deprecated, treated as AdaptiveParallelism
   message AutoParallelism {}
+
+  message AdaptiveParallelism {}
 
   message CustomParallelism {}
 
@@ -476,6 +482,7 @@ message TableParallelism {
     FixedParallelism fixed = 1;
     AutoParallelism auto = 2;
     CustomParallelism custom = 3;
+    AdaptiveParallelism adaptive = 4;
   }
 }
 
@@ -550,6 +557,8 @@ message SystemParams {
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
+  optional string wasm_storage_url = 14 [deprecated = true];
+  optional bool enable_tracing = 15;
 }
 
 message GetSystemParamsRequest {}

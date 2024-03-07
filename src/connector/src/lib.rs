@@ -33,7 +33,7 @@
 #![feature(error_generic_member_access)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // TODO(error-handling): need further refactoring
+#![recursion_limit = "256"]
 
 use std::time::Duration;
 

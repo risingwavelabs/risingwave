@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
 };
 
 use crate::model::{MetadataModel, MetadataModelResult};
@@ -36,6 +36,8 @@ const CATALOG_TABLE_CF_NAME: &str = "cf/catalog_table";
 const CATALOG_SCHEMA_CF_NAME: &str = "cf/catalog_schema";
 /// Column family name for database catalog.
 const CATALOG_DATABASE_CF_NAME: &str = "cf/catalog_database";
+/// Column family name for database catalog.
+const CATALOG_SUBSCRIPTION_CF_NAME: &str = "cf/catalog_subscription";
 
 macro_rules! impl_model_for_catalog {
     ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {
@@ -71,6 +73,7 @@ impl_model_for_catalog!(Function, CATALOG_FUNCTION_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);
+impl_model_for_catalog!(Subscription, CATALOG_SUBSCRIPTION_CF_NAME, u32, get_id);
 
 #[cfg(test)]
 mod tests {
@@ -90,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn test_database() -> MetadataModelResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let store = env.meta_store();
+        let store = env.meta_store_checked();
         let databases = Database::list(store).await?;
         assert!(databases.is_empty());
         assert!(Database::select(store, &0).await.unwrap().is_none());

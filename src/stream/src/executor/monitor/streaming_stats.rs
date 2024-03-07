@@ -19,7 +19,7 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
     register_int_counter_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, IntCounter, IntGauge, Registry,
+    register_int_gauge_with_registry, Histogram, IntCounter, IntCounterVec, IntGauge, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -64,12 +64,11 @@ pub struct StreamingMetrics {
 
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
 
     // Sink & materialized view
-    pub sink_input_row_count: GenericCounterVec<AtomicU64>,
-    pub mview_input_row_count: GenericCounterVec<AtomicU64>,
+    pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
+    pub mview_input_row_count: IntCounterVec,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -179,6 +178,8 @@ pub struct StreamingMetrics {
     pub lru_evicted_watermark_time_ms: LabelGuardedIntGaugeVec<3>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
+    pub jemalloc_resident_bytes: IntGauge,
+    pub jemalloc_metadata_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
 
@@ -211,15 +212,7 @@ impl StreamingMetrics {
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
-            &["source_id", "source_name", "actor_id"],
-            registry
-        )
-        .unwrap();
-
-        let source_row_per_barrier = register_int_counter_vec_with_registry!(
-            "stream_source_rows_per_barrier_counts",
-            "Total number of rows that have been output from source per barrier",
-            &["actor_id", "executor_id"],
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -227,12 +220,12 @@ impl StreamingMetrics {
         let source_split_change_count = register_int_counter_vec_with_registry!(
             "stream_source_split_change_event_count",
             "Total number of split change events that have been operated by source",
-            &["source_id", "source_name", "actor_id"],
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
 
-        let sink_input_row_count = register_int_counter_vec_with_registry!(
+        let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
             "Total number of rows streamed into sink executors",
             &["sink_id", "actor_id", "fragment_id"],
@@ -965,6 +958,20 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let jemalloc_resident_bytes = register_int_gauge_with_registry!(
+            "jemalloc_resident_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_metadata_bytes = register_int_gauge_with_registry!(
+            "jemalloc_metadata_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
         let jvm_allocated_bytes = register_int_gauge_with_registry!(
             "jvm_allocated_bytes",
             "The allocated jvm memory",
@@ -1061,7 +1068,6 @@ impl StreamingMetrics {
             actor_in_record_cnt,
             actor_out_record_cnt,
             source_output_row_count,
-            source_row_per_barrier,
             source_split_change_count,
             sink_input_row_count,
             mview_input_row_count,
@@ -1139,6 +1145,8 @@ impl StreamingMetrics {
             lru_evicted_watermark_time_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
+            jemalloc_resident_bytes,
+            jemalloc_metadata_bytes,
             jvm_allocated_bytes,
             jvm_active_bytes,
             materialize_cache_hit_count,

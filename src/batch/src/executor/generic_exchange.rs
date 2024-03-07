@@ -14,15 +14,14 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use rw_futures_util::select_all;
 
 use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSourceImpl;
@@ -39,6 +38,7 @@ pub struct GenericExchangeExecutor<CS, C> {
     proto_sources: Vec<PbExchangeSource>,
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
+    sequential: bool,
     context: C,
 
     schema: Schema,
@@ -126,6 +126,8 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             NodeBody::Exchange
         )?;
 
+        let sequential = node.get_sequential();
+
         ensure!(!node.get_sources().is_empty());
         let proto_sources: Vec<PbExchangeSource> = node.get_sources().to_vec();
         let source_creators =
@@ -136,6 +138,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         Ok(Box::new(ExchangeExecutor::<C> {
             proto_sources,
             source_creators,
+            sequential,
             context: source.context().clone(),
             schema: Schema { fields },
             task_id: source.task_id.clone(),
@@ -164,26 +167,33 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let mut stream = select_all(
-            self.proto_sources
-                .into_iter()
-                .zip_eq_fast(self.source_creators)
-                .map(|(prost_source, source_creator)| {
-                    Self::data_chunk_stream(
-                        prost_source,
-                        source_creator,
-                        self.context.clone(),
-                        self.metrics.clone(),
-                        self.identity.clone(),
-                    )
-                })
-                .collect_vec(),
-        )
-        .boxed();
+        let streams = self
+            .proto_sources
+            .into_iter()
+            .zip_eq_fast(self.source_creators)
+            .map(|(prost_source, source_creator)| {
+                Self::data_chunk_stream(
+                    prost_source,
+                    source_creator,
+                    self.context.clone(),
+                    self.metrics.clone(),
+                    self.identity.clone(),
+                )
+            });
 
-        while let Some(data_chunk) = stream.next().await {
-            let data_chunk = data_chunk?;
-            yield data_chunk
+        if self.sequential {
+            for mut stream in streams {
+                while let Some(data_chunk) = stream.next().await {
+                    let data_chunk = data_chunk?;
+                    yield data_chunk
+                }
+            }
+        } else {
+            let mut stream = select_all(streams).boxed();
+            while let Some(data_chunk) = stream.next().await {
+                let data_chunk = data_chunk?;
+                yield data_chunk
+            }
         }
     }
 
@@ -262,6 +272,7 @@ mod tests {
                 metrics: None,
                 proto_sources,
                 source_creators,
+                sequential: false,
                 context,
                 schema: Schema {
                     fields: vec![Field::unnamed(DataType::Int32)],

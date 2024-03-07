@@ -60,12 +60,10 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
     public static void main(String[] args) {
         var converter = new DatetimeTypeConverter();
         var d1 = LocalDate.of(1988, 5, 4);
-        var d2 = java.sql.Date.valueOf("1960-01-01");
         Integer d3 = 8989;
 
         System.out.println(converter.convertDate(null));
         System.out.println(converter.convertDate(d1));
-        System.out.println(converter.convertDate(d2));
         System.out.println(converter.convertDate(d3));
     }
 }

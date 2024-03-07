@@ -20,6 +20,7 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use tempfile::TempPath;
 use tokio::signal;
 
@@ -136,11 +137,21 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(about = "The quick way to start a RisingWave cluster for playing around")]
+#[command(about = "The quick way to start an in-memory RisingWave cluster for playing around")]
 pub struct PlaygroundOpts {
     /// The profile to use.
     #[clap(short, long, env = "PLAYGROUND_PROFILE", default_value = "playground")]
     profile: String,
+}
+
+impl risingwave_common::opts::Opts for PlaygroundOpts {
+    fn name() -> &'static str {
+        "playground"
+    }
+
+    fn meta_addr(&self) -> MetaAddressStrategy {
+        "http://0.0.0.0:5690".parse().unwrap() // hard-coded
+    }
 }
 
 pub async fn playground(opts: PlaygroundOpts) -> Result<()> {

@@ -75,8 +75,7 @@ impl StreamNode for StreamNow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let schema = self.base.schema();
         let dist_keys = self.base.distribution().dist_column_indices().to_vec();
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
+        let mut internal_table_catalog_builder = TableCatalogBuilder::default();
         schema.fields().iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });

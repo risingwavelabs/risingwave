@@ -18,7 +18,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -33,9 +35,9 @@ use crate::hummock::test_utils::{
 };
 use crate::hummock::{
     DeleteRangeTombstone, FileCache, HummockValue, SstableBuilderOptions, SstableIterator,
-    SstableIteratorType, SstableStoreRef, TableHolder,
+    SstableIteratorType, SstableStoreConfig, SstableStoreRef, TableHolder,
 };
-use crate::monitor::ObjectStoreMetrics;
+use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -53,27 +55,33 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
+        InMemObjectStore::new().monitored(
+            Arc::new(ObjectStoreMetrics::unused()),
+            ObjectStoreConfig::default(),
+        ),
     )))
 }
 
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(
+    Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-        64 << 20,
-        64 << 20,
-        0,
-        64 << 20,
-        FileCache::none(),
-        FileCache::none(),
-        None,
-    ))
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 64 << 20,
+        high_priority_ratio: 0,
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    }))
 }
 
+// Generate test table key with vnode 0
 pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
-    format!("key_test_{:05}", idx).as_bytes().to_vec()
+    prefix_slice_with_vnode(VirtualNode::ZERO, format!("key_test_{:05}", idx).as_bytes()).to_vec()
 }
 
 pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {

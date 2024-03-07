@@ -21,20 +21,25 @@ use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::{GcsProperties, OpendalSource};
+use crate::error::ConnectorResult;
 use crate::source::filesystem::s3::enumerator::get_prefix;
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     /// create opendal gcs source.
-    pub fn new_gcs_source(gcs_properties: GcsProperties) -> anyhow::Result<Self> {
+    pub fn new_gcs_source(gcs_properties: GcsProperties) -> ConnectorResult<Self> {
         // Create gcs builder.
         let mut builder = Gcs::default();
 
         builder.bucket(&gcs_properties.bucket_name);
 
         // if credential env is set, use it. Otherwise, ADC will be used.
-        let cred = gcs_properties.credential;
-        if let Some(cred) = cred {
+        if let Some(cred) = gcs_properties.credential {
             builder.credential(&cred);
+        } else {
+            let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
+            if let Ok(cred) = cred {
+                builder.credential(&cred);
+            }
         }
 
         if let Some(service_account) = gcs_properties.service_account {

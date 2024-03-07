@@ -17,16 +17,16 @@ use std::collections::BTreeSet;
 use itertools::Itertools;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Datum, DefaultOrdered, Sentinelled};
+use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use smallvec::SmallVec;
 
 use super::{WindowFuncCall, WindowFuncKind};
 use crate::{ExprError, Result};
 
-mod buffer;
-
 mod aggregate;
+mod buffer;
+mod range_utils;
 mod rank;
 
 /// Unique and ordered identifier for a row in internal states.
@@ -34,12 +34,6 @@ mod rank;
 pub struct StateKey {
     pub order_key: MemcmpEncoded,
     pub pk: DefaultOrdered<OwnedRow>,
-}
-
-impl From<StateKey> for Sentinelled<StateKey> {
-    fn from(key: StateKey) -> Self {
-        Self::Normal(key)
-    }
 }
 
 #[derive(Debug)]
@@ -114,7 +108,9 @@ pub trait WindowState: EstimateSize {
     fn slide_no_output(&mut self) -> Result<StateEvictHint>;
 }
 
-pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState + Send + Sync>> {
+pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
+
+pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
     assert!(call.frame.bounds.validate().is_ok());
 
     use WindowFuncKind::*;
@@ -122,7 +118,7 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
         RowNumber => Box::new(rank::RankState::<rank::RowNumber>::new(call)),
         Rank => Box::new(rank::RankState::<rank::Rank>::new(call)),
         DenseRank => Box::new(rank::RankState::<rank::DenseRank>::new(call)),
-        Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
+        Aggregate(_) => aggregate::new(call)?,
         kind => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{}({}) -> {}",

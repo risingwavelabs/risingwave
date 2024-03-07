@@ -1,14 +1,12 @@
 import psycopg2
-from client import client
+from client import Client
 
-class crud:
+
+class SampleTableCrud:
+    # Represents the table `sample_table_py`.
+
     def __init__(self, host, port, database, user, password):
-        self.host = host
-        self.database = database
-        self.user = user
-        self.password = password
-        self.connection = None
-        self.port=port
+        self.client = Client(host, port, database, user, password)
 
     def create_table(self):
         create_table_query = """
@@ -19,10 +17,9 @@ class crud:
             );
         """
         try:
-            databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
-            cursor=databaseconnection.connect()
+            cursor = self.client.connect()
             cursor.execute(create_table_query)
-            databaseconnection.connection.commit()
+            self.client.connection.commit()
             print("Table created successfully.")
         except psycopg2.Error as e:
             print("Table creation failed: ", str(e))
@@ -33,10 +30,9 @@ class crud:
             VALUES (%s, %s,%s);
         """
         try:
-            databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
-            cursor=databaseconnection.connect()
+            cursor = self.client.connect()
             cursor.execute(insert_data_query, (name, age, salary))
-            databaseconnection.connection.commit()
+            self.client.connection.commit()
             print("Data inserted successfully.")
         except psycopg2.Error as e:
             print("Data insertion failed: ", str(e))
@@ -48,10 +44,9 @@ class crud:
             WHERE name=%s;
         """
         try:
-            databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
-            cursor=databaseconnection.connect()
+            cursor = self.client.connect()
             cursor.execute(update_data_query, (salary, name))
-            databaseconnection.connection.commit()
+            self.client.connection.commit()
             print("Data updated successfully.")
         except psycopg2.Error as e:
             print("Data updation failed: ", str(e))
@@ -61,10 +56,9 @@ class crud:
             DELETE FROM sample_table_py WHERE name='%s';
         """
         try:
-            databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
-            cursor=databaseconnection.connect()
+            cursor = self.client.connect()
             cursor.execute(insert_data_query, (name,))
-            databaseconnection.connection.commit()
+            self.client.connection.commit()
             print("Data deletion successfully.")
         except psycopg2.Error as e:
             print("Data deletion failed: ", str(e))
@@ -74,17 +68,9 @@ class crud:
             DROP TABLE sample_table_py;
         """
         try:
-            databaseconnection = client(self.host, self.port,self.database, self.user, self.password)
-            cursor=databaseconnection.connect()
+            cursor = self.client.connect()
             cursor.execute(reset_query)
-            databaseconnection.connection.commit()
+            self.client.connection.commit()
             print("Table Dropped successfully")
         except psycopg2.Error as e:
             print("Table Drop Failed: ", str(e))
-
-crud_ins=crud(host="risingwave-standalone",
-        port="4566",
-        database="dev",
-        user="root",
-        password="")
-crud_ins.create_table()

@@ -24,10 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
-    StreamExecutorError,
-};
+use super::{ActorContextRef, Barrier, BoxedMessageStream, Execute, Message, StreamExecutorError};
 use crate::task::CreateMviewProgress;
 
 const DEFAULT_CHUNK_SIZE: usize = 1024;
@@ -36,8 +33,8 @@ const DEFAULT_CHUNK_SIZE: usize = 1024;
 /// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgress,
@@ -49,14 +46,14 @@ impl ValuesExecutor {
     /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
+        schema: Schema,
         progress: CreateMviewProgress,
         rows: Vec<Vec<NonStrictExpression>>,
         barrier_receiver: UnboundedReceiver<Barrier>,
     ) -> Self {
         Self {
             ctx,
-            info,
+            schema,
             progress,
             barrier_receiver,
             rows: rows.into_iter(),
@@ -64,9 +61,9 @@ impl ValuesExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(self) {
+    async fn execute_inner(self) {
         let Self {
-            info,
+            schema,
             mut progress,
             mut barrier_receiver,
             mut rows,
@@ -96,7 +93,7 @@ impl ValuesExecutor {
                 }
             }
 
-            let cardinality = info.schema.len();
+            let cardinality = schema.len();
             ensure!(cardinality > 0);
             while !rows.is_empty() {
                 // We need a one row chunk rather than an empty chunk because constant
@@ -105,7 +102,7 @@ impl ValuesExecutor {
                 let one_row_chunk = DataChunk::new_dummy(1);
 
                 let chunk_size = DEFAULT_CHUNK_SIZE.min(rows.len());
-                let mut array_builders = info.schema.create_array_builders(chunk_size);
+                let mut array_builders = schema.create_array_builders(chunk_size);
                 for row in rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
                         let out = expr.eval_infallible(&one_row_chunk).await;
@@ -135,27 +132,14 @@ impl ValuesExecutor {
     }
 }
 
-impl Executor for ValuesExecutor {
+impl Execute for ValuesExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+        self.execute_inner().boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::{
@@ -168,14 +152,13 @@ mod tests {
 
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{ActorContext, AddMutation, Barrier, Executor, ExecutorInfo, Mutation};
+    use crate::executor::{ActorContext, AddMutation, Barrier, Execute, Mutation};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_values() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let progress = CreateMviewProgress::for_test(barrier_manager);
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
@@ -208,15 +191,9 @@ mod tests {
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Schema>();
-        let pk_indices = vec![schema.len() - 1];
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: "ValuesExecutor".to_string(),
-        };
         let values_executor_struct = ValuesExecutor::new(
-            ActorContext::create(actor_id),
-            info,
+            ActorContext::for_test(actor_id),
+            schema,
             progress,
             vec![exprs
                 .into_iter()

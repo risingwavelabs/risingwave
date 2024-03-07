@@ -15,10 +15,12 @@
 use std::borrow::Cow;
 
 use jni::objects::JString;
-use jni::sys::jint;
+use jni::sys::{jboolean, jint};
 use tracing::Level;
 
 use crate::{execute_and_catch, EnvParam};
+
+const TARGET: &str = "risingwave_connector_node";
 
 #[no_mangle]
 pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEvent(
@@ -41,7 +43,7 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
         macro_rules! event {
             ($lvl:expr) => {
                 tracing::event!(
-                    target: "risingwave_connector_node",
+                    target: TARGET,
                     $lvl,
                     thread = &*thread_name,
                     class = &*class_name,
@@ -62,4 +64,37 @@ pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSl
 
         Ok(())
     })
+}
+
+#[no_mangle]
+pub(crate) extern "system" fn Java_com_risingwave_java_binding_Binding_tracingSlf4jEventEnabled(
+    env: EnvParam<'_>,
+    level: jint,
+) -> jboolean {
+    execute_and_catch(env, move |_env| {
+        // Currently we only support `StaticDirective` in `tracing-subscriber`, so
+        // filtering by fields like `thread` and `class` is not supported.
+        // TODO: should we support dynamic `Directive`?
+        macro_rules! event_enabled {
+            ($lvl:expr) => {
+                tracing::event_enabled!(
+                    target: TARGET,
+                    $lvl,
+                )
+            };
+        }
+
+        // See `com.risingwave.tracing.TracingSlf4jImpl`.
+        let enabled = match level {
+            0 => event_enabled!(Level::ERROR),
+            1 => event_enabled!(Level::WARN),
+            2 => event_enabled!(Level::INFO),
+            3 => event_enabled!(Level::DEBUG),
+            4 => event_enabled!(Level::TRACE),
+            _ => unreachable!(),
+        };
+
+        Ok(enabled)
+    })
+    .into()
 }

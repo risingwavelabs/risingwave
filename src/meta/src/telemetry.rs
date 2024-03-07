@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
     TelemetryResult,
 };
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
-use crate::manager::ClusterManager;
+use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,12 +35,20 @@ struct NodeCount {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct RwVersion {
+    version: String,
+    git_sha: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
     node_count: NodeCount,
+    streaming_job_count: u64,
     // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
+    rw_version: RwVersion,
 }
 
 impl TelemetryReport for MetaTelemetryReport {}
@@ -64,14 +72,14 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 
 #[derive(Clone)]
 pub struct MetaReportCreator {
-    cluster_mgr: Arc<ClusterManager>,
+    metadata_manager: MetadataManager,
     meta_backend: MetaBackend,
 }
 
 impl MetaReportCreator {
-    pub fn new(cluster_mgr: Arc<ClusterManager>, meta_backend: MetaBackend) -> Self {
+    pub fn new(metadata_manager: MetadataManager, meta_backend: MetaBackend) -> Self {
         Self {
-            cluster_mgr,
+            metadata_manager,
             meta_backend,
         }
     }
@@ -86,8 +94,23 @@ impl TelemetryReportCreator for MetaReportCreator {
         session_id: String,
         up_time: u64,
     ) -> TelemetryResult<MetaTelemetryReport> {
-        let node_map = self.cluster_mgr.count_worker_node().await;
+        let node_map = self
+            .metadata_manager
+            .count_worker_node()
+            .await
+            .map_err(|err| err.as_report().to_string())?;
+
+        let streaming_job_count = self
+            .metadata_manager
+            .count_streaming_job()
+            .await
+            .map_err(|err| err.as_report().to_string())? as u64;
+
         Ok(MetaTelemetryReport {
+            rw_version: RwVersion {
+                version: RW_VERSION.to_string(),
+                git_sha: GIT_SHA.to_string(),
+            },
             base: TelemetryReportBase {
                 tracking_id,
                 session_id,
@@ -102,6 +125,7 @@ impl TelemetryReportCreator for MetaReportCreator {
                 frontend_count: *node_map.get(&WorkerType::Frontend).unwrap_or(&0),
                 compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
             },
+            streaming_job_count,
             meta_backend: self.meta_backend,
         })
     }

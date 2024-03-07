@@ -14,20 +14,21 @@
 
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
-use super::{Access, AccessError, ChangeEvent, ChangeEventOperation};
+use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 use crate::parser::TransactionControl;
-use crate::source::SourceColumnDesc;
+use crate::source::{ConnectorProperties, SourceColumnDesc};
 
 pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
     key_accessor: Option<A>,
+    is_mongodb: bool,
 }
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
-const TRANSACTION_STATUS: &str = "status";
-const TRANSACTION_ID: &str = "id";
+pub const TRANSACTION_STATUS: &str = "status";
+pub const TRANSACTION_ID: &str = "id";
 
 pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
@@ -36,6 +37,44 @@ pub const DEBEZIUM_DELETE_OP: &str = "d";
 
 pub const DEBEZIUM_TRANSACTION_STATUS_BEGIN: &str = "BEGIN";
 pub const DEBEZIUM_TRANSACTION_STATUS_COMMIT: &str = "END";
+
+pub fn parse_transaction_meta(
+    accessor: &impl Access,
+    connector_props: &ConnectorProperties,
+) -> AccessResult<TransactionControl> {
+    if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
+        accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
+        accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
+    ) {
+        // The id field has different meanings for different databases:
+        // PG: txID:LSN
+        // MySQL: source_id:transaction_id (e.g. 3E11FA47-71CA-11E1-9E33-C80AA9429562:23)
+        match status.as_ref() {
+            DEBEZIUM_TRANSACTION_STATUS_BEGIN => match *connector_props {
+                ConnectorProperties::PostgresCdc(_) => {
+                    let (tx_id, _) = id.split_once(':').unwrap();
+                    return Ok(TransactionControl::Begin { id: tx_id.into() });
+                }
+                ConnectorProperties::MysqlCdc(_) => return Ok(TransactionControl::Begin { id }),
+                _ => {}
+            },
+            DEBEZIUM_TRANSACTION_STATUS_COMMIT => match *connector_props {
+                ConnectorProperties::PostgresCdc(_) => {
+                    let (tx_id, _) = id.split_once(':').unwrap();
+                    return Ok(TransactionControl::Commit { id: tx_id.into() });
+                }
+                ConnectorProperties::MysqlCdc(_) => return Ok(TransactionControl::Commit { id }),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    Err(AccessError::Undefined {
+        name: "transaction status".into(),
+        path: TRANSACTION_STATUS.into(),
+    })
+}
 
 impl<A> DebeziumChangeEvent<A>
 where
@@ -55,34 +94,31 @@ where
         Self {
             value_accessor,
             key_accessor,
+            is_mongodb: false,
+        }
+    }
+
+    pub fn new_mongodb_event(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
+        assert!(key_accessor.is_some() || value_accessor.is_some());
+        Self {
+            value_accessor,
+            key_accessor,
+            is_mongodb: true,
         }
     }
 
     /// Returns the transaction metadata if exists.
     ///
     /// See the [doc](https://debezium.io/documentation/reference/2.3/connectors/postgresql.html#postgresql-transaction-metadata) of Debezium for more details.
-    pub(crate) fn transaction_control(&self) -> Result<TransactionControl, AccessError> {
-        if let Some(accessor) = &self.value_accessor {
-            if let (Some(ScalarImpl::Utf8(status)), Some(ScalarImpl::Utf8(id))) = (
-                accessor.access(&[TRANSACTION_STATUS], Some(&DataType::Varchar))?,
-                accessor.access(&[TRANSACTION_ID], Some(&DataType::Varchar))?,
-            ) {
-                match status.as_ref() {
-                    DEBEZIUM_TRANSACTION_STATUS_BEGIN => {
-                        return Ok(TransactionControl::Begin { id })
-                    }
-                    DEBEZIUM_TRANSACTION_STATUS_COMMIT => {
-                        return Ok(TransactionControl::Commit { id })
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Err(AccessError::Undefined {
-            name: "transaction status".into(),
-            path: Default::default(),
-        })
+    pub(crate) fn transaction_control(
+        &self,
+        connector_props: &ConnectorProperties,
+    ) -> Option<TransactionControl> {
+        // Ignore if `value_accessor` is not provided or there's any error when
+        // trying to parse the transaction metadata.
+        self.value_accessor
+            .as_ref()
+            .and_then(|accessor| parse_transaction_meta(accessor, connector_props).ok())
     }
 }
 
@@ -93,6 +129,16 @@ where
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
         match self.op()? {
             ChangeEventOperation::Delete => {
+                // For delete events of MongoDB, the "before" and "after" field both are null in the value,
+                // we need to extract the _id field from the key.
+                if self.is_mongodb && desc.name == "_id" {
+                    return self
+                        .key_accessor
+                        .as_ref()
+                        .expect("key_accessor must be provided for delete operation")
+                        .access(&[&desc.name], Some(&desc.data_type));
+                }
+
                 if let Some(va) = self.value_accessor.as_ref() {
                     va.access(&[BEFORE, &desc.name], Some(&desc.data_type))
                 } else {
@@ -133,14 +179,31 @@ where
     }
 }
 
-pub struct MongoProjection<A> {
+pub struct MongoJsonAccess<A> {
     accessor: A,
 }
 
-pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyhow::Result<Datum> {
-    let id_field = bson_doc
-        .get("_id")
-        .ok_or_else(|| anyhow::format_err!("Debezuim Mongo requires document has a `_id` field"))?;
+pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> AccessResult {
+    let id_field = if let Some(value) = bson_doc.get("_id") {
+        value
+    } else {
+        bson_doc
+    };
+
+    let type_error = || AccessError::TypeError {
+        expected: id_type.to_string(),
+        got: match id_field {
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "bool",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+            serde_json::Value::Object(_) => "object",
+        }
+        .to_owned(),
+        value: id_field.to_string(),
+    };
+
     let id: Datum = match id_type {
         DataType::Jsonb => ScalarImpl::Jsonb(id_field.clone().into()).into(),
         DataType::Varchar => match id_field {
@@ -148,7 +211,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyh
             serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
                 obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
             )),
-            _ => anyhow::bail!("Can not convert bson {:?} to {:?}", id_field, id_type),
+            _ => return Err(type_error()),
         },
         DataType::Int32 => {
             if let serde_json::Value::Object(ref obj) = id_field
@@ -157,7 +220,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyh
                 let int_str = obj["$numberInt"].as_str().unwrap_or_default();
                 Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
             } else {
-                anyhow::bail!("Can not convert bson {:?} to {:?}", id_field, id_type)
+                return Err(type_error());
             }
         }
         DataType::Int64 => {
@@ -167,20 +230,20 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyh
                 let int_str = obj["$numberLong"].as_str().unwrap_or_default();
                 Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
             } else {
-                anyhow::bail!("Can not convert bson {:?} to {:?}", id_field, id_type)
+                return Err(type_error());
             }
         }
         _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatypes."),
     };
     Ok(id)
 }
-impl<A> MongoProjection<A> {
+impl<A> MongoJsonAccess<A> {
     pub fn new(accessor: A) -> Self {
         Self { accessor }
     }
 }
 
-impl<A> Access for MongoProjection<A>
+impl<A> Access for MongoJsonAccess<A>
 where
     A: Access,
 {
@@ -194,10 +257,37 @@ where
                         &bson_doc.take(),
                     )?)
                 } else {
-                    unreachable!("the result of access must match the type_expected")
+                    // fail to extract the "_id" field from the message payload
+                    Err(AccessError::Undefined {
+                        name: "_id".to_string(),
+                        path: path[0].to_string(),
+                    })?
                 }
             }
             ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
+            // To handle a DELETE message, we need to extract the "_id" field from the message key, because it is not in the payload.
+            // In addition, the "_id" field is named as "id" in the key. An example of message key:
+            // {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
+            ["_id"] => {
+                let ret = self.accessor.access(path, type_expected);
+                if matches!(ret, Err(AccessError::Undefined { .. })) {
+                    let id_bson = self.accessor.access(&["id"], Some(&DataType::Jsonb))?;
+                    if let Some(ScalarImpl::Jsonb(bson_doc)) = id_bson {
+                        Ok(extract_bson_id(
+                            type_expected.unwrap_or(&DataType::Jsonb),
+                            &bson_doc.take(),
+                        )?)
+                    } else {
+                        // fail to extract the "_id" field from the message key
+                        Err(AccessError::Undefined {
+                            name: "_id".to_string(),
+                            path: "id".to_string(),
+                        })?
+                    }
+                } else {
+                    ret
+                }
+            }
             _ => self.accessor.access(path, type_expected),
         }
     }

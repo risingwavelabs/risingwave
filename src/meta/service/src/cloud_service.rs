@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.use risingwave
+// limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
@@ -18,30 +18,32 @@ use std::sync::LazyLock;
 use async_trait::async_trait;
 use regex::Regex;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
+use risingwave_meta::manager::{ConnectionId, MetadataManager};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
 use risingwave_pb::cloud_service::{
     RwCloudValidateSourceRequest, RwCloudValidateSourceResponse, SourceType,
 };
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
-use crate::manager::CatalogManagerRef;
 use crate::rpc::cloud_provider::AwsEc2Client;
 
 pub struct CloudServiceImpl {
-    catalog_manager: CatalogManagerRef,
+    metadata_manager: MetadataManager,
     aws_client: Option<AwsEc2Client>,
 }
 
 impl CloudServiceImpl {
-    pub fn new(catalog_manager: CatalogManagerRef, aws_client: Option<AwsEc2Client>) -> Self {
+    pub fn new(metadata_manager: MetadataManager, aws_client: Option<AwsEc2Client>) -> Self {
         Self {
-            catalog_manager,
+            metadata_manager,
             aws_client,
         }
     }
@@ -77,17 +79,30 @@ impl CloudService for CloudServiceImpl {
         // if connection_id provided, check whether endpoint service is available and resolve
         // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_id_str) = source_cfg.get("connection.id") {
-            let connection_id = connection_id_str.parse().map_err(|e| {
-                Status::invalid_argument(format!("connection.id is not an integer: {}", e))
+            let connection_id = connection_id_str.parse::<ConnectionId>().map_err(|e| {
+                Status::invalid_argument(format!(
+                    "connection.id is not an integer: {}",
+                    e.as_report()
+                ))
             })?;
-            let connection = self
-                .catalog_manager
-                .get_connection_by_id(connection_id)
-                .await;
+
+            let connection = match &self.metadata_manager {
+                MetadataManager::V1(mgr) => {
+                    mgr.catalog_manager
+                        .get_connection_by_id(connection_id)
+                        .await
+                }
+                MetadataManager::V2(mgr) => {
+                    mgr.catalog_controller
+                        .get_connection_by_id(connection_id as _)
+                        .await
+                }
+            };
+
             if let Err(e) = connection {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::PrivatelinkConnectionNotFound,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
             if let Some(PrivateLinkService(service)) = connection.unwrap().info {
@@ -105,7 +120,7 @@ impl CloudService for CloudServiceImpl {
                     Err(e) => {
                         return Ok(new_rwc_validate_fail_response(
                             ErrorType::PrivatelinkUnavailable,
-                            e.to_string(),
+                            e.to_report_string(),
                         ));
                     }
                     Ok(false) => {
@@ -121,7 +136,7 @@ impl CloudService for CloudServiceImpl {
                 {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::PrivatelinkResolveErr,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
             } else {
@@ -137,13 +152,13 @@ impl CloudService for CloudServiceImpl {
         if let Err(e) = props {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,
-                e.to_string(),
+                e.to_report_string(),
             ));
         };
 
         async fn new_enumerator<P: SourceProperties>(
             props: P,
-        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+        ) -> ConnectorResult<P::SplitEnumerator> {
             P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
         }
 
@@ -152,15 +167,15 @@ impl CloudService for CloudServiceImpl {
             if let Err(e) = enumerator {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::KafkaInvalidProperties,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
             if let Err(e) = enumerator.unwrap().list_splits().await {
-                let error_message = e.to_string();
+                let error_message = e.to_report_string();
                 if error_message.contains("BrokerTransportFailure") {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::KafkaBrokerUnreachable,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
                 static TOPIC_NOT_FOUND: LazyLock<Regex> =
@@ -168,12 +183,12 @@ impl CloudService for CloudServiceImpl {
                 if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::KafkaTopicNotFound,
-                        e.to_string(),
+                        e.to_report_string(),
                     ));
                 }
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::KafkaOther,
-                    e.to_string(),
+                    e.to_report_string(),
                 ));
             }
         });

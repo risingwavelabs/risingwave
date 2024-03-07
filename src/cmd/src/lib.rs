@@ -42,38 +42,26 @@ risingwave_expr_impl::enable!();
 // Entry point functions.
 
 pub fn compute(opts: ComputeNodeOpts) {
-    init_risingwave_logger(LoggerSettings::new("compute"));
+    init_risingwave_logger(LoggerSettings::from_opts(&opts));
     main_okk(risingwave_compute::start(opts));
 }
 
 pub fn meta(opts: MetaNodeOpts) {
-    init_risingwave_logger(LoggerSettings::new("meta"));
+    init_risingwave_logger(LoggerSettings::from_opts(&opts));
     main_okk(risingwave_meta_node::start(opts));
 }
 
 pub fn frontend(opts: FrontendOpts) {
-    init_risingwave_logger(LoggerSettings::new("frontend"));
+    init_risingwave_logger(LoggerSettings::from_opts(&opts));
     main_okk(risingwave_frontend::start(opts));
 }
 
 pub fn compactor(opts: CompactorOpts) {
-    init_risingwave_logger(LoggerSettings::new("compactor"));
+    init_risingwave_logger(LoggerSettings::from_opts(&opts));
     main_okk(risingwave_compactor::start(opts));
 }
 
 pub fn ctl(opts: CtlOpts) {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-
-    // Note: Use a simple current thread runtime for ctl.
-    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
-    // further investigation.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_ctl::start(opts))
-        .inspect_err(|e| {
-            eprintln!("{:#?}", e);
-        })
-        .unwrap();
+    main_okk(risingwave_ctl::start(opts));
 }

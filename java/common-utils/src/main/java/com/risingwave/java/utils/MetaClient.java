@@ -105,7 +105,7 @@ public class MetaClient implements AutoCloseable {
                         .build();
         AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);
 
-        this.workerId = resp.getNode().getId();
+        this.workerId = resp.getNodeId();
     }
 
     public HummockVersion pinVersion() {

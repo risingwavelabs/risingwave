@@ -29,7 +29,7 @@ use crate::types::{DefaultOrdered, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-enum Direction {
+pub enum Direction {
     #[default]
     #[display("ASC")]
     Ascending,
@@ -38,7 +38,7 @@ enum Direction {
 }
 
 impl Direction {
-    pub fn from_protobuf(direction: &PbDirection) -> Self {
+    fn from_protobuf(direction: &PbDirection) -> Self {
         match direction {
             PbDirection::Ascending => Self::Ascending,
             PbDirection::Descending => Self::Descending,
@@ -46,7 +46,7 @@ impl Direction {
         }
     }
 
-    pub fn to_protobuf(self) -> PbDirection {
+    fn to_protobuf(self) -> PbDirection {
         match self {
             Self::Ascending => PbDirection::Ascending,
             Self::Descending => PbDirection::Descending,
@@ -74,7 +74,7 @@ enum NullsAre {
 }
 
 impl NullsAre {
-    pub fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
+    fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
         match nulls_are {
             PbNullsAre::Largest => Self::Largest,
             PbNullsAre::Smallest => Self::Smallest,
@@ -82,7 +82,7 @@ impl NullsAre {
         }
     }
 
-    pub fn to_protobuf(self) -> PbNullsAre {
+    fn to_protobuf(self) -> PbNullsAre {
         match self {
             Self::Largest => PbNullsAre::Largest,
             Self::Smallest => PbNullsAre::Smallest,
@@ -183,6 +183,10 @@ impl OrderType {
     /// Create a `DESC NULLS LAST` order type.
     pub fn descending_nulls_last() -> Self {
         Self::nulls_last(Direction::Descending)
+    }
+
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     pub fn is_ascending(&self) -> bool {
@@ -506,9 +510,7 @@ pub fn partial_cmp_datum_iter(
 ) -> Option<Ordering> {
     let mut order_types_iter = order_types.into_iter();
     lhs.into_iter().partial_cmp_by(rhs, |x, y| {
-        let Some(order_type) = order_types_iter.next() else {
-            return None;
-        };
+        let order_type = order_types_iter.next()?;
         partial_cmp_datum(x, y, order_type)
     })
 }

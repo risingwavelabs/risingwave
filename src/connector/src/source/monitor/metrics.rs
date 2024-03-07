@@ -79,14 +79,26 @@ impl SourceMetrics {
         let partition_input_count = register_int_counter_vec_with_registry!(
             "source_partition_input_count",
             "Total number of rows that have been input from specific partition",
-            &["actor_id", "source_id", "partition"],
+            &[
+                "actor_id",
+                "source_id",
+                "partition",
+                "source_name",
+                "fragment_id"
+            ],
             registry
         )
         .unwrap();
         let partition_input_bytes = register_int_counter_vec_with_registry!(
             "source_partition_input_bytes",
             "Total bytes that have been input from specific partition",
-            &["actor_id", "source_id", "partition"],
+            &[
+                "actor_id",
+                "source_id",
+                "partition",
+                "source_name",
+                "fragment_id"
+            ],
             registry
         )
         .unwrap();

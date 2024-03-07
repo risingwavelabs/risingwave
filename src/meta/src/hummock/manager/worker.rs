@@ -12,15 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::WorkerType;
 use sync_point::sync_point;
+use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
-use crate::hummock::utils::RetryableError;
 use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::LocalNotification;
 
@@ -95,32 +92,27 @@ impl HummockManager {
     }
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
-        let retry_strategy = ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(60))
-            .map(jitter);
-        if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
-            if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager.remove_compactor(worker_node.id);
-            }
-            tokio_retry::RetryIf::spawn(
-                retry_strategy.clone(),
-                || async {
-                    if let Err(err) = self.release_contexts(vec![worker_node.id]).await {
-                        tracing::warn!(
-                            "Failed to release hummock context {}. {}. Will retry.",
+        match notification {
+            LocalNotification::WorkerNodeDeleted(worker_node) => {
+                if worker_node.get_type().unwrap() == WorkerType::Compactor {
+                    self.compactor_manager.remove_compactor(worker_node.id);
+                }
+                self.release_contexts(vec![worker_node.id])
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "Failed to release hummock context {}, error={}",
                             worker_node.id,
-                            err
-                        );
-                        return Err(err);
-                    }
-                    Ok(())
-                },
-                RetryableError::default(),
-            )
-            .await
-            .expect("retry until success");
-            tracing::info!("Released hummock context {}", worker_node.id);
-            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+                            err.as_report()
+                        )
+                    });
+                tracing::info!("Released hummock context {}", worker_node.id);
+                sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+            }
+            LocalNotification::UnregisterTablesFromHummock(table_ids) => {
+                self.unregister_table_ids_fail_fast(&table_ids).await;
+            }
+            _ => {}
         }
     }
 }

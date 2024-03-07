@@ -14,10 +14,12 @@
 
 use std::ops::Bound;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -109,10 +111,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn flush(
-        &mut self,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
+    async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -137,6 +136,10 @@ impl LocalStateStore for PanicStateStore {
     async fn try_flush(&mut self) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
+
+    fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        panic!("should not operate on the panic state store!");
+    }
 }
 
 impl StateStore for PanicStateStore {
@@ -157,7 +160,7 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         panic!("should not clear shared buffer from the panic state store!");
     }
 

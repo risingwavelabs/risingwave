@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::error::Result;
 
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
+use crate::error::Result;
 use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
@@ -144,6 +144,7 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
             ApplyToJoinRule::create(),
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
+            PullUpCorrelatedPredicateAggRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
@@ -240,7 +241,11 @@ static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Push down filter with now into a left semijoin",
-        vec![SplitNowOrRule::create(), FilterWithNowToJoinRule::create()],
+        vec![
+            SplitNowAndRule::create(),
+            SplitNowOrRule::create(),
+            FilterWithNowToJoinRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });

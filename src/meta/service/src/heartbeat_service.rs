@@ -13,20 +13,20 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
-
-use crate::manager::ClusterManagerRef;
 
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {
-    cluster_manager: ClusterManagerRef,
+    metadata_manager: MetadataManager,
 }
 
 impl HeartbeatServiceImpl {
-    pub fn new(cluster_manager: ClusterManagerRef) -> Self {
-        HeartbeatServiceImpl { cluster_manager }
+    pub fn new(metadata_manager: MetadataManager) -> Self {
+        HeartbeatServiceImpl { metadata_manager }
     }
 }
 
@@ -38,16 +38,20 @@ impl HeartbeatService for HeartbeatServiceImpl {
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .cluster_manager
-            .heartbeat(
-                req.node_id,
-                req.info
-                    .into_iter()
-                    .filter_map(|node_info| node_info.info)
-                    .collect_vec(),
-            )
-            .await;
+        let info = req
+            .info
+            .into_iter()
+            .filter_map(|node_info| node_info.info)
+            .collect_vec();
+        let result = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.cluster_manager.heartbeat(req.node_id, info).await,
+            MetadataManager::V2(mgr) => {
+                mgr.cluster_controller
+                    .heartbeat(req.node_id as _, info)
+                    .await
+            }
+        };
+
         match result {
             Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
             Err(e) => {
@@ -55,7 +59,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
                     return Ok(Response::new(HeartbeatResponse {
                         status: Some(risingwave_pb::common::Status {
                             code: risingwave_pb::common::status::Code::UnknownWorker as i32,
-                            message: format!("{}", e),
+                            message: e.to_report_string(),
                         }),
                     }));
                 }

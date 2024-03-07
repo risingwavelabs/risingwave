@@ -23,7 +23,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
-use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
@@ -237,19 +237,27 @@ pub async fn compactor_serve(
     let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
         filter_key_extractor_manager.clone(),
     );
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+    let max_task_parallelism = Arc::new(AtomicU32::new(
+        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32,
+    ));
+
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store: sstable_store.clone(),
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
-        )),
+        compaction_executor,
         memory_limiter,
 
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
-        running_task_count: Arc::new(AtomicU32::new(0)),
+        running_task_parallelism: Arc::new(AtomicU32::new(0)),
+        max_task_parallelism,
     };
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -296,12 +304,12 @@ pub async fn compactor_serve(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                if shutdown_sender.send(()).is_err() {
+                                    tracing::warn!("Failed to send shutdown");
                                     continue;
                                 }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                if join_handle.await.is_err() {
+                                    tracing::warn!("Failed to join shutdown");
                                 }
                             }
                         },
@@ -366,18 +374,24 @@ pub async fn shared_compactor_serve(
     heap_profiler.start();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+    let max_task_parallelism = Arc::new(AtomicU32::new(
+        (compaction_executor.worker_num() as f32 * storage_opts.compactor_max_task_multiplier)
+            .ceil() as u32,
+    ));
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
-        )),
+        compaction_executor,
         memory_limiter,
         task_progress_manager: Default::default(),
         await_tree_reg,
-        running_task_count: Arc::new(AtomicU32::new(0)),
+        running_task_parallelism: Arc::new(AtomicU32::new(0)),
+        max_task_parallelism,
     };
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
@@ -400,12 +414,12 @@ pub async fn shared_compactor_serve(
                     tokio::select! {
                         _ = tokio::signal::ctrl_c() => {},
                         _ = &mut shutdown_recv => {
-                                if let Err(err) = shutdown_sender.send(()) {
-                                    tracing::warn!("Failed to send shutdown: {:?}", err);
-                                }
-                                if let Err(err) = join_handle.await {
-                                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                                }
+                            if shutdown_sender.send(()).is_err() {
+                                tracing::warn!("Failed to send shutdown");
+                            }
+                            if join_handle.await.is_err() {
+                                tracing::warn!("Failed to join shutdown");
+                            }
                         },
                     }
                 },

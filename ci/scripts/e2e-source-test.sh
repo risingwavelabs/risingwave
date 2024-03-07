@@ -5,6 +5,15 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+# Arguments:
+#   $1: subject name
+#   $2: schema file path
+function register_schema_registry() {
+    curl -X POST http://message_queue:8081/subjects/$1/versions \
+        -H ‘Content-Type: application/vnd.schemaregistry.v1+json’ \
+        --data-binary @<(jq -n --arg schema “$(cat $2)” ‘{schemaType: “PROTOBUF”, schema: $schema}’)
+}
+
 # prepare environment
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
@@ -55,6 +64,9 @@ cargo make ci-start ci-1cn-1fe-with-recovery
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
+
+echo "--- opendal source test"
+sqllogictest -p 4566 -d dev './e2e_test/source/opendal/**/*.slt'
 
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
@@ -112,12 +124,13 @@ export RISINGWAVE_CI=true
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20
+python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20 user
 echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
 curl --silent 'http://message_queue:8081/subjects'; echo
 # curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
 curl --silent 'http://message_queue:8081/subjects' | grep -v 'google/protobuf/source_context.proto'
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
+sqllogictest -p 4566 -d dev './e2e_test/schema_registry/alter_sr.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill

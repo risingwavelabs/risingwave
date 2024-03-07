@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 use thiserror_ext::AsReport;
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
@@ -242,7 +242,7 @@ mod tests {
             "0.111111",
             "-0.01",
         ];
-        let data = vec![
+        let data = [
             Some(ScalarImpl::Int32(1)),
             Some(ScalarImpl::Int64(111111111111111)),
             Some(ScalarImpl::Decimal(
@@ -254,7 +254,7 @@ mod tests {
             Some(ScalarImpl::Decimal(Decimal::from_str("0.111111").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("-0.01").unwrap())),
         ];
-        let data_type = vec![
+        let data_type = [
             DataType::Int32,
             DataType::Int64,
             DataType::Decimal,
@@ -307,7 +307,7 @@ mod tests {
             ("1.25e-2"),
             ("1e15"),
         ];
-        let data = vec![
+        let data = [
             Some(ScalarImpl::Decimal(Decimal::from_str("1000000").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("1250000").unwrap())),
             Some(ScalarImpl::Decimal(Decimal::from_str("12.5").unwrap())),
@@ -317,7 +317,7 @@ mod tests {
                 Decimal::from_str("1000000000000000").unwrap(),
             )),
         ];
-        let data_type = vec![
+        let data_type = [
             DataType::Decimal,
             DataType::Decimal,
             DataType::Decimal,

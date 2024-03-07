@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -43,7 +44,7 @@ impl SinkId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         SinkId {
-            sink_id: u32::MAX - 1,
+            sink_id: OBJECT_ID_PLACEHOLDER,
         }
     }
 
@@ -204,7 +205,12 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             F::Plain => SinkFormat::AppendOnly,
             F::Upsert => SinkFormat::Upsert,
             F::Debezium => SinkFormat::Debezium,
-            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+            f @ (F::Unspecified
+            | F::Native
+            | F::DebeziumMongo
+            | F::Maxwell
+            | F::Canal
+            | F::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
@@ -216,7 +222,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()

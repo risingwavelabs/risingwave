@@ -24,14 +24,15 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
+use crate::hummock::compaction::{create_overlap_strategy, CompactionDeveloperConfig};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct LevelCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
     compaction_task_validator: Arc<CompactionTaskValidator>,
+    developer_config: Arc<CompactionDeveloperConfig>,
 }
 
 impl CompactionPicker for LevelCompactionPicker {
@@ -60,12 +61,13 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_base_trivial_move(
+        if let Some(mut ret) = self.pick_base_trivial_move(
             l0,
             levels.get_level(self.target_level),
             level_handlers,
             stats,
         ) {
+            ret.vnode_partition_count = self.config.split_weight_by_vnode;
             return Some(ret);
         }
 
@@ -73,6 +75,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if let Some(ret) = self.pick_multi_level_to_base(
             l0,
             levels.get_level(self.target_level),
+            self.config.split_weight_by_vnode,
             level_handlers,
             stats,
         ) {
@@ -85,11 +88,16 @@ impl CompactionPicker for LevelCompactionPicker {
 
 impl LevelCompactionPicker {
     #[cfg(test)]
-    pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> LevelCompactionPicker {
+    pub fn new(
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        developer_config: Arc<CompactionDeveloperConfig>,
+    ) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
             compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
             config,
+            developer_config,
         }
     }
 
@@ -97,11 +105,13 @@ impl LevelCompactionPicker {
         target_level: usize,
         config: Arc<CompactionConfig>,
         compaction_task_validator: Arc<CompactionTaskValidator>,
+        developer_config: Arc<CompactionDeveloperConfig>,
     ) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
             config,
             compaction_task_validator,
+            developer_config,
         }
     }
 
@@ -112,6 +122,10 @@ impl LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if !self.developer_config.enable_trivial_move {
+            return None;
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let trivial_move_picker =
             TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());
@@ -128,6 +142,7 @@ impl LevelCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         target_level: &Level,
+        vnode_partition_count: u32,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
@@ -145,10 +160,21 @@ impl LevelCompactionPicker {
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
+            self.developer_config.enable_check_task_level_overlap,
         );
 
-        let l0_select_tables_vec = non_overlap_sub_level_picker
-            .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
+        let mut max_vnode_partition_idx = 0;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.vnode_partition_count < vnode_partition_count {
+                break;
+            }
+            max_vnode_partition_idx = idx;
+        }
+
+        let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
+            &l0.sub_levels[..=max_vnode_partition_idx],
+            &level_handlers[0],
+        );
         if l0_select_tables_vec.is_empty() {
             stats.skip_by_pending_files += 1;
             return None;
@@ -217,6 +243,7 @@ impl LevelCompactionPicker {
                 select_input_size: input.total_file_size,
                 target_input_size: target_file_size,
                 total_file_count: (input.total_file_count + target_file_count) as u64,
+                vnode_partition_count,
                 ..Default::default()
             };
 
@@ -225,6 +252,15 @@ impl LevelCompactionPicker {
                 ValidationRuleType::ToBase,
                 stats,
             ) {
+                if l0.total_file_size > target_level.total_file_size * 8 {
+                    tracing::warn!("skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
+                        result.input_levels.len(),
+                        result.total_file_count,
+                        result.select_input_size,
+                        result.target_input_size,
+                        target_level.total_file_size,
+                    );
+                }
                 continue;
             }
 
@@ -241,7 +277,9 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::*;
-    use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
+    use crate::hummock::compaction::{
+        CompactionDeveloperConfig, CompactionMode, TierCompactionPicker,
+    };
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
         let config = Arc::new(
@@ -250,7 +288,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        LevelCompactionPicker::new(1, config)
+        LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()))
     }
 
     #[test]
@@ -350,7 +388,8 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
 
         let levels = vec![Level {
             level_idx: 1,
@@ -423,6 +462,7 @@ pub mod tests {
             total_file_size: 0,
             sub_level_id: 0,
             uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,
@@ -473,7 +513,11 @@ pub mod tests {
             .max_bytes_for_level_multiplier(1)
             .level0_sub_level_compact_level_count(2)
             .build();
-        let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
+        let mut picker = LevelCompactionPicker::new(
+            1,
+            Arc::new(config),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
 
         let mut levels = Levels {
             levels: vec![Level {
@@ -487,6 +531,7 @@ pub mod tests {
                 total_file_size: 900,
                 sub_level_id: 0,
                 uncompressed_file_size: 900,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
             ..Default::default()
@@ -546,7 +591,8 @@ pub mod tests {
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -572,7 +618,9 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
+
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -638,7 +686,11 @@ pub mod tests {
 
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
-        let mut picker = LevelCompactionPicker::new(1, config.clone());
+        let mut picker = LevelCompactionPicker::new(
+            1,
+            config.clone(),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
@@ -648,7 +700,8 @@ pub mod tests {
         }
 
         // No more pending sub-level so we can get a task now.
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -681,7 +734,8 @@ pub mod tests {
                 .build(),
         );
 
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker =
+            LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();

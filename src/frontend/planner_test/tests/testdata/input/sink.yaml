@@ -20,6 +20,28 @@
       type='upsert');
   expected_outputs:
     - explain_output
+- id: create_upsert_jdbc_sink_with_downstream_pk1
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain (distsql, verbose) create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v1,v2',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  expected_outputs:
+    - explain_output
+- id: create_upsert_jdbc_sink_with_downstream_pk2
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v1,v2));
+    explain (distsql, verbose) create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v3, v5',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  expected_outputs:
+    - explain_output
 - id: create_appendonly_jdbc_sink
   sql: |
     create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v1,v2));
@@ -59,3 +81,80 @@
     explain create sink sk1 from t2 emit on window close with (connector='blackhole');
   expected_outputs:
     - explain_output
+- id: create_mock_iceberg_sink_append_only_with_sparse_partition
+  sql: |
+    create table t1 (v1 int, v2 bigint, v3 varchar, v4 time);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'append-only',
+      force_append_only = 'true',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin'
+    );
+  expected_outputs:
+    - explain_output
+- id: create_mock_iceberg_sink_append_only_with_range_partition
+  sql: |
+    create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'append-only',
+      force_append_only = 'true',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'range_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin'
+    );
+  expected_outputs:
+    - explain_output
+- id: create_mock_iceberg_sink_upsert_with_sparse_partition
+  sql: |
+    create table t1 (v1 int, v2 bigint, v3 varchar, v4 time);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'sparse_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      primary_key = 'v1'
+    );
+  expected_outputs:
+    - explain_output
+- id: create_mock_iceberg_sink_upsert_with_range_partition
+  sql: |
+    create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'range_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      primary_key = 'v1'
+    );
+  expected_outputs:
+    - explain_output
+

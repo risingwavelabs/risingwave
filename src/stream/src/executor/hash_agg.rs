@@ -39,8 +39,7 @@ use super::aggregation::{
 };
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef, StreamExecutorResult,
-    Watermark,
+    expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, StreamExecutorResult, Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
@@ -49,7 +48,7 @@ use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::AggGroup as GenericAggGroup;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{BoxedMessageStream, Executor, Message};
+use crate::executor::{BoxedMessageStream, Execute, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
@@ -74,7 +73,7 @@ type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, Precompu
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `group_change_set`, and produce a stream chunk based on the state changes.
 pub struct HashAggExecutor<K: HashKey, S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Executor,
     inner: ExecutorInner<K, S>,
 }
 
@@ -193,27 +192,15 @@ impl ExecutionStats {
     }
 }
 
-impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
+impl<K: HashKey, S: StateStore> Execute for HashAggExecutor<K, S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
-        let input_info = args.input.info();
+        let input_info = args.input.info().clone();
 
         let group_key_len = args.extra.group_key_indices.len();
         // NOTE: we assume the prefix of table pk is exactly the group key
@@ -352,7 +339,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Find groups in this chunk and generate visibility for each group key.
-        let keys = K::build(&this.group_key_indices, chunk.data_chunk())?;
+        let keys = K::build_many(&this.group_key_indices, chunk.data_chunk());
         let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
 
         // Ensure all `AggGroup`s are in `dirty_groups`.

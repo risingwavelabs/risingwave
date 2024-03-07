@@ -450,6 +450,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
 }
 
 #[tokio::test]
+#[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
@@ -459,7 +460,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
-    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
@@ -469,17 +470,17 @@ async fn test_graph_builder() -> MetaResult<()> {
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &job, expr_context)
+        .generate_graph(&env, &job, expr_context)
         .await?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
-    let sink_actor_ids = table_fragments.mview_actor_ids();
+    let mview_actor_ids = table_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
-    assert_eq!(sink_actor_ids, vec![1]);
+    assert_eq!(barrier_inject_actor_ids, vec![5, 6, 7, 8]);
+    assert_eq!(mview_actor_ids, vec![0]);
     assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
@@ -488,34 +489,33 @@ async fn test_graph_builder() -> MetaResult<()> {
         .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
         .collect();
 
+    assert_eq!(fragment_upstreams.get(&0).unwrap(), &vec![1]);
     assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
-    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
+    assert!(fragment_upstreams.get(&2).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(1, vec![]);
-    expected_downstream.insert(2, vec![1]);
-    expected_downstream.insert(3, vec![1]);
-    expected_downstream.insert(4, vec![1]);
-    expected_downstream.insert(5, vec![1]);
-    expected_downstream.insert(6, vec![2, 3, 4, 5]);
-    expected_downstream.insert(7, vec![2, 3, 4, 5]);
-    expected_downstream.insert(8, vec![2, 3, 4, 5]);
-    expected_downstream.insert(9, vec![2, 3, 4, 5]);
+    expected_downstream.insert(0, vec![]);
+    expected_downstream.insert(1, vec![0]);
+    expected_downstream.insert(2, vec![0]);
+    expected_downstream.insert(3, vec![0]);
+    expected_downstream.insert(4, vec![0]);
+    expected_downstream.insert(5, vec![1, 2, 3, 4]);
+    expected_downstream.insert(6, vec![1, 2, 3, 4]);
+    expected_downstream.insert(7, vec![1, 2, 3, 4]);
+    expected_downstream.insert(8, vec![1, 2, 3, 4]);
 
     let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(1, vec![2, 3, 4, 5]);
-    expected_upstream.insert(2, vec![6, 7, 8, 9]);
-    expected_upstream.insert(3, vec![6, 7, 8, 9]);
-    expected_upstream.insert(4, vec![6, 7, 8, 9]);
-    expected_upstream.insert(5, vec![6, 7, 8, 9]);
+    expected_upstream.insert(0, vec![1, 2, 3, 4]);
+    expected_upstream.insert(1, vec![5, 6, 7, 8]);
+    expected_upstream.insert(2, vec![5, 6, 7, 8]);
+    expected_upstream.insert(3, vec![5, 6, 7, 8]);
+    expected_upstream.insert(4, vec![5, 6, 7, 8]);
+    expected_upstream.insert(5, vec![]);
     expected_upstream.insert(6, vec![]);
     expected_upstream.insert(7, vec![]);
     expected_upstream.insert(8, vec![]);
-    expected_upstream.insert(9, vec![]);
 
     for actor in actors {
-        println!("actor_id = {}", actor.get_actor_id());
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor
