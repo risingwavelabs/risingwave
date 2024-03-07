@@ -25,6 +25,7 @@ use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
@@ -32,8 +33,8 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedBitmap, TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel,
-    TracedPrefetchOptions, TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -447,7 +448,7 @@ impl OpConsistencyLevel {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
     /// Whether the operation is consistent. The term `consistent` requires the following:
@@ -463,6 +464,9 @@ pub struct NewLocalOptions {
     /// Indicate if this is replicated. If it is, we should not
     /// upload its ReadVersions.
     pub is_replicated: bool,
+
+    /// The vnode bitmap for the local state store instance
+    pub vnodes: Arc<Bitmap>,
 }
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
@@ -477,6 +481,7 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
+            vnodes: Arc::new(value.vnodes.into()),
         }
     }
 }
@@ -493,6 +498,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
             },
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
+            vnodes: value.vnodes.as_ref().clone().into(),
         }
     }
 }
@@ -502,12 +508,14 @@ impl NewLocalOptions {
         table_id: TableId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         NewLocalOptions {
             table_id,
             op_consistency_level,
             table_option,
             is_replicated: false,
+            vnodes,
         }
     }
 
@@ -515,12 +523,14 @@ impl NewLocalOptions {
         table_id: TableId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         NewLocalOptions {
             table_id,
             op_consistency_level,
             table_option,
             is_replicated: true,
+            vnodes,
         }
     }
 
@@ -532,6 +542,7 @@ impl NewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
         }
     }
 }
@@ -539,14 +550,11 @@ impl NewLocalOptions {
 #[derive(Clone)]
 pub struct InitOptions {
     pub epoch: EpochPair,
-
-    /// The vnode bitmap for the local state store instance
-    pub vnodes: Arc<Bitmap>,
 }
 
 impl InitOptions {
-    pub fn new(epoch: EpochPair, vnodes: Arc<Bitmap>) -> Self {
-        Self { epoch, vnodes }
+    pub fn new(epoch: EpochPair) -> Self {
+        Self { epoch }
     }
 }
 
@@ -554,7 +562,6 @@ impl From<InitOptions> for TracedInitOptions {
     fn from(value: InitOptions) -> Self {
         TracedInitOptions {
             epoch: value.epoch.into(),
-            vnodes: TracedBitmap::from(value.vnodes.as_ref().clone()),
         }
     }
 }
@@ -563,7 +570,6 @@ impl From<TracedInitOptions> for InitOptions {
     fn from(value: TracedInitOptions) -> Self {
         InitOptions {
             epoch: value.epoch.into(),
-            vnodes: Arc::new(Bitmap::from(value.vnodes)),
         }
     }
 }

@@ -61,7 +61,9 @@ async fn test_failpoints_state_store_read_upload() {
     .await
     .unwrap();
 
-    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(TableId::default()))
+        .await;
 
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
     let mut batch1 = vec![

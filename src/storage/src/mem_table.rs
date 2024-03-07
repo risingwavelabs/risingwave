@@ -436,7 +436,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
-    vnodes: Option<Arc<Bitmap>>,
+    vnodes: Arc<Bitmap>,
 }
 
 impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
@@ -448,7 +448,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             table_id: option.table_id,
             op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
-            vnodes: None,
+            vnodes: option.vnodes,
         }
     }
 
@@ -601,11 +601,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             "epoch in local state store of table id {:?} is init for more than once",
             self.table_id
         );
-        assert!(
-            self.vnodes.replace(options.vnodes).is_none(),
-            "vnodes in local state store of table id {:?} is init for more than once",
-            self.table_id
-        );
 
         Ok(())
     }
@@ -665,7 +660,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     }
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
-        self.vnodes.replace(vnodes).unwrap()
+        std::mem::replace(&mut self.vnodes, vnodes)
     }
 }
 

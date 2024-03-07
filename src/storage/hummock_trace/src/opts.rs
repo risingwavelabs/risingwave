@@ -149,11 +149,14 @@ pub struct TracedNewLocalOptions {
     pub op_consistency_level: TracedOpConsistencyLevel,
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
+    pub vnodes: TracedBitmap,
 }
 
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
+        use risingwave_common::hash::VirtualNode;
+
         Self {
             table_id: TracedTableId { table_id },
             op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
@@ -161,6 +164,7 @@ impl TracedNewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
+            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
         }
     }
 }
@@ -224,7 +228,6 @@ impl From<TracedEpochPair> for EpochPair {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedInitOptions {
     pub epoch: TracedEpochPair,
-    pub vnodes: TracedBitmap,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]

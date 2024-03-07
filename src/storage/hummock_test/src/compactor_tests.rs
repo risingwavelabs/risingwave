@@ -30,7 +30,10 @@ pub(crate) mod tests {
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{
+        next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
+        TABLE_PREFIX_LEN,
+    };
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::version::HummockVersion;
@@ -144,7 +147,9 @@ pub(crate) mod tests {
         value_size: usize,
         epochs: Vec<u64>,
     ) {
-        let mut local = storage.new_local(Default::default()).await;
+        let mut local = storage
+            .new_local(NewLocalOptions::for_test(TableId::default()))
+            .await;
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
         local.init_for_test(epochs[0]).await.unwrap();
@@ -718,6 +723,8 @@ pub(crate) mod tests {
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
+
+        let vnode = VirtualNode::from_index(1);
         for index in 0..kv_count {
             epoch += 1;
             let next_epoch = epoch + 1;
@@ -734,7 +741,7 @@ pub(crate) mod tests {
 
             let mut prefix = BytesMut::default();
             let random_key = rand::thread_rng().gen::<[u8; 32]>();
-            prefix.put_u16(1);
+            prefix.extend_from_slice(&vnode.to_be_bytes());
             prefix.put_slice(random_key.as_slice());
 
             storage
@@ -840,7 +847,10 @@ pub(crate) mod tests {
         // 7. scan kv to check key table_id
         let scan_result = global_storage
             .scan(
-                (Bound::Unbounded, Bound::Unbounded),
+                prefixed_range_with_vnode(
+                    (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                    vnode,
+                ),
                 epoch,
                 None,
                 ReadOptions {
@@ -910,6 +920,7 @@ pub(crate) mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
+        let vnode = VirtualNode::from_index(1);
         let mut epoch_set = BTreeSet::new();
 
         let mut local = storage
@@ -924,7 +935,7 @@ pub(crate) mod tests {
             epoch_set.insert(epoch);
             let mut prefix = BytesMut::default();
             let random_key = rand::thread_rng().gen::<[u8; 32]>();
-            prefix.put_u16(1);
+            prefix.extend_from_slice(&vnode.to_be_bytes());
             prefix.put_slice(random_key.as_slice());
 
             local
@@ -1035,7 +1046,10 @@ pub(crate) mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan(
-                (Bound::Unbounded, Bound::Unbounded),
+                prefixed_range_with_vnode(
+                    (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                    vnode,
+                ),
                 epoch,
                 None,
                 ReadOptions {
