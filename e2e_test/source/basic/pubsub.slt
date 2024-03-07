@@ -108,13 +108,13 @@ ALTER TABLE s3 owner to other_user;
 query IT rowsort
 SHOW CREATE TABLE s3;
 ----
-public.s3 CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (pubsub.subscription = 'test-subscription-1', pubsub.emulator_host = 'localhost:5980', pubsub.credentials = '[REDACTED]') FORMAT PLAIN ENCODE JSON
+public.s3 CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (connector = [REDACTED], pubsub.subscription = [REDACTED], pubsub.emulator_host = [REDACTED], pubsub.credentials = [REDACTED]) FORMAT PLAIN ENCODE JSON
 
 # pubsub.credentials is redacted for non table owner.
 query IT rowsort
 SELECT definition FROM rw_tables WHERE name='s3';
 ----
-CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (pubsub.subscription = 'test-subscription-1', pubsub.emulator_host = 'localhost:5980', pubsub.credentials = '[REDACTED]') FORMAT PLAIN ENCODE JSON
+CREATE TABLE s3 (v1 INT, v2 CHARACTER VARYING) WITH (connector = [REDACTED], pubsub.subscription = [REDACTED], pubsub.emulator_host = [REDACTED], pubsub.credentials = [REDACTED]) FORMAT PLAIN ENCODE JSON
 
 statement ok
 DROP TABLE s3;
