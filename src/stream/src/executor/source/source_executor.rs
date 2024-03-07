@@ -316,7 +316,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
+            tracing::debug!(state = ?cache, "take snapshot");
             core.split_state_store.set_states(cache).await?;
         }
 
@@ -407,7 +407,7 @@ impl<S: StateStore> SourceExecutor<S> {
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(state = ?recover_state, "start with state");
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
