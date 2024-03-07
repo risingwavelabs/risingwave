@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use anyhow::Result;
@@ -269,6 +269,7 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RawOpts {
+    flags: HashSet<String>,
     opts: HashMap<String, String>,
 }
 
@@ -287,7 +288,8 @@ impl PartialOrd for RawOpts {
 
 impl From<&str> for RawOpts {
     fn from(s: &str) -> Self {
-        let mut inner = HashMap::new();
+        let mut opts = HashMap::new();
+        let mut flags = HashSet::new();
         let args = split(s).unwrap();
         let mut args = args.into_iter().peekable();
         loop {
@@ -299,20 +301,20 @@ impl From<&str> for RawOpts {
 
             // No next arg, current key must be a flag.
             let Some(arg2) = args.peek() else {
-                inner.insert(key, "".to_string());
+                flags.insert(key);
                 break;
             };
 
             // Next arg is a key, current key must be a flag.
             if arg2.starts_with("--") {
-                inner.insert(key, "".to_string());
+                flags.insert(key);
                 continue;
             } else {
                 // Next arg must be a value if it's not a key.
-                inner.insert(key, args.next().unwrap());
+                opts.insert(key, args.next().unwrap());
             }
         }
-        Self { opts: inner }
+        Self { flags, opts }
     }
 }
 
@@ -329,7 +331,10 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { opts: inner }
+        Self {
+            flags: Default::default(),
+            opts: inner,
+        }
     }
 
     fn default_meta_opts() -> Self {
@@ -350,7 +355,10 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { opts: inner }
+        Self {
+            flags: Default::default(),
+            opts: inner,
+        }
     }
 
     fn default_compute_opts() -> Self {
@@ -365,7 +373,10 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { opts: inner }
+        Self {
+            flags: Default::default(),
+            opts: inner,
+        }
     }
 
     fn default_compactor_opts() -> Self {
@@ -379,7 +390,10 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { opts: inner }
+        Self {
+            flags: Default::default(),
+            opts: inner,
+        }
     }
 }
 
