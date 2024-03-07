@@ -298,12 +298,19 @@ impl From<&str> for RawOpts {
             };
             assert!(arg.starts_with("--"));
             let key = args.next().unwrap();
+
+            // No next arg, current key must be a flag.
             let Some(arg2) = args.peek() else {
+                inner.insert(key, "".to_string());
                 break;
             };
+
+            // Next arg is a key, current key must be a flag.
             if arg2.starts_with("--") {
+                inner.insert(key, "".to_string());
                 continue;
             } else {
+                // Next arg must be a value if it's not a key.
                 inner.insert(key, args.next().unwrap());
             }
         }
@@ -494,6 +501,14 @@ mod tests {
     fn test_raw_opts_from_str() {
         let str = "--some-opt \"some value\" --some-flag --another-flag --some-opt-2 abc";
         let hash_map = RawOpts::from(str);
-        check(hash_map, expect![])
+        check(hash_map, expect![[r#"
+            RawOpts {
+                inner: {
+                    "--some-opt-2": "abc",
+                    "--some-flag": "",
+                    "--some-opt": "some value",
+                    "--another-flag": "",
+                },
+            }"#]])
     }
 }
