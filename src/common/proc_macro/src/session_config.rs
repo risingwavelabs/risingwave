@@ -136,6 +136,13 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             quote! {}
         };
 
+        // An easy way to check if the type is bool and use a different parse function.
+        let parse = if quote!(#ty).to_string() == "bool" {
+            quote!(risingwave_common::cast::str_to_bool)
+        } else {
+            quote!(<#ty as ::std::str::FromStr>::from_str)
+        };
+
         struct_impl_set.push(quote! {
             #[doc = #set_func_doc]
             pub fn #set_func_name(
@@ -143,7 +150,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 val: &str,
                 reporter: &mut impl ConfigReporter
             ) -> SessionConfigResult<()> {
-                let val_t = <#ty as ::std::str::FromStr>::from_str(val).map_err(|e| {
+                let val_t = #parse(val).map_err(|e| {
                     SessionConfigError::InvalidValue {
                         entry: #entry_name,
                         value: val.to_string(),
