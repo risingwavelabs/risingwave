@@ -61,7 +61,7 @@ def init_spark_table(docker):
         spark.sql(sql)
 
 
-def init_risingwave_mv(docker):
+def init_risingwave_source(docker):
     config = read_config(f"{docker.case_dir()}/config.ini")
 
     source_config = config['source']
@@ -106,7 +106,7 @@ def check_risingwave_iceberg_source(docker):
 def run_case(case):
     with DockerCompose(case) as docker:
         init_spark_table(docker)
-        init_risingwave_mv(docker)
+        init_risingwave_source(docker)
         print("Let risingwave to run")
         time.sleep(5)
         check_risingwave_iceberg_source(docker)
