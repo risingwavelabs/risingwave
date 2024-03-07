@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Re-export `risingwave_error` for easy access.
-pub mod v2 {
-    pub use risingwave_error::*;
-}
+//! Re-export `risingwave_error` for easy access.
+//!
+//! Developer should add new utilities to `risingwave_error` crate and
+//! only re-export them here.
 
 pub use risingwave_error::common::*;
 pub use risingwave_error::macros::*;
