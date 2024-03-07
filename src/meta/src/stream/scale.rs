@@ -676,18 +676,18 @@ impl ScaleController {
                 .get(fragment_id)
                 .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
 
-            // Check if the reschedule is supported.
-            match fragment_state[fragment_id] {
-                table_fragments::State::Unspecified => unreachable!(),
-                state @ table_fragments::State::Initial
-                | state @ table_fragments::State::Creating => {
-                    bail!(
-                        "the materialized view of fragment {fragment_id} is in state {}",
-                        state.as_str_name()
-                    )
-                }
-                table_fragments::State::Created => {}
-            }
+            // // Check if the reschedule is supported.
+            // match fragment_state[fragment_id] {
+            //     table_fragments::State::Unspecified => unreachable!(),
+            //     state @ table_fragments::State::Initial
+            //     | state @ table_fragments::State::Creating => {
+            //         bail!(
+            //             "the materialized view of fragment {fragment_id} is in state {}",
+            //             state.as_str_name()
+            //         )
+            //     }
+            //     table_fragments::State::Created => {}
+            // }
 
             if no_shuffle_target_fragment_ids.contains(fragment_id) {
                 bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale");
@@ -2696,7 +2696,7 @@ impl GlobalStreamManager {
                     guard
                         .table_fragments()
                         .iter()
-                        .filter(|&(_, table)| matches!(table.state(), State::Created))
+                        //.filter(|&(_, table)| matches!(table.state(), State::Created))
                         .map(|(table_id, table)| (table_id.table_id, table.assigned_parallelism))
                         .collect()
                 };

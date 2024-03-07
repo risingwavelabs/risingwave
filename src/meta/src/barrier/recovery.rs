@@ -792,7 +792,7 @@ impl GlobalBarrierManagerContext {
             guard
                 .table_fragments()
                 .iter()
-                .filter(|&(_, table)| matches!(table.state(), State::Created))
+                //.filter(|&(_, table)| matches!(table.state(), State::Created))
                 .map(|(table_id, table)| {
                     let target_parallelism =
                         derive_target_parallelism_for_custom(current_parallelism, table);
