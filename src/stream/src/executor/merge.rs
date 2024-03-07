@@ -471,7 +471,7 @@ mod tests {
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
                     if epoch % 20 == 0 {
-                        tx.send(Message::Chunk(build_test_chunk(test_epoch(epoch))))
+                        tx.send(Message::Chunk(build_test_chunk(epoch)))
                             .await
                             .unwrap();
                     } else {
@@ -506,7 +506,7 @@ mod tests {
             if epoch % 20 == 0 {
                 for _ in 0..CHANNEL_NUMBER {
                     assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                        assert_eq!(chunk.ops().len() as u64, test_epoch(epoch));
+                        assert_eq!(chunk.ops().len() as u64, epoch);
                     });
                 }
             } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
