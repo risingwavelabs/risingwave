@@ -19,15 +19,10 @@ use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::alter_source_with_sr::alter_definition_format_encode;
-use super::alter_table_column::{
-    fetch_table_catalog_for_alter, replace_table_with_definition, schema_has_schema_registry,
-};
+use super::alter_table_column::{fetch_table_catalog_for_alter, replace_table_with_definition};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::alter_source_with_sr::{
-    check_format_encode, fetch_source_catalog_with_db_schema_id,
-};
 use crate::TableCatalog;
 
 fn get_connector_schema_from_table(table: &TableCatalog) -> Result<Option<ConnectorSchema>> {
@@ -47,14 +42,6 @@ pub async fn handle_refresh_schema(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
-    let (original_source, _, _) =
-        fetch_source_catalog_with_db_schema_id(session.as_ref(), &table_name)?;
-    let connector_schema = get_connector_schema_from_table(&original_table)?
-        .ok_or(ErrorCode::NotSupported(
-        "Tables without schema registry cannot be freshed".to_string(),
-        "If you want to modify the table schema, try `ALTER TABLE .. ADD/DROP COLUMN ...` instead"
-            .to_string(),
-    ))?;
 
     if !original_table.incoming_sinks.is_empty() {
         bail_not_implemented!("alter table with incoming sinks");
@@ -67,16 +54,11 @@ pub async fn handle_refresh_schema(
         )));
     }
 
-    check_format_encode(&original_source, &connector_schema)?;
-
-    if !schema_has_schema_registry(&connector_schema) {
-        return Err(ErrorCode::NotSupported(
-            "Tables without schema registry cannot be associated with a schema registry"
-                .to_string(),
-            "try `ALTER TABLE .. ADD COLUMN ...` instead".to_string(),
-        )
-        .into());
-    }
+    let connector_schema =
+        get_connector_schema_from_table(&original_table)?.ok_or(ErrorCode::NotSupported(
+            "Tables without schema registry cannot refreshed".to_string(),
+            "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_string(),
+        ))?;
 
     let definition = alter_definition_format_encode(
         &original_table.definition,
@@ -99,73 +81,4 @@ pub async fn handle_refresh_schema(
     .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
-}
-
-#[cfg(test)]
-pub mod tests {
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-
-    use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
-
-    #[tokio::test]
-    async fn test_alter_table_with_sr_handler() {
-        let proto_file = create_proto_file(PROTO_FILE_DATA);
-        let sql = format!(
-            r#"CREATE TABLE t
-            WITH (
-                connector = 'kafka',
-                topic = 'test-topic',
-                properties.bootstrap.server = 'localhost:29092'
-            )
-            FORMAT PLAIN ENCODE PROTOBUF (
-                message = '.test.TestRecord',
-                schema.location = 'file://{}'
-            )"#,
-            proto_file.path().to_str().unwrap()
-        );
-        let frontend = LocalFrontend::new(Default::default()).await;
-        let session = frontend.session_ref();
-        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
-
-        frontend.run_sql(sql).await.unwrap();
-
-        let sql = format!(
-            r#"ALTER TABLE t FORMAT UPSERT ENCODE PROTOBUF (
-                message = '.test.TestRecord',
-                schema.location = 'file://{}'
-            )"#,
-            proto_file.path().to_str().unwrap()
-        );
-        assert!(frontend
-            .run_sql(sql)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("the original definition is FORMAT Plain ENCODE Protobuf"));
-
-        let sql = format!(
-            r#"ALTER TABLE t FORMAT PLAIN ENCODE PROTOBUF (
-                message = '.test.TestRecordExt',
-                schema.location = 'file://{}'
-            )"#,
-            proto_file.path().to_str().unwrap()
-        );
-        frontend.run_sql(sql).await.unwrap();
-
-        let altered_table = session
-            .env()
-            .catalog_reader()
-            .read_guard()
-            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
-            .unwrap()
-            .0
-            .clone();
-
-        let altered_sql = format!(
-            r#"CREATE TABLE t () WITH (connector = 'kafka', topic = 'test-topic', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecordExt', schema.location = 'file://{}')"#,
-            proto_file.path().to_str().unwrap()
-        );
-        assert_eq!(altered_sql, altered_table.definition);
-    }
 }

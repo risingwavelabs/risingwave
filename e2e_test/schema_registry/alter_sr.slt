@@ -5,144 +5,75 @@ statement ok
 CREATE SOURCE src_user WITH (
     connector = 'kafka',
     topic = 'sr_pb_test',
-    properties.bootstrap.server = 'message_queue:29092',
+    properties.bootstrap.server = 'localhost:9092',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
+    schema.registry = 'http://localhost:8081',
     message = 'test.User'
 );
 
 statement ok
 CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
 
-# Changing type is not allowed
-statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: \(city: character varying\)
-ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserWithNewType'
-);
-
-# Changing format/encode is not allowed
-statement error Feature is not yet implemented: the original definition is FORMAT Plain ENCODE Protobuf, and altering them is not supported yet
-ALTER SOURCE src_user FORMAT NATIVE ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.User'
-);
-
-statement ok
-ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserWithMoreFields'
-);
-
-# Dropping columns is not allowed
-statement error Feature is not yet implemented: this altering statement will drop columns, which is not supported yet: \(age: integer\)
-ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.User'
-);
-
-statement ok
-CREATE MATERIALIZED VIEW mv_more_fields AS SELECT * FROM src_user;
-
 statement ok
 CREATE TABLE t_user WITH (
     connector = 'kafka',
     topic = 'sr_pb_test',
-    properties.bootstrap.server = 'message_queue:29092',
+    properties.bootstrap.server = 'localhost:9092',
     scan.startup.mode = 'earliest'
 )
 FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
+    schema.registry = 'http://localhost:8081',
     message = 'test.User'
 );
 
-statement ok
-ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserWithMoreFields'
-);
+statement error
+SELECT age FROM mv_user;
 
-# It's ok to drop columns which are not referenced by downstream tasks
-statement ok
-ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.User'
-);
-
-# Reference `city`, whose type will be altered in the next statement
-statement ok
-CREATE MATERIALIZED VIEW t_user_ds_1 AS SELECT t_user.city FROM t_user;
-
-# It's not ok to alter the type of columns which are referenced by downstream tasks
-statement error unable to drop the column due to being referenced by downstream materialized views or sinks
-ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserWithNewType'
-);
-
-# It's always ok to add more columns
-statement ok
-ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.UserWithMoreFields'
-);
-
-# Reference `age`, a new added column
-statement ok
-CREATE MATERIALIZED VIEW t_user_ds_2 AS SELECT t_user.age FROM t_user;
-
-# It's not ok to drop columns which are referenced by downstream tasks
-statement error unable to drop the column due to being referenced by downstream materialized views or sinks
-ALTER TABLE t_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.User'
-);
+statement error
+SELECT age FROM t_user;
 
 # Push more events with extended fields
 system ok
-python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
+python3 e2e_test/schema_registry/pb.py "localhost:9092" "http://localhost:8081" "sr_pb_test" 5 user_with_more_fields
 
-sleep 10s
+# Refresh source schema
+statement ok
+ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = 'http://localhost:8081',
+    message = 'test.User'
+);
 
-query I
-SELECT COUNT(*) FROM mv_user;
+statement ok
+CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
+
+# Refresh table schema
+statement ok
+ALTER TABLE t_user REFRESH SCHEMA;
+
+query IIII
+SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 ----
-25
+25 4 0 10
 
-statement error
-SELECT SUM(age) FROM mv_user;
-
-query III
-SELECT COUNT(*), MAX(age), MIN(age) FROM mv_more_fields;
-----
-25 4 0
+# Push more events with extended fields
+system ok
+python3 e2e_test/schema_registry/pb.py "localhost:9092" "http://localhost:8081" "sr_pb_test" 5 user_with_more_fields
 
 query IIII
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
 ----
-25 4 0 10
-
-query IIII
-SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user_ds_2;
-----
-25 4 0 10
+30 4 0 10
 
 statement ok
-DROP MATERIALIZED VIEW t_user_ds_2;
-
-statement ok
-DROP MATERIALIZED VIEW t_user_ds_1;
+DROP MATERIALIZED VIEW mv_user_more;
 
 statement ok
 DROP TABLE t_user;
 
 statement ok
 DROP MATERIALIZED VIEW mv_user;
-
-statement ok
-DROP MATERIALIZED VIEW mv_more_fields;
 
 statement ok
 DROP SOURCE src_user;

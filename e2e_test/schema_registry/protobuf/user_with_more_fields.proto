@@ -11,6 +11,7 @@ message User {
   string city = 4;
   Gender gender = 5;
   google.protobuf.SourceContext sc = 6;
+  int32 age = 7; // new field here
 }
 
 enum Gender {
