@@ -28,7 +28,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_json::Value;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
 use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
@@ -45,6 +45,7 @@ use crate::sink::{
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
@@ -58,6 +59,7 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.table")]
     pub table: String,
     #[serde(rename = "bigquery.max_batch_rows", default = "default_max_batch_rows")]
+    #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
 }
 
