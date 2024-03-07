@@ -2,11 +2,6 @@ extend = "common.toml"
 
 [env]
 KAFKA_DOWNLOAD_PATH = "${PREFIX_TMP}/kafka.tgz"
-KAFKA_VERSION = "3.4.1"
-KAFKA_SCALA_VERSION = "2.13"
-KAFKA_RELEASE = "kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}"
-KAFKA_DOWNLOAD_RECENT_TGZ = "https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
-KAFKA_DOWNLOAD_ARCHIVE_TGZ = "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
 
 [tasks.download-kafka]
 private = true
@@ -20,9 +15,22 @@ set -e
 if [ -d "${PREFIX_BIN}/kafka" ]; then
     exit 0
 fi
+
+get_latest_kafka_version() {
+    local versions=$(curl -s https://downloads.apache.org/kafka/ | grep -Eo 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | grep -Eo "[0-9]+\.[0-9]+\.[0-9]+")
+    # Sort the version numbers and get the latest one
+    local latest_version=$(echo "$versions" | sort -V | tail -n1)
+    echo $latest_version
+}
+
+get_latest_kafka_download_url() {
+    local latest_version=$(get_latest_kafka_version)
+    local download_url="https://downloads.apache.org/kafka/${latest_version}/kafka_2.13-${latest_version}.tgz"
+    echo $download_url
+}
+
 echo "Kafka not found, download ${KAFKA_RELEASE}"
-curl -fL -o "${KAFKA_DOWNLOAD_PATH}" "${KAFKA_DOWNLOAD_RECENT_TGZ}" \
- || curl -fL -o "${KAFKA_DOWNLOAD_PATH}" "${KAFKA_DOWNLOAD_ARCHIVE_TGZ}"
+curl -fL -o "${KAFKA_DOWNLOAD_PATH}" "$(get_latest_kafka_download_url)"
 tar -xf "${KAFKA_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${KAFKA_RELEASE}" "${PREFIX_BIN}/kafka"
 rm ${KAFKA_DOWNLOAD_PATH}
