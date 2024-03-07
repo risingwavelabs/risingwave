@@ -1180,9 +1180,9 @@ mod tests {
             None
         );
 
-        // Forward iterator
-        for snapshot_epoch in 1..=3 {
-            let snapshot_epoch = test_epoch(snapshot_epoch);
+        // Forward i
+        for i in 1..=3 {
+            let snapshot_epoch = test_epoch(i);
             let mut iter = merged_imm.clone().into_forward_iter();
             iter.rewind().await.unwrap();
             let mut output = vec![];
@@ -1196,10 +1196,7 @@ mod tests {
                 }
                 iter.next().await.unwrap();
             }
-            assert_eq!(
-                output,
-                batch_items[(snapshot_epoch / test_epoch(1)) as usize - 1]
-            );
+            assert_eq!(output, batch_items[i as usize - 1]);
         }
 
         // Forward and Backward iterator

@@ -300,7 +300,7 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::prev_key;
 
     use super::*;
@@ -884,7 +884,7 @@ mod tests {
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
-                let time: HummockEpoch = rng.gen_range(prev_time..=(prev_time + 1000));
+                let time: HummockEpoch = test_epoch(rng.gen_range(prev_time..=(prev_time + 1000)));
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
@@ -906,7 +906,7 @@ mod tests {
                             .insert(Reverse(time), HummockValue::put(Bytes::from(value)));
                     }
                 }
-                prev_time = time + 1;
+                prev_time = time.next_epoch();
             }
         }
         let sstable_store = mock_sstable_store();
@@ -917,7 +917,7 @@ mod tests {
                 inserts.iter().map(|(time, value)| {
                     let full_key = FullKey {
                         user_key: key.clone(),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(time.0)),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(time.0),
                     };
                     (full_key, value.clone())
                 })
