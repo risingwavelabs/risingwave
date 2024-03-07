@@ -265,7 +265,7 @@ async fn test_hummock_compaction_task() {
     // Finish the task and succeed.
 
     assert!(hummock_manager
-        .report_compact_task(compact_task.task_id, TaskStatus::Success, vec![], None,)
+        .report_compact_task(compact_task.task_id, TaskStatus::Success, vec![], None)
         .await
         .unwrap());
 }
@@ -1972,7 +1972,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let version_1 = hummock_manager.get_current_version().await;
     // compaction_task.task_status = TaskStatus::Success.into();
     assert!(!hummock_manager
-        .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None,)
+        .report_compact_task(compaction_task.task_id, TaskStatus::Success, vec![], None)
         .await
         .unwrap());
     let version_2 = hummock_manager.get_current_version().await;
