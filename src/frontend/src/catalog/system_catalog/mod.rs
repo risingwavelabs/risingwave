@@ -27,7 +27,7 @@ use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    NON_RESERVED_SYS_CATALOG_ID,
+    MAX_SYS_CATALOG_NUM, SYS_CATALOG_START_ID,
 };
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::ConfigMap;
@@ -292,11 +292,10 @@ fn get_acl_items(
 }
 
 pub struct SystemCatalog {
-    // table id = index + 1
+    // table id = index + SYS_CATALOG_START_ID
     catalogs: Vec<BuiltinCatalog>,
 }
 
-/// FIXME: add system table id offset.
 pub fn get_sys_tables_in_schema(schema_name: &str) -> Vec<Arc<SystemTableCatalog>> {
     SYS_CATALOGS
         .catalogs
@@ -304,7 +303,7 @@ pub fn get_sys_tables_in_schema(schema_name: &str) -> Vec<Arc<SystemTableCatalog
         .enumerate()
         .filter_map(|(idx, c)| match c {
             BuiltinCatalog::Table(t) if t.schema == schema_name => Some(Arc::new(
-                SystemTableCatalog::from(t).with_id((idx as u32 + 1).into()),
+                SystemTableCatalog::from(t).with_id((idx as u32 + SYS_CATALOG_START_ID).into()),
             )),
             _ => None,
         })
@@ -328,7 +327,7 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
-    assert!(SYS_CATALOGS_SLICE.len() + 1 < NON_RESERVED_SYS_CATALOG_ID as usize);
+    assert!(SYS_CATALOGS_SLICE.len() + 1 < MAX_SYS_CATALOG_NUM as usize);
     let catalogs = SYS_CATALOGS_SLICE
         .iter()
         .map(|f| f())

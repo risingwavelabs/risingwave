@@ -61,7 +61,9 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
+
+pub const MAX_SYS_CATALOG_NUM: u32 = 5000;
+pub const SYS_CATALOG_START_ID: u32 = u32::MAX - MAX_SYS_CATALOG_NUM;
 
 pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 

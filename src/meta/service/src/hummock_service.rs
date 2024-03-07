@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
+use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
@@ -244,7 +244,7 @@ impl HummockManagerService for HummockServiceImpl {
         }
 
         // get internal_table_id by metadata_manger
-        if request.table_id >= NON_RESERVED_SYS_CATALOG_ID as u32 {
+        if request.table_id < SYS_CATALOG_START_ID {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
@@ -259,7 +259,7 @@ impl HummockManagerService for HummockServiceImpl {
         assert!(option
             .internal_table_id
             .iter()
-            .all(|table_id| *table_id >= (NON_RESERVED_SYS_CATALOG_ID as u32)),);
+            .all(|table_id| *table_id < SYS_CATALOG_START_ID),);
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
