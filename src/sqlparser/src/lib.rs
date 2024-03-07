@@ -45,7 +45,6 @@ extern crate alloc;
 pub mod ast;
 pub mod keywords;
 pub mod parser;
-pub mod redaction;
 pub mod tokenizer;
 
 #[doc(hidden)]
