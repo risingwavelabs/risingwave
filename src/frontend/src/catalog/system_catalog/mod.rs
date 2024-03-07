@@ -296,6 +296,7 @@ pub struct SystemCatalog {
     catalogs: Vec<BuiltinCatalog>,
 }
 
+/// FIXME: add system table id offset.
 pub fn get_sys_tables_in_schema(schema_name: &str) -> Vec<Arc<SystemTableCatalog>> {
     SYS_CATALOGS
         .catalogs
