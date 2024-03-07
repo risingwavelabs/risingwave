@@ -350,7 +350,8 @@ impl BigQuerySinkWriter {
         if !self.insert_request.is_empty() {
             let insert_request =
                 mem::replace(&mut self.insert_request, TableDataInsertAllRequest::new());
-            self.client
+            let request = self
+                .client
                 .tabledata()
                 .insert_all(
                     &self.config.common.project,
@@ -360,6 +361,12 @@ impl BigQuerySinkWriter {
                 )
                 .await
                 .map_err(|e| SinkError::BigQuery(e.into()))?;
+            if let Some(error) = request.insert_errors {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Insert error: {:?}",
+                    error
+                )));
+            }
         }
         Ok(())
     }
