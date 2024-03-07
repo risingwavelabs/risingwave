@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_sqlparser::ast::REDACT_SQL_OPTION;
+
 // Traverses the 'testdata/' directory and runs all files.
 #[test]
 fn run_all_test_files() {
-    risingwave_sqlparser_test_runner::run_all_test_files();
+    REDACT_SQL_OPTION.sync_scope(false, || {
+        risingwave_sqlparser_test_runner::run_all_test_files();
+    });
 }
