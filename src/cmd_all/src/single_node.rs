@@ -148,98 +148,96 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
     let mut compactor_opts = RawOpts::default_compactor_opts();
 
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
-        meta_opts.inner.insert(
+        meta_opts.opts.insert(
             "--prometheus-listener-addr".to_string(),
             prometheus_listener_addr.clone(),
         );
-        compute_opts.inner.insert(
+        compute_opts.opts.insert(
             "--prometheus-listener-addr".to_string(),
             prometheus_listener_addr.clone(),
         );
-        frontend_opts.inner.insert(
+        frontend_opts.opts.insert(
             "--prometheus-listener-addr".to_string(),
             prometheus_listener_addr.clone(),
         );
-        compactor_opts.inner.insert(
+        compactor_opts.opts.insert(
             "--prometheus-listener-addr".to_string(),
             prometheus_listener_addr.clone(),
         );
     }
     if let Some(config_path) = &opts.config_path {
         meta_opts
-            .inner
+            .opts
             .insert("--config-path".to_string(), config_path.clone());
         compute_opts
-            .inner
+            .opts
             .insert("--config-path".to_string(), config_path.clone());
         frontend_opts
-            .inner
+            .opts
             .insert("--config-path".to_string(), config_path.clone());
         compactor_opts
-            .inner
+            .opts
             .insert("--config-path".to_string(), config_path.clone());
     }
     if let Some(store_directory) = &opts.store_directory {
         let state_store_url = make_single_node_state_store_url(store_directory);
         let meta_store_endpoint = make_single_node_sql_endpoint(store_directory);
         meta_opts
-            .inner
+            .opts
             .insert("--state-store".to_string(), state_store_url);
         meta_opts
-            .inner
+            .opts
             .insert("--sql-endpoint".to_string(), meta_store_endpoint);
     }
     if let Some(meta_addr) = &opts.meta_addr {
         meta_opts
-            .inner
+            .opts
             .insert("--listen-addr".to_string(), meta_addr.to_string());
         meta_opts
-            .inner
+            .opts
             .insert("--advertise-addr".to_string(), meta_addr.to_string());
         compute_opts
-            .inner
+            .opts
             .insert("--meta-address".to_string(), meta_addr.to_string());
         frontend_opts
-            .inner
+            .opts
             .insert("--meta-addr".to_string(), meta_addr.to_string());
         compactor_opts
-            .inner
+            .opts
             .insert("--meta-address".to_string(), meta_addr.to_string());
     }
     if let Some(compute_addr) = &opts.compute_addr {
         compute_opts
-            .inner
+            .opts
             .insert("--listen-addr".to_string(), compute_addr.to_string());
     }
     if let Some(frontend_addr) = &opts.frontend_addr {
         frontend_opts
-            .inner
+            .opts
             .insert("--listen-addr".to_string(), frontend_addr.to_string());
     }
     if let Some(compactor_addr) = &opts.compactor_addr {
         compactor_opts
-            .inner
+            .opts
             .insert("--listen-addr".to_string(), compactor_addr.to_string());
     }
     if let Some(frontend_node_override_opts) = &opts.frontend_node_override_opts {
         frontend_opts
-            .inner
-            .extend(frontend_node_override_opts.inner.clone());
+            .opts
+            .extend(frontend_node_override_opts.opts.clone());
     }
     if let Some(meta_node_override_opts) = &opts.meta_node_override_opts {
-        meta_opts
-            .inner
-            .extend(meta_node_override_opts.inner.clone());
+        meta_opts.opts.extend(meta_node_override_opts.opts.clone());
     }
     if let Some(compute_node_override_opts) = &opts.compute_node_override_opts {
         compute_opts
-            .inner
-            .extend(compute_node_override_opts.inner.clone());
+            .opts
+            .extend(compute_node_override_opts.opts.clone());
     }
     if let Some(compactor_node_override_opts) = &opts.compactor_node_override_opts {
         compactor_opts
-            .inner
-            .extend(compactor_node_override_opts.inner.clone());
+            .opts
+            .extend(compactor_node_override_opts.opts.clone());
     }
     let frontend_opts = if opts.disable_frontend {
         None
@@ -271,7 +269,7 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RawOpts {
-    inner: HashMap<String, String>,
+    opts: HashMap<String, String>,
 }
 
 // FIXME(kwannoel): This is a placeholder implementation
@@ -314,7 +312,7 @@ impl From<&str> for RawOpts {
                 inner.insert(key, args.next().unwrap());
             }
         }
-        Self { inner }
+        Self { opts: inner }
     }
 }
 
@@ -331,7 +329,7 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { inner }
+        Self { opts: inner }
     }
 
     fn default_meta_opts() -> Self {
@@ -352,7 +350,7 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { inner }
+        Self { opts: inner }
     }
 
     fn default_compute_opts() -> Self {
@@ -367,7 +365,7 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { inner }
+        Self { opts: inner }
     }
 
     fn default_compactor_opts() -> Self {
@@ -381,7 +379,7 @@ impl RawOpts {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Self { inner }
+        Self { opts: inner }
     }
 }
 
@@ -501,7 +499,9 @@ mod tests {
     fn test_raw_opts_from_str() {
         let str = "--some-opt \"some value\" --some-flag --another-flag --some-opt-2 abc";
         let hash_map = RawOpts::from(str);
-        check(hash_map, expect![[r#"
+        check(
+            hash_map,
+            expect![[r#"
             RawOpts {
                 inner: {
                     "--some-opt-2": "abc",
@@ -509,6 +509,7 @@ mod tests {
                     "--some-opt": "some value",
                     "--another-flag": "",
                 },
-            }"#]])
+            }"#]],
+        )
     }
 }
