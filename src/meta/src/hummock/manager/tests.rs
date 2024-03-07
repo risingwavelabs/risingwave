@@ -1682,11 +1682,11 @@ async fn test_split_compaction_group_trivial_expired() {
         .unwrap();
     let mut selector: Box<dyn CompactionSelector> =
         Box::<SpaceReclaimCompactionSelector>::default();
-    let reclaim_task = hummock_manager
-        .get_compact_task_impl(2, &mut selector)
+    let (_, mut reclaim_tasks) = hummock_manager
+        .get_compact_tasks_impl(vec![2], 1, &mut selector)
         .await
-        .unwrap()
         .unwrap();
+    let reclaim_task = reclaim_tasks.pop().unwrap();
     assert!(CompactStatus::is_trivial_reclaim(&reclaim_task));
 
     let current_version = hummock_manager.get_current_version().await;

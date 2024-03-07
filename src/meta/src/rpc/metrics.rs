@@ -150,6 +150,7 @@ pub struct MetaMetrics {
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
+    pub compact_task_batch_count: HistogramVec,
     pub move_state_table_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
@@ -571,6 +572,14 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let opts = histogram_opts!(
+            "storage_compact_task_batch_count",
+            "count of compact task batch",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_batch_count =
+            register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
+
         let table_write_throughput = register_int_counter_vec_with_registry!(
             "storage_commit_write_throughput",
             "The number of compactions from one level to another level that have been skipped.",
@@ -676,6 +685,7 @@ impl MetaMetrics {
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            compact_task_batch_count,
             table_write_throughput,
             move_state_table_count,
             state_table_count,
