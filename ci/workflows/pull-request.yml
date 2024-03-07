@@ -146,7 +146,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end source test"
-    command: "ci/scripts/-p ci-dev"
+    command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-source-tests"

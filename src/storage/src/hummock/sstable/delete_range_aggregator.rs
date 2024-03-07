@@ -122,7 +122,6 @@ impl CompactionDeleteRangeIterator {
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockResult<HummockEpoch> {
-        use risingwave_common::util::epoch::test_epoch;
 
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         while self.inner.is_valid()
@@ -133,7 +132,7 @@ impl CompactionDeleteRangeIterator {
         {
             self.inner.next().await?;
         }
-        Ok(self.earliest_delete_since(test_epoch(epoch)))
+        Ok(self.earliest_delete_since(epoch))
     }
 
     pub fn key(&self) -> PointRange<&[u8]> {
@@ -326,77 +325,113 @@ mod tests {
         iter.rewind().await.unwrap();
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 13)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbb").as_ref(),
+                test_epoch(13)
+            )
+            .await
+            .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 11)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbb").as_ref(),
+                test_epoch(11)
+            )
+            .await
+            .unwrap(),
             test_epoch(12)
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbb").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbb").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             test_epoch(9)
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbaaa").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbbaaa").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             test_epoch(9)
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbccd").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbbccd").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             test_epoch(9)
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbddd").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbbddd").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbeee").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbbeee").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             HummockEpoch::MAX,
         );
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"bbbeef").as_ref(), 10)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"bbbeef").as_ref(),
+                test_epoch(10)
+            )
+            .await
+            .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"eeeeee").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"eeeeee").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             test_epoch(8)
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"gggggg").as_ref(), 8)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"gggggg").as_ref(),
+                test_epoch(8)
+            )
+            .await
+            .unwrap(),
             test_epoch(9)
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"hhhhhh").as_ref(), 6)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"hhhhhh").as_ref(),
+                test_epoch(6)
+            )
+            .await
+            .unwrap(),
             HummockEpoch::MAX,
         );
         assert_eq!(
-            iter.earliest_delete_which_can_see_key_for_test(test_user_key(b"iiiiii").as_ref(), 6)
-                .await
-                .unwrap(),
+            iter.earliest_delete_which_can_see_key_for_test(
+                test_user_key(b"iiiiii").as_ref(),
+                test_epoch(6)
+            )
+            .await
+            .unwrap(),
             test_epoch(7)
         );
     }
