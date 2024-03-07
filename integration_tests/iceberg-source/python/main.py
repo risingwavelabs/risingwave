@@ -61,47 +61,21 @@ def init_spark_table(docker):
         spark.sql(sql)
 
 
-def init_risingwave_mv(docker):
+def init_risingwave_source(docker):
     config = read_config(f"{docker.case_dir()}/config.ini")
-    sink_config = config['sink']
-    sink_param = ",\n".join([f"{k}='{v}'" for k, v in sink_config.items()])
+
+    source_config = config['source']
+    source_param = ",\n".join([f"{k}='{v}'" for k, v in source_config.items()])
+
     sqls = [
-        "set streaming_parallelism = 4",
-        """
-        CREATE SOURCE bid (
-            "id" BIGINT,
-            "name" VARCHAR,
-            "distance" BIGINT,
-        ) with (
-            connector = 'datagen',
-            datagen.split.num = '4',
-
-
-            fields.id.kind = 'random',
-            fields.id.min = '0',
-            fields.id.max = '1000000',
-            fields.id.seed = '100',
-
-            fields.name.kind = 'random',
-            fields.name.length = '15',
-            fields.name.seed = '100',
-
-            fields.distance.kind = 'random',
-            fields.distance.min = '0',
-            fields.distance.max = '100000',
-            fields.distance.seed = '100',
-
-            datagen.rows.per.second = '500'
-        ) FORMAT PLAIN ENCODE JSON;
-        """,
         f"""
-        CREATE SINK s1
-        AS SELECT * FROM bid
+        CREATE SOURCE iceberg_source
         WITH (
-            {sink_param}
-            );
+            {source_param}
+        );
         """
     ]
+
     rw_config = config['risingwave']
     with psycopg2.connect(database=rw_config['db'], user=rw_config['user'], host=rw_config['host'],
                           port=rw_config['port']) as conn:
@@ -110,33 +84,36 @@ def init_risingwave_mv(docker):
                 print(f"Executing sql {sql}")
                 cursor.execute(sql)
 
-
-def check_spark_table(docker):
-    spark_ip = docker.get_ip(f"{docker.case_name}-spark-1")
-    url = f"sc://{spark_ip}:15002"
-    print(f"Spark url is {url}")
-    spark = SparkSession.builder.remote(url).getOrCreate()
+def check_risingwave_iceberg_source(docker):
+    config = read_config(f"{docker.case_dir()}/config.ini")
 
     sqls = [
-        "SELECT COUNT(*) FROM s1.t1"
+        "select count(*) from iceberg_source"
     ]
 
-    for sql in sqls:
-        print(f"Executing sql: {sql}")
-        result = spark.sql(sql).collect()
-        assert result[0][0] > 100, f"Inserted result is too small: {result[0][0]}, test failed"
+    rw_config = config['risingwave']
+    with psycopg2.connect(database=rw_config['db'], user=rw_config['user'], host=rw_config['host'],
+                          port=rw_config['port']) as conn:
+        with conn.cursor() as cursor:
+            for sql in sqls:
+                print(f"Executing sql {sql}")
+                # execute sql and collect result
+                cursor.execute(sql)
+                result = cursor.fetchall()
+                assert result[0][0] == 1, f"Inserted result is unexpected: {result[0][0]}, test failed"
+
 
 def run_case(case):
     with DockerCompose(case) as docker:
         init_spark_table(docker)
-        init_risingwave_mv(docker)
+        init_risingwave_source(docker)
         print("Let risingwave to run")
         time.sleep(5)
-        check_spark_table(docker)
+        check_risingwave_iceberg_source(docker)
 
 
 if __name__ == "__main__":
-    case_names = ["rest", "storage", "jdbc", "hive"]
+    case_names = ["storage"]
     for case_name in case_names:
         print(f"Running test case: {case_name}")
         run_case(case_name)
