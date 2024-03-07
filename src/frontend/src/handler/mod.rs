@@ -164,13 +164,11 @@ pub struct HandlerArgs {
 
 impl HandlerArgs {
     pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: Arc<str>) -> Result<Self> {
-        // As `normalized_sql` is the source of truth, it shouldn't be redacted.
-        let normalized_sql = REDACT_SQL_OPTION.sync_scope(false, || Self::normalize_sql(stmt));
         Ok(Self {
             session,
             sql,
             with_options: WithOptions::try_from(stmt)?,
-            normalized_sql,
+            normalized_sql: Self::normalize_sql(stmt),
         })
     }
 
@@ -214,7 +212,7 @@ impl HandlerArgs {
             }
             _ => {}
         }
-        stmt.to_string()
+        stmt.to_unredacted_string()
     }
 }
 

@@ -144,7 +144,7 @@ pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> Resul
         _ => unreachable!(),
     }
 
-    Ok(stmt.to_string())
+    Ok(stmt.to_unredacted_string())
 }
 
 #[cfg(test)]
@@ -153,6 +153,7 @@ pub mod tests {
 
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
+    use risingwave_sqlparser::ast::REDACT_SQL_OPTION;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;

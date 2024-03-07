@@ -1963,6 +1963,12 @@ impl fmt::Display for Statement {
     }
 }
 
+impl Statement {
+    pub fn to_unredacted_string(&self) -> String {
+        REDACT_SQL_OPTION.sync_scope(false, || self.to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]

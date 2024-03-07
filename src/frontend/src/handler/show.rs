@@ -494,9 +494,9 @@ pub fn handle_show_create_object(
                 .get_sink_by_name(&object_name)
                 .ok_or_else(|| CatalogError::NotFound("sink", name.to_string()))?;
             if sink.owner.user_id != user_id {
-                sink.create_sql()
-            } else {
                 redact_definition(&sink.create_sql())?
+            } else {
+                sink.create_sql()
             }
         }
         ShowCreateType::Source => {

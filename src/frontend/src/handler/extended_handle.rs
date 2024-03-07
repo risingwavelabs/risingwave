@@ -188,7 +188,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             }
         }
         Portal::PureStatement(stmt) => {
-            let sql: Arc<str> = Arc::from(stmt.to_string());
+            let sql: Arc<str> = Arc::from(stmt.to_unredacted_string());
             handle(session, stmt, sql, vec![]).await
         }
     }

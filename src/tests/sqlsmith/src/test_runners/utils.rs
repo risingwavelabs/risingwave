@@ -199,7 +199,7 @@ pub(super) async fn create_base_tables(testdata: &str, client: &Client) -> Resul
     mvs_and_base_tables.extend_from_slice(&base_tables);
 
     for stmt in &statements {
-        let create_sql = stmt.to_string();
+        let create_sql = stmt.to_unredacted_string();
         tracing::info!("[EXECUTING CREATE TABLE]: {}", &create_sql);
         client.simple_query(&create_sql).await.unwrap();
     }
