@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -23,6 +24,7 @@ use risingwave_compactor::CompactorOpts;
 use risingwave_compute::{default_parallelism, default_total_memory_bytes, ComputeNodeOpts};
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
+use shell_words::split;
 
 use crate::ParsedStandaloneOpts;
 
@@ -83,13 +85,45 @@ pub struct SingleNodeOpts {
     /// The address of the compactor node
     #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_ADDR")]
     compactor_addr: Option<String>,
+
+    /// Frontend Node level overrides
+    #[clap(long, env = "RW_SINGLE_NODE_FRONTEND_NODE_OVERRIDE_OPTS")]
+    pub frontend_node_override_opts: Option<RawOpts>,
+
+    /// Meta Node level overrides
+    #[clap(long, env = "RW_SINGLE_NODE_META_NODE_OVERRIDE_OPTS")]
+    pub meta_node_override_opts: Option<RawOpts>,
+
+    /// Compute Node level overrides
+    #[clap(long, env = "RW_SINGLE_NODE_COMPUTE_NODE_OVERRIDE_OPTS")]
+    pub compute_node_override_opts: Option<RawOpts>,
+
+    /// Compactor Node level overrides
+    #[clap(long, env = "RW_SINGLE_NODE_COMPACTOR_NODE_OVERRIDE_OPTS")]
+    pub compactor_node_override_opts: Option<RawOpts>,
+
+    /// Disable frontend
+    #[clap(long, env = "RW_SINGLE_NODE_DISABLE_FRONTEND")]
+    pub disable_frontend: bool,
+
+    /// Disable meta
+    #[clap(long, env = "RW_SINGLE_NODE_DISABLE_META")]
+    pub disable_meta: bool,
+
+    /// Disable compute
+    #[clap(long, env = "RW_SINGLE_NODE_DISABLE_COMPUTE")]
+    pub disable_compute: bool,
+
+    /// Disable compactor
+    #[clap(long, env = "RW_SINGLE_NODE_DISABLE_COMPACTOR")]
+    pub disable_compactor: bool,
 }
 
 struct NormalizedSingleNodeOpts {
-    frontend_opts: RawOpts,
-    meta_opts: RawOpts,
-    compute_opts: RawOpts,
-    compactor_opts: RawOpts,
+    frontend_opts: Option<RawOpts>,
+    meta_opts: Option<RawOpts>,
+    compute_opts: Option<RawOpts>,
+    compactor_opts: Option<RawOpts>,
 }
 
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
@@ -187,6 +221,46 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
             .inner
             .insert("--listen-addr".to_string(), compactor_addr.to_string());
     }
+    if let Some(frontend_node_override_opts) = &opts.frontend_node_override_opts {
+        frontend_opts
+            .inner
+            .extend(frontend_node_override_opts.inner.clone());
+    }
+    if let Some(meta_node_override_opts) = &opts.meta_node_override_opts {
+        meta_opts
+            .inner
+            .extend(meta_node_override_opts.inner.clone());
+    }
+    if let Some(compute_node_override_opts) = &opts.compute_node_override_opts {
+        compute_opts
+            .inner
+            .extend(compute_node_override_opts.inner.clone());
+    }
+    if let Some(compactor_node_override_opts) = &opts.compactor_node_override_opts {
+        compactor_opts
+            .inner
+            .extend(compactor_node_override_opts.inner.clone());
+    }
+    let frontend_opts = if opts.disable_frontend {
+        None
+    } else {
+        Some(frontend_opts)
+    };
+    let meta_opts = if opts.disable_meta {
+        None
+    } else {
+        Some(meta_opts)
+    };
+    let compute_opts = if opts.disable_compute {
+        None
+    } else {
+        Some(compute_opts)
+    };
+    let compactor_opts = if opts.disable_compactor {
+        None
+    } else {
+        Some(compactor_opts)
+    };
     NormalizedSingleNodeOpts {
         frontend_opts,
         meta_opts,
@@ -195,8 +269,46 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RawOpts {
     inner: HashMap<String, String>,
+}
+
+// FIXME(kwannoel): This is a placeholder implementation
+impl Ord for RawOpts {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        Ordering::Equal
+    }
+}
+
+impl PartialOrd for RawOpts {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl From<&str> for RawOpts {
+    fn from(s: &str) -> Self {
+        let mut inner = HashMap::new();
+        let args = split(s).unwrap();
+        let mut args = args.into_iter().peekable();
+        loop {
+            let Some(arg) = args.peek() else {
+                break;
+            };
+            assert!(arg.starts_with("--"));
+            let key = args.next().unwrap();
+            let Some(arg2) = args.peek() else {
+                break;
+            };
+            if arg2.starts_with("--") {
+                continue;
+            } else {
+                inner.insert(key, args.next().unwrap());
+            }
+        }
+        Self { inner }
+    }
 }
 
 impl RawOpts {
