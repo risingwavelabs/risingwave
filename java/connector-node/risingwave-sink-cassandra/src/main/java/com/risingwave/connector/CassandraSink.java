@@ -18,6 +18,8 @@ package com.risingwave.connector;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.CqlSessionBuilder;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.*;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
@@ -50,9 +52,16 @@ public class CassandraSink extends SinkWriterBase {
             throw new IllegalArgumentException(
                     "Invalid cassandraURL: expected `host:port`, got " + url);
         }
+
+        DriverConfigLoader loader =
+                DriverConfigLoader.programmaticBuilder()
+                        .withInt(DefaultDriverOption.REQUEST_TIMEOUT, config.getRequestTimeoutMs())
+                        .build();
+
         // check connection
         CqlSessionBuilder sessionBuilder =
                 CqlSession.builder()
+                        .withConfigLoader(loader)
                         .addContactPoint(
                                 new InetSocketAddress(hostPort[0], Integer.parseInt(hostPort[1])))
                         .withKeyspace(config.getKeyspace())
