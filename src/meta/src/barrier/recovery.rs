@@ -760,7 +760,7 @@ impl GlobalBarrierManagerContext {
             }
         }
 
-        let table_parallelisms: HashMap<_, _> = {
+        let all_table_parallelisms: HashMap<_, _> = {
             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
             guard
@@ -768,20 +768,21 @@ impl GlobalBarrierManagerContext {
                 .iter()
                 .filter(|&(_, table)| matches!(table.state(), State::Created))
                 .map(|(table_id, table)| {
-                    let target_parallelism =
-                        derive_target_parallelism_for_custom(current_parallelism, table);
-
-                    (table_id.table_id, target_parallelism)
+                    (
+                        *table_id,
+                        derive_target_parallelism_for_custom(current_parallelism, table),
+                    )
                 })
                 .collect()
         };
+
 
         let workers = mgr
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
 
-        let schedulable_worker_ids = workers
+        let schedulable_worker_ids: BTreeSet<_> = workers
             .iter()
             .filter(|worker| {
                 !worker
@@ -793,29 +794,25 @@ impl GlobalBarrierManagerContext {
             .map(|worker| worker.id)
             .collect();
 
-        let plan = self
-            .scale_controller
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids: schedulable_worker_ids,
-                table_parallelisms: table_parallelisms.clone(),
-            })
-            .await?;
+        for (table_id, table_parallelism) in all_table_parallelisms {
+            let plan = self
+                .scale_controller
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids: schedulable_worker_ids.clone(),
+                    table_parallelisms: HashMap::from([(table_id.table_id, table_parallelism)]),
+                })
+                .await?;
 
-        let table_parallelisms: HashMap<_, _> = table_parallelisms
-            .into_iter()
-            .map(|(table_id, parallelism)| {
-                debug_assert_ne!(parallelism, TableParallelism::Custom);
-                (TableId::new(table_id), parallelism)
-            })
-            .collect();
+            if plan.is_empty() {
+                continue;
+            }
 
-        let mut compared_table_parallelisms = table_parallelisms.clone();
+            let table_parallelisms = HashMap::from([(table_id, table_parallelism)]);
 
-        // skip reschedule if no reschedule is generated.
-        let (reschedule_fragment, applied_reschedules) = if plan.is_empty() {
-            (HashMap::new(), HashMap::new())
-        } else {
-            self.scale_controller
+            let mut compared_table_parallelisms = table_parallelisms.clone();
+
+            let (reschedule_fragment, applied_reschedules) = self
+                .scale_controller
                 .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
@@ -824,27 +821,32 @@ impl GlobalBarrierManagerContext {
                     },
                     Some(&mut compared_table_parallelisms),
                 )
-                .await?
-        };
+                .await?;
 
-        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
 
-        if let Err(e) = self
-            .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
-            .await
-        {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to apply reschedule for offline scaling in recovery",
+            if let Err(e) = self
+                .scale_controller
+                .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+                .await
+            {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to apply reschedule for offline scaling in recovery",
+                );
+
+                mgr.fragment_manager
+                    .cancel_apply_reschedules(applied_reschedules)
+                    .await;
+
+                return Err(e);
+            }
+
+            tracing::info!(
+                "offline rescheduling for job {} in recovery is done",
+                table_id.table_id
             );
-
-            mgr.fragment_manager
-                .cancel_apply_reschedules(applied_reschedules)
-                .await;
-
-            return Err(e);
         }
 
         debug!("scaling actors succeed.");
