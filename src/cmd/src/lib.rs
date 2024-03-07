@@ -63,17 +63,5 @@ pub fn compactor(opts: CompactorOpts) {
 
 pub fn ctl(opts: CtlOpts) {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-
-    // Note: Use a simple current thread runtime for ctl.
-    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
-    // further investigation.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_ctl::start(opts))
-        .inspect_err(|e| {
-            eprintln!("{:#?}", e);
-        })
-        .unwrap();
+    main_okk(risingwave_ctl::start(opts));
 }

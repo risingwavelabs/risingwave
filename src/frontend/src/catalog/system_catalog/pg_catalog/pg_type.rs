@@ -12,68 +12,93 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::BuiltinView;
+use crate::catalog::system_catalog::rw_catalog::rw_types::read_rw_types;
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
-pub static PG_TYPE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_type",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "oid"),
-        (DataType::Varchar, "typname"),
-        // 0
-        (DataType::Int32, "typelem"),
-        // 0
-        (DataType::Int32, "typarray"),
-        // FIXME: Should be regproc type
-        (DataType::Varchar, "typinput"),
-        // false
-        (DataType::Boolean, "typnotnull"),
-        // 0
-        (DataType::Int32, "typbasetype"),
-        // -1
-        (DataType::Int32, "typtypmod"),
-        // 0
-        (DataType::Int32, "typcollation"),
-        // 0
-        (DataType::Int32, "typlen"),
-        // should be pg_catalog oid.
-        (DataType::Int32, "typnamespace"),
-        // 'b'
-        (DataType::Varchar, "typtype"),
-        // 0
-        (DataType::Int32, "typrelid"),
-        // None
-        (DataType::Varchar, "typdefault"),
-        // None
-        (DataType::Varchar, "typcategory"),
-        // None
-        (DataType::Int32, "typreceive"),
-    ],
-    sql: "SELECT t.id AS oid, \
-                t.name AS typname, \
-                t.typelem AS typelem, \
-                t.typarray AS typarray, \
-                t.input_oid AS typinput, \
-                false AS typnotnull, \
-                0 AS typbasetype, \
-                -1 AS typtypmod, \
-                0 AS typcollation, \
-                0 AS typlen, \
-                s.id AS typnamespace, \
-                'b' AS typtype, \
-                0 AS typrelid, \
-                NULL AS typdefault, \
-                NULL AS typcategory, \
-                NULL::integer AS typreceive \
-            FROM rw_catalog.rw_types t \
-            JOIN rw_catalog.rw_schemas s \
-            ON s.name = 'pg_catalog'"
-        .to_string(),
-});
+
+// TODO: Make it a view atop of `rw_types` to reduce code duplication of the
+// `read` function, while reserving the property that `oid` acts as the
+// primary key. See https://github.com/risingwavelabs/risingwave/issues/15243.
+//
+// #[system_catalog(
+//     view,
+//     "pg_catalog.pg_type",
+//     "SELECT t.id AS oid,
+//         t.name AS typname,
+//         t.typelem AS typelem,
+//         t.typarray AS typarray,
+//         t.input_oid AS typinput,
+//         false AS typnotnull,
+//         0 AS typbasetype,
+//         -1 AS typtypmod,
+//         0 AS typcollation,
+//         0 AS typlen,
+//         s.id AS typnamespace,
+//         'b' AS typtype,
+//         0 AS typrelid,
+//         NULL AS typdefault,
+//         NULL AS typcategory,
+//         NULL::integer AS typreceive
+//     FROM rw_catalog.rw_types t
+//     JOIN rw_catalog.rw_schemas s
+//     ON s.name = 'pg_catalog'"
+// )]
+#[derive(Fields)]
+struct PgType {
+    #[primary_key]
+    oid: i32,
+    typname: String,
+    typelem: i32,
+    typarray: i32,
+    typinput: String,
+    typnotnull: bool,
+    typbasetype: i32,
+    typtypmod: i32,
+    typcollation: i32,
+    typlen: i32,
+    typnamespace: i32,
+    typtype: &'static str,
+    typrelid: i32,
+    typdefault: Option<String>,
+    typcategory: Option<String>,
+    typreceive: Option<i32>,
+}
+
+#[system_catalog(table, "pg_catalog.pg_type")]
+fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let pg_catalog_id = catalog_reader
+        .get_schema_by_name(&reader.auth_context.database, "pg_catalog")?
+        .id() as i32;
+
+    let rw_types = read_rw_types(reader)?;
+
+    let mut rows = Vec::with_capacity(rw_types.len());
+    for rw_type in rw_types {
+        rows.push(PgType {
+            oid: rw_type.id,
+            typname: rw_type.name,
+            typelem: rw_type.typelem,
+            typarray: rw_type.typarray,
+            typinput: rw_type.input_oid,
+            typnotnull: false,
+            typbasetype: 0,
+            typtypmod: -1,
+            typcollation: 0,
+            typlen: 0,
+            typnamespace: pg_catalog_id,
+            typtype: "b",
+            typrelid: 0,
+            typdefault: None,
+            typcategory: None,
+            typreceive: None,
+        });
+    }
+    Ok(rows)
+}

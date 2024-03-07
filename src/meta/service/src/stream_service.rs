@@ -17,9 +17,10 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
-use risingwave_meta_model_v2::SourceId;
+use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
@@ -280,11 +281,18 @@ impl StreamManagerService for StreamServiceImpl {
                 let job_states = mgr.catalog_controller.list_streaming_job_states().await?;
                 job_states
                     .into_iter()
-                    .map(|(table_id, state)| {
+                    .map(|(table_id, state, parallelism)| {
+                        let parallelism = match parallelism {
+                            StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                            StreamingParallelism::Fixed(n) => {
+                                model::TableParallelism::Fixed(n as _)
+                            }
+                        };
+
                         list_table_fragment_states_response::TableFragmentState {
                             table_id: table_id as _,
                             state: PbState::from(state) as _,
-                            parallelism: None, // TODO: support parallelism.
+                            parallelism: Some(parallelism.into()),
                         }
                     })
                     .collect_vec()

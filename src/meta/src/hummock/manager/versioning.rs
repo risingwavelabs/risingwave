@@ -39,7 +39,9 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, create_trx_wrapper, read_lock, write_lock};
-use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
+use crate::hummock::metrics_utils::{
+    trigger_safepoint_stat, trigger_write_stop_stats, LocalTableMetrics,
+};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::model::{VarTransaction, VarTransactionWrapper};
@@ -94,6 +96,7 @@ pub struct Versioning {
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
+    pub local_metrics: HashMap<u32, LocalTableMetrics>,
 }
 
 impl Versioning {

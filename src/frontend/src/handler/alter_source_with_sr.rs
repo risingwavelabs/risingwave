@@ -16,7 +16,6 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
@@ -30,6 +29,7 @@ use super::create_source::{bind_columns_from_source, validate_compatibility};
 use super::util::is_cdc_connector;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::{ErrorCode, Result};
 use crate::{Binder, WithOptions};
 
 fn format_type_to_format(from: FormatType) -> Option<Format> {
@@ -42,6 +42,7 @@ fn format_type_to_format(from: FormatType) -> Option<Format> {
         FormatType::Canal => Format::Canal,
         FormatType::Upsert => Format::Upsert,
         FormatType::Plain => Format::Plain,
+        FormatType::None => Format::None,
     })
 }
 
@@ -55,6 +56,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Json => Encode::Json,
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
+        EncodeType::None => Encode::None,
     })
 }
 

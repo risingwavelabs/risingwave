@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -261,13 +261,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
-    fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-        self.inner
-            .flush(delete_ranges)
-            .verbose_instrument_await("store_flush")
+    fn flush(&mut self) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
+        self.inner.flush().verbose_instrument_await("store_flush")
     }
 
     fn epoch(&self) -> u64 {
@@ -291,6 +286,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner
             .try_flush()
             .verbose_instrument_await("store_try_flush")
+    }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        self.inner.update_vnode_bitmap(vnodes)
     }
 }
 
@@ -337,11 +336,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         panic!("the state store is already monitored")
     }
 
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+    fn clear_shared_buffer(&self, prev_epoch: u64) -> impl Future<Output = ()> + Send + '_ {
         self.inner
-            .clear_shared_buffer()
+            .clear_shared_buffer(prev_epoch)
             .verbose_instrument_await("store_clear_shared_buffer")
-            .inspect_err(|e| error!(error = %e.as_report(), "Failed in clear_shared_buffer"))
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {

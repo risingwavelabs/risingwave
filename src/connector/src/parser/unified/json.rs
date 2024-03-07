@@ -29,6 +29,7 @@ use simd_json::prelude::{
     TypedValue, ValueAsContainer, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
 };
 use simd_json::{BorrowedValue, ValueType};
+use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
@@ -358,7 +359,7 @@ impl JsonParseOptions {
                     .as_bytes();
                 let decimal = BigInt::from_signed_bytes_be(value);
                 let negative = decimal.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1);
+                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1)?;
                 let decimal =
                     rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(Decimal::Normalized(decimal))
@@ -468,7 +469,7 @@ impl JsonParseOptions {
                                 // TODO: is it possible to unify the logging with the one in `do_action`?
                                 static LOG_SUPPERSSER: LazyLock<LogSuppresser> =  LazyLock::new(LogSuppresser::default);
                                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                                    tracing::warn!(%error, suppressed_count, "undefined nested field, padding with `NULL`");
+                                    tracing::warn!(error = %error.as_report(), suppressed_count, "undefined nested field, padding with `NULL`");
                                 }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)
                             });

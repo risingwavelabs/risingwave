@@ -464,7 +464,7 @@ pub fn start_compactor(
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats) = match sstable_object_id_manager.add_watermark_object_id(None).await
+                                        let ((compact_task, table_stats), _memory_tracker) = match sstable_object_id_manager.add_watermark_object_id(None).await
                                         {
                                             Ok(tracker_id) => {
                                                 let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
@@ -480,7 +480,7 @@ pub fn start_compactor(
                                                 tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
                                                 let mut compact_task = compact_task;
                                                 compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
-                                                (compact_task, HashMap::default())
+                                                ((compact_task, HashMap::default()),None)
                                             }
                                         };
                                         shutdown.lock().unwrap().remove(&task_id);
@@ -502,18 +502,17 @@ pub fn start_compactor(
                                                 .as_millis() as u64,
                                         }) {
                                             tracing::warn!(error = %e.as_report(), "Failed to report task {task_id:?}");
-                                            if enable_check_compaction_result && need_check_task {
-                                                match check_compaction_result(&compact_task, context.clone()).await {
-                                                    Err(e) => {
-                                                        tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
-                                                    },
-                                                    Ok(true) => (),
-                                                    Ok(false) => {
-                                                        panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
-                                                    }
+                                        }
+                                        if enable_check_compaction_result && need_check_task {
+                                            match check_compaction_result(&compact_task, context.clone()).await {
+                                                Err(e) => {
+                                                    tracing::warn!(error = %e.as_report(), "Failed to check compaction task {}",compact_task.task_id);
+                                                },
+                                                Ok(true) => (),
+                                                Ok(false) => {
+                                                    panic!("Failed to pass consistency check for result of compaction task:\n{:?}", compact_task_to_string(&compact_task));
                                                 }
                                             }
-
                                         }
                                     }
                                     ResponseEvent::VacuumTask(vacuum_task) => {
@@ -670,7 +669,7 @@ pub fn start_shared_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let (compact_task, table_stats) = compactor_runner::compact(
+                                    let ((compact_task, table_stats), _memory_tracker)= compactor_runner::compact(
                                         context.clone(),
                                         compact_task,
                                         rx,

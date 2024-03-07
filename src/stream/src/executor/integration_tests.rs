@@ -35,7 +35,7 @@ use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::{
     generate_agg_schema, new_boxed_simple_agg_executor,
 };
-use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
+use crate::executor::{Execute, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::{LocalBarrierManager, SharedContext};
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
@@ -47,30 +47,28 @@ async fn test_merger_sum_aggr() {
         time_zone: String::from("UTC"),
     };
 
-    let actor_ctx = ActorContext::create(0);
+    let actor_ctx = ActorContext::for_test(0);
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
-        let _schema = Schema {
+        let input_schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::for_test(input_rx);
+        let input = Executor::new(
+            ExecutorInfo {
+                schema: input_schema,
+                pk_indices: PkIndices::new(),
+                identity: "ReceiverExecutor".to_string(),
+            },
+            ReceiverExecutor::for_test(input_rx).boxed(),
+        );
         let agg_calls = vec![
             AggCall::from_pretty("(count:int8)"),
             AggCall::from_pretty("(sum:int8 $0:int8)"),
         ];
         let schema = generate_agg_schema(&input, &agg_calls, None);
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = StatelessSimpleAggExecutor::new(
-            actor_ctx.clone(),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: format!("StatelessSimpleAggExecutor {:X}", 1),
-            },
-            input.boxed(),
-            agg_calls,
-        )
-        .unwrap();
+        let aggregator =
+            StatelessSimpleAggExecutor::new(actor_ctx.clone(), input, schema, agg_calls).unwrap();
         let (tx, rx) = channel_for_test();
         let consumer = SenderConsumer {
             input: aggregator.boxed(),
@@ -108,13 +106,15 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (input, rx) = channel_for_test();
-    let schema = Schema {
-        fields: vec![
-            Field::unnamed(DataType::Int64),
-            Field::unnamed(DataType::Int64),
-        ],
-    };
-    let receiver_op = Box::new(ReceiverExecutor::for_test(rx));
+    let receiver_op = Executor::new(
+        ExecutorInfo {
+            // input schema of local simple agg
+            schema: Schema::new(vec![Field::unnamed(DataType::Int64)]),
+            pk_indices: PkIndices::new(),
+            identity: "ReceiverExecutor".to_string(),
+        },
+        ReceiverExecutor::for_test(rx).boxed(),
+    );
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
@@ -138,14 +138,25 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::for_test(outputs, schema);
+    let merger = Executor::new(
+        ExecutorInfo {
+            // output schema of local simple agg
+            schema: Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ]),
+            pk_indices: PkIndices::new(),
+            identity: "MergeExecutor".to_string(),
+        },
+        MergeExecutor::for_test(outputs).boxed(),
+    );
 
     // for global aggregator, we need to sum data and sum row count
     let is_append_only = false;
     let aggregator = new_boxed_simple_agg_executor(
         actor_ctx.clone(),
         MemoryStateStore::new(),
-        merger.boxed(),
+        merger,
         is_append_only,
         vec![
             AggCall::from_pretty("(sum0:int8 $0:int8)"),
@@ -160,13 +171,6 @@ async fn test_merger_sum_aggr() {
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),
-        ExecutorInfo {
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            pk_indices: vec![],
-            identity: format!("ProjectExecutor {:X}", 3),
-        },
         aggregator,
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
@@ -232,7 +236,7 @@ async fn test_merger_sum_aggr() {
 }
 
 struct MockConsumer {
-    input: BoxedExecutor,
+    input: Box<dyn Execute>,
     data: Arc<Mutex<Vec<StreamChunk>>>,
 }
 
@@ -259,7 +263,7 @@ impl StreamConsumer for MockConsumer {
 
 /// `SenderConsumer` consumes data from input executor and send it into a channel.
 pub struct SenderConsumer {
-    input: BoxedExecutor,
+    input: Box<dyn Execute>,
     channel: BoxedOutput,
 }
 

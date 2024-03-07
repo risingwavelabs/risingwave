@@ -377,14 +377,22 @@ impl StageRunner {
                 ));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
+            let chunk_size = (source_info.split_info().unwrap().len() as f32
+                / self.stage.parallelism.unwrap() as f32)
+                .ceil() as usize;
+            for (id, split) in source_info
+                .split_info()
+                .unwrap()
+                .chunks(chunk_size)
+                .enumerate()
+            {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
                     task_id: id as u32,
                 };
                 let plan_fragment = self
-                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.to_vec())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(
@@ -935,11 +943,12 @@ impl StageRunner {
                 let exchange_sources = child_stage.all_exchange_sources_for(task_id);
 
                 match &execution_plan_node.node {
-                    NodeBody::Exchange(_exchange_node) => PlanNodePb {
+                    NodeBody::Exchange(exchange_node) => PlanNodePb {
                         children: vec![],
                         identity,
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
                             sources: exchange_sources,
+                            sequential: exchange_node.sequential,
                             input_schema: execution_plan_node.schema.clone(),
                         })),
                     },
@@ -949,6 +958,7 @@ impl StageRunner {
                         node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
                             exchange: Some(ExchangeNode {
                                 sources: exchange_sources,
+                                sequential: false,
                                 input_schema: execution_plan_node.schema.clone(),
                             }),
                             column_orders: sort_merge_exchange_node.column_orders.clone(),
@@ -979,11 +989,15 @@ impl StageRunner {
                 let NodeBody::Source(mut source_node) = node_body else {
                     unreachable!();
                 };
+
                 let partition = partition
                     .expect("no partition info for seq scan")
                     .into_source()
                     .expect("PartitionInfo should be SourcePartitionInfo");
-                source_node.split = partition.encode_to_bytes().into();
+                source_node.split = partition
+                    .into_iter()
+                    .map(|split| split.encode_to_bytes().into())
+                    .collect_vec();
                 PlanNodePb {
                     children: vec![],
                     identity,

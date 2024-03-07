@@ -177,9 +177,7 @@ where
     /// async interface only used for replicated state table,
     /// as it needs to wait for prev epoch to be committed.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
-        self.local_store
-            .init(InitOptions::new_with_epoch(epoch))
-            .await
+        self.local_store.init(InitOptions::new(epoch)).await
     }
 }
 
@@ -195,7 +193,7 @@ where
     /// No need to `wait_for_epoch`, so it should complete immediately.
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store
-            .init(InitOptions::new_with_epoch(epoch))
+            .init(InitOptions::new(epoch))
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
@@ -303,7 +301,7 @@ where
 
         // FIXME(yuhao): only use `dist_key_in_pk` in the proto
         let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
-            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices).unwrap()
         } else {
             table_catalog
                 .get_dist_key_in_pk()
@@ -357,11 +355,21 @@ where
             OpConsistencyLevel::Inconsistent
         };
 
-        let table_option = TableOption::build_table_option(table_catalog.get_properties());
+        let table_option = TableOption::new(table_catalog.retention_seconds);
         let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
+            NewLocalOptions::new_replicated(
+                table_id,
+                op_consistency_level,
+                table_option,
+                distribution.vnodes().clone(),
+            )
         } else {
-            NewLocalOptions::new(table_id, op_consistency_level, table_option)
+            NewLocalOptions::new(
+                table_id,
+                op_consistency_level,
+                table_option,
+                distribution.vnodes().clone(),
+            )
         };
         let local_state_store = store.new_local(new_local_options).await;
 
@@ -573,6 +581,7 @@ where
                 table_id,
                 op_consistency_level,
                 TableOption::default(),
+                distribution.vnodes().clone(),
             ))
             .await;
         let row_serde = make_row_serde();
@@ -780,6 +789,13 @@ where
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
+        let prev_vnodes = self.local_store.update_vnode_bitmap(new_vnodes.clone());
+        assert_eq!(
+            &prev_vnodes,
+            self.vnodes(),
+            "state table and state store vnode bitmap mismatches"
+        );
+
         if self.distribution.is_singleton() {
             assert_eq!(
                 &new_vnodes,
@@ -1127,24 +1143,6 @@ where
         Ok(())
     }
 
-    // TODO(st1page): maybe we should extract a pub struct to do it
-    /// just specially used by those state table read-only and after the call the data
-    /// in the epoch will be visible
-    pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
-        assert_eq!(self.epoch(), new_epoch.prev);
-        assert!(!self.is_dirty());
-        // Tick the watermark buffer here because state table is expected to be committed once
-        // per epoch.
-        self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(
-            new_epoch.curr,
-            SealCurrentEpochOptions {
-                table_watermarks: None,
-                switch_op_consistency_level: None,
-            },
-        );
-    }
-
     /// Write to state store.
     async fn seal_current_epoch(
         &mut self,
@@ -1236,7 +1234,7 @@ where
             self.watermark_cache.clear();
         }
 
-        self.local_store.flush(vec![]).await?;
+        self.local_store.flush().await?;
         let table_watermarks =
             seal_watermark.map(|(direction, watermark)| (direction, vec![watermark]));
 

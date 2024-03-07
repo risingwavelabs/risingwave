@@ -24,7 +24,7 @@ use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_expr::expr_context::expr_context_scope;
+use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
@@ -58,7 +58,7 @@ pub struct ActorContext {
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn create(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
             fragment_id: 0,
@@ -73,7 +73,7 @@ impl ActorContext {
         })
     }
 
-    pub fn create_with_metrics(
+    pub fn create(
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
@@ -171,14 +171,17 @@ where
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        expr_context_scope(self.expr_context.clone(), async move {
-            tokio::join!(
-                // Drive the subtasks concurrently.
-                join_all(std::mem::take(&mut self.subtasks)),
-                self.run_consumer(),
-            )
-            .1
-        })
+        FRAGMENT_ID::scope(
+            self.actor_context.fragment_id,
+            expr_context_scope(self.expr_context.clone(), async move {
+                tokio::join!(
+                    // Drive the subtasks concurrently.
+                    join_all(std::mem::take(&mut self.subtasks)),
+                    self.run_consumer(),
+                )
+                .1
+            }),
+        )
         .await
     }
 

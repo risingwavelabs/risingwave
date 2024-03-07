@@ -101,7 +101,9 @@ fn get_compaction_group_object_ids(
 
 async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedSnapshot> {
     match env.sql_meta_store() {
-        None => HummockPinnedSnapshot::list(env.meta_store()).await.unwrap(),
+        None => HummockPinnedSnapshot::list(env.meta_store_checked())
+            .await
+            .unwrap(),
         Some(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_snapshot;
             use sea_orm::EntityTrait;
@@ -118,7 +120,9 @@ async fn list_pinned_snapshot_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPi
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
     match env.sql_meta_store() {
-        None => HummockPinnedVersion::list(env.meta_store()).await.unwrap(),
+        None => HummockPinnedVersion::list(env.meta_store_checked())
+            .await
+            .unwrap(),
         Some(sql_meta_store) => {
             use risingwave_meta_model_v2::hummock_pinned_version;
             use sea_orm::EntityTrait;
@@ -1824,7 +1828,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                     ..Default::default()
                 },
             ],
-            None
+            None,
         )
         .await
         .unwrap());
@@ -2030,7 +2034,7 @@ async fn test_move_tables_between_compaction_group() {
                 gen_sstable_info(12, 2, vec![100, 101]),
                 gen_sstable_info(13, 3, vec![101, 102]),
             ],
-            None
+            None,
         )
         .await
         .unwrap());

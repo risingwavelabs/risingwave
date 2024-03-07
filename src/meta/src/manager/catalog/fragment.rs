@@ -124,7 +124,7 @@ pub type FragmentManagerRef = Arc<FragmentManager>;
 
 impl FragmentManager {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
-        let table_fragments = TableFragments::list(env.meta_store()).await?;
+        let table_fragments = TableFragments::list(env.meta_store_checked()).await?;
 
         // `expr_context` of `StreamActor` is introduced in 1.6.0.
         // To ensure compatibility, we fill it for table fragments that were created with older versions.
@@ -133,7 +133,7 @@ impl FragmentManager {
             .map(|tf| (tf.table_id(), tf.fill_expr_context()))
             .collect();
 
-        let table_revision = TableRevision::get(env.meta_store()).await?;
+        let table_revision = TableRevision::get(env.meta_store_checked()).await?;
 
         Ok(Self {
             env,
@@ -547,7 +547,10 @@ impl FragmentManager {
     /// tables.
     /// If table fragments already deleted, this should just be noop,
     /// the delete function (`table_fragments.remove`) will not return an error.
-    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<Vec<u32>> {
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -559,7 +562,9 @@ impl FragmentManager {
 
         let mut dirty_sink_into_table_upstream_fragment_id = HashSet::new();
         let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
+            table_ids_to_unregister_from_hummock.extend(table_fragment.all_table_ids());
             table_fragments.remove(table_fragment.table_id());
             let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
@@ -634,7 +639,7 @@ impl FragmentManager {
             }
         }
 
-        Ok(())
+        Ok(table_ids_to_unregister_from_hummock)
     }
 
     // When dropping sink into a table, there could be an unexpected meta reboot. At this time, the sink’s catalog might have been deleted,
@@ -856,6 +861,22 @@ impl FragmentManager {
         }
 
         actor_maps
+    }
+
+    pub async fn node_actor_count(&self) -> HashMap<WorkerId, usize> {
+        let mut actor_count = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for actor_status in fragments.actor_status.values() {
+                if let Some(pu) = &actor_status.parallel_unit {
+                    let e = actor_count.entry(pu.worker_node_id).or_insert(0);
+                    *e += 1;
+                }
+            }
+        }
+
+        actor_count
     }
 
     // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
@@ -1316,7 +1337,9 @@ impl FragmentManager {
 
         for (table_id, parallelism) in table_parallelism_assignment {
             if let Some(mut table) = table_fragments.get_mut(table_id) {
-                table.assigned_parallelism = parallelism;
+                if table.assigned_parallelism != parallelism {
+                    table.assigned_parallelism = parallelism;
+                }
             }
         }
 
@@ -1488,5 +1511,9 @@ impl FragmentManager {
             .read()
             .await
             .running_fragment_parallelisms(id_filter)
+    }
+
+    pub async fn count_streaming_job(&self) -> usize {
+        self.core.read().await.table_fragments().len()
     }
 }

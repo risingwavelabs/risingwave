@@ -18,7 +18,6 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{childless_record, Distill};
@@ -27,6 +26,7 @@ use super::{
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{

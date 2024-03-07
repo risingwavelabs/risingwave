@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
@@ -28,6 +27,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
     StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
 };
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
 };
@@ -713,12 +713,10 @@ impl PredicatePushdown for LogicalOverWindow {
 
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        if !self.core.funcs_have_same_partition_and_order() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
-            )
-            .into());
-        }
+        assert!(
+            self.core.funcs_have_same_partition_and_order(),
+            "must apply OverWindowSplitRule before generating physical plan"
+        );
 
         // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
         // empty PARTITION BY by simply removing the following check.
@@ -744,17 +742,15 @@ impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         use super::stream::prelude::*;
 
+        assert!(
+            self.core.funcs_have_same_partition_and_order(),
+            "must apply OverWindowSplitRule before generating physical plan"
+        );
+
         let stream_input = self.core.input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
-
-            if !self.core.funcs_have_same_partition_and_order() {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
-                )
-                .into());
-            }
 
             let order_by = &self.window_functions()[0].order_by;
             if order_by.len() != 1 || order_by[0].order_type != OrderType::ascending() {
@@ -796,13 +792,6 @@ impl ToStream for LogicalOverWindow {
             Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
-
-            if !self.core.funcs_have_same_partition_and_order() {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
-                )
-                .into());
-            }
 
             // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
             // empty PARTITION BY by simply removing the following check.

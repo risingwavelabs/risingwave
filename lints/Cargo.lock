@@ -535,9 +535,9 @@ checksum = "13e3bf6590cbc649f4d1a3eefc9d5d6eb746f5200ffb04e5e142700b8faa56e7"
 
 [[package]]
 name = "libgit2-sys"
-version = "0.16.1+1.7.1"
+version = "0.16.2+1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2a2bb3680b094add03bb3732ec520ece34da31a8cd2d633d1389d0f0fb60d0c"
+checksum = "ee4126d8b4ee5c9d9ea891dd875cfdc1e9d0950437179104b183d7d8a74d24e8"
 dependencies = [
  "cc",
  "libc",
@@ -588,10 +588,12 @@ dependencies = [
 name = "lints"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clippy_utils",
  "dylint_linting",
  "dylint_testing",
  "itertools 0.12.0",
+ "thiserror-ext",
  "tracing",
 ]
 
@@ -982,6 +984,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9a7210f5c9a7156bb50aa36aed4c95afb51df0df00713949448cf9e97d382d2"
 dependencies = [
  "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-ext"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "368fdd73eb5f0df62797d1a5d1dca41ca4137a62f250980787ffe33e530b5d8b"
+dependencies = [
+ "thiserror",
+ "thiserror-ext-derive",
+]
+
+[[package]]
+name = "thiserror-ext-derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efc1991800eaf856df8d097c909b487fdee13db47ffa293136c91cde6de4abee"
+dependencies = [
+ "either",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

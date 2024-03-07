@@ -339,7 +339,7 @@ pub mod tests {
         generate_l0_overlapping_sublevels, generate_level, generate_table,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, ManualCompactionSelector};
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
@@ -688,7 +688,7 @@ pub mod tests {
         // pick_l0_to_base_level
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
-        let mut expected = vec![vec![5, 6], vec![7, 8], vec![9, 10]];
+        let mut expected = [vec![5, 6], vec![7, 8], vec![9, 10]];
         expected.reverse();
         let result = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -724,7 +724,7 @@ pub mod tests {
         };
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
-        let mut expected = vec![vec![5, 6], vec![7, 8]];
+        let mut expected = [vec![5, 6], vec![7, 8]];
         expected.reverse();
         let result = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -1012,7 +1012,7 @@ pub mod tests {
         }
 
         {
-            let expected_input_level_sst_ids = vec![vec![4], vec![2]];
+            let expected_input_level_sst_ids = [vec![4], vec![2]];
             let option = ManualCompactionOption {
                 sst_ids: vec![],
                 level: input_level,
@@ -1201,6 +1201,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1237,6 +1238,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1309,6 +1311,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1347,6 +1350,7 @@ pub mod tests {
                     &mut levels_handler,
                     &mut local_stats,
                     HashMap::default(),
+                    Arc::new(CompactionDeveloperConfig::default()),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);

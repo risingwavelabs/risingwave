@@ -223,6 +223,7 @@ message SinkDesc {
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
   optional uint32 target_table = 14;
+  optional uint64 extra_partition_col_idx = 15;
 }
 
 enum SinkLogStoreType {
@@ -256,7 +257,6 @@ message FilterNode {
 message CdcFilterNode {
   expr.ExprNode search_condition = 1;
   uint32 upstream_source_id = 2;
-  repeated int32 upstream_column_ids = 3;
 }
 
 // A materialized view is regarded as a table.
@@ -553,7 +553,7 @@ message StreamCdcScanNode {
   // Strips the primary key columns if they're unnecessary.
   repeated uint32 output_indices = 3;
 
-  /// The state table used by Backfill operator for persisting internal state
+  // The state table used by CdcBackfill operator for persisting internal state
   catalog.Table state_table = 4;
 
   // The external table that will be backfilled for CDC.
@@ -561,6 +561,9 @@ message StreamCdcScanNode {
 
   // The rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
+
+  // Whether skip the backfill and only consume from upstream.
+  bool disable_backfill = 7;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -717,6 +720,12 @@ message OverWindowNode {
   OverWindowCachePolicy cache_policy = 5;
 }
 
+message SubscriptionNode {
+  catalog.Subscription subscription_catalog = 1;
+  // log store should have a table.
+  catalog.Table log_store_table = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -760,6 +769,7 @@ message StreamNode {
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
+    SubscriptionNode subscription = 141;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -854,6 +864,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
+  FRAGMENT_TYPE_FLAG_SUBSCRIPTION = 512;
 }
 
 // The streaming context associated with a stream plan

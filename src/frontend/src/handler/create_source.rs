@@ -16,59 +16,68 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, INITIAL_SOURCE_VERSION_ID,
-    KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::additional_columns::{
+    build_additional_column_catalog, COMPATIBLE_ADDITIONAL_COLUMNS,
+};
 use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
-    SpecificParserConfig,
+    SpecificParserConfig, DEBEZIUM_IGNORE_KEY,
 };
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
-    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
+    CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    get_connector_compatible_additional_columns, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR,
-    KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
+    PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
-use risingwave_pb::plan_common::{AdditionalColumnType, EncodeType, FormatType};
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, ConnectorSchema, CreateSourceStatement, Encode, Format,
-    Ident, ProtobufSchema, SourceWatermark,
+    ProtobufSchema, SourceWatermark,
 };
+use risingwave_sqlparser::parser::IncludeOption;
+use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::ColumnId;
+use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
+use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
+    connector_need_pk, get_connector, is_cdc_connector, is_iceberg_connector, is_kafka_connector,
+    SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
@@ -143,6 +152,15 @@ async fn extract_avro_table_schema(
         let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
     } else {
+        if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
+            &parser_config.encoding_config
+            && !avro_props.use_schema_registry
+            && !format_encode_options
+                .get("with_deprecated_file_header")
+                .is_some_and(|v| v == "true")
+        {
+            bail_not_implemented!(issue = 12871, "avro without schema registry");
+        }
         let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
         conf.map_to_columns()?
     };
@@ -310,6 +328,10 @@ pub(crate) async fn bind_columns_from_source(
         ..Default::default()
     };
 
+    if source_schema.format == Format::Debezium {
+        try_consume_string_from_options(&mut format_encode_options_to_consume, DEBEZIUM_IGNORE_KEY);
+    }
+
     let columns = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native)
         | (Format::Plain, Encode::Bytes)
@@ -422,6 +444,17 @@ pub(crate) async fn bind_columns_from_source(
             )
             .await?
         }
+        (Format::None, Encode::None) => {
+            if is_iceberg_connector(with_properties) {
+                Some(
+                    extract_iceberg_columns(with_properties)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else {
+                None
+            }
+        }
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
                 "Unknown combination {:?} {:?}",
@@ -495,29 +528,21 @@ fn bind_columns_from_source_for_cdc(
 /// add connector-spec columns to the end of column catalog
 pub fn handle_addition_columns(
     with_properties: &HashMap<String, String>,
-    mut additional_columns: Vec<(Ident, Option<Ident>)>,
+    mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
     let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
 
-    let addition_col_list =
-        match get_connector_compatible_additional_columns(connector_name.as_str()) {
-            Some(cols) => cols,
-            // early return if there are no accepted additional columns for the connector
-            None => {
-                return if additional_columns.is_empty() {
-                    Ok(())
-                } else {
-                    Err(RwError::from(ProtocolError(format!(
-                        "Connector {} accepts no additional column but got {:?}",
-                        connector_name, additional_columns
-                    ))))
-                }
-            }
-        };
-    let gen_default_column_name = |connector_name: &str, addi_column_name: &str| {
-        format!("_rw_{}_{}", connector_name, addi_column_name)
-    };
+    if COMPATIBLE_ADDITIONAL_COLUMNS
+        .get(connector_name.as_str())
+        .is_none()
+        && !additional_columns.is_empty()
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Connector {} accepts no additional column but got {:?}",
+            connector_name, additional_columns
+        ))));
+    }
 
     let latest_col_id: ColumnId = columns
         .iter()
@@ -525,27 +550,31 @@ pub fn handle_addition_columns(
         .max()
         .unwrap(); // there must be at least one column in the column catalog
 
-    for (col_name, gen_column_catalog_fn) in addition_col_list {
-        // always insert in spec order
-        if let Some(idx) = additional_columns
-            .iter()
-            .position(|(col, _)| col.real_value().eq_ignore_ascii_case(col_name))
+    while let Some(item) = additional_columns.pop() {
         {
-            let (_, alias) = additional_columns.remove(idx);
-            columns.push(gen_column_catalog_fn(
-                latest_col_id.next(),
-                alias
-                    .map(|alias| alias.real_value())
-                    .unwrap_or_else(|| gen_default_column_name(connector_name.as_str(), col_name))
-                    .as_str(),
-            ))
+            // only allow header column have inner field
+            if item.inner_field.is_some()
+                && !item.column_type.real_value().eq_ignore_ascii_case("header")
+            {
+                return Err(RwError::from(ProtocolError(format!(
+                    "Only header column can have inner field, but got {:?}",
+                    item.column_type.real_value(),
+                ))));
+            }
         }
-    }
-    if !additional_columns.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown additional columns {:?}",
-            additional_columns
-        ))));
+
+        let data_type_name: Option<String> = item
+            .header_inner_expect_type
+            .map(|dt| format!("{:?}", dt).to_lowercase());
+        columns.push(build_additional_column_catalog(
+            latest_col_id.next(),
+            connector_name.as_str(),
+            item.column_type.real_value().as_str(),
+            item.column_alias.map(|alias| alias.real_value()),
+            item.inner_field.as_deref(),
+            data_type_name.as_deref(),
+            true,
+        )?);
     }
 
     Ok(())
@@ -684,7 +713,10 @@ pub(crate) async fn bind_source_pk(
         // iter columns to check if contains additional columns from key part
         // return the key column names if exists
         columns.iter().find_map(|catalog| {
-            if catalog.column_desc.additional_column_type == AdditionalColumnType::Key {
+            if matches!(
+                catalog.column_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Key(_))
+            ) {
                 Some(catalog.name().to_string())
             } else {
                 None
@@ -694,9 +726,7 @@ pub(crate) async fn bind_source_pk(
     let additional_column_names = columns
         .iter()
         .filter_map(|col| {
-            if (col.column_desc.additional_column_type != AdditionalColumnType::Unspecified)
-                && (col.column_desc.additional_column_type != AdditionalColumnType::Normal)
-            {
+            if col.column_desc.additional_column.column_type.is_some() {
                 Some(col.name().to_string())
             } else {
                 None
@@ -705,7 +735,9 @@ pub(crate) async fn bind_source_pk(
         .collect_vec();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) | (Format::None, Encode::None) | (Format::Plain, _) => {
+            sql_defined_pk_names
+        }
 
         // For all Upsert formats, we only accept one and only key column as primary key.
         // Additional KEY columns must be set in this case and must be primary key.
@@ -845,21 +877,27 @@ fn check_and_add_timestamp_column(
     columns: &mut Vec<ColumnCatalog>,
 ) {
     if is_kafka_connector(with_properties) {
-        if columns
-            .iter()
-            .any(|col| col.column_desc.additional_column_type == AdditionalColumnType::Timestamp)
-        {
+        if columns.iter().any(|col| {
+            matches!(
+                col.column_desc.additional_column.column_type,
+                Some(AdditionalColumnType::Timestamp(_))
+            )
+        }) {
             // already has timestamp column, no need to add a new one
             return;
         }
 
         // add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
-        let mut catalog = get_connector_compatible_additional_columns(KAFKA_CONNECTOR)
-            .unwrap()
-            .iter()
-            .find(|(col_name, _)| col_name.eq(&"timestamp"))
-            .unwrap()
-            .1(ColumnId::placeholder(), KAFKA_TIMESTAMP_COLUMN_NAME);
+        let mut catalog = build_additional_column_catalog(
+            ColumnId::placeholder(),
+            KAFKA_CONNECTOR,
+            "timestamp",
+            Some(KAFKA_TIMESTAMP_COLUMN_NAME.to_string()),
+            None,
+            None,
+            true,
+        )
+        .unwrap();
         catalog.is_hidden = true;
 
         columns.push(catalog);
@@ -965,11 +1003,17 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 CITUS_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
                 ),
+                MONGODB_CDC_CONNECTOR => hashmap!(
+                    Format::DebeziumMongo => vec![Encode::Json],
+                ),
                 NATS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
                 ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
+                ),
+                ICEBERG_CONNECTOR => hashmap!(
+                    Format::None => vec![Encode::None],
                 )
         ))
     });
@@ -1047,12 +1091,11 @@ pub fn validate_compatibility(
 }
 
 /// Performs early stage checking in frontend to see if the schema of the given `columns` is
-/// compatible with the connector extracted from the properties. Currently this only works for
-/// `nexmark` connector since it's in chunk format.
+/// compatible with the connector extracted from the properties.
 ///
 /// One should only call this function after all properties of all columns are resolved, like
 /// generated column descriptors.
-pub(super) fn check_source_schema(
+pub(super) async fn check_source_schema(
     props: &HashMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -1061,10 +1104,22 @@ pub(super) fn check_source_schema(
         return Ok(());
     };
 
-    if connector != NEXMARK_CONNECTOR {
-        return Ok(());
+    if connector == NEXMARK_CONNECTOR {
+        check_nexmark_schema(props, row_id_index, columns)
+    } else if connector == ICEBERG_CONNECTOR {
+        Ok(check_iceberg_source(props, columns)
+            .await
+            .map_err(|err| ProtocolError(err.to_report_string()))?)
+    } else {
+        Ok(())
     }
+}
 
+pub(super) fn check_nexmark_schema(
+    props: &HashMap<String, String>,
+    row_id_index: Option<usize>,
+    columns: &[ColumnCatalog],
+) -> Result<()> {
     let table_type = props
         .get("nexmark.table.type")
         .map(|t| t.to_ascii_lowercase());
@@ -1111,6 +1166,102 @@ pub(super) fn check_source_schema(
             "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
     }
+    Ok(())
+}
+
+pub async fn extract_iceberg_columns(
+    with_properties: &HashMap<String, String>,
+) -> anyhow::Result<Vec<ColumnCatalog>> {
+    let props = ConnectorProperties::extract(with_properties.clone(), true)?;
+    if let ConnectorProperties::Iceberg(properties) = props {
+        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
+        let table = iceberg_config.load_table().await?;
+        let iceberg_schema: arrow_schema::Schema = table
+            .current_table_metadata()
+            .current_schema()?
+            .clone()
+            .try_into()?;
+
+        let columns = iceberg_schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let data_type = field.data_type().clone();
+                let column_desc = ColumnDesc::named(
+                    field.name(),
+                    ColumnId::new((i as u32).try_into().unwrap()),
+                    data_type.into(),
+                );
+                ColumnCatalog {
+                    column_desc,
+                    is_hidden: false,
+                }
+            })
+            .collect();
+
+        Ok(columns)
+    } else {
+        Err(anyhow!(format!(
+            "Invalid properties for iceberg source: {:?}",
+            props
+        )))
+    }
+}
+
+pub async fn check_iceberg_source(
+    props: &HashMap<String, String>,
+    columns: &[ColumnCatalog],
+) -> anyhow::Result<()> {
+    let props = ConnectorProperties::extract(props.clone(), true)?;
+    let ConnectorProperties::Iceberg(properties) = props else {
+        return Err(anyhow!(format!(
+            "Invalid properties for iceberg source: {:?}",
+            props
+        )));
+    };
+
+    let iceberg_config = properties.to_iceberg_config();
+
+    let schema = Schema {
+        fields: columns
+            .iter()
+            .cloned()
+            .map(|c| c.column_desc.into())
+            .collect(),
+    };
+
+    let table = iceberg_config.load_table().await?;
+
+    let iceberg_schema: arrow_schema::Schema = table
+        .current_table_metadata()
+        .current_schema()?
+        .clone()
+        .try_into()?;
+
+    for f1 in schema.fields() {
+        if !iceberg_schema.fields.iter().any(|f2| f2.name() == &f1.name) {
+            return Err(anyhow::anyhow!(format!(
+                "Column {} not found in iceberg table",
+                f1.name
+            )));
+        }
+    }
+
+    let new_iceberg_field = iceberg_schema
+        .fields
+        .iter()
+        .filter(|f1| schema.fields.iter().any(|f2| f1.name() == &f2.name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let new_iceberg_schema = arrow_schema::Schema::new(new_iceberg_field);
+
+    risingwave_connector::sink::iceberg::try_matches_arrow_schema(
+        &schema,
+        &new_iceberg_schema,
+        true,
+    )?;
+
     Ok(())
 }
 
@@ -1189,6 +1340,8 @@ pub async fn handle_create_source(
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // enable cdc sharing mode, which will capture all tables in the given `database.name`
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+        // enable transactional cdc
+        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
     }
 
     // must behind `handle_addition_columns`
@@ -1206,8 +1359,8 @@ pub async fn handle_create_source(
         )
         .into());
     }
-
-    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_pk_on_relation(columns, pk_names, connector_need_pk(&with_properties))?;
 
     debug_assert!(is_column_ids_dedup(&columns));
 
@@ -1224,7 +1377,7 @@ pub async fn handle_create_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&with_properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns).await?;
 
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
@@ -1301,6 +1454,7 @@ fn format_to_prost(format: &Format) -> FormatType {
         Format::DebeziumMongo => FormatType::DebeziumMongo,
         Format::Maxwell => FormatType::Maxwell,
         Format::Canal => FormatType::Canal,
+        Format::None => FormatType::None,
     }
 }
 fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
@@ -1312,6 +1466,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Csv => EncodeType::Csv,
         Encode::Bytes => EncodeType::Bytes,
         Encode::Template => EncodeType::Template,
+        Encode::None => EncodeType::None,
     }
 }
 
@@ -1542,6 +1697,19 @@ pub mod tests {
         match frontend.run_sql(sql).await {
             Err(e) => {
                 assert_eq!(e.to_string(), "Protocol error: Primary key must be specified to _rw_kafka_key when creating source with FORMAT UPSERT ENCODE Json")
+            }
+            _ => unreachable!(),
+        }
+
+        let sql =
+            "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json"
+                .to_string();
+        match frontend.run_sql(sql).await {
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "Protocol error: Only header column can have inner field, but got \"timestamp\""
+                )
             }
             _ => unreachable!(),
         }

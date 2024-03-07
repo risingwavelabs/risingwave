@@ -87,6 +87,7 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
 #[function("cast(int4) -> int2")]
 #[function("cast(int8) -> int2")]
 #[function("cast(int8) -> int4")]
+#[function("cast(serial) -> int8")]
 #[function("cast(float4) -> int2")]
 #[function("cast(float8) -> int2")]
 #[function("cast(float4) -> int4")]

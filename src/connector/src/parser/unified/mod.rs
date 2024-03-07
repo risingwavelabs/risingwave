@@ -17,11 +17,13 @@
 use auto_impl::auto_impl;
 use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
+use thiserror_ext::Macro;
 
 use self::avro::AvroAccess;
 use self::bytes::BytesAccess;
 use self::json::JsonAccess;
 use self::protobuf::ProtobufAccess;
+use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::source::SourceColumnDesc;
 
 pub mod avro;
@@ -45,6 +47,7 @@ pub enum AccessImpl<'a, 'b> {
     Bytes(BytesAccess<'a>),
     Protobuf(ProtobufAccess),
     Json(JsonAccess<'a, 'b>),
+    MongoJson(MongoJsonAccess<JsonAccess<'a, 'b>>),
 }
 
 impl Access for AccessImpl<'_, '_> {
@@ -54,6 +57,7 @@ impl Access for AccessImpl<'_, '_> {
             Self::Bytes(accessor) => accessor.access(path, type_expected),
             Self::Protobuf(accessor) => accessor.access(path, type_expected),
             Self::Json(accessor) => accessor.access(path, type_expected),
+            Self::MongoJson(accessor) => accessor.access(path, type_expected),
         }
     }
 }
@@ -86,7 +90,8 @@ where
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Macro)]
+#[thiserror_ext(macro(mangle))]
 pub enum AccessError {
     #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
@@ -98,10 +103,8 @@ pub enum AccessError {
     },
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
-    #[error(transparent)]
-    Other(
-        #[from]
-        #[backtrace]
-        anyhow::Error,
-    ),
+
+    /// Errors that are not categorized into variants above.
+    #[error("{message}")]
+    Uncategorized { message: String },
 }

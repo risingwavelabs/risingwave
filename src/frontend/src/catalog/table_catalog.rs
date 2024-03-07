@@ -17,10 +17,8 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ConflictBehavior, Field, Schema, TableDesc, TableId, TableVersionId,
 };
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
@@ -29,10 +27,10 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId, SinkId};
+use crate::error::{ErrorCode, RwError};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
-use crate::WithOptions;
 
 /// Includes full information about a table.
 ///
@@ -76,6 +74,8 @@ pub struct TableCatalog {
 
     pub name: String,
 
+    pub dependent_relations: Vec<TableId>,
+
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
@@ -102,8 +102,8 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: UserId,
 
-    /// Properties of the table. For example, `appendonly` or `retention_seconds`.
-    pub properties: WithOptions,
+    // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
+    pub retention_seconds: Option<u32>,
 
     /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
@@ -356,8 +356,7 @@ impl TableCatalog {
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
 
-        let table_options =
-            TableOption::build_table_option(&self.properties.inner().clone().into_iter().collect());
+        let table_options = TableOption::new(self.retention_seconds);
 
         TableDesc {
             table_id: self.id,
@@ -366,9 +365,7 @@ impl TableCatalog {
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             append_only: self.append_only,
-            retention_seconds: table_options
-                .retention_seconds
-                .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
+            retention_seconds: table_options.retention_seconds,
             value_indices: self.value_indices.clone(),
             read_prefix_len_hint: self.read_prefix_len_hint,
             watermark_columns: self.watermark_columns.clone(),
@@ -430,7 +427,6 @@ impl TableCatalog {
                 .collect_vec(),
             append_only: self.append_only,
             owner: self.owner,
-            properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
             dml_fragment_id: self.dml_fragment_id,
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
@@ -452,6 +448,7 @@ impl TableCatalog {
             incoming_sinks: self.incoming_sinks.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            retention_seconds: self.retention_seconds,
         }
     }
 
@@ -496,6 +493,15 @@ impl TableCatalog {
 
     pub fn has_generated_column(&self) -> bool {
         self.columns.iter().any(|c| c.is_generated())
+    }
+
+    pub fn column_schema(&self) -> Schema {
+        Schema::new(
+            self.columns
+                .iter()
+                .map(|c| Field::from(&c.column_desc))
+                .collect(),
+        )
     }
 }
 
@@ -545,7 +551,6 @@ impl From<PbTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             append_only: tb.append_only,
             owner: tb.owner,
-            properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
             dml_fragment_id: tb.dml_fragment_id,
             vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
@@ -569,6 +574,12 @@ impl From<PbTable> for TableCatalog {
             incoming_sinks: tb.incoming_sinks.clone(),
             created_at_cluster_version: tb.created_at_cluster_version.clone(),
             initialized_at_cluster_version: tb.initialized_at_cluster_version.clone(),
+            retention_seconds: tb.retention_seconds,
+            dependent_relations: tb
+                .dependent_relations
+                .into_iter()
+                .map(TableId::from)
+                .collect_vec(),
         }
     }
 }
@@ -587,23 +598,20 @@ impl OwnedByUserCatalog for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use risingwave_common::catalog::{
         row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
     };
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::plan_common::{
-        AdditionalColumnType, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+        AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
-    use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
@@ -639,10 +647,7 @@ mod tests {
                 .into(),
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties: HashMap::from([(
-                String::from(PROPERTIES_RETENTION_SECOND_KEY),
-                String::from("300"),
-            )]),
+            retention_seconds: Some(300),
             fragment_id: 0,
             dml_fragment_id: None,
             initialized_at_epoch: None,
@@ -694,7 +699,7 @@ mod tests {
                             type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
-                            additional_column_type: AdditionalColumnType::Normal,
+                            additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false
@@ -705,10 +710,7 @@ mod tests {
                 distribution_key: vec![],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                properties: WithOptions::new(HashMap::from([(
-                    String::from(PROPERTIES_RETENTION_SECOND_KEY),
-                    String::from("300")
-                )])),
+                retention_seconds: Some(300),
                 fragment_id: 0,
                 dml_fragment_id: None,
                 vnode_col_index: None,
@@ -729,6 +731,7 @@ mod tests {
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,
+                dependent_relations: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

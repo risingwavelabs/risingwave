@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fancy_regex::Regex;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -26,59 +27,100 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{Parser, ParserError};
 
 use super::*;
+use crate::binder::UdfContext;
 use crate::catalog::CatalogError;
-use crate::expr::{ExprImpl, Literal};
+use crate::expr::{Expr, ExprImpl, Literal};
 use crate::{bind_data_type, Binder};
 
+/// The error type for hint display
+/// Currently we will try invalid parameter first
+/// Then try to find non-existent functions
+enum ErrMsgType {
+    Parameter,
+    Function,
+    // Not yet support
+    None,
+}
+
+const DEFAULT_ERR_MSG: &str = "Failed to conduct semantic check";
+
+/// Used for hint display
+const PROMPT: &str = "In SQL UDF definition: ";
+
+/// Used for detecting non-existent function
+const FUNCTION_KEYWORD: &str = "function";
+
+/// Used for detecting invalid parameters
+pub const SQL_UDF_PATTERN: &str = "[sql udf]";
+
+/// Validate the error message to see if
+/// it's possible to improve the display to users
+fn validate_err_msg(invalid_msg: &str) -> ErrMsgType {
+    // First try invalid parameters
+    if invalid_msg.contains(SQL_UDF_PATTERN) {
+        ErrMsgType::Parameter
+    } else if invalid_msg.contains(FUNCTION_KEYWORD) {
+        ErrMsgType::Function
+    } else {
+        // Nothing could be better display
+        ErrMsgType::None
+    }
+}
+
+/// Extract the target name to hint display
+/// according to the type of the error message item
+fn extract_hint_display_target(err_msg_type: ErrMsgType, invalid_msg: &str) -> Option<&str> {
+    match err_msg_type {
+        // e.g., [sql udf] failed to find named parameter <target name>
+        ErrMsgType::Parameter => invalid_msg.split_whitespace().last(),
+        // e.g., function <target name> does not exist
+        ErrMsgType::Function => {
+            let func = invalid_msg.split_whitespace().nth(1).unwrap_or("null");
+            // Note: we do not want the parenthesis
+            func.find('(').map(|i| &func[0..i])
+        }
+        // Nothing to hint display, return default error message
+        ErrMsgType::None => None,
+    }
+}
+
+/// Find the pattern for better hint display
+/// return the exact index where the pattern first appears
+fn find_target(input: &str, target: &str) -> Option<usize> {
+    // Regex pattern to find `target` not preceded or followed by an ASCII letter
+    // The pattern uses negative lookbehind (?<!...) and lookahead (?!...) to ensure
+    // the target is not surrounded by ASCII alphabetic characters
+    let pattern = format!(r"(?<![A-Za-z]){0}(?![A-Za-z])", fancy_regex::escape(target));
+    let Ok(re) = Regex::new(&pattern) else {
+        return None;
+    };
+
+    let Ok(Some(ma)) = re.find(input) else {
+        return None;
+    };
+
+    Some(ma.start())
+}
+
 /// Create a mock `udf_context`, which is used for semantic check
-fn create_mock_udf_context(arg_types: Vec<DataType>) -> HashMap<String, ExprImpl> {
-    (1..=arg_types.len())
+fn create_mock_udf_context(
+    arg_types: Vec<DataType>,
+    arg_names: Vec<String>,
+) -> HashMap<String, ExprImpl> {
+    let mut ret: HashMap<String, ExprImpl> = (1..=arg_types.len())
         .map(|i| {
             let mock_expr =
                 ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i - 1].clone())));
-            (format!("${i}"), mock_expr.clone())
+            (format!("${i}"), mock_expr)
         })
-        .collect()
-}
+        .collect();
 
-fn extract_udf_expression(ast: Vec<Statement>) -> Result<Expr> {
-    if ast.len() != 1 {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "the query for sql udf should contain only one statement".to_string(),
-        )
-        .into());
+    for (i, arg_name) in arg_names.into_iter().enumerate() {
+        let mock_expr = ExprImpl::Literal(Box::new(Literal::new(None, arg_types[i].clone())));
+        ret.insert(arg_name, mock_expr);
     }
 
-    // Extract the expression out
-    let Statement::Query(query) = ast[0].clone() else {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "invalid function definition, please recheck the syntax".to_string(),
-        )
-        .into());
-    };
-
-    let SetExpr::Select(select) = query.body else {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "missing `select` body for sql udf expression, please recheck the syntax".to_string(),
-        )
-        .into());
-    };
-
-    if select.projection.len() != 1 {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "`projection` should contain only one `SelectItem`".to_string(),
-        )
-        .into());
-    }
-
-    let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "expect `UnnamedExpr` for `projection`".to_string(),
-        )
-        .into());
-    };
-
-    Ok(expr)
+    ret
 }
 
 pub async fn handle_create_sql_function(
@@ -211,14 +253,69 @@ pub async fn handle_create_sql_function(
 
         binder
             .udf_context_mut()
-            .update_context(create_mock_udf_context(arg_types.clone()));
+            .update_context(create_mock_udf_context(
+                arg_types.clone(),
+                arg_names.clone(),
+            ));
 
-        if let Ok(expr) = extract_udf_expression(ast) {
-            if let Err(e) = binder.bind_expr(expr) {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    format!("failed to conduct semantic check, please see if you are calling non-existence functions.\nDetailed error: {e}")
-                )
-                .into());
+        // Need to set the initial global count to 1
+        // otherwise the context will not be probed during the semantic check
+        binder.udf_context_mut().incr_global_count();
+
+        if let Ok(expr) = UdfContext::extract_udf_expression(ast) {
+            match binder.bind_expr(expr) {
+                Ok(expr) => {
+                    // Check if the return type mismatches
+                    if expr.return_type() != return_type {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "\nreturn type mismatch detected\nexpected: [{}]\nactual: [{}]\nplease adjust your function definition accordingly",
+                            return_type,
+                            expr.return_type()
+                        ))
+                        .into());
+                    }
+                }
+                Err(e) => {
+                    if let ErrorCode::BindErrorRoot { expr: _, error } = e.inner() {
+                        let invalid_msg = error.to_string();
+
+                        // First validate the message
+                        let err_msg_type = validate_err_msg(invalid_msg.as_str());
+
+                        // Get the name of the invalid item
+                        // We will just display the first one found
+                        let Some(invalid_item_name) =
+                            extract_hint_display_target(err_msg_type, invalid_msg.as_str())
+                        else {
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
+                        };
+
+                        // Find the invalid parameter / column / function
+                        let Some(idx) = find_target(body.as_str(), invalid_item_name) else {
+                            return Err(
+                                ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into()
+                            );
+                        };
+
+                        // The exact error position for `^` to point to
+                        let position = format!(
+                            "{}{}",
+                            " ".repeat(idx + PROMPT.len() + 1),
+                            "^".repeat(invalid_item_name.len())
+                        );
+
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "{}\n{}\n{}`{}`\n{}",
+                            DEFAULT_ERR_MSG, invalid_msg, PROMPT, body, position
+                        ))
+                        .into());
+                    }
+
+                    // Otherwise return the default error message
+                    return Err(ErrorCode::InvalidInputSyntax(DEFAULT_ERR_MSG.into()).into());
+                }
             }
         } else {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -243,8 +340,10 @@ pub async fn handle_create_sql_function(
         language,
         identifier: None,
         body: Some(body),
+        compressed_binary: None,
         link: None,
         owner: session.user_id(),
+        always_retry_on_network_error: false,
     };
 
     let catalog_writer = session.catalog_writer()?;

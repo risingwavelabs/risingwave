@@ -82,11 +82,10 @@ macro_rules! for_all_params {
             { bloom_false_positive,                     f64,    Some(0.001_f64),                            false,  "False positive probability of bloom filter.", },
             { state_store,                              String, None,                                       false,  "", },
             { data_directory,                           String, None,                                       false,  "Remote directory for storing data and metadata objects.", },
-            { backup_storage_url,                       String, Some("memory".to_string()),                 true,   "Remote storage url for storing snapshots.", },
-            { backup_storage_directory,                 String, Some("backup".to_string()),                 true,   "Remote directory for storing snapshots.", },
+            { backup_storage_url,                       String, None,                                       true,   "Remote storage url for storing snapshots.", },
+            { backup_storage_directory,                 String, None,                                       true,   "Remote directory for storing snapshots.", },
             { max_concurrent_creating_streaming_jobs,   u32,    Some(1_u32),                                true,   "Max number of concurrent creating streaming jobs.", },
             { pause_on_next_bootstrap,                  bool,   Some(false),                                true,   "Whether to pause all data sources on next bootstrap.", },
-            { wasm_storage_url,                         String, Some("fs://.risingwave/data".to_string()),  false,  "", },
             { enable_tracing,                           bool,   Some(false),                                true,   "Whether to enable distributed tracing.", },
         }
     };
@@ -340,7 +339,7 @@ macro_rules! impl_set_system_param {
                 )*
                 _ => {
                     Err(format!(
-                        "unrecognized system param {:?}",
+                        "unrecognized system parameter {:?}",
                         key
                     ))
                 }
@@ -374,6 +373,8 @@ macro_rules! impl_system_params_for_test {
             };
             ret.data_directory = Some("hummock_001".to_string());
             ret.state_store = Some("hummock+memory".to_string());
+            ret.backup_storage_url = Some("memory".into());
+            ret.backup_storage_directory = Some("backup".into());
             ret
         }
     };
@@ -398,13 +399,17 @@ impl ValidateOnSet for OverrideValidateOnSet {
         Self::expect_range(*v, 1..)
     }
 
-    fn backup_storage_directory(_v: &String) -> Result<()> {
-        // TODO
+    fn backup_storage_directory(v: &String) -> Result<()> {
+        if v.trim().is_empty() {
+            return Err("backup_storage_directory cannot be empty".into());
+        }
         Ok(())
     }
 
-    fn backup_storage_url(_v: &String) -> Result<()> {
-        // TODO
+    fn backup_storage_url(v: &String) -> Result<()> {
+        if v.trim().is_empty() {
+            return Err("backup_storage_url cannot be empty".into());
+        }
         Ok(())
     }
 }
@@ -434,7 +439,6 @@ mod tests {
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
-            (WASM_STORAGE_URL_KEY, "a"),
             (ENABLE_TRACING_KEY, "true"),
             ("a_deprecated_param", "foo"),
         ];

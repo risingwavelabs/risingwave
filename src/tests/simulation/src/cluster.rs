@@ -32,6 +32,8 @@ use itertools::Itertools;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
+#[cfg(madsim)]
+use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
 #[cfg(not(madsim))]
@@ -175,9 +177,10 @@ impl Configuration {
 
     pub fn for_auto_parallelism(
         max_heartbeat_interval_secs: u64,
-        enable_auto_scale_in: bool,
         enable_auto_parallelism: bool,
     ) -> Self {
+        let disable_automatic_parallelism_control = !enable_auto_parallelism;
+
         let config_path = {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");
@@ -185,8 +188,10 @@ impl Configuration {
             let config_data = format!(
                 r#"[meta]
 max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
-enable_scale_in_when_recovery = {enable_auto_scale_in}
-enable_automatic_parallelism_control = {enable_auto_parallelism}
+disable_automatic_parallelism_control = {disable_automatic_parallelism_control}
+parallelism_control_trigger_first_delay_sec = 0
+parallelism_control_batch_size = 0
+parallelism_control_trigger_period_sec = 10
 
 [system]
 barrier_interval_ms = 250
@@ -259,6 +264,8 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
+            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = true;".into()]
+                .into(),
             ..Default::default()
         }
     }
@@ -295,18 +302,18 @@ metrics_level = "Disabled"
 ///
 /// # Nodes
 ///
-/// | Name           | IP            |
-/// | -------------- | ------------- |
-/// | meta-x         | 192.168.1.x   |
-/// | frontend-x     | 192.168.2.x   |
-/// | compute-x      | 192.168.3.x   |
-/// | compactor-x    | 192.168.4.x   |
-/// | etcd           | 192.168.10.1  |
-/// | kafka-broker   | 192.168.11.1  |
-/// | kafka-producer | 192.168.11.2  |
-/// | s3             | 192.168.12.1  |
-/// | client         | 192.168.100.1 |
-/// | ctl            | 192.168.101.1 |
+/// | Name             | IP            |
+/// | ---------------- | ------------- |
+/// | meta-x           | 192.168.1.x   |
+/// | frontend-x       | 192.168.2.x   |
+/// | compute-x        | 192.168.3.x   |
+/// | compactor-x      | 192.168.4.x   |
+/// | etcd             | 192.168.10.1  |
+/// | kafka-broker     | 192.168.11.1  |
+/// | kafka-producer   | 192.168.11.2  |
+/// | object_store_sim | 192.168.12.1  |
+/// | client           | 192.168.100.1 |
+/// | ctl              | 192.168.101.1 |
 pub struct Cluster {
     config: Configuration,
     handle: Handle,
@@ -383,14 +390,13 @@ impl Cluster {
             })
             .build();
 
-        // s3
+        // object_store_sim
         handle
             .create_node()
-            .name("s3")
+            .name("object_store_sim")
             .ip("192.168.12.1".parse().unwrap())
             .init(move || async move {
-                aws_sdk_s3::server::SimServer::default()
-                    .with_bucket("hummock001")
+                ObjectStoreSimServer::builder()
                     .serve("0.0.0.0:9301".parse().unwrap())
                     .await
             })
@@ -420,7 +426,7 @@ impl Cluster {
                 "--etcd-endpoints",
                 "etcd:2388",
                 "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
+                "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",
                 "hummock_001",
             ]);

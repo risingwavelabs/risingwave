@@ -532,17 +532,6 @@ impl ObjectStore for S3ObjectStore {
     fn store_media_type(&self) -> &'static str {
         "s3"
     }
-
-    fn recv_buffer_size(&self) -> usize {
-        self.config
-            .s3
-            .object_store_recv_buffer_size
-            .unwrap_or(1 << 21)
-    }
-
-    fn config(&self) -> Option<&ObjectStoreConfig> {
-        Some(&self.config)
-    }
 }
 
 impl S3ObjectStore {
@@ -938,12 +927,18 @@ impl From<RetryError> for ObjectError {
 
 struct RetryCondition {
     retry_unknown_service_error: bool,
+    retryable_service_error_codes: Vec<String>,
 }
 
 impl RetryCondition {
     fn new(config: &S3ObjectStoreConfig) -> Self {
         Self {
-            retry_unknown_service_error: config.retry_unknown_service_error,
+            retry_unknown_service_error: config.developer.object_store_retry_unknown_service_error
+                || config.retry_unknown_service_error,
+            retryable_service_error_codes: config
+                .developer
+                .object_store_retryable_service_error_codes
+                .clone(),
         }
     }
 }
@@ -958,12 +953,24 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
                         return true;
                     }
                 }
-                SdkError::ServiceError(e) => {
-                    if self.retry_unknown_service_error && e.err().code().is_none() {
-                        tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
-                        return true;
+                SdkError::ServiceError(e) => match e.err().code() {
+                    None => {
+                        if self.retry_unknown_service_error {
+                            tracing::warn!(target: "unknown_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
                     }
-                }
+                    Some(code) => {
+                        if self
+                            .retryable_service_error_codes
+                            .iter()
+                            .any(|s| s.as_str().eq_ignore_ascii_case(code))
+                        {
+                            tracing::warn!(target: "retryable_service_error", "{e:?} occurs, retry S3 get_object request.");
+                            return true;
+                        }
+                    }
+                },
                 _ => {}
             },
             Either::Right(_) => {

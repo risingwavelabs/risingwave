@@ -240,9 +240,10 @@ mod tests {
 
     fn get_system_params() -> SystemParams {
         SystemParams {
-            state_store: Some("state_store".to_string()),
-            data_directory: Some("data_directory".to_string()),
-            wasm_storage_url: Some("wasm_storage_url".to_string()),
+            state_store: Some("state_store".into()),
+            data_directory: Some("data_directory".into()),
+            backup_storage_url: Some("backup_storage_url".into()),
+            backup_storage_directory: Some("backup_storage_directory".into()),
             ..SystemConfig::default().into_init_system_params()
         }
     }

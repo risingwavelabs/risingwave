@@ -24,7 +24,7 @@ use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
-use risingwave_hummock_sdk::key::{FullKey, PointRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
@@ -49,6 +49,7 @@ use crate::hummock::iterator::{
     Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, CompressionAlgorithm,
@@ -251,7 +252,10 @@ pub async fn compact(
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
     filter_key_extractor_manager: FilterKeyExtractorManager,
-) -> (CompactTask, HashMap<u32, TableStats>) {
+) -> (
+    (CompactTask, HashMap<u32, TableStats>),
+    Option<MemoryTracker>,
+) {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -330,7 +334,10 @@ pub async fn compact(
         Err(e) => {
             tracing::error!(error = %e.as_report(), "Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error", compact_task.existing_table_ids);
             let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return (
+                compact_done(compact_task, context.clone(), vec![], task_status),
+                None,
+            );
         }
         Ok(extractor) => extractor,
     };
@@ -344,7 +351,10 @@ pub async fn compact(
         if !removed_tables.is_empty() {
             tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
             let task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
+            return (
+                compact_done(compact_task, context.clone(), vec![], task_status),
+                None,
+            );
         }
     }
 
@@ -357,7 +367,7 @@ pub async fn compact(
     let has_ttl = compact_task
         .table_options
         .iter()
-        .any(|(_, table_option)| table_option.retention_seconds > 0);
+        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
     let mut task_status = TaskStatus::Success;
     // skip sst related to non-existent able_id to reduce io
     let sstable_infos = compact_task
@@ -410,7 +420,10 @@ pub async fn compact(
             Err(e) => {
                 tracing::warn!(error = %e.as_report(), "Failed to generate_splits");
                 task_status = TaskStatus::ExecuteFailed;
-                return compact_done(compact_task, context.clone(), vec![], task_status);
+                return (
+                    compact_done(compact_task, context.clone(), vec![], task_status),
+                    None,
+                );
             }
         }
     }
@@ -426,11 +439,14 @@ pub async fn compact(
             context.running_task_parallelism.load(Ordering::Relaxed),
             context.max_task_parallelism.load(Ordering::Relaxed),
         );
-        return compact_done(
-            compact_task,
-            context.clone(),
-            vec![],
-            TaskStatus::NoAvailCpuResourceCanceled,
+        return (
+            compact_done(
+                compact_task,
+                context.clone(),
+                vec![],
+                TaskStatus::NoAvailCpuResourceCanceled,
+            ),
+            None,
         );
     }
 
@@ -488,7 +504,10 @@ pub async fn compact(
                 context.memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailMemoryResourceCanceled;
-        return compact_done(compact_task, context.clone(), output_ssts, task_status);
+        return (
+            compact_done(compact_task, context.clone(), output_ssts, task_status),
+            memory_detector,
+        );
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
@@ -546,7 +565,7 @@ pub async fn compact(
             cost_time,
             compact_task_to_string(&compact_task)
         );
-        return (compact_task, table_stats);
+        return ((compact_task, table_stats), memory_detector);
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
@@ -619,8 +638,6 @@ pub async fn compact(
         }
     }
 
-    drop(memory_detector);
-
     if task_status != TaskStatus::Success {
         for abort_handle in abort_handles {
             abort_handle.abort();
@@ -641,7 +658,7 @@ pub async fn compact(
         cost_time,
         compact_task_to_string(&compact_task)
     );
-    (compact_task, table_stats)
+    ((compact_task, table_stats), memory_detector)
 }
 
 /// Fills in the compact task and tries to report the task result to meta node.
@@ -732,7 +749,7 @@ where
     };
     let max_key = end_key.to_ref();
 
-    let mut last_key = FullKey::default();
+    let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
     let mut watermark_can_see_last_key = false;
     let mut user_key_last_delete_epoch = HummockEpoch::MAX;
     let mut local_stats = StoreLocalStatistic::default();
@@ -746,18 +763,16 @@ where
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
-        let mut is_new_user_key =
-            last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();
-
+        let mut is_new_user_key = full_key_tracker.observe(iter.key()).is_some();
         let mut drop = false;
 
+        // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
         let epoch = iter_key.epoch_with_gap.pure_epoch();
         let value = iter.value();
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
             }
-            last_key.set(iter_key);
             watermark_can_see_last_key = false;
             user_key_last_delete_epoch = HummockEpoch::MAX;
             if value.is_delete() {
@@ -768,12 +783,12 @@ where
         }
 
         if last_table_id.map_or(true, |last_table_id| {
-            last_table_id != last_key.user_key.table_id.table_id
+            last_table_id != iter_key.user_key.table_id.table_id
         }) {
             if let Some(last_table_id) = last_table_id.take() {
                 table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
             }
-            last_table_id = Some(last_key.user_key.table_id.table_id);
+            last_table_id = Some(iter_key.user_key.table_id.table_id);
         }
 
         let target_extended_user_key = PointRange::from_user_key(iter_key.user_key, false);
@@ -804,7 +819,9 @@ where
         // in our design, frontend avoid to access keys which had be deleted, so we dont
         // need to consider the epoch when the compaction_filter match (it
         // means that mv had drop)
-        if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
+        // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
+        // Do not assume that "the epoch of keys behind must be smaller than the current key."
+        if (epoch < task_config.watermark && task_config.gc_delete_keys && value.is_delete())
             || (epoch < task_config.watermark
                 && (watermark_can_see_last_key
                     || earliest_range_delete_which_can_see_iter_key <= task_config.watermark))
@@ -824,13 +841,13 @@ where
 
             let should_count = match task_config.stats_target_table_ids.as_ref() {
                 Some(target_table_ids) => {
-                    target_table_ids.contains(&last_key.user_key.table_id.table_id)
+                    target_table_ids.contains(&iter_key.user_key.table_id.table_id)
                 }
                 None => true,
             };
             if should_count {
                 last_table_stats.total_key_count -= 1;
-                last_table_stats.total_key_size -= last_key.encoded_len() as i64;
+                last_table_stats.total_key_size -= iter_key.encoded_len() as i64;
                 last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
             }
             iter.next()
@@ -1037,7 +1054,7 @@ mod tests {
                 .sstable(&sst_info, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
-            ret.append(&mut sst.value().meta.monotonic_tombstone_events.clone());
+            ret.append(&mut sst.meta.monotonic_tombstone_events.clone());
         }
         let expected_result = create_monotonic_events(vec![tombstone]);
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use arrow_array::RecordBatch;
@@ -22,12 +23,22 @@ use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::Schema;
 use cfg_or_panic::cfg_or_panic;
-use futures_util::{stream, Stream, StreamExt, TryStreamExt};
+use futures_util::{stream, FutureExt, Stream, StreamExt, TryStreamExt};
+use ginepro::{LoadBalancedChannel, ResolutionStrategy};
+use risingwave_common::util::addr::HostAddr;
 use thiserror_ext::AsReport;
+use tokio::time::Duration as TokioDuration;
 use tonic::transport::Channel;
 
 use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
+
+// Interval between two successive probes of the UDF DNS.
+const DNS_PROBE_INTERVAL_SECS: u64 = 5;
+// Timeout duration for performing an eager DNS resolution.
+const EAGER_DNS_RESOLVE_TIMEOUT_SECS: u64 = 5;
+const REQUEST_TIMEOUT_SECS: u64 = 5;
+const CONNECT_TIMEOUT_SECS: u64 = 5;
 
 /// Client for external function service based on Arrow Flight.
 #[derive(Debug)]
@@ -41,25 +52,50 @@ pub struct ArrowFlightUdfClient {
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
     pub async fn connect(addr: &str) -> Result<Self> {
-        let conn = tonic::transport::Endpoint::new(addr.to_string())?
-            .timeout(Duration::from_secs(5))
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await?;
-        let client = FlightServiceClient::new(conn);
-        Ok(Self {
-            client,
-            addr: addr.into(),
-        })
+        Self::connect_inner(
+            addr,
+            ResolutionStrategy::Eager {
+                timeout: TokioDuration::from_secs(EAGER_DNS_RESOLVE_TIMEOUT_SECS),
+            },
+        )
+        .await
     }
 
     /// Connect to a UDF service lazily (i.e. only when the first request is sent).
     pub fn connect_lazy(addr: &str) -> Result<Self> {
-        let conn = tonic::transport::Endpoint::new(addr.to_string())?
-            .timeout(Duration::from_secs(5))
-            .connect_timeout(Duration::from_secs(5))
-            .connect_lazy();
-        let client = FlightServiceClient::new(conn);
+        Self::connect_inner(addr, ResolutionStrategy::Lazy)
+            .now_or_never()
+            .unwrap()
+    }
+
+    async fn connect_inner(
+        mut addr: &str,
+        resolution_strategy: ResolutionStrategy,
+    ) -> Result<Self> {
+        if addr.starts_with("http://") {
+            addr = addr.strip_prefix("http://").unwrap();
+        }
+        if addr.starts_with("https://") {
+            addr = addr.strip_prefix("https://").unwrap();
+        }
+        let host_addr = HostAddr::from_str(addr).map_err(|e| {
+            Error::service_error(format!("invalid address: {}, err: {}", addr, e.as_report()))
+        })?;
+        let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
+            .dns_probe_interval(std::time::Duration::from_secs(DNS_PROBE_INTERVAL_SECS))
+            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+            .resolution_strategy(resolution_strategy)
+            .channel()
+            .await
+            .map_err(|e| {
+                Error::service_error(format!(
+                    "failed to create LoadBalancedChannel, address: {}, err: {}",
+                    host_addr,
+                    e.as_report()
+                ))
+            })?;
+        let client = FlightServiceClient::new(channel.into());
         Ok(Self {
             client,
             addr: addr.into(),
@@ -108,9 +144,15 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function.
-    pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+    pub async fn call(
+        &self,
+        id: &str,
+        input: RecordBatch,
+        fragment_id: u32,
+    ) -> Result<RecordBatch> {
         let metrics = &*GLOBAL_METRICS;
-        let labels = &[self.addr.as_str(), id];
+        let fragment_id_str = fragment_id.to_string();
+        let labels = &[self.addr.as_str(), id, fragment_id_str.as_str()];
         metrics
             .udf_input_chunk_rows
             .with_label_values(labels)
@@ -139,28 +181,29 @@ impl ArrowFlightUdfClient {
     }
 
     async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
-        let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
-        // TODO: support no output
-        let head = output_stream
-            .next()
-            .await
-            .ok_or_else(Error::no_returned)??;
-        let remaining = output_stream.try_collect::<Vec<_>>().await?;
-        if remaining.is_empty() {
-            Ok(head)
-        } else {
-            Ok(arrow_select::concat::concat_batches(
-                &head.schema(),
-                std::iter::once(&head).chain(remaining.iter()),
-            )?)
+        let mut output_stream = self
+            .call_stream_internal(id, stream::once(async { input }))
+            .await?;
+        let mut batches = vec![];
+        while let Some(batch) = output_stream.next().await {
+            batches.push(batch?);
         }
+        Ok(arrow_select::concat::concat_batches(
+            output_stream.schema().ok_or_else(Error::no_returned)?,
+            batches.iter(),
+        )?)
     }
 
     /// Call a function, retry up to 5 times / 3s if connection is broken.
-    pub async fn call_with_retry(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+    pub async fn call_with_retry(
+        &self,
+        id: &str,
+        input: RecordBatch,
+        fragment_id: u32,
+    ) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
-            match self.call(id, input.clone()).await {
+            match self.call(id, input.clone(), fragment_id).await {
                 Err(err) if err.is_connection_error() && i != 4 => {
                     tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
@@ -172,6 +215,31 @@ impl ArrowFlightUdfClient {
         unreachable!()
     }
 
+    /// Always retry on connection error
+    pub async fn call_with_always_retry_on_network_error(
+        &self,
+        id: &str,
+        input: RecordBatch,
+        fragment_id: u32,
+    ) -> Result<RecordBatch> {
+        let mut backoff = Duration::from_millis(100);
+        loop {
+            match self.call(id, input.clone(), fragment_id).await {
+                Err(err) if err.is_tonic_error() => {
+                    tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
+                }
+                ret => {
+                    if ret.is_err() {
+                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    }
+                    return ret;
+                }
+            }
+            tokio::time::sleep(backoff).await;
+            backoff *= 2;
+        }
+    }
+
     /// Call a function with streaming input and output.
     #[panic_return = "Result<stream::Empty<_>>"]
     pub async fn call_stream(
@@ -179,6 +247,17 @@ impl ArrowFlightUdfClient {
         id: &str,
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
+        Ok(self
+            .call_stream_internal(id, inputs)
+            .await?
+            .map_err(|e| e.into()))
+    }
+
+    async fn call_stream_internal(
+        &self,
+        id: &str,
+        inputs: impl Stream<Item = RecordBatch> + Send + 'static,
+    ) -> Result<FlightRecordBatchStream> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
         let flight_data_stream =
             FlightDataEncoderBuilder::new()
@@ -194,11 +273,10 @@ impl ArrowFlightUdfClient {
 
         // decode response
         let stream = response.into_inner();
-        let record_batch_stream = FlightRecordBatchStream::new_from_flight_data(
+        Ok(FlightRecordBatchStream::new_from_flight_data(
             // convert tonic::Status to FlightError
             stream.map_err(|e| e.into()),
-        );
-        Ok(record_batch_stream.map_err(|e| e.into()))
+        ))
     }
 }
 

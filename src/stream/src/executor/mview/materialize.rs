@@ -42,16 +42,16 @@ use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedExecutor,
-    BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
-    StreamExecutorResult, UpdateMutation,
+    expect_first_barrier, ActorContext, ActorContextRef, AddMutation, BoxedMessageStream, Execute,
+    Executor, Message, Mutation, StreamExecutorResult, UpdateMutation,
 };
 use crate::task::{ActorId, AtomicU64Ref};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
-    input: BoxedExecutor,
-    info: ExecutorInfo,
+    input: Executor,
+
+    schema: Schema,
 
     state_table: StateTableInner<S, SD>,
 
@@ -71,8 +71,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        input: BoxedExecutor,
-        info: ExecutorInfo,
+        input: Executor,
+        schema: Schema,
         store: S,
         arrange_key: Vec<ColumnOrder>,
         actor_context: ActorContextRef,
@@ -99,7 +99,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         Self {
             input,
-            info,
+            schema,
             state_table,
             arrange_key_indices,
             actor_context,
@@ -115,7 +115,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let actor_id_str = self.actor_context.id.to_string();
         let fragment_id_str = self.actor_context.fragment_id.to_string();
 
-        let data_types = self.schema().data_types().clone();
+        let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
@@ -264,12 +264,11 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
     #[allow(clippy::too_many_arguments)]
     pub async fn for_test(
-        input: BoxedExecutor,
+        input: Executor,
         store: S,
         table_id: TableId,
         keys: Vec<ColumnOrder>,
         column_ids: Vec<ColumnId>,
-        executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
@@ -293,14 +292,10 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
 
         Self {
             input,
+            schema,
             state_table,
             arrange_key_indices: arrange_columns.clone(),
-            actor_context: ActorContext::create(0),
-            info: ExecutorInfo {
-                schema,
-                pk_indices: arrange_columns,
-                identity: format!("MaterializeExecutor {:X}", executor_id),
-            },
+            actor_context: ActorContext::for_test(0),
             materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
             conflict_behavior,
         }
@@ -429,32 +424,15 @@ impl MaterializeBuffer {
         self.buffer
     }
 }
-impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
+impl<S: StateStore, SD: ValueRowSerde> Execute for MaterializeExecutor<S, SD> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
     }
 }
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
-            .field("info", &self.info())
             .field("arrange_key_indices", &self.arrange_key_indices)
             .finish()
     }
@@ -676,17 +654,14 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -703,19 +678,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::NoCheck,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::NoCheck,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 
@@ -784,17 +757,14 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -811,19 +781,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::Overwrite,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::Overwrite,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 
@@ -880,18 +848,15 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(chunk3),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(chunk3),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -908,19 +873,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::Overwrite,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::Overwrite,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 
@@ -1012,19 +975,16 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Chunk(chunk3),
-                Message::Barrier(Barrier::new_test_barrier(4)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Chunk(chunk3),
+            Message::Barrier(Barrier::new_test_barrier(4)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1041,19 +1001,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::Overwrite,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::Overwrite,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 
@@ -1196,18 +1154,15 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(chunk3),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(chunk3),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1224,19 +1179,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::IgnoreConflict,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::IgnoreConflict,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 
@@ -1307,15 +1260,12 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1332,19 +1282,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::IgnoreConflict,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::IgnoreConflict,
         )
+        .await
+        .boxed()
         .execute();
         let _msg1 = materialize_executor
             .next()
@@ -1426,19 +1374,16 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let source = MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(chunk1),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(chunk2),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Chunk(chunk3),
-                Message::Barrier(Barrier::new_test_barrier(4)),
-            ],
-        );
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Chunk(chunk3),
+            Message::Barrier(Barrier::new_test_barrier(4)),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1455,19 +1400,17 @@ mod tests {
             vec![0, 1],
         );
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store,
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                ConflictBehavior::IgnoreConflict,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::IgnoreConflict,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.next().await.transpose().unwrap();
 
@@ -1635,21 +1578,20 @@ mod tests {
             .chain(iter::once(Message::Barrier(Barrier::new_test_barrier(2))))
             .collect();
         // Prepare stream executors.
-        let source = MockSource::with_messages(schema.clone(), PkIndices::new(), messages);
+        let source =
+            MockSource::with_messages(messages).into_executor(schema.clone(), PkIndices::new());
 
-        let mut materialize_executor = Box::new(
-            MaterializeExecutor::for_test(
-                Box::new(source),
-                memory_state_store.clone(),
-                table_id,
-                vec![ColumnOrder::new(0, OrderType::ascending())],
-                column_ids,
-                1,
-                Arc::new(AtomicU64::new(0)),
-                conflict_behavior,
-            )
-            .await,
+        let mut materialize_executor = MaterializeExecutor::for_test(
+            source,
+            memory_state_store.clone(),
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            conflict_behavior,
         )
+        .await
+        .boxed()
         .execute();
         materialize_executor.expect_barrier().await;
 

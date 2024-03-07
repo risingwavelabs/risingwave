@@ -21,8 +21,8 @@ use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -201,7 +201,7 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
