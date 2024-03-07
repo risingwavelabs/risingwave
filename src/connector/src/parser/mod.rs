@@ -29,6 +29,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
@@ -712,7 +713,16 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                 "failed to parse message, skipping"
                             );
                         }
-                        parser.source_ctx().report_user_source_error(&error);
+
+                        // report to error metrics
+                        let context = parser.source_ctx();
+                        GLOBAL_ERROR_METRICS.user_source_error.report([
+                            // TODO(eric): output ConnectorError's variant as label
+                            "source_parser".to_owned(),
+                            context.source_info.source_id.to_string(),
+                            context.source_info.source_name.clone(),
+                            context.source_info.fragment_id.to_string(),
+                        ]);
                     }
                 }
 

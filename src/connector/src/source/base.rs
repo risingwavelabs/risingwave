@@ -26,14 +26,12 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
-use thiserror_ext::AsReport;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -191,20 +189,6 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
         }
-    }
-
-    pub(crate) fn report_user_source_error(&self, _e: &(impl AsReport + ?Sized)) {
-        if self.source_info.fragment_id == u32::MAX {
-            // batch query
-            return;
-        }
-        GLOBAL_ERROR_METRICS.user_source_error.report([
-            "SourceError".to_owned(),
-            // Let's be a bit more specific for SourceExecutor
-            "SourceExecutor".to_owned(),
-            self.source_info.fragment_id.to_string(),
-            self.source_info.source_id.table_id.to_string(),
-        ]);
     }
 }
 
