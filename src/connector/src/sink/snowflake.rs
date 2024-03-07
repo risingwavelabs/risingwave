@@ -36,14 +36,17 @@ pub const SNOWFLAKE_SINK: &str = "snowflake";
 // TODO: add comments
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
-    #[serde(rename = "snowflake.url")]
-    pub url: String,
-
     #[serde(rename = "snowflake.database")]
     pub database: String,
 
-    #[serde(rename = "snowflake.user")]
-    pub user: String,
+    #[serde(rename = "snowflake.database.schema")]
+    pub schema: String,
+
+    #[serde(rename = "snowflake.database.schema.pipe")]
+    pub pipe: String,
+
+    #[serde(rename = "snowflake.account")]
+    pub account: String,
 
     #[serde(rename = "snowflake.private.key")]
     pub private_key: String,
@@ -53,6 +56,12 @@ pub struct SnowflakeCommon {
 
     #[serde(rename = "snowflake.role")]
     pub role: String,
+
+    #[serde(rename = "snowflake.jwt_token")]
+    pub jwt_token: String,
+
+    #[serde(rename = "snowflake.s3")]
+    pub s3: String,
 }
 
 #[serde_as]
