@@ -26,7 +26,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
-    DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
+    DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::external::CdcOffset;
@@ -510,7 +510,8 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
         }),
-        protocol_config: ProtocolProperties::Debezium,
+        // the cdc message is generated internally so the key must exist.
+        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
     };
     let mut parser = DebeziumParser::new(
         props,

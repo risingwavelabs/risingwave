@@ -76,6 +76,8 @@ mod unified;
 mod upsert_parser;
 mod util;
 
+pub use debezium::DEBEZIUM_IGNORE_KEY;
+
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
@@ -861,7 +863,7 @@ impl ByteStreamSourceParserImpl {
                     PlainParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Plain(parser))
             }
-            (ProtocolProperties::Debezium, _) => {
+            (ProtocolProperties::Debezium(_), _) => {
                 let parser =
                     DebeziumParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Debezium(parser))
@@ -967,7 +969,7 @@ pub enum EncodingProperties {
 
 #[derive(Debug, Default, Clone)]
 pub enum ProtocolProperties {
-    Debezium,
+    Debezium(DebeziumProps),
     DebeziumMongo,
     Maxwell,
     Canal,
@@ -988,7 +990,10 @@ impl SpecificParserConfig {
         // in the future
         let protocol_config = match format {
             SourceFormat::Native => ProtocolProperties::Native,
-            SourceFormat::Debezium => ProtocolProperties::Debezium,
+            SourceFormat::Debezium => {
+                let debezium_props = DebeziumProps::from(&info.format_encode_options);
+                ProtocolProperties::Debezium(debezium_props)
+            }
             SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,
             SourceFormat::Maxwell => ProtocolProperties::Maxwell,
             SourceFormat::Canal => ProtocolProperties::Canal,
