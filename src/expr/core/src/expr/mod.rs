@@ -209,4 +209,6 @@ where
 pub struct Context {
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
+    /// Whether the function is variadic.
+    pub variadic: bool,
 }
