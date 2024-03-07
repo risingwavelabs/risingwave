@@ -97,6 +97,10 @@ macro_rules! ensure_eq {
 }
 pub use ensure_eq;
 
+/// Return early with an error, in any type that can be converted from
+/// an [`anyhow::Error`].
+///
+/// See [`anyhow::bail`] for more details.
 #[macro_export]
 macro_rules! bail {
     ($($arg:tt)*) => {
