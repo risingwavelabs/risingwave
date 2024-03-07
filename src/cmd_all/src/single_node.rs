@@ -476,3 +476,24 @@ impl SingleNodeOpts {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+
+    use expect_test::{expect, Expect};
+
+    use super::*;
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_raw_opts_from_str() {
+        let str = "--some-opt \"some value\" --some-flag --another-flag --some-opt-2 abc";
+        let hash_map = RawOpts::from(str);
+        check(hash_map, expect![])
+    }
+}
