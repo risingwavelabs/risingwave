@@ -9972,6 +9972,7 @@ name = "risingwave_sqlparser"
 version = "1.7.0-alpha"
 dependencies = [
  "itertools 0.12.0",
+ "madsim-tokio",
  "matches",
  "serde",
  "tracing",
