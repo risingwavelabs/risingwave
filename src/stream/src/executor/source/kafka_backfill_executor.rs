@@ -365,7 +365,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                             let core = &self.stream_source_core;
                             tracing::warn!(
                                 error = ?e.as_report(),
-                                actor_id = self.actor_ctx.id,
                                 source_id = %core.source_id,
                                 "stream source reader error",
                             );
@@ -421,7 +420,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
                                             tracing::info!(
-                                                actor_id = self.actor_ctx.id,
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
@@ -595,7 +593,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
                             }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
-                                    actor_id = self.actor_ctx.id,
                                     actor_splits = ?actor_splits,
                                     "source change split received"
                                 );
@@ -740,7 +737,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
 
         if split_changed {
             tracing::info!(
-                actor_id = self.actor_ctx.id,
                 state = ?target_state,
                 "apply split change"
             );
@@ -844,7 +840,6 @@ impl<S: StateStore> KafkaBackfillExecutorInner<S> {
 
         if split_changed {
             tracing::info!(
-                actor_id = self.actor_ctx.id,
                 target_splits = ?target_splits,
                 "apply split change"
             );
