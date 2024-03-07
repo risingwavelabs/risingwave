@@ -49,6 +49,13 @@
 extern crate self as risingwave_common;
 
 #[macro_use]
+extern crate risingwave_error;
+pub use risingwave_error::common::{
+    bail_no_function, bail_not_implemented, no_function, not_implemented,
+};
+pub use risingwave_error::macros::*;
+
+#[macro_use]
 pub mod jemalloc;
 #[macro_use]
 pub mod error;
