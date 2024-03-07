@@ -1211,7 +1211,6 @@ mod tests {
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
-    const BASIC_EPOCH: HummockEpoch = test_epoch(4);
     const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
@@ -1231,7 +1230,7 @@ mod tests {
     }
 
     fn initial_pinned_version() -> PinnedVersion {
-        PinnedVersion::new(test_hummock_version(BASIC_EPOCH), unbounded_channel().0)
+        PinnedVersion::new(test_hummock_version(INITIAL_EPOCH), unbounded_channel().0)
     }
 
     fn dummy_table_key() -> Vec<u8> {
@@ -1404,7 +1403,7 @@ mod tests {
     #[tokio::test]
     async fn test_uploader_basic() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let epoch1 = INITIAL_EPOCH;
+        let epoch1 = INITIAL_EPOCH.next_epoch();
         let imm = gen_imm(epoch1).await;
         uploader.add_imm(imm.clone());
         assert_eq!(1, uploader.unsealed_data.len());

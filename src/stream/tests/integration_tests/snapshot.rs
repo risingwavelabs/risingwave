@@ -199,6 +199,8 @@ fn run_until_pending(
                 }
                 SnapshotEvent::Chunk(output)
             }
+            // The epoch value in the input is randomly chosen (e.g., 1, 2, 3), but during the actual processing, it undergoes a left shift.
+            // In order to ensure consistency between the input and output when comparing with the script, the epoch value in the output needs to be correspondingly right-shifted.
             Message::Barrier(barrier) => SnapshotEvent::Barrier(barrier.epoch.curr / test_epoch(1)),
             Message::Watermark(watermark) => SnapshotEvent::Watermark {
                 col_idx: watermark.col_idx,
