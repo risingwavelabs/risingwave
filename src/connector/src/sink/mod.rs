@@ -33,6 +33,7 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod snowflake;
+pub mod snowflake_connector;
 pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
