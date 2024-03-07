@@ -664,6 +664,7 @@ impl Masking for FunctionArgExpr {
 impl Masking for Function {
     fn mask(&mut self, context: &mut MaskingContext) {
         let Function {
+            name,
             args,
             over,
             order_by,
@@ -671,6 +672,7 @@ impl Masking for Function {
             within_group,
             ..
         } = self;
+        name.mask(context);
         args.iter_mut().for_each(|arg| arg.mask(context));
         if let Some(window_spec) = over {
             window_spec.mask(context);
@@ -744,7 +746,7 @@ mod tests {
             SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
         );
         "#;
-        let create_mv_expected = "CREATE MATERIALIZED VIEW _12_ AS SELECT _13_._2_ AS _14_, _13_._3_ AS _15_, COUNT(_16_._1_) AS _17_ FROM _1_ AS _13_ JOIN _18_ AS _16_ ON _13_._2_ = _16_._1_ GROUP BY _13_._2_, _13_._3_ HAVING COUNT(_16_._1_) >= (SELECT COUNT(*) / COUNT(DISTINCT _1_) FROM _18_)";
+        let create_mv_expected = "CREATE MATERIALIZED VIEW _12_ AS SELECT _13_._2_ AS _14_, _13_._3_ AS _15_, _16_(_17_._1_) AS _18_ FROM _1_ AS _13_ JOIN _19_ AS _17_ ON _13_._2_ = _17_._1_ GROUP BY _13_._2_, _13_._3_ HAVING _16_(_17_._1_) >= (SELECT _16_(*) / _16_(DISTINCT _1_) FROM _19_)";
         let create_sink = r#"
         CREATE SINK sink_nexmark_q102 AS
         SELECT
@@ -759,7 +761,7 @@ mod tests {
         )
         WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
         "#;
-        let create_sink_expected = "CREATE SINK _19_ AS SELECT _13_._2_ AS _14_, _13_._3_ AS _15_, COUNT(_16_._1_) AS _17_ FROM _1_ AS _13_ JOIN _18_ AS _16_ ON _13_._2_ = _16_._1_ GROUP BY _13_._2_, _13_._3_ HAVING COUNT(_16_._1_) >= (SELECT COUNT(*) / COUNT(DISTINCT _1_) FROM _18_) WITH (connector = '[REDACTED]', type = '[REDACTED]', force_append_only = '[REDACTED]')";
+        let create_sink_expected = "CREATE SINK _20_ AS SELECT _13_._2_ AS _14_, _13_._3_ AS _15_, _16_(_17_._1_) AS _18_ FROM _1_ AS _13_ JOIN _19_ AS _17_ ON _13_._2_ = _17_._1_ GROUP BY _13_._2_, _13_._3_ HAVING _16_(_17_._1_) >= (SELECT _16_(*) / _16_(DISTINCT _1_) FROM _19_) WITH (connector = '[REDACTED]', type = '[REDACTED]', force_append_only = '[REDACTED]')";
         let mut context = MaskingContext::default();
         let create_table_redacted = redact_statement(&statement(create_table), &mut context);
         let create_mv_redacted = redact_statement(&statement(create_mv), &mut context);
