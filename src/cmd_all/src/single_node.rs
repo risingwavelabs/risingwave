@@ -516,14 +516,16 @@ mod tests {
         check(
             hash_map,
             expect![[r#"
-            RawOpts {
-                inner: {
-                    "--some-opt-2": "abc",
-                    "--some-flag": "",
-                    "--some-opt": "some value",
-                    "--another-flag": "",
-                },
-            }"#]],
+                RawOpts {
+                    flags: {
+                        "--some-flag",
+                        "--another-flag",
+                    },
+                    opts: {
+                        "--some-opt-2": "abc",
+                        "--some-opt": "some value",
+                    },
+                }"#]],
         )
     }
 }
