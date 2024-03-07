@@ -1,0 +1,18 @@
+
+‰
+livestream.protolivestream.schema"Å
+LiveStreamMetrics
+	client_ip (	RclientIp
+
+user_agent (	R	userAgent
+user_id (	RuserId
+room_id (	RroomId
+	video_bps (RvideoBps
+	video_fps (RvideoFps
+	video_rtt (RvideoRtt$
+video_lost_pps (RvideoLostPpsA
+video_longest_freeze_duration	 (RvideoLongestFreezeDuration=
+video_total_freeze_duration
+ (RvideoTotalFreezeDuration)
+report_timestamp (RreportTimestamp
+country (	RcountryBZlivestream/protobproto3

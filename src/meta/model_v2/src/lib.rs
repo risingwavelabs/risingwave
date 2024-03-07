@@ -44,6 +44,7 @@ pub mod schema;
 pub mod sink;
 pub mod source;
 pub mod streaming_job;
+pub mod subscription;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
@@ -62,6 +63,7 @@ pub type SchemaId = ObjectId;
 pub type TableId = ObjectId;
 pub type SourceId = ObjectId;
 pub type SinkId = ObjectId;
+pub type SubscriptionId = ObjectId;
 pub type IndexId = ObjectId;
 pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
@@ -215,8 +217,6 @@ derive_from_json_struct!(
     risingwave_pb::catalog::connection::PbPrivateLinkService
 );
 derive_from_json_struct!(AuthInfo, risingwave_pb::user::PbAuthInfo);
-
-derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
 
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);

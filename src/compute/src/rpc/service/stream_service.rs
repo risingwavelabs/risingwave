@@ -84,7 +84,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
         let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(&req.info);
+        let res = self.mgr.update_actor_info(req.info).await;
         match res {
             Err(e) => {
                 error!(error = %e.as_report(), "failed to update actor info table actor");
@@ -116,7 +116,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        self.mgr.reset().await;
+        self.mgr.reset(req.prev_epoch).await;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,

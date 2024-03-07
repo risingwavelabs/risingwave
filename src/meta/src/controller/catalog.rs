@@ -19,21 +19,23 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, object_dependency, schema, sink, source,
-    streaming_job, table, user_privilege, view, ActorId, ColumnCatalogArray, ConnectionId,
-    CreateType, DatabaseId, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
-    PrivateLinkService, SchemaId, SourceId, StreamSourceInfo, StreamingParallelism, TableId,
-    UserId,
+    actor, connection, database, fragment, function, index, object, object_dependency, schema,
+    sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
+    ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SinkId,
+    SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
-    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView,
+    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::relation::PbRelationInfo;
@@ -41,6 +43,8 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, SimpleExpr};
 use sea_orm::ActiveValue::Set;
@@ -423,9 +427,12 @@ impl CatalogController {
     pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<ReleaseContext> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let creating_job_ids: Vec<ObjectId> = streaming_job::Entity::find()
+
+        let creating_jobs: Vec<(ObjectId, ObjectType)> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
+            .column(object::Column::ObjType)
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .filter(
                 streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
                     streaming_job::Column::JobStatus
@@ -436,8 +443,103 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        if creating_job_ids.is_empty() {
+
+        let changed = Self::clean_dirty_sink_downstreams(&txn).await?;
+
+        if creating_jobs.is_empty() {
+            if changed {
+                txn.commit().await?;
+            }
+
             return Ok(ReleaseContext::default());
+        }
+
+        // Record cleaned streaming jobs in event logs.
+        let mut creating_table_ids = vec![];
+        let mut creating_source_ids = vec![];
+        let mut creating_sink_ids = vec![];
+        let mut creating_job_ids = vec![];
+        for (job_id, job_type) in creating_jobs {
+            creating_job_ids.push(job_id);
+            match job_type {
+                ObjectType::Table | ObjectType::Index => creating_table_ids.push(job_id),
+                ObjectType::Source => creating_source_ids.push(job_id),
+                ObjectType::Sink => creating_sink_ids.push(job_id),
+                _ => unreachable!("unexpected streaming job type"),
+            }
+        }
+        let mut event_logs = vec![];
+        if !creating_table_ids.is_empty() {
+            let table_info: Vec<(TableId, String, String)> = Table::find()
+                .select_only()
+                .columns([
+                    table::Column::TableId,
+                    table::Column::Name,
+                    table::Column::Definition,
+                ])
+                .filter(table::Column::TableId.is_in(creating_table_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            for (table_id, name, definition) in table_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: table_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        if !creating_source_ids.is_empty() {
+            let source_info: Vec<(SourceId, String, String)> = Source::find()
+                .select_only()
+                .columns([
+                    source::Column::SourceId,
+                    source::Column::Name,
+                    source::Column::Definition,
+                ])
+                .filter(source::Column::SourceId.is_in(creating_source_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            for (source_id, name, definition) in source_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: source_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
+        }
+        if !creating_sink_ids.is_empty() {
+            let sink_info: Vec<(SinkId, String, String)> = Sink::find()
+                .select_only()
+                .columns([
+                    sink::Column::SinkId,
+                    sink::Column::Name,
+                    sink::Column::Definition,
+                ])
+                .filter(sink::Column::SinkId.is_in(creating_sink_ids))
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            for (sink_id, name, definition) in sink_info {
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: sink_id as _,
+                    name,
+                    definition,
+                    error: "clear during recovery".to_string(),
+                };
+                event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ));
+            }
         }
 
         let associated_source_ids: Vec<SourceId> = Table::find()
@@ -468,6 +570,7 @@ impl CatalogController {
             .clone()
             .into_iter()
             .chain(state_table_ids.clone().into_iter())
+            .chain(associated_source_ids.clone().into_iter())
             .collect();
 
         let res = Object::delete_many()
@@ -475,13 +578,185 @@ impl CatalogController {
             .exec(&txn)
             .await?;
         assert!(res.rows_affected > 0);
+
         txn.commit().await?;
+
+        self.env.event_log_manager_ref().add_event_logs(event_logs);
 
         Ok(ReleaseContext {
             state_table_ids,
             source_ids: associated_source_ids,
             ..Default::default()
         })
+    }
+
+    async fn clean_dirty_sink_downstreams(txn: &DatabaseTransaction) -> MetaResult<bool> {
+        // clean incoming sink from (table)
+        // clean upstream fragment ids from (fragment)
+        // clean stream node from (fragment)
+        // clean upstream actor ids from (actor)
+        let all_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .columns(vec![fragment::Column::FragmentId])
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        let all_fragment_ids: HashSet<_> = all_fragment_ids.into_iter().collect();
+
+        let table_sink_ids: Vec<ObjectId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::TargetTable.is_not_null())
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        let all_table_with_incoming_sinks: Vec<(ObjectId, I32Array)> = Table::find()
+            .select_only()
+            .columns(vec![table::Column::TableId, table::Column::IncomingSinks])
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        let table_incoming_sinks_to_update = all_table_with_incoming_sinks
+            .into_iter()
+            .filter(|(_, incoming_sinks)| {
+                let inner_ref = incoming_sinks.inner_ref();
+                !inner_ref.is_empty()
+                    && inner_ref
+                        .iter()
+                        .any(|sink_id| !table_sink_ids.contains(sink_id))
+            })
+            .collect_vec();
+
+        let new_table_incoming_sinks = table_incoming_sinks_to_update
+            .into_iter()
+            .map(|(table_id, incoming_sinks)| {
+                let new_incoming_sinks = incoming_sinks
+                    .into_inner()
+                    .extract_if(|id| table_sink_ids.contains(id))
+                    .collect_vec();
+                (table_id, I32Array::from(new_incoming_sinks))
+            })
+            .collect_vec();
+
+        // no need to update, returning
+        if new_table_incoming_sinks.is_empty() {
+            return Ok(false);
+        }
+
+        for (table_id, new_incoming_sinks) in new_table_incoming_sinks {
+            tracing::info!("cleaning dirty table sink downstream table {}", table_id);
+            Table::update_many()
+                .col_expr(table::Column::IncomingSinks, new_incoming_sinks.into())
+                .filter(table::Column::TableId.eq(table_id))
+                .exec(txn)
+                .await?;
+
+            let fragments: Vec<(FragmentId, I32Array, StreamNode, i32)> = Fragment::find()
+                .select_only()
+                .columns(vec![
+                    fragment::Column::FragmentId,
+                    fragment::Column::UpstreamFragmentId,
+                    fragment::Column::StreamNode,
+                    fragment::Column::FragmentTypeMask,
+                ])
+                .filter(fragment::Column::JobId.eq(table_id))
+                .into_tuple()
+                .all(txn)
+                .await?;
+
+            for (fragment_id, upstream_fragment_ids, stream_node, fragment_mask) in fragments {
+                let mut upstream_fragment_ids = upstream_fragment_ids.into_inner();
+
+                let dirty_upstream_fragment_ids = upstream_fragment_ids
+                    .extract_if(|id| !all_fragment_ids.contains(id))
+                    .collect_vec();
+
+                if !dirty_upstream_fragment_ids.is_empty() {
+                    // dirty downstream should be materialize fragment of table
+                    assert!(fragment_mask & FragmentTypeFlag::Mview as i32 > 0);
+
+                    tracing::info!(
+                        "cleaning dirty table sink fragment {:?} from downstream fragment {}",
+                        dirty_upstream_fragment_ids,
+                        fragment_id
+                    );
+
+                    let mut pb_stream_node = stream_node.to_protobuf();
+
+                    visit_stream_node_cont(&mut pb_stream_node, |node| {
+                        if let Some(NodeBody::Union(_)) = node.node_body {
+                            node.input.retain_mut(|input| {
+                                if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body
+                                    && all_fragment_ids
+                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                {
+                                    true
+                                } else {
+                                    false
+                                }
+                            });
+                        }
+                        true
+                    });
+
+                    Fragment::update_many()
+                        .col_expr(
+                            fragment::Column::UpstreamFragmentId,
+                            I32Array::from(upstream_fragment_ids).into(),
+                        )
+                        .col_expr(
+                            fragment::Column::StreamNode,
+                            StreamNode::from_protobuf(&pb_stream_node).into(),
+                        )
+                        .filter(fragment::Column::FragmentId.eq(fragment_id))
+                        .exec(txn)
+                        .await?;
+
+                    let actors: Vec<(ActorId, ActorUpstreamActors)> = Actor::find()
+                        .select_only()
+                        .columns(vec![
+                            actor::Column::ActorId,
+                            actor::Column::UpstreamActorIds,
+                        ])
+                        .filter(actor::Column::FragmentId.eq(fragment_id))
+                        .into_tuple()
+                        .all(txn)
+                        .await?;
+
+                    for (actor_id, upstream_actor_ids) in actors {
+                        let mut upstream_actor_ids = upstream_actor_ids.into_inner();
+
+                        let dirty_actor_upstreams = upstream_actor_ids
+                            .extract_if(|id, _| !all_fragment_ids.contains(id))
+                            .map(|(id, _)| id)
+                            .collect_vec();
+
+                        if !dirty_actor_upstreams.is_empty() {
+                            tracing::debug!(
+                                "cleaning dirty table sink fragment {:?} from downstream fragment {} actor {}",
+                                dirty_actor_upstreams,
+                                fragment_id,
+                                actor_id,
+                            );
+
+                            Actor::update_many()
+                                .col_expr(
+                                    actor::Column::UpstreamActorIds,
+                                    ActorUpstreamActors::from(upstream_actor_ids).into(),
+                                )
+                                .filter(actor::Column::ActorId.eq(actor_id))
+                                .exec(txn)
+                                .await?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(true)
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
@@ -571,6 +846,18 @@ impl CatalogController {
                     )),
                 });
             }
+            ObjectType::Subscription => {
+                let (subscription, obj) = Subscription::find_by_id(job_id)
+                    .find_also_related(Object)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Subscription(
+                        ObjectModel(subscription, obj.unwrap()).into(),
+                    )),
+                });
+            }
             ObjectType::Index => {
                 let (index, obj) = Index::find_by_id(job_id)
                     .find_also_related(Object)
@@ -656,13 +943,13 @@ impl CatalogController {
         .await?;
         pb_source.id = source_obj.oid as _;
         let source: source::ActiveModel = pb_source.clone().into();
-        source.insert(&txn).await?;
+        Source::insert(source).exec(&txn).await?;
 
         if let Some(src_manager) = source_manager_ref {
             let ret = src_manager.register_source(&pb_source).await;
             if let Err(e) = ret {
                 txn.rollback().await?;
-                return Err(e.into());
+                return Err(e);
             }
         }
         txn.commit().await?;
@@ -698,7 +985,7 @@ impl CatalogController {
         .await?;
         pb_function.id = function_obj.oid as _;
         let function: function::ActiveModel = pb_function.clone().into();
-        function.insert(&txn).await?;
+        Function::insert(function).exec(&txn).await?;
         txn.commit().await?;
 
         let version = self
@@ -774,7 +1061,7 @@ impl CatalogController {
         .await?;
         pb_connection.id = conn_obj.oid as _;
         let connection: connection::ActiveModel = pb_connection.clone().into();
-        connection.insert(&txn).await?;
+        Connection::insert(connection).exec(&txn).await?;
 
         txn.commit().await?;
 
@@ -869,17 +1156,17 @@ impl CatalogController {
         .await?;
         pb_view.id = view_obj.oid as _;
         let view: view::ActiveModel = pb_view.clone().into();
-        view.insert(&txn).await?;
+        View::insert(view).exec(&txn).await?;
 
         // todo: change `dependent_relations` to `dependent_objects`, which should includes connection and function as well.
         // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
         for obj_id in &pb_view.dependent_relations {
-            object_dependency::ActiveModel {
+            ObjectDependency::insert(object_dependency::ActiveModel {
                 oid: Set(*obj_id as _),
                 used_by: Set(view_obj.oid),
                 ..Default::default()
-            }
-            .insert(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
 
@@ -1056,6 +1343,44 @@ impl CatalogController {
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
                 relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
+
+                // internal tables.
+                let internal_tables: Vec<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .filter(table::Column::BelongsToJobId.eq(object_id))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                Object::update_many()
+                    .col_expr(
+                        object::Column::OwnerId,
+                        SimpleExpr::Value(Value::Int(Some(new_owner))),
+                    )
+                    .filter(object::Column::Oid.is_in(internal_tables.clone()))
+                    .exec(&txn)
+                    .await?;
+
+                let table_objs = Table::find()
+                    .find_also_related(Object)
+                    .filter(table::Column::TableId.is_in(internal_tables))
+                    .all(&txn)
+                    .await?;
+                for (table, table_obj) in table_objs {
+                    relations.push(PbRelationInfo::Table(
+                        ObjectModel(table, table_obj.unwrap()).into(),
+                    ));
+                }
+            }
+            ObjectType::Subscription => {
+                let subscription = Subscription::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
+                relations.push(PbRelationInfo::Subscription(
+                    ObjectModel(subscription, obj).into(),
+                ));
 
                 // internal tables.
                 let internal_tables: Vec<TableId> = Table::find()
@@ -1302,6 +1627,48 @@ impl CatalogController {
                     }
                 }
             }
+            ObjectType::Subscription => {
+                let subscription = Subscription::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
+                check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn)
+                    .await?;
+                relations.push(PbRelationInfo::Subscription(
+                    ObjectModel(subscription, obj).into(),
+                ));
+
+                // internal tables.
+                let internal_tables: Vec<TableId> = Table::find()
+                    .select_only()
+                    .column(table::Column::TableId)
+                    .filter(table::Column::BelongsToJobId.eq(object_id))
+                    .into_tuple()
+                    .all(&txn)
+                    .await?;
+
+                if !internal_tables.is_empty() {
+                    Object::update_many()
+                        .col_expr(
+                            object::Column::SchemaId,
+                            SimpleExpr::Value(Value::Int(Some(new_schema))),
+                        )
+                        .filter(object::Column::Oid.is_in(internal_tables.clone()))
+                        .exec(&txn)
+                        .await?;
+
+                    let table_objs = Table::find()
+                        .find_also_related(Object)
+                        .filter(table::Column::TableId.is_in(internal_tables))
+                        .all(&txn)
+                        .await?;
+                    for (table, table_obj) in table_objs {
+                        relations.push(PbRelationInfo::Table(
+                            ObjectModel(table, table_obj.unwrap()).into(),
+                        ));
+                    }
+                }
+            }
             ObjectType::View => {
                 let view = View::find_by_id(object_id)
                     .one(&txn)
@@ -1480,11 +1847,61 @@ impl CatalogController {
         assert!(
             to_drop_objects.iter().all(|obj| matches!(
                 obj.obj_type,
-                ObjectType::Table | ObjectType::Index | ObjectType::Sink | ObjectType::View
+                ObjectType::Table
+                    | ObjectType::Index
+                    | ObjectType::Sink
+                    | ObjectType::View
+                    | ObjectType::Subscription
             )),
             "only these objects will depends on others"
         );
         to_drop_objects.push(obj);
+
+        // Special handling for 'sink into table'.
+        if object_type != ObjectType::Sink {
+            // When dropping a table downstream, all incoming sinks of the table should be dropped as well.
+            if object_type == ObjectType::Table {
+                let table = Table::find_by_id(object_id)
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+
+                let incoming_sinks = table.incoming_sinks.into_inner();
+
+                if !incoming_sinks.is_empty() {
+                    let objs: Vec<PartialObject> = Object::find()
+                        .filter(object::Column::Oid.is_in(incoming_sinks))
+                        .into_partial_model()
+                        .all(&txn)
+                        .await?;
+
+                    to_drop_objects.extend(objs);
+                }
+            }
+
+            let to_drop_object_ids: HashSet<_> =
+                to_drop_objects.iter().map(|obj| obj.oid).collect();
+
+            // When there is a table sink in the dependency chain of drop cascade, an error message needs to be returned currently to manually drop the sink.
+            for obj in &to_drop_objects {
+                if obj.obj_type == ObjectType::Sink {
+                    let sink = Sink::find_by_id(obj.oid)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+
+                    // Since dropping the sink into the table requires the frontend to handle some of the logic (regenerating the plan), it’s not compatible with the current cascade dropping.
+                    if let Some(target_table) = sink.target_table
+                        && !to_drop_object_ids.contains(&target_table)
+                    {
+                        bail!(
+                            "Found sink into table with sink id {} in dependency, please drop them manually",
+                            obj.oid,
+                        );
+                    }
+                }
+            }
+        }
 
         let to_drop_table_ids = to_drop_objects
             .iter()
@@ -1495,6 +1912,7 @@ impl CatalogController {
             .filter(|obj| {
                 obj.obj_type == ObjectType::Table
                     || obj.obj_type == ObjectType::Sink
+                    || obj.obj_type == ObjectType::Subscription
                     || obj.obj_type == ObjectType::Index
             })
             .map(|obj| obj.oid)
@@ -1625,6 +2043,14 @@ impl CatalogController {
                 }),
                 ObjectType::Sink => relations.push(PbRelation {
                     relation_info: Some(PbRelationInfo::Sink(PbSink {
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
+                        ..Default::default()
+                    })),
+                }),
+                ObjectType::Subscription => relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Subscription(PbSubscription {
                         id: obj.oid as _,
                         schema_id: obj.schema_id.unwrap() as _,
                         database_id: obj.database_id.unwrap() as _,
@@ -1804,6 +2230,9 @@ impl CatalogController {
             ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
             ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
             ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
+            ObjectType::Subscription => {
+                rename_relation!(Subscription, subscription, subscription_id, object_id)
+            }
             ObjectType::View => rename_relation!(View, view, view_id, object_id),
             ObjectType::Index => {
                 let (mut index, obj) = Index::find_by_id(object_id)
@@ -1855,27 +2284,36 @@ impl CatalogController {
                 });
             }};
         }
-        let objs = get_referring_objects(object_id, &txn).await?;
-        // TODO: For sink into table. when sink into table is ready.
-        // if object_type == ObjectType::Table {
-        //     let incoming_sinks: Vec<_> = Table::find_by_id(object_id)
-        //         .select_only()
-        //         .column(table::Column::IncomingSinks)
-        //         .into_tuple()
-        //         .one(&txn)
-        //         .await?
-        //         .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
-        //     objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-        //         oid: id as _,
-        //         obj_type: ObjectType::Sink,
-        //         ..Default::default()
-        //     }));
-        // }
+        let mut objs = get_referring_objects(object_id, &txn).await?;
+        if object_type == ObjectType::Table {
+            let incoming_sinks: I32Array = Table::find_by_id(object_id)
+                .select_only()
+                .column(table::Column::IncomingSinks)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+
+            objs.extend(
+                incoming_sinks
+                    .into_inner()
+                    .into_iter()
+                    .map(|id| PartialObject {
+                        oid: id,
+                        obj_type: ObjectType::Sink,
+                        schema_id: None,
+                        database_id: None,
+                    }),
+            );
+        }
 
         for obj in objs {
             match obj.obj_type {
                 ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
                 ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
+                ObjectType::Subscription => {
+                    rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
+                }
                 ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid),
                 ObjectType::Index => {
                     let index_table_id: Option<TableId> = Index::find_by_id(obj.oid)
@@ -1886,7 +2324,9 @@ impl CatalogController {
                         .await?;
                     rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
                 }
-                _ => bail!("only table, sink, view and index depend on other objects."),
+                _ => {
+                    bail!("only table, sink, subscription, view and index depend on other objects.")
+                }
             }
         }
         txn.commit().await?;
@@ -2022,6 +2462,11 @@ impl CatalogController {
         inner.list_sinks().await
     }
 
+    pub async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
+        let inner = self.inner.read().await;
+        inner.list_subscriptions().await
+    }
+
     pub async fn list_views(&self) -> MetaResult<Vec<PbView>> {
         let inner = self.inner.read().await;
         inner.list_views().await
@@ -2088,10 +2533,25 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?;
+        let creating_subscriptions: Vec<(ObjectId, String, DatabaseId, SchemaId)> =
+            Subscription::find()
+                .select_only()
+                .columns([
+                    subscription::Column::SubscriptionId,
+                    subscription::Column::Name,
+                ])
+                .columns([object::Column::DatabaseId, object::Column::SchemaId])
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
 
         let mut job_mapping: HashMap<JobKey, ObjectId> = creating_tables
             .into_iter()
             .chain(creating_sinks.into_iter())
+            .chain(creating_subscriptions.into_iter())
             .map(|(id, name, database_id, schema_id)| ((database_id, schema_id, name), id))
             .collect();
 
@@ -2211,6 +2671,18 @@ impl CatalogController {
     }
 }
 
+/// `CatalogStats` is a struct to store the statistics of all catalogs.
+pub struct CatalogStats {
+    pub table_num: u64,
+    pub mview_num: u64,
+    pub index_num: u64,
+    pub source_num: u64,
+    pub sink_num: u64,
+    pub function_num: u64,
+    pub streaming_job_num: u64,
+    pub actor_num: u64,
+}
+
 impl CatalogControllerInner {
     pub async fn snapshot(&self) -> MetaResult<(Catalog, Vec<PbUserInfo>)> {
         let databases = self.list_databases().await?;
@@ -2218,6 +2690,7 @@ impl CatalogControllerInner {
         let tables = self.list_tables().await?;
         let sources = self.list_sources().await?;
         let sinks = self.list_sinks().await?;
+        let subscriptions = self.list_subscriptions().await?;
         let indexes = self.list_indexes().await?;
         let views = self.list_views().await?;
         let functions = self.list_functions().await?;
@@ -2232,6 +2705,7 @@ impl CatalogControllerInner {
                 tables,
                 sources,
                 sinks,
+                subscriptions,
                 indexes,
                 views,
                 functions,
@@ -2239,6 +2713,40 @@ impl CatalogControllerInner {
             ),
             users,
         ))
+    }
+
+    pub async fn stats(&self) -> MetaResult<CatalogStats> {
+        let mut table_num_map: HashMap<_, _> = Table::find()
+            .select_only()
+            .column(table::Column::TableType)
+            .column_as(table::Column::TableId.count(), "num")
+            .group_by(table::Column::TableType)
+            .having(table::Column::TableType.ne(TableType::Internal))
+            .into_tuple::<(TableType, i64)>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|(table_type, num)| (table_type, num as u64))
+            .collect();
+
+        let source_num = Source::find().count(&self.db).await?;
+        let sink_num = Sink::find().count(&self.db).await?;
+        let function_num = Function::find().count(&self.db).await?;
+        let streaming_job_num = StreamingJob::find().count(&self.db).await?;
+        let actor_num = Actor::find().count(&self.db).await?;
+
+        Ok(CatalogStats {
+            table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
+            mview_num: table_num_map
+                .remove(&TableType::MaterializedView)
+                .unwrap_or(0),
+            index_num: table_num_map.remove(&TableType::Index).unwrap_or(0),
+            source_num,
+            sink_num,
+            function_num,
+            streaming_job_num,
+            actor_num,
+        })
     }
 
     async fn list_databases(&self) -> MetaResult<Vec<PbDatabase>> {
@@ -2368,6 +2876,21 @@ impl CatalogControllerInner {
         Ok(sink_objs
             .into_iter()
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect())
+    }
+
+    /// `list_subscriptions` return all `CREATED` subscriptions.
+    async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
+        let subscription_objs = Subscription::find()
+            .find_also_related(Object)
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .all(&self.db)
+            .await?;
+
+        Ok(subscription_objs
+            .into_iter()
+            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
             .collect())
     }
 
@@ -2524,17 +3047,18 @@ mod tests {
     #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
-        let return_type = risingwave_pb::data::DataType {
+        let test_data_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
             ..Default::default()
         };
+        let arg_types = vec![test_data_type.clone()];
         let pb_function = PbFunction {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
             name: "test_function".to_string(),
             owner: TEST_OWNER_ID as _,
-            arg_types: vec![],
-            return_type: Some(return_type.clone()),
+            arg_types,
+            return_type: Some(test_data_type.clone()),
             language: "python".to_string(),
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
@@ -2555,7 +3079,8 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
-        assert_eq!(function.return_type.0, return_type);
+        assert_eq!(function.return_type.0, test_data_type);
+        assert_eq!(function.arg_types.into_inner().len(), 1);
         assert_eq!(function.language, "python");
 
         mgr.drop_function(function.function_id).await?;

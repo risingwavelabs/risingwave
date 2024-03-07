@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::{RwLock, RwLockReadGuard};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
@@ -61,11 +62,9 @@ pub enum HummockEvent {
     },
 
     /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>),
+    Clear(oneshot::Sender<()>, u64),
 
     Shutdown,
-
-    VersionUpdate(HummockVersionUpdate),
 
     ImmToUploader(ImmutableMemtable),
 
@@ -90,6 +89,7 @@ pub enum HummockEvent {
         table_id: TableId,
         new_read_version_sender: oneshot::Sender<(HummockReadVersionRef, LocalInstanceGuard)>,
         is_replicated: bool,
+        vnodes: Arc<Bitmap>,
     },
 
     DestroyReadVersion {
@@ -108,13 +108,9 @@ impl HummockEvent {
                 sync_result_sender: _,
             } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),
 
-            HummockEvent::Clear(_) => "Clear".to_string(),
+            HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
-
-            HummockEvent::VersionUpdate(version_update_payload) => {
-                format!("VersionUpdate {:?}", version_update_payload)
-            }
 
             HummockEvent::ImmToUploader(imm) => {
                 format!("ImmToUploader {:?}", imm)
@@ -144,6 +140,7 @@ impl HummockEvent {
                 table_id,
                 new_read_version_sender: _,
                 is_replicated,
+                vnodes: _,
             } => format!(
                 "RegisterReadVersion table_id {:?}, is_replicated: {:?}",
                 table_id, is_replicated

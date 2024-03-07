@@ -254,7 +254,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
-            config
+            (config
                 .storage
                 .object_store
                 .object_store_read_timeout_ms
@@ -271,7 +271,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                         .object_store
                         .object_store_streaming_upload_timeout_ms,
                 )
-                .max(config.meta.compaction_task_max_progress_interval_secs)
+                .max(config.meta.compaction_task_max_progress_interval_secs * 1000))
+                / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
@@ -284,6 +285,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 disable_automatic_parallelism_control: config
                     .meta
                     .disable_automatic_parallelism_control,
+                parallelism_control_batch_size: config.meta.parallelism_control_batch_size,
+                parallelism_control_trigger_period_sec: config
+                    .meta
+                    .parallelism_control_trigger_period_sec,
+                parallelism_control_trigger_first_delay_sec: config
+                    .meta
+                    .parallelism_control_trigger_first_delay_sec,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,

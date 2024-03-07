@@ -365,6 +365,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                     retention_seconds: None,
                 },
                 is_replicated: false,
+                vnodes: serde.vnodes().clone(),
             })
             .await;
 
@@ -640,7 +641,7 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer().await.unwrap();
+        test_env.storage.clear_shared_buffer(epoch2).await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -845,7 +846,7 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env.storage.clear_shared_buffer().await.unwrap();
+        test_env.storage.clear_shared_buffer(epoch2).await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1072,7 +1073,7 @@ mod tests {
         drop(writer2);
 
         // Recovery
-        test_env.storage.clear_shared_buffer().await.unwrap();
+        test_env.storage.clear_shared_buffer(epoch2).await;
 
         let vnodes = build_bitmap(0..VirtualNode::COUNT);
         let factory = KvLogStoreFactory::new(
@@ -1375,8 +1376,10 @@ mod tests {
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
         assert_eq!(0, chunk_ids.len());
 
-        // Recovery happens. Test rewind while consuming persisted log. No new data written
-
+        // Recovery happens. Test rewind while consuming persisted log. No new data written.
+        // Writer must be dropped first to ensure vnode assignment is exclusive.
+        drop(reader);
+        drop(writer);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
@@ -1432,7 +1435,9 @@ mod tests {
         assert_eq!(1, chunk_ids.len());
 
         // Recovery happens again. Test rewind with some new data written and flushed.
-
+        // Writer must be dropped first to ensure vnode assignment is exclusive.
+        drop(reader);
+        drop(writer);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),

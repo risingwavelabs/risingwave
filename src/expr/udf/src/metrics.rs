@@ -43,7 +43,7 @@ pub static GLOBAL_METRICS: LazyLock<Metrics> =
 
 impl Metrics {
     fn new(registry: &Registry) -> Self {
-        let labels = &["link", "name"];
+        let labels = &["link", "language", "name", "fragment_id"];
         let udf_success_count = register_int_counter_vec_with_registry!(
             "udf_success_count",
             "Total number of successful UDF calls",

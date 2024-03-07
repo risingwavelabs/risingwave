@@ -17,7 +17,7 @@ mod postgres;
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -32,12 +32,10 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
-
-pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
 #[derive(Debug)]
 pub enum CdcTableType {
@@ -77,10 +75,7 @@ impl CdcTableType {
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(with_properties, schema).await?,
             )),
-            _ => bail!(ConnectorError::Config(anyhow!(
-                "invalid external table type: {:?}",
-                *self
-            ))),
+            _ => bail!("invalid external table type: {:?}", *self),
         }
     }
 }
@@ -405,22 +400,14 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
-                            _ => {
-                                return Err(ConnectorError::Internal(anyhow!(
-                                    "unsupported primary key data type: {}",
-                                    ty
-                                )))
-                            }
+                            _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        Ok((pk.clone(), val))
+                        ConnectorResult::Ok((pk.clone(), val))
                     } else {
-                        Err(ConnectorError::Internal(anyhow!(
-                            "primary key {} cannot be null",
-                            pk
-                        )))
+                        bail!("primary key {} cannot be null", pk);
                     }
                 })
-                .try_collect()?;
+                .try_collect::<_, _, ConnectorError>()?;
 
             let rs_stream = sql
                 .with(Params::from(params))

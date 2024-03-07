@@ -1,0 +1,44 @@
+# This test will test that barrier latency does not spike
+# when there's rate limit on source.
+# The upstream side should backpressure the source reader,
+# but still allow barriers to flow through.
+
+statement ok
+SET STREAMING_PARALLELISM=2;
+
+statement ok
+SET STREAMING_RATE_LIMIT=1;
+
+statement ok
+CREATE TABLE source_table (i1 int)
+WITH (
+    connector = 'datagen',
+    fields.i1.start = '1',
+    fields.i1.end = '5',
+    datagen.rows.per.second = '10000'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SINK sink AS
+    SELECT x.i1 as i1 FROM source_table x
+        JOIN source_table s1 ON x.i1 = s1.i1
+            JOIN source_table s2 ON x.i1 = s2.i1
+                JOIN source_table s3 ON x.i1 = s3.i1
+    WITH (connector = 'blackhole');
+
+# The following sequence of FLUSH should be fast, since barrier should be able to bypass sink.
+# Otherwise, these FLUSH will take a long time to complete, and trigger timeout.
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+flush;
+
+statement ok
+drop sink sink;
+
+statement ok
+drop table source_table;

@@ -25,18 +25,17 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
-use crate::session::{AuthContext, FrontendEnv};
+use crate::session::SessionImpl;
 
 /// Batch task execution context in frontend.
 #[derive(Clone)]
 pub struct FrontendBatchTaskContext {
-    env: FrontendEnv,
-    auth_context: Arc<AuthContext>,
+    session: Arc<SessionImpl>,
 }
 
 impl FrontendBatchTaskContext {
-    pub fn new(env: FrontendEnv, auth_context: Arc<AuthContext>) -> Self {
-        Self { env, auth_context }
+    pub fn new(session: Arc<SessionImpl>) -> Self {
+        Self { session }
     }
 }
 
@@ -47,16 +46,18 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn catalog_reader(&self) -> SysCatalogReaderRef {
         Arc::new(SysCatalogReaderImpl::new(
-            self.env.catalog_reader().clone(),
-            self.env.user_info_reader().clone(),
-            self.env.worker_node_manager_ref(),
-            self.env.meta_client_ref(),
-            self.auth_context.clone(),
+            self.session.env().catalog_reader().clone(),
+            self.session.env().user_info_reader().clone(),
+            self.session.env().worker_node_manager_ref(),
+            self.session.env().meta_client_ref(),
+            self.session.auth_context(),
+            self.session.shared_config(),
+            self.session.env().system_params_manager().get_params(),
         ))
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
-        is_local_address(self.env.server_address(), peer_addr)
+        is_local_address(self.session.env().server_address(), peer_addr)
     }
 
     fn state_store(&self) -> risingwave_storage::store_impl::StateStoreImpl {
@@ -68,11 +69,11 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn client_pool(&self) -> ComputeClientPoolRef {
-        self.env.client_pool()
+        self.session.env().client_pool()
     }
 
     fn get_config(&self) -> &BatchConfig {
-        self.env.batch_config()
+        self.session.env().batch_config()
     }
 
     fn dml_manager(&self) -> risingwave_dml::dml_manager::DmlManagerRef {
@@ -80,7 +81,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn source_metrics(&self) -> Arc<SourceMetrics> {
-        self.env.source_metrics()
+        self.session.env().source_metrics()
     }
 
     fn store_mem_usage(&self, _val: usize) {

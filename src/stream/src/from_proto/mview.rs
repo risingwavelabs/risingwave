@@ -32,7 +32,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let order_key = node
@@ -51,7 +51,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             ($SD:ident) => {
                 MaterializeExecutor::<_, $SD>::new(
                     input,
-                    params.info,
+                    params.info.schema.clone(),
                     store,
                     order_key,
                     params.actor_context,
@@ -66,13 +66,13 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             };
         }
 
-        let executor = if versioned {
+        let exec = if versioned {
             new_executor!(ColumnAwareSerde)
         } else {
             new_executor!(BasicSerde)
         };
 
-        Ok(executor)
+        Ok((params.info, exec).into())
     }
 }
 
@@ -85,7 +85,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let keys = node
@@ -102,9 +102,9 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let executor = MaterializeExecutor::<_, BasicSerde>::new(
+        let exec = MaterializeExecutor::<_, BasicSerde>::new(
             input,
-            params.info,
+            params.info.schema.clone(),
             store,
             keys,
             params.actor_context,
@@ -116,6 +116,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         )
         .await;
 
-        Ok(executor.boxed())
+        Ok((params.info, exec.boxed()).into())
     }
 }

@@ -17,7 +17,7 @@ use std::time::SystemTime;
 
 use anyhow::anyhow;
 use axum::{Extension, Json};
-use prometheus_http_query::response::{RangeVector, Sample};
+use prometheus_http_query::response::{InstantVector, RangeVector, Sample};
 use serde::Serialize;
 
 use super::handlers::{err, DashboardError};
@@ -41,6 +41,7 @@ impl From<&Sample> for PrometheusSample {
 #[derive(Serialize, Debug)]
 pub struct PrometheusVector {
     metric: HashMap<String, String>,
+    // Multiple samples from `RangeVector` or single sample from `InstantVector`.
     sample: Vec<PrometheusSample>,
 }
 
@@ -48,7 +49,18 @@ impl From<&RangeVector> for PrometheusVector {
     fn from(value: &RangeVector) -> Self {
         PrometheusVector {
             metric: value.metric().clone(),
-            sample: value.samples().iter().map(PrometheusSample::from).collect(),
+            sample: value.samples().iter().map(Into::into).collect(),
+        }
+    }
+}
+
+// Note(eric): For backward compatibility, we store the `InstantVector` as a single sample,
+// instead of defining a new struct.
+impl From<&InstantVector> for PrometheusVector {
+    fn from(value: &InstantVector) -> Self {
+        PrometheusVector {
+            metric: value.metric().clone(),
+            sample: vec![value.sample().into()],
         }
     }
 }
@@ -127,39 +139,24 @@ pub async fn list_prometheus_cluster(
 
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ActorBackPressure {
+pub struct FragmentBackPressure {
     output_buffer_blocking_duration: Vec<PrometheusVector>,
 }
-pub async fn list_prometheus_actor_back_pressure(
+pub async fn list_prometheus_fragment_back_pressure(
     Extension(srv): Extension<Service>,
-) -> Result<Json<ActorBackPressure>> {
+) -> Result<Json<FragmentBackPressure>> {
     if let Some(ref client) = srv.prometheus_client {
-        let now = SystemTime::now();
         let back_pressure_query =
             format!("avg(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) / 1000000000", srv.prometheus_selector);
-        let result = client
-            .query_range(
-                back_pressure_query,
-                now.duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64
-                    - 1800,
-                now.duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64,
-                15.0,
-            )
-            .get()
-            .await
-            .map_err(err)?;
+        let result = client.query(back_pressure_query).get().await.map_err(err)?;
         let back_pressure_data = result
             .data()
-            .as_matrix()
+            .as_vector()
             .unwrap()
             .iter()
             .map(PrometheusVector::from)
             .collect();
-        Ok(Json(ActorBackPressure {
+        Ok(Json(FragmentBackPressure {
             output_buffer_blocking_duration: back_pressure_data,
         }))
     } else {

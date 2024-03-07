@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -498,13 +498,23 @@ fn check_cycle_for_sink(
         reader: &CatalogReadGuard,
         sink_index: &HashMap<u32, &SinkCatalog>,
         sink: &SinkCatalog,
-        visited_tables: &mut HashSet<u32>,
+        target_table_id: catalog::TableId,
+        path: &mut Vec<String>,
     ) -> Result<()> {
         for table_id in &sink.dependent_relations {
             if let Ok(table) = reader.get_table_by_id(table_id) {
-                visit_table(session, reader, sink_index, table.as_ref(), visited_tables)?
+                path.push(table.name.clone());
+                visit_table(
+                    session,
+                    reader,
+                    sink_index,
+                    table.as_ref(),
+                    target_table_id,
+                    path,
+                )?;
+                path.pop();
             } else {
-                bail!("table not found: {:?}", table_id);
+                bail!("streaming job not found: {:?}", table_id);
             }
         }
 
@@ -516,30 +526,56 @@ fn check_cycle_for_sink(
         reader: &CatalogReadGuard,
         sink_index: &HashMap<u32, &SinkCatalog>,
         table: &TableCatalog,
-        visited_tables: &mut HashSet<u32>,
+        target_table_id: catalog::TableId,
+        path: &mut Vec<String>,
     ) -> Result<()> {
-        if visited_tables.contains(&table.id.table_id) {
+        if table.id == target_table_id {
+            path.reverse();
+            path.push(table.name.clone());
             return Err(RwError::from(ErrorCode::BindError(
-                "Creating such a sink will result in circular dependency.".to_string(),
+                format!(
+                    "Creating such a sink will result in circular dependency, path = [{}]",
+                    path.join(", ")
+                )
+                .to_string(),
             )));
         }
 
-        let _ = visited_tables.insert(table.id.table_id);
         for sink_id in &table.incoming_sinks {
             if let Some(sink) = sink_index.get(sink_id) {
-                visit_sink(session, reader, sink_index, sink, visited_tables)?
+                path.push(sink.name.clone());
+                visit_sink(session, reader, sink_index, sink, target_table_id, path)?;
+                path.pop();
             } else {
                 bail!("sink not found: {:?}", sink_id);
+            }
+        }
+
+        for table_id in &table.dependent_relations {
+            if let Ok(table) = reader.get_table_by_id(table_id) {
+                path.push(table.name.clone());
+                visit_table(
+                    session,
+                    reader,
+                    sink_index,
+                    table.as_ref(),
+                    target_table_id,
+                    path,
+                )?;
+                path.pop();
+            } else {
+                bail!("streaming job not found: {:?}", table_id);
             }
         }
 
         Ok(())
     }
 
-    let mut visited_tables = HashSet::new();
-    visited_tables.insert(table_id.table_id);
+    let mut path = vec![];
 
-    visit_sink(session, &reader, &sinks, &sink_catalog, &mut visited_tables)
+    path.push(sink_catalog.name.clone());
+
+    visit_sink(session, &reader, &sinks, &sink_catalog, table_id, &mut path)
 }
 
 pub(crate) async fn reparse_table_for_sink(
@@ -693,7 +729,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         F::Plain => SinkFormat::AppendOnly,
         F::Upsert => SinkFormat::Upsert,
         F::Debezium => SinkFormat::Debezium,
-        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal | F::None) => {
             return Err(ErrorCode::BindError(format!("sink format unsupported: {f}")).into());
         }
     };
@@ -702,7 +738,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes) => {
+        e @ (E::Native | E::Csv | E::Bytes | E::None) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };

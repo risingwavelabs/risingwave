@@ -15,7 +15,6 @@
 use std::io;
 use std::marker::{Send, Sync};
 
-use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStreamError;
@@ -28,7 +27,7 @@ use tokio::sync::oneshot::error::RecvError;
 #[derive(Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
 #[thiserror_ext(newtype(name = ObjectError, backtrace, report_debug))]
 pub enum ObjectErrorInner {
-    #[error("s3 error: {}", DisplayErrorContext(&**.0))]
+    #[error("s3 error: {0}")]
     S3(#[source] BoxedError),
     #[error("disk error: {msg}")]
     Disk {

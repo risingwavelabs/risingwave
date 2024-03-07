@@ -15,14 +15,14 @@
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
-    connection, database, function, index, object, schema, sink, source, table, view,
+    connection, database, function, index, object, schema, sink, source, subscription, table, view,
 };
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
-    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView,
+    PbSchema, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView,
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
@@ -134,8 +134,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
             description: value.0.description,
-            // TODO: fix it for model v2.
-            incoming_sinks: vec![],
+            incoming_sinks: value.0.incoming_sinks.into_u32_array(),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
@@ -204,8 +203,34 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
-            // todo: fix this for model v2
-            target_table: None,
+            target_table: value.0.target_table.map(|id| id as _),
+            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
+            created_at_cluster_version: value.1.created_at_cluster_version,
+        }
+    }
+}
+
+impl From<ObjectModel<subscription::Model>> for PbSubscription {
+    fn from(value: ObjectModel<subscription::Model>) -> Self {
+        Self {
+            id: value.0.subscription_id as _,
+            schema_id: value.1.schema_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap() as _,
+            name: value.0.name,
+            plan_pk: value.0.plan_pk.0,
+            dependent_relations: vec![], // todo: deprecate it.
+            distribution_key: value.0.distribution_key.0,
+            owner: value.1.owner_id as _,
+            properties: value.0.properties.0,
+            definition: value.0.definition,
+            initialized_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.initialized_at.timestamp_millis() as _).0,
+            ),
+            created_at_epoch: Some(
+                Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
+            ),
+            stream_job_status: PbStreamJobStatus::Created as _, // todo: deprecate it.
+            column_catalogs: value.0.columns.0,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
@@ -286,7 +311,9 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             link: value.0.link,
             identifier: value.0.identifier,
             body: value.0.body,
+            compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
+            always_retry_on_network_error: value.0.always_retry_on_network_error,
         }
     }
 }

@@ -14,6 +14,7 @@
 
 use risingwave_batch::error::BatchError;
 use risingwave_common::session_config::QueryMode;
+use risingwave_connector::error::ConnectorError;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
@@ -61,6 +62,13 @@ pub enum SchedulerError {
         #[from]
         #[backtrace]
         BatchError,
+    ),
+
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
     ),
 
     #[error(transparent)]

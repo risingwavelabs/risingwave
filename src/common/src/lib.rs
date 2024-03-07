@@ -45,7 +45,7 @@
 #![feature(array_methods)]
 #![feature(btree_cursors)]
 
-#[cfg_attr(not(test), expect(unused_extern_crates))]
+#[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
 
 #[macro_use]
@@ -92,9 +92,9 @@ pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
 // The single source of truth of the pg parameters, Used in ConfigMap and current_cluster_version.
 // The version of PostgreSQL that Risingwave claims to be.
-pub const PG_VERSION: &str = "9.5.0";
+pub const PG_VERSION: &str = "13.14.0";
 /// The version of PostgreSQL that Risingwave claims to be.
-pub const SERVER_VERSION_NUM: i32 = 90500;
+pub const SERVER_VERSION_NUM: i32 = 130014;
 /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time. It is also the default value of `client_encoding`.
 pub const SERVER_ENCODING: &str = "UTF8";
 /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>

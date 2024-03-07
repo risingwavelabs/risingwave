@@ -32,15 +32,11 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
 
-        let vnodes = Arc::new(
-            params
-                .vnode_bitmap
-                .expect("vnodes not set for dynamic filter"),
-        );
+        let vnodes = params.vnode_bitmap.map(Arc::new);
 
         let prost_condition = node.get_condition()?;
         let comparator = prost_condition.get_function_type()?;
@@ -62,17 +58,14 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let left_table = node.get_left_table()?;
         let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
 
-        if cleaned_by_watermark {
-            let state_table_l = WatermarkCacheStateTable::from_table_catalog(
-                node.get_left_table()?,
-                store,
-                Some(vnodes),
-            )
-            .await;
+        let exec = if cleaned_by_watermark {
+            let state_table_l =
+                WatermarkCacheStateTable::from_table_catalog(node.get_left_table()?, store, vnodes)
+                    .await;
 
-            Ok(Box::new(DynamicFilterExecutor::new(
+            DynamicFilterExecutor::new(
                 params.actor_context,
-                params.info,
+                &params.info,
                 source_l,
                 source_r,
                 key_l,
@@ -83,14 +76,15 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 params.env.config().developer.chunk_size,
                 condition_always_relax,
                 cleaned_by_watermark,
-            )))
+            )
+            .boxed()
         } else {
             let state_table_l =
-                StateTable::from_table_catalog(node.get_left_table()?, store, Some(vnodes)).await;
+                StateTable::from_table_catalog(node.get_left_table()?, store, vnodes).await;
 
-            Ok(Box::new(DynamicFilterExecutor::new(
+            DynamicFilterExecutor::new(
                 params.actor_context,
-                params.info,
+                &params.info,
                 source_l,
                 source_r,
                 key_l,
@@ -101,7 +95,10 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 params.env.config().developer.chunk_size,
                 condition_always_relax,
                 cleaned_by_watermark,
-            )))
-        }
+            )
+            .boxed()
+        };
+
+        Ok((params.info, exec).into())
     }
 }

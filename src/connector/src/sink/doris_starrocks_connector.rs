@@ -141,6 +141,14 @@ impl HeaderBuilder {
         self
     }
 
+    pub fn set_partial_update(mut self, partial_update: Option<String>) -> Self {
+        self.header.insert(
+            "partial_update".to_string(),
+            partial_update.unwrap_or_else(|| "false".to_string()),
+        );
+        self
+    }
+
     pub fn build(self) -> HashMap<String, String> {
         self.header
     }

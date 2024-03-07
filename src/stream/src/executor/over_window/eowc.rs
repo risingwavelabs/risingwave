@@ -39,8 +39,8 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
@@ -95,14 +95,14 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// - `WindowState` should output agg result for `curr output row`.
 /// - Recover: iterate through state table, push rows to `WindowState`, ignore ready windows.
 pub struct EowcOverWindowExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     calls: Vec<WindowFuncCall>,
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
@@ -117,30 +117,18 @@ struct ExecutionVars<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> Executor for EowcOverWindowExecutor<S> {
+impl<S: StateStore> Execute for EowcOverWindowExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub actor_ctx: ActorContextRef,
-    pub info: ExecutorInfo,
 
-    pub input: BoxedExecutor,
+    pub input: Executor,
 
+    pub schema: Schema,
     pub calls: Vec<WindowFuncCall>,
     pub partition_key_indices: Vec<usize>,
     pub order_key_index: usize,
@@ -150,13 +138,13 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
-        let input_info = args.input.info();
+        let input_info = args.input.info().clone();
 
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: args.info,
+                schema: args.schema,
                 calls: args.calls,
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
@@ -237,7 +225,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let mut builders = this.info.schema.create_array_builders(chunk.capacity()); // just an estimate
+        let mut builders = this.schema.create_array_builders(chunk.capacity()); // just an estimate
 
         // We assume that the input is sorted by order key.
         for record in chunk.records() {
@@ -318,7 +306,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     for key in keys_to_evict {
                         let order_key = memcmp_encoding::decode_row(
                             &key.order_key,
-                            &[this.info.schema[this.order_key_index].data_type()],
+                            &[this.schema[this.order_key_index].data_type()],
                             &[OrderType::ascending()],
                         )?;
                         let state_row_pk = (&partition_key).chain(order_key).chain(key.pk);

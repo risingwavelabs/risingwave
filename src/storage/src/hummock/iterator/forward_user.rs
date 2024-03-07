@@ -32,7 +32,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     iterator: I,
 
     // Track the last seen full key
-    full_key_tracker: FullKeyTracker<Bytes>,
+    full_key_tracker: FullKeyTracker<Bytes, true>,
 
     /// Last user value
     latest_val: Bytes,
