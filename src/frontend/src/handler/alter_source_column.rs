@@ -153,7 +153,6 @@ pub mod tests {
 
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
-    use risingwave_sqlparser::ast::REDACT_SQL_OPTION;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
