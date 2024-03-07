@@ -200,7 +200,7 @@ impl ArrowFlightUdfClient {
                     return ret;
                 }
             }
-            metrics.udf_failure_count.with_label_values(labels).inc();
+            metrics.udf_retry_count.with_label_values(labels).inc();
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         }
