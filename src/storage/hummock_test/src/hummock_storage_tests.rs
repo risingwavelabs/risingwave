@@ -746,7 +746,7 @@ async fn test_delete_get() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = test_epoch(initial_epoch.next_epoch());
+    let epoch1 = initial_epoch.next_epoch();
 
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
@@ -831,7 +831,7 @@ async fn test_multiple_epoch_sync() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = test_epoch(initial_epoch.next_epoch());
+    let epoch1 = initial_epoch.next_epoch();
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
         (

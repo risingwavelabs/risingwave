@@ -331,7 +331,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        gen_iterator_test_sstable_with_range_tombstones_for_test, iterator_test_bytes_key_of,
+        gen_iterator_test_sstable_with_range_tombstones, iterator_test_bytes_key_of,
         iterator_test_bytes_key_of_epoch, iterator_test_bytes_user_key_of, iterator_test_value_of,
         mock_sstable_store, TEST_KEYS_COUNT,
     };
@@ -529,7 +529,7 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let sst_info = gen_iterator_test_sstable_with_range_tombstones_for_test(
+        let sst_info = gen_iterator_test_sstable_with_range_tombstones(
             0,
             kv_pairs,
             range_tombstones,

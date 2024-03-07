@@ -101,9 +101,8 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        let repeat_num = epoch / test_epoch(1);
-        for e in 1..repeat_num {
-            let epoch = test_epoch(6);
+        for e in 1..6 {
+            let epoch = test_epoch(e);
             let key = iterator_test_table_key_of(e as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),

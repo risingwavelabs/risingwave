@@ -259,7 +259,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        gen_iterator_test_sstable_with_range_tombstones_for_test, iterator_test_user_key_of,
+        gen_iterator_test_sstable_with_range_tombstones, iterator_test_user_key_of,
         mock_sstable_store,
     };
     use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
@@ -510,7 +510,7 @@ mod tests {
     async fn test_delete_range_get() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
-        let sst_info = gen_iterator_test_sstable_with_range_tombstones_for_test(
+        let sst_info = gen_iterator_test_sstable_with_range_tombstones(
             0,
             vec![],
             vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
