@@ -671,6 +671,7 @@ impl GlobalBarrierManagerContext {
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
                 )
@@ -807,6 +808,7 @@ impl GlobalBarrierManagerContext {
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
                 )
