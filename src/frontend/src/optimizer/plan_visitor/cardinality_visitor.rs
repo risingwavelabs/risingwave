@@ -67,6 +67,23 @@ impl PlanVisitor for CardinalityVisitor {
         plan.rows().len().into()
     }
 
+    fn visit_logical_share(&mut self, plan: &plan_node::LogicalShare) -> Cardinality {
+        self.visit(plan.input())
+    }
+
+    fn visit_logical_dedup(&mut self, plan: &plan_node::LogicalDedup) -> Cardinality {
+        let input = self.visit(plan.input());
+        if plan.dedup_cols().is_empty() {
+            input.min(1)
+        } else {
+            input
+        }
+    }
+
+    fn visit_logical_over_window(&mut self, plan: &super::LogicalOverWindow) -> Self::Result {
+        self.visit(plan.input())
+    }
+
     fn visit_logical_agg(&mut self, plan: &plan_node::LogicalAgg) -> Cardinality {
         let input = self.visit(plan.input());
 

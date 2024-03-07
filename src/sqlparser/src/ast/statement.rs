@@ -133,9 +133,10 @@ impl Format {
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
+            "NONE" => Format::None, // used by iceberg
             _ => {
                 return Err(ParserError::ParserError(
-                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE after FORMAT"
+                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
                         .to_string(),
                 ))
             }
@@ -186,8 +187,9 @@ impl Encode {
             "JSON" => Encode::Json,
             "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native, // used internally for schema change
+            "NONE" => Encode::None, // used by iceberg
             _ => return Err(ParserError::ParserError(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
                     .to_string(),
             )),
         })
@@ -219,12 +221,16 @@ impl Parser {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
+        // FIXME: parse input `connector` to enum type instead using string here
         if connector.contains("-cdc") {
             let expected = if cdc_source_job {
                 ConnectorSchema::plain_json()
+            } else if connector.contains("mongodb") {
+                ConnectorSchema::debezium_mongo_json()
             } else {
                 ConnectorSchema::debezium_json()
             };
+
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
@@ -306,6 +312,14 @@ impl ConnectorSchema {
     pub const fn debezium_json() -> Self {
         ConnectorSchema {
             format: Format::Debezium,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
+    pub const fn debezium_mongo_json() -> Self {
+        ConnectorSchema {
+            format: Format::DebeziumMongo,
             row_encode: Encode::Json,
             row_options: Vec::new(),
         }
@@ -741,6 +755,7 @@ pub enum UserOption {
     NoLogin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
+    OAuth(Vec<SqlOption>),
 }
 
 impl fmt::Display for UserOption {
@@ -757,6 +772,9 @@ impl fmt::Display for UserOption {
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::OAuth(options) => {
+                write!(f, "({})", display_comma_separated(options.as_slice()))
+            }
         }
     }
 }
@@ -844,10 +862,14 @@ impl ParseTo for UserOptions {
                             UserOption::EncryptedPassword(AstString::parse_to(parser)?),
                         )
                     }
+                    Keyword::OAUTH => {
+                        let options = parser.parse_options()?;
+                        (&mut builder.password, UserOption::OAuth(options))
+                    }
                     _ => {
                         parser.expected(
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                             token,
                         )?;
                         unreachable!()
@@ -857,7 +879,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                     token,
                 )?
             }

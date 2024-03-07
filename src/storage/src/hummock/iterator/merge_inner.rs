@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use super::Forward;
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatchIterator, SharedBufferVersionedEntry,
+    SharedBufferBatchIterator, SharedBufferVersionedEntryRef,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -100,7 +100,7 @@ impl<I: HummockIterator> MergeIterator<I> {
 
 impl MergeIterator<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_key_entry(&self) -> &SharedBufferVersionedEntry {
+    pub(crate) fn current_key_entry(&self) -> SharedBufferVersionedEntryRef<'_> {
         self.heap
             .peek()
             .expect("no inner iter for imm merge")

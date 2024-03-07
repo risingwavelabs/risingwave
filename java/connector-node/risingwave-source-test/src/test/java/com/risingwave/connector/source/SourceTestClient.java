@@ -29,6 +29,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
 import java.util.UUID;
@@ -142,6 +143,25 @@ public class SourceTestClient {
                         .putProperties("schema.name", "public") // pg only
                         .putProperties("slot.name", "orders") // pg only
                         .putProperties("server.id", "1") // mysql only
+                        .build();
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
+        try {
+            responses = blockingStub.getEventStream(req);
+        } catch (StatusRuntimeException e) {
+            fail("RPC failed: {}", e.getStatus());
+        }
+        return responses;
+    }
+
+    public Iterator<ConnectorServiceProto.GetEventStreamResponse> getEventStream(
+            ConnectorServiceProto.SourceType sourceType,
+            long sourceId,
+            Map<String, String> properties) {
+        ConnectorServiceProto.GetEventStreamRequest req =
+                ConnectorServiceProto.GetEventStreamRequest.newBuilder()
+                        .setSourceId(sourceId)
+                        .setSourceType(sourceType)
+                        .putAllProperties(properties)
                         .build();
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
         try {

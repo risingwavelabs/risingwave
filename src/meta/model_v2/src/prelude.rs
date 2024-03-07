@@ -35,6 +35,7 @@ pub use super::schema::Entity as Schema;
 pub use super::sink::Entity as Sink;
 pub use super::source::Entity as Source;
 pub use super::streaming_job::Entity as StreamingJob;
+pub use super::subscription::Entity as Subscription;
 pub use super::system_parameter::Entity as SystemParameter;
 pub use super::table::Entity as Table;
 pub use super::user::Entity as User;

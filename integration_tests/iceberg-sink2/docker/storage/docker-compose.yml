@@ -4,7 +4,7 @@ services:
   spark:
     depends_on:
       - minio-0
-    image: ghcr.io/icelake-io/icelake-spark:latest
+    image: ghcr.io/icelake-io/icelake-spark:0.1
     environment:
       - SPARK_HOME=/opt/spark
       - PYSPARK_PYTHON=/usr/bin/python3.9
