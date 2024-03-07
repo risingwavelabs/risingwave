@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use anyhow::Result;
@@ -84,6 +85,13 @@ pub struct SingleNodeOpts {
     compactor_addr: Option<String>,
 }
 
+struct NormalizedSingleNodeOpts {
+    frontend_opts: RawOpts,
+    meta_opts: RawOpts,
+    compute_opts: RawOpts,
+    compactor_opts: RawOpts,
+}
+
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
     format!(
         "sqlite://{}/meta_store/single_node.db?mode=rwc",
@@ -96,50 +104,165 @@ pub fn make_single_node_state_store_url(store_directory: &String) -> String {
 }
 
 pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
-    let mut meta_opts = SingleNodeOpts::default_meta_opts();
-    let mut compute_opts = SingleNodeOpts::default_compute_opts();
-    let mut frontend_opts = SingleNodeOpts::default_frontend_opts();
-    let mut compactor_opts = SingleNodeOpts::default_compactor_opts();
+    todo!()
+}
+
+pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNodeOpts {
+    let mut meta_opts = RawOpts::default_meta_opts();
+    let mut compute_opts = RawOpts::default_compute_opts();
+    let mut frontend_opts = RawOpts::default_frontend_opts();
+    let mut compactor_opts = RawOpts::default_compactor_opts();
+
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
-        meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
-        compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
-        frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
-        compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        meta_opts.inner.insert(
+            "--prometheus-listener-addr".to_string(),
+            prometheus_listener_addr.clone(),
+        );
+        compute_opts.inner.insert(
+            "--prometheus-listener-addr".to_string(),
+            prometheus_listener_addr.clone(),
+        );
+        frontend_opts.inner.insert(
+            "--prometheus-listener-addr".to_string(),
+            prometheus_listener_addr.clone(),
+        );
+        compactor_opts.inner.insert(
+            "--prometheus-listener-addr".to_string(),
+            prometheus_listener_addr.clone(),
+        );
     }
     if let Some(config_path) = &opts.config_path {
-        meta_opts.config_path = config_path.clone();
-        compute_opts.config_path = config_path.clone();
-        frontend_opts.config_path = config_path.clone();
-        compactor_opts.config_path = config_path.clone();
+        meta_opts
+            .inner
+            .insert("--config-path".to_string(), config_path.clone());
+        compute_opts
+            .inner
+            .insert("--config-path".to_string(), config_path.clone());
+        frontend_opts
+            .inner
+            .insert("--config-path".to_string(), config_path.clone());
+        compactor_opts
+            .inner
+            .insert("--config-path".to_string(), config_path.clone());
     }
     if let Some(store_directory) = &opts.store_directory {
         let state_store_url = make_single_node_state_store_url(store_directory);
         let meta_store_endpoint = make_single_node_sql_endpoint(store_directory);
-        meta_opts.state_store = Some(state_store_url);
-        meta_opts.sql_endpoint = Some(meta_store_endpoint);
+        meta_opts
+            .inner
+            .insert("--state-store".to_string(), state_store_url);
+        meta_opts
+            .inner
+            .insert("--sql-endpoint".to_string(), meta_store_endpoint);
     }
     if let Some(meta_addr) = &opts.meta_addr {
-        meta_opts.listen_addr = meta_addr.clone();
-        meta_opts.advertise_addr = meta_addr.clone();
-
-        compute_opts.meta_address = meta_addr.parse().unwrap();
-        frontend_opts.meta_addr = meta_addr.parse().unwrap();
-        compactor_opts.meta_address = meta_addr.parse().unwrap();
+        meta_opts
+            .inner
+            .insert("--listen-addr".to_string(), meta_addr.to_string());
+        meta_opts
+            .inner
+            .insert("--advertise-addr".to_string(), meta_addr.to_string());
+        compute_opts
+            .inner
+            .insert("--meta-address".to_string(), meta_addr.to_string());
+        frontend_opts
+            .inner
+            .insert("--meta-addr".to_string(), meta_addr.to_string());
+        compactor_opts
+            .inner
+            .insert("--meta-address".to_string(), meta_addr.to_string());
     }
     if let Some(compute_addr) = &opts.compute_addr {
-        compute_opts.listen_addr = compute_addr.clone();
+        compute_opts
+            .inner
+            .insert("--listen-addr".to_string(), compute_addr.to_string());
     }
     if let Some(frontend_addr) = &opts.frontend_addr {
-        frontend_opts.listen_addr = frontend_addr.clone();
+        frontend_opts
+            .inner
+            .insert("--listen-addr".to_string(), frontend_addr.to_string());
     }
     if let Some(compactor_addr) = &opts.compactor_addr {
-        compactor_opts.listen_addr = compactor_addr.clone();
+        compactor_opts
+            .inner
+            .insert("--listen-addr".to_string(), compactor_addr.to_string());
     }
-    ParsedStandaloneOpts {
-        meta_opts: Some(meta_opts),
-        compute_opts: Some(compute_opts),
-        frontend_opts: Some(frontend_opts),
-        compactor_opts: Some(compactor_opts),
+    NormalizedSingleNodeOpts {
+        frontend_opts,
+        meta_opts,
+        compute_opts,
+        compactor_opts,
+    }
+}
+
+struct RawOpts {
+    inner: HashMap<String, String>,
+}
+
+impl RawOpts {
+    fn default_frontend_opts() -> Self {
+        let opts = [
+            ("--listen-addr", "0.0.0.0:4566"),
+            ("--advertise-addr", "0.0.0.0:4566"),
+            ("--meta-addr", "http://0.0.0.0:5690"),
+            ("--prometheus-listener-addr", "0.0.0.0:1250"),
+            ("--health-check-listener-addr", "0.0.0.0:6786"),
+        ];
+        let inner = opts
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Self { inner }
+    }
+
+    fn default_meta_opts() -> Self {
+        let opts = [
+            ("--listen-addr", "0.0.0.0:5690"),
+            ("--advertise-addr", "0.0.0.0:5690"),
+            ("--dashboard-host", "0.0.0.0:5691"),
+            ("--prometheus-listener_addr", "0.0.0.0:1250"),
+            ("--sql-endpoint", &DEFAULT_SINGLE_NODE_SQL_ENDPOINT.clone()),
+            ("--backend", "sql"),
+            (
+                "--state-store",
+                &DEFAULT_SINGLE_NODE_STATE_STORE_URL.clone(),
+            ),
+            ("--data-directory", "hummock_001"),
+        ];
+        let inner = opts
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Self { inner }
+    }
+
+    fn default_compute_opts() -> Self {
+        let opts = [
+            ("--listen-addr", "0.0.0.0:5688"),
+            ("--advertise-addr", "0.0.0.0:5688"),
+            ("--prometheus-listener-addr", "0.0.0.0:1250"),
+            ("--meta-address", "http://0.0.0.0:5690"),
+            ("--async-stack-trace", "release-verbose"),
+        ];
+        let inner = opts
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Self { inner }
+    }
+
+    fn default_compactor_opts() -> Self {
+        let opts = [
+            ("--listen-addr", "0.0.0.0:6660"),
+            ("--advertise-addr", "0.0.0.0:6660"),
+            ("--prometheus-listener-addr", "0.0.0.0:1250"),
+            ("--meta-address", "http://0.0.0.0:5690"),
+        ];
+        let inner = opts
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Self { inner }
     }
 }
 
