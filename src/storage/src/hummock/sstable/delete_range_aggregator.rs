@@ -122,7 +122,6 @@ impl CompactionDeleteRangeIterator {
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockResult<HummockEpoch> {
-
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         while self.inner.is_valid()
             && self

@@ -741,6 +741,7 @@ impl HummockEventHandler {
                 table_id,
                 new_read_version_sender,
                 is_replicated,
+                vnodes,
             } => {
                 let pinned_version = self.pinned_version.load();
                 let basic_read_version = Arc::new(RwLock::new(
@@ -748,6 +749,7 @@ impl HummockEventHandler {
                         table_id,
                         (**pinned_version).clone(),
                         is_replicated,
+                        vnodes,
                     ),
                 ));
 
@@ -875,7 +877,9 @@ mod tests {
     use bytes::Bytes;
     use futures::FutureExt;
     use itertools::Itertools;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_hummock_sdk::key::TableKey;
@@ -956,6 +960,7 @@ mod tests {
             table_id,
             new_read_version_sender: read_version_tx,
             is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
         })
         .unwrap();
         let (read_version, guard) = read_version_rx.await.unwrap();

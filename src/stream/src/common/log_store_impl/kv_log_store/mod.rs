@@ -365,6 +365,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                     retention_seconds: None,
                 },
                 is_replicated: false,
+                vnodes: serde.vnodes().clone(),
             })
             .await;
 
@@ -1375,8 +1376,10 @@ mod tests {
         let chunk_ids = check_reader(&mut reader, [(epoch3, None)].iter()).await;
         assert_eq!(0, chunk_ids.len());
 
-        // Recovery happens. Test rewind while consuming persisted log. No new data written
-
+        // Recovery happens. Test rewind while consuming persisted log. No new data written.
+        // Writer must be dropped first to ensure vnode assignment is exclusive.
+        drop(reader);
+        drop(writer);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
@@ -1432,7 +1435,9 @@ mod tests {
         assert_eq!(1, chunk_ids.len());
 
         // Recovery happens again. Test rewind with some new data written and flushed.
-
+        // Writer must be dropped first to ensure vnode assignment is exclusive.
+        drop(reader);
+        drop(writer);
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
