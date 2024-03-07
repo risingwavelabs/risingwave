@@ -464,7 +464,7 @@ mod tests {
         let merger = MergeExecutor::for_test(rxs);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
-        let epochs = (10..100u64).step_by(10).collect_vec();
+        let epochs = (10..1000u64).step_by(10).collect_vec();
 
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
