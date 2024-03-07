@@ -78,7 +78,7 @@ function restore() {
   --etcd-endpoints 127.0.0.1:2388 \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-  1>/dev/null
+  1>/dev/null 2>&1
 }
 
 function execute_sql() {
