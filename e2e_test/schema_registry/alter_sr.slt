@@ -38,6 +38,8 @@ SELECT age FROM t_user;
 system ok
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
 
+sleep 5s
+
 # Refresh source schema
 statement ok
 ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
@@ -60,6 +62,8 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 # Push more events with extended fields
 system ok
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 5 user_with_more_fields
+
+sleep 5s
 
 query IIII
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
