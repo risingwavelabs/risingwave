@@ -229,6 +229,18 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
 
+    /// The number of streaming jobs per scaling operation.
+    #[serde(default = "default::meta::parallelism_control_batch_size")]
+    pub parallelism_control_batch_size: usize,
+
+    /// The period of parallelism control trigger.
+    #[serde(default = "default::meta::parallelism_control_trigger_period_sec")]
+    pub parallelism_control_trigger_period_sec: u64,
+
+    /// The first delay of parallelism control.
+    #[serde(default = "default::meta::parallelism_control_trigger_first_delay_sec")]
+    pub parallelism_control_trigger_first_delay_sec: u64,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
@@ -1102,6 +1114,18 @@ pub mod default {
 
         pub fn event_log_channel_max_size() -> u32 {
             10
+        }
+
+        pub fn parallelism_control_batch_size() -> usize {
+            10
+        }
+
+        pub fn parallelism_control_trigger_period_sec() -> u64 {
+            10
+        }
+
+        pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
+            30
         }
     }
 
