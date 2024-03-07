@@ -40,6 +40,3 @@ pub mod stream_graph_visitor;
 pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
-
-#[macro_use]
-pub mod match_util;

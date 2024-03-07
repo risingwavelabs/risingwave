@@ -36,5 +36,8 @@ pub mod tonic;
 pub use thiserror_ext;
 pub use thiserror_ext::*;
 
+/// An error type that is [`Send`], [`Sync`], and `'static`.
 pub trait Error = std::error::Error + Send + Sync + 'static;
+
+/// A boxed error type that is [`Send`], [`Sync`], and `'static`.
 pub type BoxedError = Box<dyn Error>;

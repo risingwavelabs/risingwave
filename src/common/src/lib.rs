@@ -48,6 +48,8 @@
 #[cfg_attr(not(test), allow(unused_extern_crates))]
 extern crate self as risingwave_common;
 
+// Re-export all macros from `risingwave_error` crate for code compatibility,
+// since they were previously defined and exported from `risingwave_common`.
 #[macro_use]
 extern crate risingwave_error;
 pub use risingwave_error::common::{
