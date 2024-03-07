@@ -454,18 +454,6 @@ where
                         Mutation::Resume => {
                             paused = false;
                         }
-                        Mutation::Update(u) => {
-                            if let Some(bitmap) = u.vnode_bitmaps.get(&self.actor_id) {
-                                tracing::debug!(
-                                    "updating vnode bitmap for actor {}",
-                                    self.actor_id
-                                );
-
-                                if let Some(state_table) = self.state_table.as_mut() {
-                                    let _ = state_table.update_vnode_bitmap(bitmap.clone());
-                                }
-                            }
-                        }
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
