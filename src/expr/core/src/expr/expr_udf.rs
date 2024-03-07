@@ -32,6 +32,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
+use risingwave_udf::metrics::GLOBAL_METRICS;
 use risingwave_udf::ArrowFlightUdfClient;
 use thiserror_ext::AsReport;
 
@@ -110,34 +111,57 @@ impl UserDefinedFunction {
         // this will drop invisible rows
         let arrow_input = arrow_array::RecordBatch::try_from(input)?;
 
-        let arrow_output: arrow_array::RecordBatch = match &self.imp {
-            UdfImpl::Wasm(runtime) => runtime.call(&self.identifier, &arrow_input)?,
-            UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+        // metrics
+        let metrics = &*GLOBAL_METRICS;
+        let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned)
+            .unwrap_or(0)
+            .to_string();
+
+        let addr = match &self.imp {
+            UdfImpl::External(client) => client.get_addr(),
+            _ => "",
+        };
+        let labels: &[&str; 3] = &[addr, &self.identifier, fragment_id.as_str()];
+        metrics
+            .udf_input_chunk_rows
+            .with_label_values(labels)
+            .observe(arrow_input.num_rows() as f64);
+        metrics
+            .udf_input_rows
+            .with_label_values(labels)
+            .inc_by(arrow_input.num_rows() as u64);
+        metrics
+            .udf_input_bytes
+            .with_label_values(labels)
+            .inc_by(arrow_input.get_array_memory_size() as u64);
+        let timer = metrics.udf_latency.with_label_values(labels).start_timer();
+
+        let arrow_output_result: Result<arrow_array::RecordBatch> = match &self.imp {
+            UdfImpl::Wasm(runtime) => runtime
+                .call(&self.identifier, &arrow_input)
+                .map_err(|e| e.into()),
+            UdfImpl::JavaScript(runtime) => runtime
+                .call(&self.identifier, &arrow_input)
+                .map_err(|e| e.into()),
             #[cfg(feature = "embedded-python-udf")]
-            UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input)?,
+            UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input),
             UdfImpl::External(client) => {
                 // batch query does not have a fragment_id
-                let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned).unwrap_or(0);
-
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
                     client
-                        .call_with_always_retry_on_network_error(
-                            &self.identifier,
-                            arrow_input,
-                            fragment_id,
-                        )
+                        .call_with_always_retry_on_network_error(&self.identifier, arrow_input)
                         .instrument_await(self.span.clone())
                         .await
                 } else {
                     let result = if disable_retry_count != 0 {
                         client
-                            .call(&self.identifier, arrow_input, fragment_id)
+                            .call(&self.identifier, arrow_input)
                             .instrument_await(self.span.clone())
                             .await
                     } else {
                         client
-                            .call_with_retry(&self.identifier, arrow_input, fragment_id)
+                            .call_with_retry(&self.identifier, arrow_input)
                             .instrument_await(self.span.clone())
                             .await
                     };
@@ -158,9 +182,20 @@ impl UserDefinedFunction {
                     }
                     result
                 };
-                result?
+                result.map_err(|e| e.into())
             }
         };
+        timer.stop_and_record();
+        if arrow_output_result.is_ok() {
+            &metrics.udf_success_count
+        } else {
+            &metrics.udf_failure_count
+        }
+        .with_label_values(labels)
+        .inc();
+
+        let arrow_output = arrow_output_result?;
+
         if arrow_output.num_rows() != input.cardinality() {
             bail!(
                 "UDF returned {} rows, but expected {}",
