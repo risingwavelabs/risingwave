@@ -281,6 +281,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 disable_automatic_parallelism_control: config
                     .meta
                     .disable_automatic_parallelism_control,
+                parallelism_control_batch_size: config.meta.parallelism_control_batch_size,
+                parallelism_control_trigger_period_sec: config
+                    .meta
+                    .parallelism_control_trigger_period_sec,
+                parallelism_control_trigger_first_delay_sec: config
+                    .meta
+                    .parallelism_control_trigger_first_delay_sec,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
