@@ -24,12 +24,15 @@ use risingwave_sqlparser::ast::{
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
+use self::cte_ref::BoundBackCteRef;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
+use crate::binder::bind_context::BindingCteState;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
+mod cte_ref;
 mod join;
 mod share;
 mod subquery;
@@ -65,6 +68,7 @@ pub enum Relation {
     },
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
+    BackCteRef(Box<BoundBackCteRef>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -79,6 +83,7 @@ impl RewriteExprsRecursive for Relation {
             Relation::TableFunction { expr: inner, .. } => {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
+            Relation::BackCteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
             _ => {}
         }
     }
@@ -336,7 +341,7 @@ impl Binder {
         {
             // Handles CTE
 
-            let (share_id, query, mut original_alias) = item.deref().clone();
+            let (share_id, cte_state, mut original_alias) = item.deref().borrow().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
@@ -349,27 +354,41 @@ impl Binder {
                     .collect();
             }
 
-            self.bind_table_to_context(
-                query
-                    .body
-                    .schema()
-                    .fields
-                    .iter()
-                    .map(|f| (false, f.clone())),
-                table_name.clone(),
-                Some(original_alias),
-            )?;
-
-            // Share the CTE.
-            let input_relation = Relation::Subquery(Box::new(BoundSubquery {
-                query,
-                lateral: false,
-            }));
-            let share_relation = Relation::Share(Box::new(BoundShare {
-                share_id,
-                input: input_relation,
-            }));
-            Ok(share_relation)
+            match cte_state {
+                BindingCteState::Init => {
+                    Err(ErrorCode::BindError(format!("Base term of recursive CTE not found, consider write it to left side of the `UNION` operator")).into())
+                }
+                BindingCteState::BaseResolved { schema } => {
+                    self.bind_table_to_context(
+                        schema.fields.iter().map(|f| (false, f.clone())),
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
+                }
+                BindingCteState::Bound { query } => {
+                    self.bind_table_to_context(
+                        query
+                            .body
+                            .schema()
+                            .fields
+                            .iter()
+                            .map(|f| (false, f.clone())),
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    // Share the CTE.
+                    let input_relation = Relation::Subquery(Box::new(BoundSubquery {
+                        query,
+                        lateral: false,
+                    }));
+                    let share_relation = Relation::Share(Box::new(BoundShare {
+                        share_id,
+                        input: input_relation,
+                    }));
+                    Ok(share_relation)
+                }
+            }
         } else {
             self.bind_relation_by_name_inner(
                 schema_name.as_deref(),

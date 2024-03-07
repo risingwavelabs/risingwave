@@ -483,6 +483,12 @@ impl ExprImpl {
                         self.visit_bound_set_expr(left);
                         self.visit_bound_set_expr(right);
                     }
+                    BoundSetExpr::RecursiveUnion {
+                        base, recursive, ..
+                    } => {
+                        self.visit_bound_set_expr(base);
+                        self.visit_bound_set_expr(recursive);
+                    }
                 };
             }
         }
@@ -523,6 +529,10 @@ impl ExprImpl {
                     BoundSetExpr::SetOperation { left, right, .. } => {
                         self.visit_bound_set_expr(left);
                         self.visit_bound_set_expr(right);
+                    }
+                    BoundSetExpr::RecursiveUnion { base, recursive } => {
+                        self.visit_bound_set_expr(base);
+                        self.visit_bound_set_expr(recursive);
                     }
                 }
             }
@@ -592,6 +602,10 @@ impl ExprImpl {
                     BoundSetExpr::SetOperation { left, right, .. } => {
                         self.visit_bound_set_expr(&mut *left);
                         self.visit_bound_set_expr(&mut *right);
+                    }
+                    BoundSetExpr::RecursiveUnion { base, recursive } => {
+                        self.visit_bound_set_expr(&mut *base);
+                        self.visit_bound_set_expr(&mut *recursive);
                     }
                 }
             }

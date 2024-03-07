@@ -54,6 +54,9 @@ impl Planner {
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
+            Relation::BackCteRef(..) => {
+                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
+            }
         }
     }
 

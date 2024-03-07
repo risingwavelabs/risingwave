@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use parse_display::Display;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::TableAlias;
 
@@ -66,6 +67,30 @@ pub struct LateralBindContext {
     pub context: BindContext,
 }
 
+/// If the CTE a recursive one, we may need store it in `cte_to_relation` first, and bind it step by step.
+///
+/// ```sql
+/// WITH RECURSIVE t(n) AS (
+/// ---------------^ Init
+///     VALUES (1)
+///   UNION ALL
+///     SELECT n+1 FROM t WHERE n < 100
+/// # ------------------^BaseResolved
+/// )
+/// SELECT sum(n) FROM t;
+/// # -----------------^Bound
+/// ```
+#[derive(Default, Debug, Clone)]
+pub enum BindingCteState {
+    /// We know nothing about the CTE before resolve the body.
+    #[default]
+    Init,
+    /// We know the schema from after the base term resolved.
+    BaseResolved { schema: Schema },
+    /// We get the whole bound result.
+    Bound { query: BoundQuery },
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct BindContext {
     // Columns of all tables.
@@ -80,7 +105,7 @@ pub struct BindContext {
     pub column_group_context: ColumnGroupContext,
     /// Map the cte's name to its Relation::Subquery.
     /// The `ShareId` of the value is used to help the planner identify the share plan.
-    pub cte_to_relation: HashMap<String, Rc<(ShareId, BoundQuery, TableAlias)>>,
+    pub cte_to_relation: HashMap<String, Rc<RefCell<(ShareId, BindingCteState, TableAlias)>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
 }

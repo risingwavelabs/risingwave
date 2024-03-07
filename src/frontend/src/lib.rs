@@ -35,6 +35,7 @@
 #![feature(round_ties_even)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
+#![feature(entry_insert)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
