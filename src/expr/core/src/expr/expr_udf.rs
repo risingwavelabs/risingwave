@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, Error};
 use arrow_schema::{Field, Fields, Schema};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-python-udf")]
@@ -113,10 +113,10 @@ impl UserDefinedFunction {
 
         // metrics
         let metrics = &*GLOBAL_METRICS;
+        // batch query does not have a fragment_id
         let fragment_id = FRAGMENT_ID::try_with(ToOwned::to_owned)
             .unwrap_or(0)
             .to_string();
-
         let addr = match &self.imp {
             UdfImpl::External(client) => client.get_addr(),
             _ => "",
@@ -136,7 +136,7 @@ impl UserDefinedFunction {
             .inc_by(arrow_input.get_array_memory_size() as u64);
         let timer = metrics.udf_latency.with_label_values(labels).start_timer();
 
-        let arrow_output_result: Result<arrow_array::RecordBatch> = match &self.imp {
+        let arrow_output_result: Result<arrow_array::RecordBatch, Error> = match &self.imp {
             UdfImpl::Wasm(runtime) => runtime
                 .call(&self.identifier, &arrow_input)
                 .map_err(|e| e.into()),
@@ -146,7 +146,6 @@ impl UserDefinedFunction {
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input),
             UdfImpl::External(client) => {
-                // batch query does not have a fragment_id
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
                     client
