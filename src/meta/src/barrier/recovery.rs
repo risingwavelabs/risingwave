@@ -739,13 +739,13 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    /// We infer the new parallelism strategy based on the prior level of parallelism of the table.
-    /// If the parallelism strategy is Fixed or Auto, we won't make any modifications.
-    /// For Custom, we'll assess the parallelism of the core fragment;
-    /// if the parallelism is higher than the currently available parallelism, we'll set it to Auto.
-    /// If it's lower, we'll set it to Fixed.
-    /// If it was previously set to Adaptive, but the DefaultParallelism in the configuration isn’t Full,
-    /// and it matches the actual fragment parallelism, in this case, it will be handled by downgrading to Fixed.
+    // We infer the new parallelism strategy based on the prior level of parallelism of the table.
+    // If the parallelism strategy is Fixed or Auto, we won't make any modifications.
+    // For Custom, we'll assess the parallelism of the core fragment;
+    // if the parallelism is higher than the currently available parallelism, we'll set it to Adaptive.
+    // If it's lower, we'll set it to Fixed.
+    // If it was previously set to Adaptive, but the default_parallelism in the configuration isn’t Full,
+    // and it matches the actual fragment parallelism, in this case, it will be handled by downgrading to Fixed.
     fn derive_target_parallelism(
         available_parallelism: usize,
         assigned_parallelism: TableParallelism,
