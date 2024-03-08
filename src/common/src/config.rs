@@ -350,7 +350,7 @@ pub struct MetaConfig {
     pub enable_dropped_column_reclaim: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
