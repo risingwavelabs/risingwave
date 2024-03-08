@@ -337,7 +337,7 @@ pub struct MetaConfig {
     pub developer: MetaDeveloperConfig,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
