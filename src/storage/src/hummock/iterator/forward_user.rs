@@ -834,7 +834,8 @@ mod tests {
             read_options.clone(),
         )];
 
-        let min_epoch = test_epoch((TEST_KEYS_COUNT / 5) as u64);
+        let min_count = (TEST_KEYS_COUNT / 5) as u64;
+        let min_epoch = test_epoch(min_count);
         let mi = MergeIterator::new(iters);
         let mut ui =
             UserIterator::for_test_with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch);

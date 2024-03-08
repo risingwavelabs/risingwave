@@ -1070,7 +1070,8 @@ mod tests {
 
         let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
 
-        let min_epoch = test_epoch((TEST_KEYS_COUNT / 5) as u64);
+        let min_count = (TEST_KEYS_COUNT / 5) as u64;
+        let min_epoch = test_epoch(min_count);
         let mi = MergeIterator::new(backward_iters);
         let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();
@@ -1085,7 +1086,7 @@ mod tests {
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - (min_epoch / test_epoch(1)) as usize;
+        let expect_count = TEST_KEYS_COUNT - min_count as usize;
         assert_eq!(i, expect_count);
     }
 }

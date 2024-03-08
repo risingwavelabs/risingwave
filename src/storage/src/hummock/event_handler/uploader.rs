@@ -1478,8 +1478,10 @@ mod tests {
         // When we get IMM_MERGE_THRESHOLD epochs, there should be merging task started for sealed
         // data. Then we await the merging task and check the uploader's state again.
         let mut merged_imms = VecDeque::new();
+
+        let mut epoch = INITIAL_EPOCH;
         for i in 1..=ckpt_intervals {
-            let epoch = INITIAL_EPOCH + test_epoch(i);
+            epoch.inc_epoch();
             let mut imm1 = gen_imm(epoch).await;
             let mut imm2 = gen_imm(epoch).await;
 
@@ -1504,7 +1506,8 @@ mod tests {
                 assert_eq!(2, imms.len());
             }
 
-            let epoch_cnt = ((epoch - INITIAL_EPOCH) / test_epoch(1)) as usize;
+            let epoch_cnt = i;
+
             if epoch_cnt < imm_merge_threshold {
                 assert!(uploader.sealed_data.merging_tasks.is_empty());
                 assert!(uploader.sealed_data.spilled_data.is_empty());
