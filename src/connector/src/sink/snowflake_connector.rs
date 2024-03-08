@@ -74,9 +74,15 @@ impl SnowflakeHttpClient {
         let request = builder
             .body(Body::from(self.s3.clone()))
             .map_err(|err| SinkError::Snowflake(err.to_string()))?;
-        let response = client.request(request).await.map_err(|err| SinkError::Snowflake(err.to_string()))?;
+        let response = client
+            .request(request)
+            .await
+            .map_err(|err| SinkError::Snowflake(err.to_string()))?;
         if response.status() != StatusCode::OK {
-            return Err(SinkError::Snowflake(format!("failed to make http request, error code: {}", response.status())));
+            return Err(SinkError::Snowflake(format!(
+                "failed to make http request, error code: {}",
+                response.status()
+            )));
         }
         Ok(())
     }
