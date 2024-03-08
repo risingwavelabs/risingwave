@@ -372,6 +372,11 @@ impl IcebergConfig {
                     .insert("s3.endpoint".to_string(), endpoint.clone().to_string());
             }
 
+            if let Some(region) = &self.region {
+                java_catalog_configs
+                    .insert("client.region".to_string(), region.clone().to_string());
+            }
+
             java_catalog_configs.insert(
                 "s3.access-key-id".to_string(),
                 self.access_key.clone().to_string(),
