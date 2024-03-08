@@ -14,13 +14,11 @@
 
 use std::collections::HashMap;
 
-use bytes::{BufMut, Bytes, BytesMut};
 use http::request::Builder;
-use hyper::body::{Body, Sender};
+use hyper::body::Body;
 use hyper::client::HttpConnector;
-use hyper::{body, Client, Request, StatusCode};
+use hyper::{Client, Request, StatusCode};
 use hyper_tls::HttpsConnector;
-use tokio::task::JoinHandle;
 
 use super::doris_starrocks_connector::POOL_IDLE_TIMEOUT;
 use super::{Result, SinkError};
