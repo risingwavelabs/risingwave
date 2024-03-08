@@ -34,7 +34,7 @@ use with_options::WithOptions;
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_SUCCESS_STATUS, STARROCKS_DELETE_SIGN,
 };
-use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, RowEncoder};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::sink::writer::SinkWriterExt;
@@ -358,12 +358,7 @@ impl StarrocksSinkWriter {
             inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_starrocks(
-                schema,
-                None,
-                TimestampHandlingMode::String,
-                decimal_map,
-            ),
+            row_encoder: JsonEncoder::new_with_starrocks(schema, None, decimal_map),
         })
     }
 
