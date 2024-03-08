@@ -41,8 +41,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{LocalNotification};
-use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
@@ -746,7 +745,6 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-<<<<<<< HEAD
     // We infer the new parallelism strategy based on the prior level of parallelism of the table.
     // If the parallelism strategy is Fixed or Auto, we won't make any modifications.
     // For Custom, we'll assess the parallelism of the core fragment;
