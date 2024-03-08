@@ -262,7 +262,7 @@ error: should not format error directly
 LL |     let _ = anyhow!("some error occurred: {}", err);
    |                                                ^^^
    |
-   = help: consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
 
 error: should not format error directly
   --> $DIR/format_error.rs:57:50
@@ -270,7 +270,111 @@ error: should not format error directly
 LL |     let _ = anyhow!("some error occurred: {:?}", err);
    |                                                  ^^^
    |
-   = help: consider using `anyhow::Error::context`, `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
 
-error: aborting due to 34 previous errors
+error: should not format error directly
+  --> $DIR/format_error.rs:63:27
+   |
+LL |     let _ = format!("{}", anyhow_err);
+   |                           ^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:64:27
+   |
+LL |     let _ = format!("{}", &anyhow_err);
+   |                           ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:65:27
+   |
+LL |     let _ = format!("{}", &&anyhow_err);
+   |                           ^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:68:29
+   |
+LL |     tracing::field::display(&anyhow_err);
+   |                             ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and recording the error as a field with `error = %<error>.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:69:27
+   |
+LL |     tracing::field::debug(make_anyhow_err());
+   |                           ^^^^^^^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and recording the error as a field with `error = %<error>.as_report()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:71:24
+   |
+LL |     let _ = anyhow_err.to_string();
+   |                        ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:72:28
+   |
+LL |     let _ = (&&anyhow_err).to_string();
+   |                            ^^^^^^^^^^^
+   |
+   = help: consider importing `thiserror_ext::AsReport` and using `.to_report_string()` instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:74:27
+   |
+LL |     let _ = anyhow!("{}", anyhow_err);
+   |                           ^^^^^^^^^^
+   |
+   = help: consider removing the redundant wrapping of `anyhow::anyhow!(..)`
+
+error: should not format error directly
+  --> $DIR/format_error.rs:75:50
+   |
+LL |     let _ = anyhow!("some error occurred: {:?}", anyhow_err);
+   |                                                  ^^^^^^^^^^
+   |
+   = help: consider using `.context(..)` to attach additional message to the error and make it an error source instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:79:27
+   |
+LL |     let _ = anyhow!("{}", err.as_report());
+   |                           ^^^^^^^^^^^^^^^
+   |
+   = help: consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting its report
+
+error: should not format error directly
+  --> $DIR/format_error.rs:80:48
+   |
+LL |     let _ = anyhow!("some error occurred: {}", err.as_report());
+   |                                                ^^^^^^^^^^^^^^^
+   |
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:81:29
+   |
+LL |     let _ = anyhow!("{:?}", anyhow_err.as_report());
+   |                             ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting its report
+
+error: should not format error directly
+  --> $DIR/format_error.rs:82:50
+   |
+LL |     let _ = anyhow!("some error occurred: {:?}", anyhow_err.as_report());
+   |                                                  ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+
+error: aborting due to 47 previous errors
 

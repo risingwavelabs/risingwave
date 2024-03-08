@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use risingwave_common::bail;
 
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
+use crate::error::ConnectorResult;
 use crate::extract_key_config;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -32,12 +35,33 @@ pub struct DebeziumParser {
     payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+
+    props: DebeziumProps,
+}
+
+pub const DEBEZIUM_IGNORE_KEY: &str = "ignore_key";
+
+#[derive(Debug, Clone, Default)]
+pub struct DebeziumProps {
+    // Ignore the key part of the message.
+    // If enabled, we don't take the key part into message accessor.
+    pub ignore_key: bool,
+}
+
+impl DebeziumProps {
+    pub fn from(props: &BTreeMap<String, String>) -> Self {
+        let ignore_key = props
+            .get(DEBEZIUM_IGNORE_KEY)
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        Self { ignore_key }
+    }
 }
 
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
-) -> anyhow::Result<AccessBuilderImpl> {
+) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Avro(_) => {
             let config = DebeziumAvroParserConfig::new(config).await?;
@@ -60,26 +84,35 @@ impl DebeziumParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let (key_config, key_type) = extract_key_config!(props);
         let key_builder = build_accessor_builder(key_config, key_type).await?;
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
+        let debezium_props = if let ProtocolProperties::Debezium(props) = props.protocol_config {
+            props
+        } else {
+            unreachable!(
+                "expecting Debezium protocol properties but got {:?}",
+                props.protocol_config
+            )
+        };
         Ok(Self {
             key_builder,
             payload_builder,
             rw_columns,
             source_ctx,
+            props: debezium_props,
         })
     }
 
-    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> anyhow::Result<Self> {
+    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> ConnectorResult<Self> {
         let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         Self::new(props, rw_columns, Default::default()).await
     }
@@ -89,11 +122,12 @@ impl DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         // tombetone messages are handled implicitly by these accessors
-        let key_accessor = match key {
-            None => None,
-            Some(data) => Some(self.key_builder.generate_accessor(data).await?),
+        let key_accessor = match (key, self.props.ignore_key) {
+            (None, false) => None,
+            (Some(data), false) => Some(self.key_builder.generate_accessor(data).await?),
+            (_, true) => None,
         };
         let payload_accessor = match payload {
             None => None,
@@ -137,7 +171,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -146,7 +180,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<ParseResult> {
+    ) -> ConnectorResult<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }
@@ -183,7 +217,7 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         let mut source_ctx = SourceContext::default();
         source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());

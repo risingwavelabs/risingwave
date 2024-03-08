@@ -64,7 +64,7 @@ fi
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
-cargo build --bin risectl --features "rw-static-link" --profile release
+cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"
@@ -94,7 +94,9 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   dnf install -y gh
 
   echo "--- Release create"
+  set +e
   response=$(gh api repos/risingwavelabs/risingwave/releases/tags/${BUILDKITE_TAG} 2>&1)
+  set -euo pipefail
   if [[ $response == *"Not Found"* ]]; then
     echo "Tag ${BUILDKITE_TAG} does not exist. Creating release..."
     gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
@@ -116,7 +118,7 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 
   echo "--- Release upload risingwave-all-in-one asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux-all-in-one.tar.gz risingwave libs
-  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-{ARCH}-unknown-linux-all-in-one.tar.gz
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux-all-in-one.tar.gz
 fi
 
 

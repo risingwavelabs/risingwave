@@ -21,6 +21,7 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
+use crate::error::ConnectorResult;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::unified::avro::{
@@ -48,7 +49,7 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> anyhow::Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let schema = self.schema_resolver.get(schema_id).await?;
         self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
@@ -70,7 +71,7 @@ impl DebeziumAvroAccessBuilder {
     pub fn new(
         config: DebeziumAvroParserConfig,
         encoding_type: EncodingType,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
             schema_resolver,
@@ -99,7 +100,7 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(encoding_config: EncodingProperties) -> anyhow::Result<Self> {
+    pub async fn new(encoding_config: EncodingProperties) -> ConnectorResult<Self> {
         let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
@@ -121,11 +122,11 @@ impl DebeziumAvroParserConfig {
         })
     }
 
-    pub fn extract_pks(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+    pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(&self.key_schema)
     }
 
-    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
         avro_schema_to_column_descs(avro_schema_skip_union(avro_extract_field_schema(
             &self.outer_schema,
             Some("before"),
@@ -348,7 +349,7 @@ mod tests {
 
     #[ignore]
     #[tokio::test]
-    async fn test_debezium_avro_parser() -> anyhow::Result<()> {
+    async fn test_debezium_avro_parser() -> crate::error::ConnectorResult<()> {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));

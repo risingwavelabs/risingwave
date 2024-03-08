@@ -17,10 +17,12 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -30,7 +32,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, FileSelector, IcebergScanExecutor,
+};
 use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
@@ -40,7 +44,7 @@ pub struct SourceExecutor {
     column_ids: Vec<ColumnId>,
     metrics: Arc<SourceMetrics>,
     source_id: TableId,
-    split: SplitImpl,
+    split_list: Vec<SplitImpl>,
 
     schema: Schema,
     identity: String,
@@ -75,18 +79,9 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
 
-        let source_reader = SourceReader {
-            config,
-            columns,
-            parser_config,
-            connector_message_buffer_size: source
-                .context()
-                .get_config()
-                .developer
-                .connector_message_buffer_size,
-        };
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: source.context().get_config().developer.chunk_size,
+            rate_limit: None,
         };
 
         let column_ids: Vec<_> = source_node
@@ -95,7 +90,11 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
             .collect();
 
-        let split = SplitImpl::restore_from_bytes(&source_node.split)?;
+        let split_list = source_node
+            .split
+            .iter()
+            .map(|split| SplitImpl::restore_from_bytes(split).unwrap())
+            .collect_vec();
 
         let fields = source_node
             .columns
@@ -109,16 +108,45 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .collect();
         let schema = Schema::new(fields);
 
-        Ok(Box::new(SourceExecutor {
-            source: source_reader,
-            column_ids,
-            metrics: source.context().source_metrics(),
-            source_id: TableId::new(source_node.source_id),
-            split,
-            schema,
-            identity: source.plan_node().get_identity().clone(),
-            source_ctrl_opts,
-        }))
+        if let ConnectorProperties::Iceberg(iceberg_properties) = config {
+            let iceberg_properties: IcebergProperties = *iceberg_properties;
+            assert_eq!(split_list.len(), 1);
+            if let SplitImpl::Iceberg(split) = &split_list[0] {
+                let split: IcebergSplit = split.clone();
+                Ok(Box::new(IcebergScanExecutor::new(
+                    iceberg_properties.to_iceberg_config(),
+                    Some(split.snapshot_id),
+                    FileSelector::FileList(split.files),
+                    source.context.get_config().developer.chunk_size,
+                    schema,
+                    source.plan_node().get_identity().clone(),
+                )))
+            } else {
+                unreachable!()
+            }
+        } else {
+            let source_reader = SourceReader {
+                config,
+                columns,
+                parser_config,
+                connector_message_buffer_size: source
+                    .context()
+                    .get_config()
+                    .developer
+                    .connector_message_buffer_size,
+            };
+
+            Ok(Box::new(SourceExecutor {
+                source: source_reader,
+                column_ids,
+                metrics: source.context().source_metrics(),
+                source_id: TableId::new(source_node.source_id),
+                split_list,
+                schema,
+                identity: source.plan_node().get_identity().clone(),
+                source_ctrl_opts,
+            }))
+        }
     }
 }
 
@@ -151,7 +179,7 @@ impl SourceExecutor {
         ));
         let stream = self
             .source
-            .to_stream(Some(vec![self.split]), self.column_ids, source_ctx)
+            .to_stream(Some(self.split_list), self.column_ids, source_ctx)
             .await?;
 
         #[for_await]

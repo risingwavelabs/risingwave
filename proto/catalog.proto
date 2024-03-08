@@ -159,6 +159,26 @@ message Sink {
   optional string created_at_cluster_version = 23;
 }
 
+message Subscription {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated common.ColumnOrder plan_pk = 4;
+  repeated int32 distribution_key = 5;
+  map<string, string> properties = 6;
+  repeated plan_common.ColumnCatalog column_catalogs = 7;
+  uint32 database_id = 8;
+  uint32 schema_id = 9;
+  repeated uint32 dependent_relations = 10;
+  optional uint64 initialized_at_epoch = 11;
+  optional uint64 created_at_epoch = 12;
+  uint32 owner = 13;
+  StreamJobStatus stream_job_status = 14;
+
+  optional string initialized_at_cluster_version = 15;
+  optional string created_at_cluster_version = 16;
+}
+
 message Connection {
   message PrivateLinkService {
     enum PrivateLinkProvider {
@@ -219,7 +239,11 @@ message Function {
   string language = 7;
   optional string link = 8;
   optional string identifier = 10;
+  // The source code of the function.
   optional string body = 14;
+  // The zstd-compressed binary of the function.
+  optional bytes compressed_binary = 17;
+  bool always_retry_on_network_error = 16;
 
   oneof kind {
     ScalarFunction scalar = 11;

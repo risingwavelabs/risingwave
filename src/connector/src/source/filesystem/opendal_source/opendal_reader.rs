@@ -22,6 +22,7 @@ use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
+use crate::error::ConnectorResult;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
@@ -50,7 +51,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         let connector = Src::new_enumerator(properties)?;
         let opendal_reader = OpendalReader {
             connector,
@@ -67,7 +68,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
 }
 
 impl<Src: OpendalSource> OpendalReader<Src> {
-    #[try_stream(boxed, ok = StreamChunk, error = anyhow::Error)]
+    #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
@@ -107,7 +108,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         }
     }
 
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     pub async fn stream_read_object(
         op: Operator,
         split: OpendalFsSplit<Src>,
@@ -150,6 +151,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             offset += len;
             batch_size += len;
             batch.push(msg);
+
             if batch.len() >= max_chunk_size {
                 source_ctx
                     .metrics

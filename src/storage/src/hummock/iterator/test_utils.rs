@@ -18,8 +18,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::MetricLevel;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -54,7 +55,10 @@ pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
-        InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
+        InMemObjectStore::new().monitored(
+            Arc::new(ObjectStoreMetrics::unused()),
+            ObjectStoreConfig::default(),
+        ),
     )))
 }
 
@@ -75,8 +79,9 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
     }))
 }
 
+// Generate test table key with vnode 0
 pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
-    format!("key_test_{:05}", idx).as_bytes().to_vec()
+    prefix_slice_with_vnode(VirtualNode::ZERO, format!("key_test_{:05}", idx).as_bytes()).to_vec()
 }
 
 pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {

@@ -31,6 +31,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -68,7 +69,7 @@ use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
     NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
-    StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
+    StreamingJob, SubscriptionId, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -100,6 +101,7 @@ pub enum StreamingJobId {
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+    Subscription(SubscriptionId),
 }
 
 impl StreamingJobId {
@@ -108,6 +110,7 @@ impl StreamingJobId {
         match self {
             StreamingJobId::MaterializedView(id)
             | StreamingJobId::Sink(id)
+            | StreamingJobId::Subscription(id)
             | StreamingJobId::Table(_, id)
             | StreamingJobId::Index(id) => *id,
         }
@@ -436,7 +439,7 @@ impl DdlController {
                     mgr.catalog_manager
                         .cancel_create_source_procedure(&source)
                         .await?;
-                    return Err(e.into());
+                    return Err(e);
                 }
 
                 mgr.catalog_manager
@@ -804,7 +807,7 @@ impl DdlController {
     pub(crate) async fn validate_cdc_table(
         table: &Table,
         table_fragments: &TableFragments,
-    ) -> anyhow::Result<()> {
+    ) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
             .values()
@@ -820,7 +823,7 @@ impl DdlController {
 
         async fn new_enumerator_for_validate<P: SourceProperties>(
             source_props: P,
-        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+        ) -> Result<P::SplitEnumerator, ConnectorError> {
             P::SplitEnumerator::new(source_props, SourceEnumeratorContext::default().into()).await
         }
 
@@ -1135,6 +1138,7 @@ impl DdlController {
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
+                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Sink),
                 };
 
                 let version = self
@@ -1187,6 +1191,15 @@ impl DdlController {
                 mgr.catalog_manager
                     .drop_relation(
                         RelationIdEnum::Index(index_id),
+                        mgr.fragment_manager.clone(),
+                        drop_mode,
+                    )
+                    .await?
+            }
+            StreamingJobId::Subscription(subscription_id) => {
+                mgr.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Subscription(subscription_id),
                         mgr.fragment_manager.clone(),
                         drop_mode,
                     )
@@ -1509,6 +1522,11 @@ impl DdlController {
                     .cancel_create_sink_procedure(sink, target_table)
                     .await;
             }
+            StreamingJob::Subscription(subscription) => {
+                mgr.catalog_manager
+                    .cancel_create_subscription_procedure(subscription)
+                    .await;
+            }
             StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     mgr.catalog_manager
@@ -1594,6 +1612,11 @@ impl DdlController {
                 }
 
                 version
+            }
+            StreamingJob::Subscription(subscription) => {
+                mgr.catalog_manager
+                    .finish_create_subscription_procedure(internal_tables, subscription)
+                    .await?
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
@@ -1927,6 +1950,11 @@ impl DdlController {
                         .alter_database_name(database_id, new_name)
                         .await
                 }
+                alter_name_request::Object::SubscriptionId(sink_id) => {
+                    mgr.catalog_manager
+                        .alter_subscription_name(sink_id, new_name)
+                        .await
+                }
             },
             MetadataManager::V2(mgr) => {
                 let (obj_type, id) = match relation {
@@ -1942,6 +1970,9 @@ impl DdlController {
                     }
                     alter_name_request::Object::DatabaseId(id) => {
                         (ObjectType::Database, id as ObjectId)
+                    }
+                    alter_name_request::Object::SubscriptionId(id) => {
+                        (ObjectType::Subscription, id as ObjectId)
                     }
                 };
                 mgr.catalog_controller
@@ -1970,6 +2001,7 @@ impl DdlController {
                     Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
                     Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
                     Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
+                    Object::SubscriptionId(id) => (ObjectType::Subscription, id as ObjectId),
                 };
                 mgr.catalog_controller
                     .alter_owner(obj_type, id, owner_id as _)
@@ -2008,6 +2040,9 @@ impl DdlController {
                     }
                     alter_set_schema_request::Object::ConnectionId(id) => {
                         (ObjectType::Connection, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SubscriptionId(id) => {
+                        (ObjectType::Subscription, id as ObjectId)
                     }
                 };
                 mgr.catalog_controller

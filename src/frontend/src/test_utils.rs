@@ -802,7 +802,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserId>,
+        _granted_by: UserId,
         _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,
@@ -931,7 +931,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
-        unimplemented!()
+        Ok(HummockVersion::default())
     }
 
     async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {

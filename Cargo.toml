@@ -90,7 +90,8 @@ aws-sdk-s3 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-ec2 = { version = "1", default-features = false, features = [
+# To bump the version of aws-sdk-ec2, check the README of https://github.com/risingwavelabs/rw-aws-sdk-ec2
+aws-sdk-ec2 = { package = "rw-aws-sdk-ec2", version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
@@ -122,7 +123,7 @@ tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "58c1f003484449d7c6dd693b348bf19dd44889cb" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "56943d203464d32701c20d74b278b6b3ef2eefc7", features = [
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "54fd72fbd1dd8c592f05eeeb79223c8a6a33c297", features = [
   "prometheus",
 ] }
 arrow-array = "50"
@@ -136,6 +137,7 @@ arrow-ord = "50"
 arrow-row = "50"
 arrow-udf-js = "0.1"
 arrow-udf-wasm = { version = "0.1.2", features = ["build"] }
+arrow-udf-python = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "6c32f71" }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
 arrow-cast-deltalake = { package = "arrow-cast", version = "48.0.1" }

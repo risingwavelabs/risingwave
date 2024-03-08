@@ -20,7 +20,6 @@ use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
-use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::SourceCtrlOpts;
@@ -39,7 +38,6 @@ const CHUNK_SIZE: usize = 1024;
 #[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -64,7 +62,6 @@ impl<S: StateStore> FsListExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -74,7 +71,6 @@ impl<S: StateStore> FsListExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -193,21 +189,9 @@ impl<S: StateStore> FsListExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for FsListExecutor<S> {
+impl<S: StateStore> Execute for FsListExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -217,7 +201,6 @@ impl<S: StateStore> Debug for FsListExecutor<S> {
             f.debug_struct("FsListExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("FsListExecutor").finish()

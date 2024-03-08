@@ -22,9 +22,9 @@ use anyhow::anyhow;
 use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
@@ -49,7 +49,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source  for external
     stream_source_core: StreamSourceCore<S>,
@@ -70,7 +69,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -79,7 +77,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
     ) -> StreamResult<Self> {
         Ok(Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -364,7 +361,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
-        let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -397,16 +393,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             }
                         }
                         self.take_snapshot_and_clear_cache(epoch).await?;
-
-                        self.metrics
-                            .source_row_per_barrier
-                            .with_label_values(&[
-                                self.actor_ctx.id.to_string().as_str(),
-                                self.stream_source_core.source_id.to_string().as_ref(),
-                                self.actor_ctx.fragment_id.to_string().as_str(),
-                            ])
-                            .inc_by(metric_row_per_barrier);
-                        metric_row_per_barrier = 0;
 
                         yield msg;
                     }
@@ -442,7 +428,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 self.stream_source_core.latest_split_info.get_mut(id).map(
                                     |origin_split| {
                                         origin_split.update_in_place(offset.clone())?;
-                                        Ok::<_, anyhow::Error>((id.clone(), origin_split.clone()))
+                                        Ok::<_, ConnectorError>((id.clone(), origin_split.clone()))
                                     },
                                 )
                             })
@@ -480,21 +466,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for FsSourceExecutor<S> {
+impl<S: StateStore> Execute for FsSourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -503,7 +477,6 @@ impl<S: StateStore> Debug for FsSourceExecutor<S> {
         f.debug_struct("FsSourceExecutor")
             .field("source_id", &self.stream_source_core.source_id)
             .field("column_ids", &self.stream_source_core.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }

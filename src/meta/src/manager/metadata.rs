@@ -637,6 +637,19 @@ impl MetadataManager {
         }
     }
 
+    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        match &self {
+            MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.node_actor_count().await),
+            MetadataManager::V2(mgr) => {
+                let actor_cnt = mgr.catalog_controller.worker_actor_count().await?;
+                Ok(actor_cnt
+                    .into_iter()
+                    .map(|(id, cnt)| (id as WorkerId, cnt))
+                    .collect())
+            }
+        }
+    }
+
     pub async fn count_streaming_job(&self) -> MetaResult<usize> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr.fragment_manager.count_streaming_job().await),
@@ -645,20 +658,6 @@ impl MetadataManager {
                 .list_streaming_job_states()
                 .await
                 .map(|x| x.len()),
-        }
-    }
-
-    pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
-        match self {
-            MetadataManager::V1(mgr) => {
-                mgr.fragment_manager
-                    .drop_table_fragments_vec(table_ids)
-                    .await
-            }
-            MetadataManager::V2(_) => {
-                // Do nothing. Need to refine drop and cancel process.
-                Ok(())
-            }
         }
     }
 

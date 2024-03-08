@@ -26,7 +26,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
-    DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
+    DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
     SourceStreamChunkBuilder, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::external::CdcOffset;
@@ -45,8 +45,8 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
 
@@ -55,13 +55,12 @@ const METADATA_STATE_LEN: usize = 4;
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// The external table to be backfilled
     external_table: ExternalStorageTable,
 
     /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     /// User may select a subset of columns from the upstream table.
@@ -83,9 +82,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         external_table: ExternalStorageTable,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         output_indices: Vec<usize>,
         progress: Option<CreateMviewProgress>,
         metrics: Arc<StreamingMetrics>,
@@ -95,7 +93,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             external_table,
             upstream,
             output_indices,
@@ -510,7 +507,8 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
         }),
-        protocol_config: ProtocolProperties::Debezium,
+        // the cdc message is generated internally so the key must exist.
+        protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
     };
     let mut parser = DebeziumParser::new(
         props,
@@ -609,21 +607,9 @@ fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
         .collect_vec()
 }
 
-impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
+impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -639,7 +625,6 @@ mod tests {
 
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
 
     #[tokio::test]
     async fn test_transform_upstream_chunk() {
@@ -649,7 +634,8 @@ mod tests {
             Field::unnamed(DataType::Varchar), // _rw_table_name
         ]);
         let pk_indices = vec![1];
-        let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema.clone(), pk_indices.clone());
         // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
 

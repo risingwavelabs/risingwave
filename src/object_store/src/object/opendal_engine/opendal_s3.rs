@@ -61,7 +61,7 @@ impl OpendalObjectStore {
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub fn with_minio(server: &str) -> ObjectResult<Self> {
+    pub fn with_minio(server: &str, object_store_config: ObjectStoreConfig) -> ObjectResult<Self> {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
@@ -86,7 +86,18 @@ impl OpendalObjectStore {
         builder.disable_config_load();
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
+            .layer(
+                RetryLayer::new()
+                    .with_min_delay(Duration::from_millis(
+                        object_store_config.s3.object_store_req_retry_interval_ms,
+                    ))
+                    .with_max_delay(Duration::from_millis(
+                        object_store_config.s3.object_store_req_retry_max_delay_ms,
+                    ))
+                    .with_max_times(object_store_config.s3.object_store_req_retry_max_attempts)
+                    .with_factor(1.0)
+                    .with_jitter(),
+            )
             .finish();
         Ok(Self {
             op,

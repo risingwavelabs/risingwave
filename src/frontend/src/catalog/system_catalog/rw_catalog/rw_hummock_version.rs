@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+
+use itertools::Itertools;
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -22,6 +26,7 @@ use crate::error::Result;
 
 #[derive(Fields)]
 struct RwHummockVersion {
+    #[primary_key]
     version_id: i64,
     max_committed_epoch: i64,
     safe_epoch: i64,
@@ -138,4 +143,64 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
         }
     }
     sstables
+}
+
+#[derive(Fields)]
+struct RwHummockTableWatermark {
+    #[primary_key]
+    table_id: i32,
+    #[primary_key]
+    vnode_id: i16,
+    epoch: i64,
+    watermark: Vec<u8>,
+    direction: String,
+}
+
+#[system_catalog(table, "rw_catalog.rw_hummock_table_watermark")]
+async fn read_hummock_table_watermarks(
+    reader: &SysCatalogReaderImpl,
+) -> Result<Vec<RwHummockTableWatermark>> {
+    let version = reader.meta_client.get_hummock_current_version().await?;
+    Ok(version
+        .table_watermarks
+        .into_iter()
+        .flat_map(|(table_id, table_watermarks)| {
+            let mut vnode_watermark_map = HashMap::new();
+            for (vnode, epoch, watermark) in
+                table_watermarks
+                    .watermarks
+                    .into_iter()
+                    .flat_map(move |(epoch, watermarks)| {
+                        watermarks.into_iter().flat_map(move |vnode_watermark| {
+                            let watermark = vnode_watermark.watermark().clone();
+                            let vnodes = vnode_watermark.vnode_bitmap().iter_ones().collect_vec();
+                            vnodes
+                                .into_iter()
+                                .map(move |vnode| (vnode, epoch, Vec::from(watermark.as_ref())))
+                        })
+                    })
+            {
+                match vnode_watermark_map.entry(vnode) {
+                    Entry::Occupied(mut entry) => {
+                        let (prev_epoch, prev_watermark) = entry.get_mut();
+                        if epoch > *prev_epoch {
+                            *prev_watermark = watermark;
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert((epoch, watermark));
+                    }
+                }
+            }
+            vnode_watermark_map
+                .into_iter()
+                .map(move |(vnode, (epoch, watermark))| RwHummockTableWatermark {
+                    table_id: table_id.table_id as _,
+                    vnode_id: vnode as _,
+                    epoch: epoch as _,
+                    watermark,
+                    direction: table_watermarks.direction.to_string(),
+                })
+        })
+        .collect())
 }

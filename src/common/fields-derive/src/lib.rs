@@ -82,16 +82,17 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
         .iter()
         .map(|field| field.ident.as_ref().expect("field no name"))
         .collect::<Vec<_>>();
-    let primary_key = get_primary_key(&input).map(|indices| {
-        quote! {
-            fn primary_key() -> &'static [usize] {
-                &[#(#indices),*]
-            }
-        }
-    });
+    let primary_key = get_primary_key(&input).map_or_else(
+        || quote! { None },
+        |indices| {
+            quote! { Some(&[#(#indices),*]) }
+        },
+    );
 
     Ok(quote! {
         impl ::risingwave_common::types::Fields for #ident {
+            const PRIMARY_KEY: Option<&'static [usize]> = #primary_key;
+
             fn fields() -> Vec<(&'static str, ::risingwave_common::types::DataType)> {
                 vec![#(#fields_rw),*]
             }
@@ -100,7 +101,6 @@ fn gen(tokens: TokenStream) -> Result<TokenStream> {
                     ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.#names)
                 ),*])
             }
-            #primary_key
         }
         impl From<#ident> for ::risingwave_common::types::ScalarImpl {
             fn from(v: #ident) -> Self {
@@ -133,7 +133,9 @@ fn get_primary_key(input: &syn::DeriveInput) -> Option<Vec<usize>> {
         return Some(
             keys.to_string()
                 .split(',')
-                .map(|s| index(s.trim()))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(index)
                 .collect(),
         );
     }
@@ -199,6 +201,18 @@ mod tests {
         prettyplease::unparse(&output)
     }
 
+    fn do_test(code: &str, expected_path: &str) {
+        let input: TokenStream = str::parse(code).unwrap();
+
+        let output = super::gen(input).unwrap();
+
+        let output = pretty_print(output);
+
+        let expected = expect_test::expect_file![expected_path];
+
+        expected.assert_eq(&output);
+    }
+
     #[test]
     fn test_gen() {
         let code = indoc! {r#"
@@ -213,14 +227,33 @@ mod tests {
             }
         "#};
 
-        let input: TokenStream = str::parse(code).unwrap();
+        do_test(code, "gen/test_output.rs");
+    }
 
-        let output = super::gen(input).unwrap();
+    #[test]
+    fn test_no_pk() {
+        let code = indoc! {r#"
+            #[derive(Fields)]
+            struct Data {
+                v1: i16,
+                v2: String,
+            }
+        "#};
 
-        let output = pretty_print(output);
+        do_test(code, "gen/test_no_pk.rs");
+    }
 
-        let expected = expect_test::expect_file!["gen/test_output.rs"];
+    #[test]
+    fn test_empty_pk() {
+        let code = indoc! {r#"
+            #[derive(Fields)]
+            #[primary_key()]
+            struct Data {
+                v1: i16,
+                v2: String,
+            }
+        "#};
 
-        expected.assert_eq(&output);
+        do_test(code, "gen/test_empty_pk.rs");
     }
 }

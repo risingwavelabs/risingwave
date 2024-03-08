@@ -21,6 +21,7 @@ use crate::error::Result;
 
 #[derive(Fields)]
 struct RwMetaSnapshot {
+    #[primary_key]
     meta_snapshot_id: i64,
     hummock_version_id: i64,
     // the smallest epoch this meta snapshot includes
