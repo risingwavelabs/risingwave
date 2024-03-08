@@ -49,9 +49,13 @@ pub enum AlterTableOperation {
     /// `ADD <table_constraint>`
     AddConstraint(TableConstraint),
     /// `ADD [ COLUMN ] <column_def>`
-    AddColumn { column_def: ColumnDef },
+    AddColumn {
+        column_def: ColumnDef,
+    },
     /// TODO: implement `DROP CONSTRAINT <name>`
-    DropConstraint { name: Ident },
+    DropConstraint {
+        name: Ident,
+    },
     /// `DROP [ COLUMN ] [ IF EXISTS ] <column_name> [ CASCADE ]`
     DropColumn {
         column_name: Ident,
@@ -64,7 +68,9 @@ pub enum AlterTableOperation {
         new_column_name: Ident,
     },
     /// `RENAME TO <table_name>`
-    RenameTable { table_name: ObjectName },
+    RenameTable {
+        table_name: ObjectName,
+    },
     // CHANGE [ COLUMN ] <old_name> <new_name> <data_type> [ <options> ]
     ChangeColumn {
         old_name: Ident,
@@ -75,21 +81,29 @@ pub enum AlterTableOperation {
     /// `RENAME CONSTRAINT <old_constraint_name> TO <new_constraint_name>`
     ///
     /// Note: this is a PostgreSQL-specific operation.
-    RenameConstraint { old_name: Ident, new_name: Ident },
+    RenameConstraint {
+        old_name: Ident,
+        new_name: Ident,
+    },
     /// `ALTER [ COLUMN ]`
     AlterColumn {
         column_name: Ident,
         op: AlterColumnOperation,
     },
     /// `OWNER TO <owner_name>`
-    ChangeOwner { new_owner_name: Ident },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
     /// `SET SCHEMA <schema_name>`
-    SetSchema { new_schema_name: ObjectName },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    RefreshSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -262,6 +276,9 @@ impl fmt::Display for AlterTableOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterTableOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
             }
         }
     }

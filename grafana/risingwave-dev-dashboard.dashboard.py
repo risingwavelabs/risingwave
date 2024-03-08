@@ -720,19 +720,6 @@ def section_streaming(outer_panels):
                         )
                     ],
                 ),
-                panels.timeseries_rowsps(
-                    "Source Throughput(rows) per barrier",
-                    "RisingWave ingests barriers periodically to trigger computation and checkpoints. The frequency of "
-                    "barrier can be set by barrier_interval_ms. This metric shows how many rows are ingested between two "
-                    "consecutive barriers.",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        )
-                    ],
-                ),
                 panels.timeseries_count(
                     "Source Upstream Status",
                     "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
@@ -4060,12 +4047,20 @@ def section_udf(outer_panels):
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
                             f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name, fragment_id)",
                             "udf_success_count - {{link}} {{name}} {{fragment_id}}",
                         ),
                         panels.target(
                             f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name, fragment_id)",
                             "udf_failure_count - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),

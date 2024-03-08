@@ -35,9 +35,9 @@ pub const ICEBERG_CONNECTOR: &str = "iceberg";
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
 pub struct IcebergProperties {
     #[serde(rename = "catalog.type")]
-    pub catalog_type: String,
+    pub catalog_type: Option<String>,
     #[serde(rename = "s3.region")]
-    pub region_name: String,
+    pub region: Option<String>,
     #[serde(rename = "s3.endpoint", default)]
     pub endpoint: String,
     #[serde(rename = "s3.access.key", default)]
@@ -46,8 +46,14 @@ pub struct IcebergProperties {
     pub s3_secret: String,
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: String,
+    // Catalog name, can be omitted for storage catalog, but
+    // must be set for other catalogs.
+    #[serde(rename = "catalog.name")]
+    pub catalog_name: Option<String>,
+    #[serde(rename = "catalog.uri")]
+    pub catalog_uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
     #[serde(rename = "database.name")]
-    pub database_name: String,
+    pub database_name: Option<String>,
     #[serde(rename = "table.name")]
     pub table_name: String,
 
@@ -58,14 +64,16 @@ pub struct IcebergProperties {
 impl IcebergProperties {
     pub fn to_iceberg_config(&self) -> IcebergConfig {
         IcebergConfig {
-            database_name: Some(self.database_name.clone()),
+            catalog_name: self.catalog_name.clone(),
+            database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
-            catalog_type: Some(self.catalog_type.clone()),
+            catalog_type: self.catalog_type.clone(),
+            uri: self.catalog_uri.clone(),
             path: self.warehouse_path.clone(),
             endpoint: Some(self.endpoint.clone()),
             access_key: self.s3_access.clone(),
             secret_key: self.s3_secret.clone(),
-            region: Some(self.region_name.clone()),
+            region: self.region.clone(),
             ..Default::default()
         }
     }

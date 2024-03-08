@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 use risingwave_pb::hummock::PbTableWatermarks;
 
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -114,6 +114,10 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.inner.value_meta()
     }
 }
 pub struct SkipWatermarkState {

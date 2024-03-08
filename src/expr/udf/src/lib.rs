@@ -17,7 +17,8 @@
 
 mod error;
 mod external;
-mod metrics;
+pub mod metrics;
 
 pub use error::{Error, Result};
 pub use external::ArrowFlightUdfClient;
+pub use metrics::GLOBAL_METRICS;

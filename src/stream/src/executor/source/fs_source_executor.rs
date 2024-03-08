@@ -360,7 +360,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
-        let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -393,16 +392,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             }
                         }
                         self.take_snapshot_and_clear_cache(epoch).await?;
-
-                        self.metrics
-                            .source_row_per_barrier
-                            .with_label_values(&[
-                                self.actor_ctx.id.to_string().as_str(),
-                                self.stream_source_core.source_id.to_string().as_ref(),
-                                self.actor_ctx.fragment_id.to_string().as_str(),
-                            ])
-                            .inc_by(metric_row_per_barrier);
-                        metric_row_per_barrier = 0;
 
                         yield msg;
                     }

@@ -78,6 +78,13 @@ pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
     (left, right)
 }
 
+// Ensure there is only one vnode involved in table key range and return the vnode
+pub fn vnode(range: &TableKeyRange) -> VirtualNode {
+    let (l, r_exclusive) = vnode_range(range);
+    assert_eq!(r_exclusive - l, 1);
+    VirtualNode::from_index(l)
+}
+
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
     let res = epoch.to_be();
