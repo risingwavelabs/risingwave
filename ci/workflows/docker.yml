@@ -47,6 +47,7 @@ steps:
     retry: *auto-retry
 
   - label: "pre build binary: amd64"
+    if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -63,6 +64,7 @@ steps:
     retry: *auto-retry
 
   - label: "pre build binary: aarch64 "
+    if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
