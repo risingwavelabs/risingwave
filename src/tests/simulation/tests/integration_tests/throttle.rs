@@ -37,8 +37,5 @@ async fn test_throttle_mv() {
         .await
         .unwrap();
 
-    cluster
-        .throttle_mv(TableId::from(2), None)
-        .await
-        .unwrap();
+    cluster.throttle_mv(TableId::from(2), None).await.unwrap();
 }
