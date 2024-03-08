@@ -489,6 +489,9 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn value_meta(&self) -> ValueMeta {
         let iter = self.sstable_iter.as_ref().expect("no table iter");
+        // sstable_iter's seek_block_idx must have advanced at least one.
+        // See SstableStreamIterator::next_block.
+        assert!(iter.seek_block_idx >= 1);
         ValueMeta {
             object_id: Some(iter.sstable_info.object_id),
             block_id: Some(iter.seek_block_idx as u64 - 1),

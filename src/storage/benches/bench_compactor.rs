@@ -18,7 +18,7 @@ use std::sync::Arc;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
@@ -326,7 +326,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
             let iter = MergeIterator::for_compactor(sub_iters);
-            async move { compact(iter, sstable_store1).await }
+            async move { compact(iter, sstable_store1, None).await }
         });
     });
     c.bench_function("bench_merge_iterator", |b| {
@@ -469,7 +469,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
                 0,
             ),
         ];
-        UnorderedMergeIteratorInner::for_compactor(sub_iters)
+        MergeIterator::for_compactor(sub_iters)
     };
 
     c.bench_function(
