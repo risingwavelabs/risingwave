@@ -536,7 +536,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
+    type IterStream = RangeKvStateStoreIter<R>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -569,8 +569,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
                 to_full_key_range(read_options.table_id, key_range),
             ),
             epoch,
-        )
-        .into_stream())
+        ))
     }
 }
 
@@ -658,6 +657,8 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     /// For supporting semantic of `Fuse`
     stopped: bool,
+
+    item_buffer: Option<StateStoreIterItem>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -667,17 +668,16 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
             epoch,
             last_key: None,
             stopped: false,
+            item_buffer: None,
         }
     }
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    type Item = StateStoreIterItem;
-
     #[allow(clippy::unused_async)]
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
         if self.stopped {
-            Ok(None)
+            panic!("call next after returning None or Err")
         } else {
             let ret = self.next_inner();
             match &ret {
@@ -686,8 +686,12 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
                 }
                 _ => {}
             }
-
-            ret
+            let item = ret?;
+            self.item_buffer = item;
+            Ok(self
+                .item_buffer
+                .as_ref()
+                .map(|(key, value)| (key.to_ref(), value.as_ref())))
         }
     }
 }

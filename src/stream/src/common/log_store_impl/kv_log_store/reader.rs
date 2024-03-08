@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{try_join_all, BoxFuture};
-use futures::stream::select_all;
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -350,7 +349,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                             // Use MAX EPOCH here because the epoch to consume may be below the safe
                             // epoch
                             async move {
-                                Ok::<_, anyhow::Error>(Box::pin(
+                                Ok::<_, anyhow::Error>(
                                     state_store
                                         .iter(
                                             (Included(range_start), Included(range_end)),
@@ -364,15 +363,14 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             },
                                         )
                                         .await?,
-                                ))
+                                )
                             }
                         }))
                         .await?;
-                        let combined_stream = select_all(streams);
 
                         let chunk = serde
                             .deserialize_stream_chunk(
-                                combined_stream,
+                                streams,
                                 start_seq_id,
                                 end_seq_id,
                                 item_epoch,

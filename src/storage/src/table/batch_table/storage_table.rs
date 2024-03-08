@@ -34,7 +34,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -45,7 +45,7 @@ use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
-use crate::store::{PrefetchOptions, ReadOptions};
+use crate::store::{PrefetchOptions, ReadOptions, StateStoreIter};
 use crate::table::merge_sort::merge_sort;
 use crate::table::{KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
@@ -725,18 +725,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 
     /// Yield a row with its primary key.
     #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
-    async fn into_stream(self) {
-        use futures::TryStreamExt;
-
-        // No need for table id and epoch.
-        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key, v));
-        futures::pin_mut!(iter);
-        while let Some((table_key, value)) = iter
+    async fn into_stream(mut self) {
+        while let Some((k, v)) = self
+            .iter
             .try_next()
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            let full_row = self.row_deserializer.deserialize(&value)?;
+            let (table_key, value) = (k.user_key.table_key, v);
+            let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self
                 .mapping
                 .project(OwnedRow::new(full_row))
@@ -774,14 +771,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                     }
                     let row = OwnedRow::new(result_row_vec);
 
+                    // TODO: may optimize the key clone
                     yield KeyedRow {
-                        vnode_prefixed_key: table_key,
+                        vnode_prefixed_key: TableKey(Bytes::copy_from_slice(table_key.as_ref())),
                         row,
                     }
                 }
                 None => {
                     yield KeyedRow {
-                        vnode_prefixed_key: table_key,
+                        vnode_prefixed_key: TableKey(Bytes::copy_from_slice(table_key.as_ref())),
                         row: result_row_in_value,
                     }
                 }

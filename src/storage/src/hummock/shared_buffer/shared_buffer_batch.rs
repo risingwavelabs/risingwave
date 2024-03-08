@@ -23,7 +23,6 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
@@ -670,6 +669,7 @@ impl SharedBufferDeleteRangeIterator {
         table_id: TableId,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> Self {
+        use itertools::Itertools;
         let point_range_pairs = delete_ranges
             .into_iter()
             .map(|(left_bound, right_bound)| {

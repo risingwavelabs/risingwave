@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
@@ -55,7 +55,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIterExt, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
@@ -1453,16 +1453,14 @@ fn deserialize_keyed_row_stream<'a>(
     stream: impl StateStoreIterItemStream + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
-    stream.map(move |result| {
-        result
-            .map_err(StreamExecutorError::from)
-            .and_then(|(key, value)| {
-                Ok(KeyedRow::new(
-                    key.user_key.table_key,
-                    deserializer.deserialize(&value).map(OwnedRow::new)?,
-                ))
-            })
-    })
+    stream
+        .into_stream(move |(key, value)| {
+            Ok(KeyedRow::new(
+                TableKey(Bytes::copy_from_slice(key.user_key.table_key.as_ref())),
+                deserializer.deserialize(value).map(OwnedRow::new)?,
+            ))
+        })
+        .map_err(Into::into)
 }
 
 pub fn prefix_range_to_memcomparable(

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::HashMap;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
@@ -20,7 +21,7 @@ use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::buffer::Bitmap;
@@ -43,36 +44,79 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: Send + Sync {
-    type Item: Send;
+pub trait StateStoreIter: Send {
+    fn try_next(
+        &mut self,
+    ) -> impl Future<Output = StorageResult<Option<StateStoreIterItemRef<'_>>>> + Send + '_;
+}
 
-    fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
+pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<StateStoreIterItem> {
+    Ok((key.copy_into(), Bytes::copy_from_slice(value)))
 }
 
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
+    type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
 
-    fn into_stream(self) -> Self::ItemStream;
+    fn into_stream<O: Send, F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send>(
+        self,
+        f: F,
+    ) -> Self::ItemStream<O, F>;
 }
 
-#[try_stream(ok = I::Item, error = StorageError)]
-async fn into_stream_inner<I: StateStoreIter>(mut iter: I) {
-    while let Some(item) = iter.next().await? {
-        yield item;
+#[try_stream(ok = O, error = StorageError)]
+async fn into_stream_inner<
+    I: StateStoreIter,
+    O: Send,
+    F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send,
+>(
+    mut iter: I,
+    f: F,
+) {
+    while let Some(item) = iter.try_next().await? {
+        yield f(item)?;
     }
 }
 
-pub type StreamTypeOfIter<I> = <I as StateStoreIterExt>::ItemStream;
+pub struct FromStreamStateStoreIter<S> {
+    inner: S,
+    item_buffer: Option<StateStoreIterItem>,
+}
+
+impl<S> FromStreamStateStoreIter<S> {
+    pub fn new(inner: S) -> Self {
+        Self {
+            inner,
+            item_buffer: None,
+        }
+    }
+}
+
+impl<S: Stream<Item = StorageResult<StateStoreIterItem>> + Unpin + Send> StateStoreIter
+    for FromStreamStateStoreIter<S>
+{
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        self.item_buffer = self.inner.try_next().await?;
+        Ok(self
+            .item_buffer
+            .as_ref()
+            .map(|(key, value)| (key.to_ref(), value.as_ref())))
+    }
+}
+
 impl<I: StateStoreIter> StateStoreIterExt for I {
-    type ItemStream = impl Stream<Item = StorageResult<<Self as StateStoreIter>::Item>>;
+    type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
 
-    fn into_stream(self) -> Self::ItemStream {
-        into_stream_inner(self)
+    fn into_stream<O: Send, F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send>(
+        self,
+        f: F,
+    ) -> Self::ItemStream<O, F> {
+        into_stream_inner(self, f)
     }
 }
 
+pub type StateStoreIterItemRef<'a> = (FullKey<&'a [u8]>, &'a [u8]);
 pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
-pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
+pub trait StateStoreIterItemStream = StateStoreIter;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
 pub trait StateStoreRead: StaticSendSync {
@@ -128,12 +172,14 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         if limit.is_some() {
             read_options.prefetch_options.prefetch = false;
         }
+        const MAX_INITIAL_CAP: usize = 1024;
         let limit = limit.unwrap_or(usize::MAX);
-        self.iter(key_range, epoch, read_options)
-            .await?
-            .take(limit)
-            .try_collect()
-            .await
+        let mut ret = Vec::with_capacity(min(limit, MAX_INITIAL_CAP));
+        let mut iter = self.iter(key_range, epoch, read_options).await?;
+        while let Some((key, value)) = iter.try_next().await? {
+            ret.push((key.copy_into(), Bytes::copy_from_slice(value)))
+        }
+        Ok(ret)
     }
 }
 

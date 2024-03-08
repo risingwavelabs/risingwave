@@ -62,7 +62,7 @@ use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
+use crate::store::{gen_min_epoch, ReadOptions};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -830,7 +830,7 @@ impl HummockVersionReader {
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         self.iter_inner(
             table_key_range,
             epoch,
@@ -853,7 +853,7 @@ impl HummockVersionReader {
             Option<ReadTableWatermark>,
         ),
         memtable_iter: MemTableHummockIterator<'a>,
-    ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
+    ) -> StorageResult<LocalHummockStorageIterator<'_>> {
         self.iter_inner(
             table_key_range,
             epoch,
@@ -871,7 +871,7 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
         mem_table: Option<MemTableHummockIterator<'b>>,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
+    ) -> StorageResult<HummockStorageIteratorInner<'b>> {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed, watermark) = read_version_tuple;
@@ -1123,8 +1123,7 @@ impl HummockVersionReader {
             self.state_store_metrics.clone(),
             read_options.table_id,
             local_stats,
-        )
-        .into_stream())
+        ))
     }
 
     // Note: this method will not check the kv tomestones and delete range tomestones

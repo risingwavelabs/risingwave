@@ -257,7 +257,8 @@ async fn test_storage_basic() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .into_stream(to_owned_item);
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
@@ -334,7 +335,8 @@ async fn test_storage_basic() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .into_stream(to_owned_item);
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
@@ -387,7 +389,8 @@ async fn test_storage_basic() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .into_stream(to_owned_item);
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
@@ -625,7 +628,8 @@ async fn test_state_store_sync() {
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .into_stream(to_owned_item);
         futures::pin_mut!(iter);
 
         let kv_map = [
@@ -663,7 +667,8 @@ async fn test_state_store_sync() {
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .into_stream(to_owned_item);
 
         futures::pin_mut!(iter);
 
@@ -994,7 +999,8 @@ async fn test_iter_with_min_epoch() {
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1016,7 +1022,8 @@ async fn test_iter_with_min_epoch() {
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(20, result.len());
@@ -1037,7 +1044,8 @@ async fn test_iter_with_min_epoch() {
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1077,7 +1085,8 @@ async fn test_iter_with_min_epoch() {
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1099,7 +1108,8 @@ async fn test_iter_with_min_epoch() {
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1122,7 +1132,8 @@ async fn test_iter_with_min_epoch() {
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1228,7 +1239,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1256,7 +1268,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
@@ -1285,7 +1298,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1350,7 +1364,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1387,7 +1402,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
@@ -1420,7 +1436,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1452,7 +1469,8 @@ async fn test_hummock_version_reader() {
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(30, result.len());
@@ -1490,7 +1508,8 @@ async fn test_hummock_version_reader() {
                             read_snapshot,
                         )
                         .await
-                        .unwrap();
+                        .unwrap()
+                        .into_stream(to_owned_item);
 
                     let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(8, result.len());
@@ -1522,7 +1541,8 @@ async fn test_hummock_version_reader() {
                             read_snapshot,
                         )
                         .await
-                        .unwrap();
+                        .unwrap()
+                        .into_stream(to_owned_item);
 
                     let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(18, result.len());
@@ -1866,6 +1886,7 @@ async fn test_table_watermark() {
             )
             .await
             .unwrap()
+            .into_stream(to_owned_item)
             .map_ok(|(full_key, value)| (full_key.user_key, value))
             .try_collect::<Vec<_>>()
             .await
@@ -1938,6 +1959,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .map_ok(|(full_key, value)| (full_key.user_key, value))
                 .try_collect::<Vec<_>>()
                 .await
@@ -1969,6 +1991,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .try_collect::<Vec<_>>()
                 .await
                 .unwrap();
@@ -2037,6 +2060,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .map_ok(|(full_key, value)| (full_key.user_key, value))
                 .try_collect::<Vec<_>>()
                 .await
@@ -2068,6 +2092,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .try_collect::<Vec<_>>()
                 .await
                 .unwrap();
@@ -2136,6 +2161,7 @@ async fn test_table_watermark() {
                     )
                     .await
                     .unwrap()
+                    .into_stream(to_owned_item)
                     .map_ok(|(full_key, value)| (full_key.user_key, value))
                     .try_collect::<Vec<_>>()
                     .await
@@ -2168,6 +2194,7 @@ async fn test_table_watermark() {
                     )
                     .await
                     .unwrap()
+                    .into_stream(to_owned_item)
                     .try_collect::<Vec<_>>()
                     .await
                     .unwrap();
@@ -2196,6 +2223,7 @@ async fn test_table_watermark() {
             )
             .await
             .unwrap()
+            .into_stream(to_owned_item)
             .map_ok(|(full_key, value)| (full_key.user_key, value))
             .try_collect::<Vec<_>>()
             .await

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{pin_mut, StreamExt};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
@@ -1411,6 +1411,7 @@ async fn test_replicated_local_hummock_storage() {
         )
         .await
         .unwrap()
+        .into_stream(to_owned_item)
         .collect::<Vec<_>>()
         .await;
 
@@ -1471,6 +1472,7 @@ async fn test_replicated_local_hummock_storage() {
             .iter((Unbounded, Unbounded), epoch2, read_options.clone())
             .await
             .unwrap()
+            .into_stream(to_owned_item)
             .collect::<Vec<_>>()
             .await;
 
@@ -1499,6 +1501,7 @@ async fn test_replicated_local_hummock_storage() {
             .iter((Unbounded, Unbounded), epoch1, read_options)
             .await
             .unwrap()
+            .into_stream(to_owned_item)
             .collect::<Vec<_>>()
             .await;
 

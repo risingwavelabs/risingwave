@@ -266,7 +266,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
@@ -399,7 +399,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type IterStream = HummockStorageIterator;
 
     fn get(
         &self,

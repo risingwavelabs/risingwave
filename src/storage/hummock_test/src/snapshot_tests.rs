@@ -15,7 +15,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TableKey;
@@ -37,12 +36,14 @@ use crate::test_utils::{
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
+
+        use risingwave_storage::StateStoreIter;
         let range = $range;
         let bounds: (Bound<TableKey<Bytes>>, Bound<TableKey<Bytes>>) = (
             range.start_bound().map(|x: &TableKey<Bytes>| x.clone()),
             range.end_bound().map(|x: &TableKey<Bytes>| x.clone()),
         );
-        let it = $storage
+        let mut it = $storage
             .iter(
                 bounds,
                 $epoch,
@@ -54,7 +55,6 @@ macro_rules! assert_count_range_scan {
             )
             .await
             .unwrap();
-        futures::pin_mut!(it);
         let mut count = 0;
         loop {
             match it.try_next().await.unwrap() {

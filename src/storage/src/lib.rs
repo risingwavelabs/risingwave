@@ -64,8 +64,3 @@ mod storage_failpoints;
 
 pub use store::{StateStore, StateStoreIter, StateStoreReadIterStream};
 pub use store_impl::StateStoreImpl;
-
-pub enum TableScanOptions {
-    SequentialScan,
-    SparseIndexScan,
-}

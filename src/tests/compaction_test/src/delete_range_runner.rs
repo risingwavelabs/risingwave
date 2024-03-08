@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::cache::CachePriority;
@@ -60,7 +59,7 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
 };
-use risingwave_storage::StateStore;
+use risingwave_storage::{StateStore, StateStoreIter};
 
 use crate::CompactionTestOpts;
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -471,10 +470,10 @@ impl NormalState {
             .await
             .unwrap(),);
         let mut ret = vec![];
-        while let Some(item) = iter.next().await {
-            let (full_key, val) = item.unwrap();
-            let tkey = full_key.user_key.table_key.0.clone();
-            ret.push((tkey, val));
+        while let Some(item) = iter.try_next().await.unwrap() {
+            let (full_key, val) = item;
+            let tkey = Bytes::copy_from_slice(full_key.user_key.table_key.0);
+            ret.push((tkey, Bytes::copy_from_slice(val)));
         }
         ret
     }
@@ -483,29 +482,31 @@ impl NormalState {
 #[async_trait::async_trait]
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
-                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
-                    ),
-                    ReadOptions {
-                        ignore_range_tombstone: true,
-                        table_id: self.table_id,
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap(),
-        );
+        let mut iter = self
+            .storage
+            .iter(
+                (
+                    Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
+                    Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
+                ),
+                ReadOptions {
+                    ignore_range_tombstone: true,
+                    table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         let mut delete_item = Vec::new();
-        while let Some(item) = iter.next().await {
-            let (full_key, value) = item.unwrap();
-            delete_item.push((full_key.user_key.table_key, value));
+        while let Some(item) = iter.try_next().await.unwrap() {
+            let (full_key, value) = item;
+            delete_item.push((
+                TableKey(Bytes::copy_from_slice(&full_key.user_key.table_key)),
+                Bytes::copy_from_slice(value),
+            ));
         }
         drop(iter);
         for (key, value) in delete_item {

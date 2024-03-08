@@ -16,20 +16,19 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{Future, TryFutureExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
-use tracing::error;
+use tracing::{error, Instrument};
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
 use super::MonitoredStorageMetrics;
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
@@ -123,7 +122,7 @@ impl<S> MonitoredStateStore<S> {
                 table_id,
             },
         };
-        Ok(monitored.into_stream())
+        Ok(monitored)
     }
 
     pub fn inner(&self) -> &S {
@@ -141,8 +140,6 @@ impl<S> MonitoredStateStore<S> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<Bytes>> {
-        use tracing::Instrument;
-
         let table_id_label = table_id.to_string();
         let timer = self
             .storage_metrics
@@ -382,29 +379,21 @@ struct MonitoredStateStoreIterStats {
     table_id: TableId,
 }
 
-impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(self) {
-        let inner = self.inner;
-
-        let mut stats = self.stats;
-        futures::pin_mut!(inner);
-        while let Some((key, value)) = inner
+impl<S: StateStoreIter> StateStoreIter for MonitoredStateStoreIter<S> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        if let Some((key, value)) = self
+            .inner
             .try_next()
+            .instrument(tracing::trace_span!("store_iter_try_next"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in next"))?
         {
-            stats.total_items += 1;
-            stats.total_size += key.encoded_len() + value.len();
-            yield (key, value);
+            self.stats.total_items += 1;
+            self.stats.total_size += key.encoded_len() + value.len();
+            Ok(Some((key, value)))
+        } else {
+            Ok(None)
         }
-        drop(stats);
-    }
-
-    fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
-        use risingwave_common::util::tracing::InstrumentStream;
-
-        Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }
 

@@ -33,7 +33,8 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
-    LocalStateStore, StateStoreIterItemStream, StateStoreRead, SyncResult,
+    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreIterItemStream, StateStoreRead,
+    SyncResult,
 };
 use risingwave_storage::{StateStore, StateStoreReadIterStream};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -54,7 +55,7 @@ where
     }
 
     pub(crate) fn into_stream(self) -> impl Stream<Item = Result<ReplayItem>> {
-        self.inner.map(|item_res| {
+        self.inner.into_stream(to_owned_item).map(|item_res| {
             item_res
                 .map(|(key, value)| (key.user_key.table_key.0.into(), value.into()))
                 .map_err(|_| TraceError::IterFailed("iter failed to retrieve item".to_string()))
@@ -69,6 +70,7 @@ pub(crate) struct LocalReplayIter {
 impl LocalReplayIter {
     pub(crate) async fn new(stream: impl StateStoreIterItemStream) -> Self {
         let inner = stream
+            .into_stream(to_owned_item)
             .map_ok(|value| (value.0.user_key.table_key.0.into(), value.1.into()))
             .try_collect::<Vec<_>>()
             .await
@@ -115,7 +117,6 @@ impl ReplayRead for GlobalReplayImpl {
             .iter(key_range, epoch, read_options.into())
             .await
             .unwrap();
-        let iter = iter.boxed();
         let stream = GlobalReplayIter::new(iter).into_stream().boxed();
         Ok(stream)
     }
@@ -241,7 +242,6 @@ impl LocalReplayRead for LocalReplayImpl {
             .await
             .unwrap();
 
-        let iter = iter.boxed();
         let stream = LocalReplayIter::new(iter).await.into_stream().boxed();
         Ok(stream)
     }

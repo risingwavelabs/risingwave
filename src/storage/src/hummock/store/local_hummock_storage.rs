@@ -136,7 +136,7 @@ impl LocalHummockStorage {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
@@ -164,7 +164,7 @@ impl LocalHummockStorage {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
+    ) -> StorageResult<LocalHummockStorageIterator<'_>> {
         let (table_key_range, read_snapshot) = read_filter_for_local(
             epoch,
             read_options.table_id,
@@ -206,7 +206,7 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type IterStream = HummockStorageIterator;
 
     fn get(
         &self,
@@ -231,7 +231,7 @@ impl StateStoreRead for LocalHummockStorage {
 }
 
 impl LocalStateStore for LocalHummockStorage {
-    type IterStream<'a> = StreamTypeOfIter<LocalHummockStorageIterator<'a>>;
+    type IterStream<'a> = LocalHummockStorageIterator<'a>;
 
     fn may_exist(
         &self,
@@ -598,19 +598,22 @@ pub type LocalHummockStorageIterator<'a> = HummockStorageIteratorInner<'a>;
 
 pub struct HummockStorageIteratorInner<'a> {
     inner: UserIterator<HummockStorageIteratorPayloadInner<'a>>,
+    initial_read: bool,
     stats_guard: IterLocalMetricsGuard,
 }
 
 impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
-    type Item = StateStoreIterItem;
-
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
         let iter = &mut self.inner;
+        debug_assert!(iter.is_valid());
+        if !self.initial_read {
+            self.initial_read = true;
+        } else {
+            iter.next().await?;
+        }
 
         if iter.is_valid() {
-            let kv = (iter.key().clone(), iter.value().clone());
-            iter.next().await?;
-            Ok(Some(kv))
+            Ok(Some((iter.key().to_ref(), iter.value().as_ref())))
         } else {
             Ok(None)
         }
@@ -626,6 +629,7 @@ impl<'a> HummockStorageIteratorInner<'a> {
     ) -> Self {
         Self {
             inner,
+            initial_read: false,
             stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
     }

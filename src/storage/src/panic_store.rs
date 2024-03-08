@@ -13,12 +13,9 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures::Stream;
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -174,12 +171,10 @@ impl StateStore for PanicStateStore {
     }
 }
 
-pub struct PanicStateStoreStream {}
+pub struct PanicStateStoreStream;
 
-impl Stream for PanicStateStoreStream {
-    type Item = StorageResult<StateStoreIterItem>;
-
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+impl StateStoreIter for PanicStateStoreStream {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
         panic!("should not call next on panic state store stream")
     }
 }

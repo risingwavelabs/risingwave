@@ -14,8 +14,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Future, TryFutureExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -26,7 +25,7 @@ use risingwave_hummock_trace::{
 use thiserror_ext::AsReport;
 
 use super::identity;
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
@@ -79,7 +78,7 @@ impl<S> TracedStateStore<S> {
             span.may_send_result(OperationResult::Iter(TraceResult::Err));
         }
         let traced = TracedStateStoreIter::new(res?, span);
-        Ok(traced.into_stream())
+        Ok(traced)
     }
 
     async fn traced_get(
@@ -347,13 +346,10 @@ impl<S> TracedStateStoreIter<S> {
     }
 }
 
-impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(self) {
-        let inner = self.inner;
-        futures::pin_mut!(inner);
-
-        while let Some((key, value)) = inner
+impl<S: StateStoreIterItemStream> StateStoreIter for TracedStateStoreIter<S> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        if let Some((key, value)) = self
+            .inner
             .try_next()
             .await
             .inspect_err(|e| tracing::error!(error = %e.as_report(), "Failed in next"))?
@@ -362,14 +358,12 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
             self.span
                 .may_send_result(OperationResult::IterNext(TraceResult::Ok(Some((
                     TracedBytes::from(key.user_key.table_key.to_vec()),
-                    TracedBytes::from(value.clone()),
+                    TracedBytes::from(Bytes::copy_from_slice(value)),
                 )))));
-            yield (key, value);
+            Ok(Some((key, value)))
+        } else {
+            Ok(None)
         }
-    }
-
-    fn into_stream(self) -> TracedStateStoreIterStream<S> {
-        Self::into_stream_inner(self)
     }
 }
 
