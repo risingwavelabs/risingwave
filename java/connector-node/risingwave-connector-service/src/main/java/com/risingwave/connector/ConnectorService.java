@@ -37,16 +37,6 @@ public class ConnectorService {
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse(options, args);
 
-        // Quoted from the debezium document:
-        // > Your application should always properly stop the engine to ensure graceful and complete
-        // > shutdown and that each source record is sent to the application exactly one time.
-        // However, in RisingWave we assume the upstream changelog may contain duplicate events and
-        // handle conflicts in the mview operator, thus we don't need to obey the above
-        // instructions.
-        // So we decrease the wait time to 1 second here to reclaim grpc resources faster when the
-        // grpc channel is broken.
-        System.setProperty(DbzConnectorConfig.WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS, "1000");
-
         int port = DEFAULT_PORT;
         String prometheusHttpHost = DEFAULT_PROMETHEUS_HOST;
         if (cmd.hasOption("p")) {
