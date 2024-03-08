@@ -37,7 +37,6 @@ pub(crate) mod tests {
         TABLE_PREFIX_LEN,
     };
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_hummock_sdk::table_watermark::{
         ReadTableWatermark, TableWatermarks, VnodeWatermark, WatermarkDirection,

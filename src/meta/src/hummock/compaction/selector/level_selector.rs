@@ -23,7 +23,8 @@ use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::version::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
-use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
+use risingwave_pb::hummock::compact_task::PbTaskType;
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
     create_compaction_task, CompactionSelector, LevelCompactionPicker, TierCompactionPicker,
@@ -476,8 +477,8 @@ impl CompactionSelector for DynamicLevelSelector {
         "DynamicLevelSelector"
     }
 
-    fn task_type(&self) -> compact_task::TaskType {
-        compact_task::TaskType::Dynamic
+    fn task_type(&self) -> PbTaskType {
+        PbTaskType::Dynamic
     }
 }
 

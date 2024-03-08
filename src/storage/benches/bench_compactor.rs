@@ -31,7 +31,8 @@ use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::{compact_task, TableSchema};
+use risingwave_pb::hummock::compact_task::PbTaskType;
+use risingwave_pb::hummock::PbTableSchema;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
@@ -266,7 +267,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
         gc_delete_keys: false,
         watermark: 0,
         stats_target_table_ids: None,
-        task_type: compact_task::TaskType::Dynamic,
+        task_type: PbTaskType::Dynamic,
         use_block_based_filter: true,
         ..Default::default()
     });
@@ -417,7 +418,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         gc_delete_keys: false,
         watermark: 0,
         stats_target_table_ids: None,
-        task_type: compact_task::TaskType::Dynamic,
+        task_type: PbTaskType::Dynamic,
         use_block_based_filter: true,
         table_schemas: vec![].into_iter().collect(),
         ..Default::default()
@@ -426,13 +427,13 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let mut task_config_schema = task_config_no_schema.clone();
     task_config_schema.table_schemas.insert(
         10,
-        TableSchema {
+        PbTableSchema {
             column_ids: (0..column_num as i32).collect(),
         },
     );
     task_config_schema.table_schemas.insert(
         11,
-        TableSchema {
+        PbTableSchema {
             column_ids: (0..column_num as i32).collect(),
         },
     );
@@ -440,13 +441,13 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let mut task_config_schema_cause_drop = task_config_no_schema.clone();
     task_config_schema_cause_drop.table_schemas.insert(
         10,
-        TableSchema {
+        PbTableSchema {
             column_ids: (0..column_num as i32 / 2).collect(),
         },
     );
     task_config_schema_cause_drop.table_schemas.insert(
         11,
-        TableSchema {
+        PbTableSchema {
             column_ids: (0..column_num as i32 / 2).collect(),
         },
     );

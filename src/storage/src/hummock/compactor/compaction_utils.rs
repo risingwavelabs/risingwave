@@ -27,7 +27,8 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::version::{CompactTask, SstableInfo};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
-use risingwave_pb::hummock::{compact_task, LevelType, TableSchema};
+use risingwave_pb::hummock::compact_task::PbTaskType;
+use risingwave_pb::hummock::{PbLevelType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -125,7 +126,7 @@ pub struct TaskConfig {
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
-    pub task_type: compact_task::TaskType,
+    pub task_type: PbTaskType,
     pub is_target_l0_or_lbase: bool,
     pub use_block_based_filter: bool,
 
@@ -133,7 +134,7 @@ pub struct TaskConfig {
     /// `TableId` -> `TableSchema`
     /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
     /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
-    pub table_schemas: HashMap<u32, TableSchema>,
+    pub table_schemas: HashMap<u32, PbTableSchema>,
     /// `disable_drop_column_optimization` should only be set in benchmark.
     pub disable_drop_column_optimization: bool,
 }
@@ -354,7 +355,7 @@ pub async fn check_compaction_result(
         }
 
         // Do not need to filter the table because manager has done it.
-        if level.level_type == LevelType::Nonoverlapping {
+        if level.level_type == PbLevelType::Nonoverlapping {
             debug_assert!(can_concat(&level.table_infos));
             del_iter.add_concat_iter(level.table_infos.clone(), context.sstable_store.clone());
 
