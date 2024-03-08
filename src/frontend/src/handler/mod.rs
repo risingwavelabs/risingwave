@@ -794,6 +794,10 @@ pub async fn handle(
             alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
                 .await
         }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::RefreshSchema,
+        } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
         Statement::AlterFunction {
             name,
             args,

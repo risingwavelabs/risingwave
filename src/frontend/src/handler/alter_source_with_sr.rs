@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
@@ -28,7 +29,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use super::alter_table_column::schema_has_schema_registry;
 use super::create_source::{bind_columns_from_source, validate_compatibility};
-use super::util::is_cdc_connector;
+use super::util::{is_cdc_connector, SourceSchemaCompatExt};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -169,14 +170,36 @@ pub async fn refresh_sr_and_get_columns_diff(
     Ok((source_info, added_columns, dropped_columns))
 }
 
+fn get_connector_schema_from_source(source: &SourceCatalog) -> Result<ConnectorSchema> {
+    let [stmt]: [_; 1] = Parser::parse_sql(&source.definition)
+        .context("unable to parse original source definition")?
+        .try_into()
+        .unwrap();
+    let Statement::CreateSource {
+        stmt: CreateSourceStatement { source_schema, .. },
+    } = stmt
+    else {
+        unreachable!()
+    };
+    Ok(source_schema.into_v2_with_warning())
+}
+
+pub async fn handler_refresh_schema(
+    handler_args: HandlerArgs,
+    name: ObjectName,
+) -> Result<RwPgResponse> {
+    let (source, _, _) = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
+    let connector_schema = get_connector_schema_from_source(&source)?;
+    handle_alter_source_with_sr(handler_args, name, connector_schema).await
+}
+
 pub async fn handle_alter_source_with_sr(
     handler_args: HandlerArgs,
     name: ObjectName,
     connector_schema: ConnectorSchema,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (source, database_id, schema_id) =
-        fetch_source_catalog_with_db_schema_id(session.as_ref(), &name)?;
+    let (source, database_id, schema_id) = fetch_source_catalog_with_db_schema_id(&session, &name)?;
     let mut source = source.as_ref().clone();
 
     if source.associated_table_id.is_some() {

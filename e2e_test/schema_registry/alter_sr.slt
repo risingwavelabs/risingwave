@@ -42,10 +42,7 @@ sleep 5s
 
 # Refresh source schema
 statement ok
-ALTER SOURCE src_user FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = 'http://message_queue:8081',
-    message = 'test.User'
-);
+ALTER SOURCE src_user REFRESH SCHEMA;
 
 statement ok
 CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
