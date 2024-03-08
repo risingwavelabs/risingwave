@@ -399,6 +399,7 @@ impl GlobalBarrierManager {
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
+                    // FIXME: Transactions should be used.
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
