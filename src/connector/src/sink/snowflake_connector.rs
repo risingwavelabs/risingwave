@@ -29,17 +29,19 @@ const SNOWFLAKE_HOST_ADDR: &str = "snowflakecomputing.com";
 const SNOWFLAKE_REQUEST_ID: &str = "RW_SNOWFLAKE_SINK";
 
 #[derive(Debug)]
-pub struct SnowflakeInserterBuilder {
+pub struct SnowflakeHttpClient {
     url: String,
+    s3: String,
     header: HashMap<String, String>,
 }
 
-impl SnowflakeInserterBuilder {
+impl SnowflakeHttpClient {
     pub fn new(
         account: String,
         db: String,
         schema: String,
         pipe: String,
+        s3: String,
         header: HashMap<String, String>,
     ) -> Self {
         // TODO: ensure if we need user to *explicitly* provide the request id
@@ -48,11 +50,11 @@ impl SnowflakeInserterBuilder {
             account, SNOWFLAKE_HOST_ADDR, db, schema, pipe, SNOWFLAKE_REQUEST_ID
         );
 
-        Self { url, header }
+        Self { url, s3, header }
     }
 
     fn build_request_and_client(&self) -> (Builder, Client<HttpsConnector<HttpConnector>>) {
-        let mut builder = Request::put(self.url.clone());
+        let mut builder = Request::post(self.url.clone());
         for (k, v) in &self.header {
             builder = builder.header(k, v);
         }
@@ -65,17 +67,17 @@ impl SnowflakeInserterBuilder {
         (builder, client)
     }
 
-    pub async fn build(&self) -> Result<SnowflakeInserter> {
+    /// NOTE: this function should ONLY be called after
+    /// uploading files to remote external staged storage, e.g., AWS S3
+    pub async fn send_request(&self) -> Result<()> {
         let (builder, client) = self.build_request_and_client();
-        let (sender, body) = Body::channel();
-
-        Err(SinkError::Snowflake("err!".to_string()))
+        let request = builder
+            .body(Body::from(self.s3.clone()))
+            .map_err(|err| SinkError::Snowflake(err.to_string()))?;
+        let response = client.request(request).await.map_err(|err| SinkError::Snowflake(err.to_string()))?;
+        if response.status() != StatusCode::OK {
+            return Err(SinkError::Snowflake(format!("failed to make http request, error code: {}", response.status())));
+        }
+        Ok(())
     }
-}
-
-#[derive(Debug)]
-pub struct SnowflakeInserter {
-    sender: Option<Sender>,
-    join_handle: Option<JoinHandle<Result<Vec<u8>>>>,
-    buffer: BytesMut,
 }
