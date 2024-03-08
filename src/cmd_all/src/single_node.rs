@@ -247,6 +247,8 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
     let meta_opts = if opts.disable_meta {
         None
     } else {
+        // let mut meta_opts = meta_opts.map(|o| MetaNodeOpts::parse_from(osstrs(o)));
+
         Some(meta_opts)
     };
     let compute_opts = if opts.disable_compute {
