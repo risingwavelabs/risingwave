@@ -391,9 +391,18 @@ impl GlobalBarrierManager {
                         .cloned()
                         .collect_vec();
 
+                    let background_streaming_jobs = self
+                        .context
+                        .metadata_manager
+                        .list_background_creating_jobs()
+                        .await?;
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
-                    let mut info = if !self.env.opts.disable_automatic_parallelism_control {
+                    // FIXME: Transactions should be used.
+                    let mut info = if !self.env.opts.disable_automatic_parallelism_control
+                        && background_streaming_jobs.is_empty()
+                    {
                         self.context
                             .scale_actors(all_nodes.clone())
                             .await
