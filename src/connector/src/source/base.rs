@@ -166,6 +166,7 @@ pub struct SourceContext {
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
 }
+
 impl SourceContext {
     pub fn new(
         actor_id: u32,
