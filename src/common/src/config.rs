@@ -1066,7 +1066,7 @@ pub mod default {
         }
 
         pub fn default_parallelism() -> DefaultParallelism {
-            DefaultParallelism::Default(std::num::NonZeroUsize::new(4).unwrap())
+            DefaultParallelism::Full
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
