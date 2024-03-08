@@ -50,6 +50,8 @@ pub struct IcebergProperties {
     // must be set for other catalogs.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
+    #[serde(rename = "catalog.uri")]
+    pub catalog_uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
     #[serde(rename = "database.name")]
     pub database_name: Option<String>,
     #[serde(rename = "table.name")]
@@ -66,6 +68,7 @@ impl IcebergProperties {
             database_name: self.database_name.clone(),
             table_name: self.table_name.clone(),
             catalog_type: self.catalog_type.clone(),
+            uri: self.catalog_uri.clone(),
             path: self.warehouse_path.clone(),
             endpoint: Some(self.endpoint.clone()),
             access_key: self.s3_access.clone(),
