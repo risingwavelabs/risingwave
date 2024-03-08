@@ -189,6 +189,9 @@ impl Configuration {
                 r#"[meta]
 max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
 disable_automatic_parallelism_control = {disable_automatic_parallelism_control}
+parallelism_control_trigger_first_delay_sec = 0
+parallelism_control_batch_size = 0
+parallelism_control_trigger_period_sec = 10
 
 [system]
 barrier_interval_ms = 250

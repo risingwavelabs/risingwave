@@ -47,6 +47,7 @@ mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
+mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
 mod comment;
@@ -246,6 +247,7 @@ pub async fn handle(
             args,
             returns,
             params,
+            with_options,
         } => {
             // For general udf, `language` clause could be ignored
             // refer: https://github.com/risingwavelabs/risingwave/pull/10608
@@ -266,6 +268,7 @@ pub async fn handle(
                     args,
                     returns,
                     params,
+                    with_options,
                 )
                 .await
             } else {
@@ -596,6 +599,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RefreshSchema,
+        } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },

@@ -139,5 +139,9 @@ harness = false
 name = "bench_row"
 harness = false
 
+[[bench]]
+name = "bench_imm_compact"
+harness = false
+
 [lints]
 workspace = true

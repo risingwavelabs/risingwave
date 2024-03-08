@@ -37,10 +37,10 @@ IcebergProperties:
   fields:
   - name: catalog.type
     field_type: String
-    required: true
+    required: false
   - name: s3.region
     field_type: String
-    required: true
+    required: false
   - name: s3.endpoint
     field_type: String
     required: false
@@ -56,9 +56,12 @@ IcebergProperties:
   - name: warehouse.path
     field_type: String
     required: true
+  - name: catalog.name
+    field_type: String
+    required: false
   - name: database.name
     field_type: String
-    required: true
+    required: false
   - name: table.name
     field_type: String
     required: true

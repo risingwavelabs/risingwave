@@ -34,7 +34,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
+    mapping_message, mark_chunk, owned_row_iter, update_backfill_metrics, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -301,7 +301,13 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-
+                                        update_backfill_metrics(
+                                            &self.metrics,
+                                            self.actor_id,
+                                            upstream_table_id,
+                                            cur_barrier_snapshot_processed_rows,
+                                            cur_barrier_upstream_processed_rows,
+                                        );
                                         break 'backfill_loop;
                                     }
                                     Some(record) => {
@@ -403,21 +409,13 @@ where
                     upstream_chunk_buffer.clear()
                 }
 
-                self.metrics
-                    .backfill_snapshot_read_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_snapshot_processed_rows);
-
-                self.metrics
-                    .backfill_upstream_output_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_upstream_processed_rows);
+                update_backfill_metrics(
+                    &self.metrics,
+                    self.actor_id,
+                    upstream_table_id,
+                    cur_barrier_snapshot_processed_rows,
+                    cur_barrier_upstream_processed_rows,
+                );
 
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;

@@ -40,7 +40,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
@@ -84,13 +84,17 @@ impl GlobalBarrierManagerContext {
                     .collect();
                 debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
-                mgr.fragment_manager
+                let unregister_table_ids = mgr
+                    .fragment_manager
                     .drop_table_fragments_vec(&to_drop_streaming_ids)
                     .await?;
 
                 // unregister compaction group for dirty table fragments.
-                self.hummock_manager
-                    .unregister_table_fragments_vec(&to_drop_table_fragments)
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        unregister_table_ids,
+                    ))
                     .await;
 
                 // clean up source connector dirty changes.
@@ -106,13 +110,14 @@ impl GlobalBarrierManagerContext {
                 } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister compaction group for cleaned state tables.
-                self.hummock_manager
-                    .unregister_table_ids_fail_fast(
-                        &state_table_ids
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        state_table_ids
                             .into_iter()
                             .map(|id| id as StateTableId)
                             .collect_vec(),
-                    )
+                    ))
                     .await;
 
                 // unregister cleaned sources.
@@ -192,7 +197,7 @@ impl GlobalBarrierManagerContext {
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", table.id);
-                    finished.await.context("failed to finish command")?;
+                    finished.await.ok().context("failed to finish command")??;
 
                     tracing::debug!("finished stream job {}", table.id);
                     // Once notified that job is finished we need to notify frontend.
@@ -275,7 +280,7 @@ impl GlobalBarrierManagerContext {
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     tracing::debug!("recovering stream job {}", id);
-                    finished.await.ok().context("failed to finish command")?;
+                    finished.await.ok().context("failed to finish command")??;
                     tracing::debug!(id, "finished stream job");
                     catalog_controller.finish_streaming_job(id).await?;
                 };
@@ -306,9 +311,16 @@ impl GlobalBarrierManager {
         if !cancelled.is_empty() {
             match &self.context.metadata_manager {
                 MetadataManager::V1(mgr) => {
-                    mgr.fragment_manager
+                    let unregister_table_ids = mgr
+                        .fragment_manager
                         .drop_table_fragments_vec(&cancelled)
                         .await?;
+                    self.env
+                        .notification_manager()
+                        .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                            unregister_table_ids,
+                        ))
+                        .await;
                 }
                 MetadataManager::V2(mgr) => {
                     for job_id in cancelled {
@@ -697,6 +709,7 @@ impl GlobalBarrierManagerContext {
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
                 )
@@ -721,7 +734,7 @@ impl GlobalBarrierManagerContext {
             return Err(e);
         }
 
-        debug!("scaling-in actors succeed.");
+        debug!("scaling actors succeed.");
         Ok(())
     }
 
@@ -773,7 +786,7 @@ impl GlobalBarrierManagerContext {
             }
         }
 
-        let table_parallelisms: HashMap<_, _> = {
+        let all_table_parallelisms: HashMap<_, _> = {
             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
             guard
@@ -781,15 +794,15 @@ impl GlobalBarrierManagerContext {
                 .iter()
                 .filter(|&(_, table)| matches!(table.state(), State::Created))
                 .map(|(table_id, table)| {
-                    let target_parallelism =
-                        derive_target_parallelism_for_custom(current_parallelism, table);
-
-                    (table_id.table_id, target_parallelism)
+                    (
+                        *table_id,
+                        derive_target_parallelism_for_custom(current_parallelism, table),
+                    )
                 })
                 .collect()
         };
 
-        let schedulable_worker_ids = workers
+        let schedulable_worker_ids: BTreeSet<_> = workers
             .iter()
             .filter(|worker| {
                 !worker
@@ -801,60 +814,62 @@ impl GlobalBarrierManagerContext {
             .map(|worker| worker.id)
             .collect();
 
-        let plan = self
-            .scale_controller
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids: schedulable_worker_ids,
-                table_parallelisms: table_parallelisms.clone(),
-            })
-            .await?;
+        for (table_id, table_parallelism) in all_table_parallelisms {
+            let plan = self
+                .scale_controller
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids: schedulable_worker_ids.clone(),
+                    table_parallelisms: HashMap::from([(table_id.table_id, table_parallelism)]),
+                })
+                .await?;
 
-        let table_parallelisms: HashMap<_, _> = table_parallelisms
-            .into_iter()
-            .map(|(table_id, parallelism)| {
-                debug_assert_ne!(parallelism, TableParallelism::Custom);
-                (TableId::new(table_id), parallelism)
-            })
-            .collect();
+            if plan.is_empty() {
+                continue;
+            }
 
-        let mut compared_table_parallelisms = table_parallelisms.clone();
+            let table_parallelisms = HashMap::from([(table_id, table_parallelism)]);
 
-        // skip reschedule if no reschedule is generated.
-        let (reschedule_fragment, applied_reschedules) = if plan.is_empty() {
-            (HashMap::new(), HashMap::new())
-        } else {
-            self.scale_controller
+            let mut compared_table_parallelisms = table_parallelisms.clone();
+
+            let (reschedule_fragment, applied_reschedules) = self
+                .scale_controller
                 .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
                 )
-                .await?
-        };
+                .await?;
 
-        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
 
-        if let Err(e) = self
-            .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
-            .await
-        {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to apply reschedule for offline scaling in recovery",
+            if let Err(e) = self
+                .scale_controller
+                .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+                .await
+            {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to apply reschedule for offline scaling in recovery",
+                );
+
+                mgr.fragment_manager
+                    .cancel_apply_reschedules(applied_reschedules)
+                    .await;
+
+                return Err(e);
+            }
+
+            tracing::info!(
+                "offline rescheduling for job {} in recovery is done",
+                table_id.table_id
             );
-
-            mgr.fragment_manager
-                .cancel_apply_reschedules(applied_reschedules)
-                .await;
-
-            return Err(e);
         }
 
-        debug!("scaling-in actors succeed.");
+        debug!("scaling actors succeed.");
         Ok(())
     }
 

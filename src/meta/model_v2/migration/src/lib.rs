@@ -4,6 +4,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20230908_072257_init;
 mod m20231008_020431_hummock;
+mod m20240304_074901_subscription;
 
 pub struct Migrator;
 
@@ -13,6 +14,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20230908_072257_init::Migration),
             Box::new(m20231008_020431_hummock::Migration),
+            Box::new(m20240304_074901_subscription::Migration),
         ]
     }
 }

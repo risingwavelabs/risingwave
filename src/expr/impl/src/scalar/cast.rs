@@ -302,6 +302,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{}", &ctx).unwrap(),
@@ -314,6 +315,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert_eq!(str_to_list("{1, 2, 3}", &ctx).unwrap(), list123);
 
@@ -322,6 +324,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(str_to_list("{{1, 2, 3}}", &ctx).unwrap(), nested_list123);
 
@@ -334,6 +337,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[][][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
@@ -344,6 +348,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::from_str("int[][]").unwrap()],
             return_type: DataType::from_str("varchar[][]").unwrap(),
+            variadic: false,
         };
         let double_nested_varchar_list123_445566 = ListValue::from_iter([
             list_cast(nested_list123.as_scalar_ref(), &ctx).unwrap(),
@@ -354,6 +359,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("varchar[][][]").unwrap(),
+            variadic: false,
         };
         assert_eq!(
             str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
@@ -367,6 +373,7 @@ mod tests {
         let ctx = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::from_str("int[]").unwrap(),
+            variadic: false,
         };
         assert!(str_to_list("{{}", &ctx).is_err());
         assert!(str_to_list("{}}", &ctx).is_err());
@@ -385,6 +392,7 @@ mod tests {
                 ("a", DataType::Int32),
                 ("b", DataType::Int32),
             ])),
+            variadic: false,
         };
         assert_eq!(
             struct_cast(
@@ -420,6 +428,7 @@ mod tests {
         let ctx_str_to_int16 = Context {
             arg_types: vec![DataType::Varchar],
             return_type: DataType::Int16,
+            variadic: false,
         };
         test_str_to_int16::<I16Array, _>(|x| str_parse(x, &ctx_str_to_int16).unwrap()).await;
     }
