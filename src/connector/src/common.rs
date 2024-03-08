@@ -100,7 +100,7 @@ impl AwsAuthProps {
                 ),
             ))
         } else {
-            bail!("Both \"access_key\" and \"secret_access\" are required.")
+            bail!("Both \"access_key\" and \"secret_key\" are required.")
         }
     }
 

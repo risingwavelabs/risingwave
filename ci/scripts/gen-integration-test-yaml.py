@@ -34,7 +34,7 @@ CASES_MAP = {
     'big-query-sink': ['json'],
     'mindsdb': ['json'],
     'vector': ['json'],
-    'nats': ['json'],
+    'nats': ['json', 'protobuf'],
     'doris-sink': ['json'],
     'starrocks-sink': ['json'],
     'deltalake-sink': ['json'],
