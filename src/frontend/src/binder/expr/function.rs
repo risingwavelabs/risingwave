@@ -273,7 +273,7 @@ impl Binder {
             }
         }
 
-        self.bind_builtin_scalar_function(function_name.as_str(), inputs)
+        self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
     }
 
     fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
@@ -791,6 +791,7 @@ impl Binder {
         &mut self,
         function_name: &str,
         inputs: Vec<ExprImpl>,
+        variadic: bool,
     ) -> Result<ExprImpl> {
         type Inputs = Vec<ExprImpl>;
 
@@ -1075,7 +1076,7 @@ impl Binder {
                     guard_by_len(2, raw(|binder, inputs| {
                         let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
                         // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
-                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0], false)?;
                         let arg1 = arg1.cast_implicit(DataType::Int32)?;
 
                         FunctionCall::new(
@@ -1102,36 +1103,8 @@ impl Binder {
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccess)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
-                ("jsonb_extract_path", raw(|_binder, mut inputs| {
-                    // rewrite: jsonb_extract_path(jsonb, s1, s2...)
-                    // to:      jsonb_extract_path(jsonb, array[s1, s2...])
-                    if inputs.len() < 2 {
-                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
-                    }
-                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
-                    let mut variadic_inputs = inputs.split_off(1);
-                    for input in &mut variadic_inputs {
-                        input.cast_implicit_mut(DataType::Varchar)?;
-                    }
-                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
-                    inputs.push(array.into());
-                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPath, inputs, DataType::Jsonb).into())
-                })),
-                ("jsonb_extract_path_text", raw(|_binder, mut inputs| {
-                    // rewrite: jsonb_extract_path_text(jsonb, s1, s2...)
-                    // to:      jsonb_extract_path_text(jsonb, array[s1, s2...])
-                    if inputs.len() < 2 {
-                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
-                    }
-                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
-                    let mut variadic_inputs = inputs.split_off(1);
-                    for input in &mut variadic_inputs {
-                        input.cast_implicit_mut(DataType::Varchar)?;
-                    }
-                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
-                    inputs.push(array.into());
-                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPathText, inputs, DataType::Varchar).into())
-                })),
+                ("jsonb_extract_path", raw_call(ExprType::JsonbExtractPath)),
+                ("jsonb_extract_path_text", raw_call(ExprType::JsonbExtractPathText)),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
@@ -1387,6 +1360,26 @@ impl Binder {
 
             tree
         });
+
+        if variadic {
+            let func = match function_name {
+                "format" => ExprType::FormatVariadic,
+                "concat" => ExprType::ConcatVariadic,
+                "concat_ws" => ExprType::ConcatWsVariadic,
+                "jsonb_build_array" => ExprType::JsonbBuildArrayVariadic,
+                "jsonb_build_object" => ExprType::JsonbBuildObjectVariadic,
+                "jsonb_extract_path" => ExprType::JsonbExtractPathVariadic,
+                "jsonb_extract_path_text" => ExprType::JsonbExtractPathTextVariadic,
+                _ => {
+                    return Err(ErrorCode::BindError(format!(
+                        "VARIADIC argument is not allowed in function \"{}\"",
+                        function_name
+                    ))
+                    .into())
+                }
+            };
+            return Ok(FunctionCall::new(func, inputs)?.into());
+        }
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),

@@ -97,6 +97,7 @@ message ExprNode {
     TRANSLATE = 216;
     COALESCE = 217;
     CONCAT_WS = 218;
+    CONCAT_WS_VARIADIC = 285;
     ABS = 219;
     SPLIT_PART = 220;
     CEIL = 221;
@@ -106,6 +107,8 @@ message ExprNode {
     CHAR_LENGTH = 225;
     REPEAT = 226;
     CONCAT_OP = 227;
+    CONCAT = 286;
+    CONCAT_VARIADIC = 287;
     // BOOL_OUT is different from CAST-bool-to-varchar in PostgreSQL.
     BOOL_OUT = 228;
     OCTET_LENGTH = 229;
@@ -182,6 +185,7 @@ message ExprNode {
     LEFT = 317;
     RIGHT = 318;
     FORMAT = 319;
+    FORMAT_VARIADIC = 326;
     PGWIRE_SEND = 320;
     PGWIRE_RECV = 321;
     CONVERT_FROM = 322;
@@ -232,9 +236,11 @@ message ExprNode {
     // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
     // jsonb #> text[] -> jsonb
-    JSONB_EXTRACT_PATH = 613;
+    JSONB_EXTRACT_PATH = 627;
+    JSONB_EXTRACT_PATH_VARIADIC = 613;
     // jsonb #>> text[] -> text
-    JSONB_EXTRACT_PATH_TEXT = 614;
+    JSONB_EXTRACT_PATH_TEXT = 628;
+    JSONB_EXTRACT_PATH_TEXT_VARIADIC = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
@@ -261,7 +267,9 @@ message ExprNode {
     JSONB_STRIP_NULLS = 616;
     TO_JSONB = 617;
     JSONB_BUILD_ARRAY = 618;
+    JSONB_BUILD_ARRAY_VARIADIC = 625;
     JSONB_BUILD_OBJECT = 619;
+    JSONB_BUILD_OBJECT_VARIADIC = 626;
     JSONB_PATH_EXISTS = 620;
     JSONB_PATH_MATCH = 621;
     JSONB_PATH_QUERY_ARRAY = 622;

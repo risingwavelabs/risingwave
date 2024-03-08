@@ -439,6 +439,9 @@ pub fn rebalance_actor_vnode(
 pub struct RescheduleOptions {
     /// Whether to resolve the upstream of NoShuffle when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
     pub resolve_no_shuffle_upstream: bool,
+
+    /// Whether to skip creating new actors. If it is true, the scaling-out actors will not be created.
+    pub skip_create_new_actors: bool,
 }
 
 pub type ScaleControllerRef = Arc<ScaleController>;
@@ -1195,13 +1198,15 @@ impl ScaleController {
             }
         }
 
-        self.create_actors_on_compute_node(
-            &ctx.worker_nodes,
-            actor_infos_to_broadcast,
-            node_actors_to_create,
-            broadcast_worker_ids,
-        )
-        .await?;
+        if !options.skip_create_new_actors {
+            self.create_actors_on_compute_node(
+                &ctx.worker_nodes,
+                actor_infos_to_broadcast,
+                node_actors_to_create,
+                broadcast_worker_ids,
+            )
+            .await?;
+        }
 
         // For stream source fragments, we need to reallocate the splits.
         // Because we are in the Pause state, so it's no problem to reallocate
@@ -2679,6 +2684,20 @@ impl GlobalStreamManager {
     }
 
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
+        let background_streaming_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_streaming_jobs.is_empty() {
+            tracing::debug!(
+                "skipping parallelism control due to background jobs {:?}",
+                background_streaming_jobs
+            );
+            // skip if there are background creating jobs
+            return Ok(true);
+        }
+
         tracing::info!("trigger parallelism control");
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
@@ -2813,6 +2832,7 @@ impl GlobalStreamManager {
             reschedules,
             RescheduleOptions {
                 resolve_no_shuffle_upstream: false,
+                skip_create_new_actors: false,
             },
             None,
         )

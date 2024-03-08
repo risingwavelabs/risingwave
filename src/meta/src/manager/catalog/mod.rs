@@ -3692,6 +3692,33 @@ impl CatalogManager {
             .collect()
     }
 
+    /// Returns column ids of `table_ids` that is versioned.
+    /// Being versioned implies using `ColumnAwareSerde`.
+    pub async fn get_versioned_table_schemas(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<TableId, Vec<i32>> {
+        let guard = self.core.lock().await;
+        table_ids
+            .iter()
+            .filter_map(|table_id| {
+                if let Some(t) = guard.database.tables.get(table_id)
+                    && t.version.is_some()
+                {
+                    let ret = (
+                        t.id,
+                        t.columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec(),
+                    );
+                    return Some(ret);
+                }
+                None
+            })
+            .collect()
+    }
+
     // TODO: replace *_count with SQL
     #[cfg_attr(coverage, coverage(off))]
     pub async fn source_count(&self) -> usize {
@@ -3944,14 +3971,28 @@ impl CatalogManager {
         true
     }
 
+    /// Check whether the user is the owner of the object.
+    #[inline(always)]
+    fn check_owner(
+        database_manager: &DatabaseManager,
+        object: &Object,
+        user_id: UserId,
+    ) -> MetaResult<bool> {
+        database_manager
+            .get_object_owner(object)
+            .map(|owner_id| owner_id == user_id)
+    }
+
     pub async fn grant_privilege(
         &self,
         user_ids: &[UserId],
         new_grant_privileges: &[GrantPrivilege],
         grantor: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.user;
-        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let core = &mut *self.core.lock().await;
+        let user_core = &mut core.user;
+        let catalog_core = &core.database;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut user_updated = Vec::with_capacity(user_ids.len());
         let grantor_info = users
             .get(&grantor)
@@ -3970,6 +4011,13 @@ impl CatalogManager {
             }
             if !grantor_info.is_super {
                 for new_grant_privilege in new_grant_privileges {
+                    if Self::check_owner(
+                        catalog_core,
+                        new_grant_privilege.object.as_ref().unwrap(),
+                        grantor,
+                    )? {
+                        continue;
+                    }
                     if let Some(privilege) = grantor_info
                         .grant_privileges
                         .iter()
@@ -4005,7 +4053,7 @@ impl CatalogManager {
 
         commit_meta!(self, users)?;
 
-        let grant_user = core
+        let grant_user = user_core
             .user_grant_relation
             .entry(grantor)
             .or_insert_with(HashSet::new);
@@ -4066,8 +4114,10 @@ impl CatalogManager {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.user;
-        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let core = &mut *self.core.lock().await;
+        let user_core = &mut core.user;
+        let catalog_core = &core.database;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut user_updated = HashMap::new();
         let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
@@ -4078,6 +4128,13 @@ impl CatalogManager {
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_super {
             for privilege in revoke_grant_privileges {
+                if Self::check_owner(
+                    catalog_core,
+                    privilege.object.as_ref().unwrap(),
+                    revoke_by.id,
+                )? {
+                    continue;
+                }
                 if let Some(user_privilege) = revoke_by
                     .grant_privileges
                     .iter()
@@ -4113,7 +4170,7 @@ impl CatalogManager {
         }
         while !users_info.is_empty() {
             let mut cur_user = users_info.pop_front().unwrap();
-            let cur_relations = core
+            let cur_relations = user_core
                 .user_grant_relation
                 .get(&cur_user.id)
                 .cloned()
@@ -4168,7 +4225,7 @@ impl CatalogManager {
 
         // Since we might revoke privileges recursively, just simply re-build the grant relation
         // map here.
-        core.build_grant_relation_map();
+        user_core.build_grant_relation_map();
 
         let mut version = 0;
         // FIXME: user might not be updated.
