@@ -126,7 +126,7 @@ impl Default for SystemData {
 }
 
 /// Sends a `POST` request of the telemetry reporting to a URL.
-async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
+pub async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)

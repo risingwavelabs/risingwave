@@ -20,6 +20,8 @@ use risingwave_common::telemetry::{
 };
 use serde::{Deserialize, Serialize};
 
+const TELEMETRY_FRONTEND_REPORT_TYPE: &str = "frontend";
+
 #[derive(Clone, Copy)]
 pub(crate) struct FrontendTelemetryCreator {}
 
@@ -45,7 +47,7 @@ impl TelemetryReportCreator for FrontendTelemetryCreator {
     }
 
     fn report_type(&self) -> &str {
-        "frontend"
+        TELEMETRY_FRONTEND_REPORT_TYPE
     }
 }
 
@@ -93,5 +95,24 @@ mod tests {
         assert_eq!(report.base.session_id, "session_id");
         assert_eq!(report.base.up_time, 0);
         assert_eq!(report.base.node_type, TelemetryNodeType::Frontend);
+    }
+
+    use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
+    use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
+
+    #[tokio::test]
+    async fn test_frontend_telemetry_report() {
+        let mut report = super::FrontendTelemetryReport::new(
+            "tracking_id".to_string(),
+            "session_id".to_string(),
+            100,
+        );
+        report.base.is_test = true;
+
+        let pb_report = report.to_pb_bytes();
+        let url =
+            (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_FRONTEND_REPORT_TYPE).to_owned();
+        let post_res = post_telemetry_report_pb(&url, pb_report).await;
+        assert!(post_res.is_ok());
     }
 }

@@ -21,6 +21,8 @@ use risingwave_common::telemetry::{
 };
 use serde::{Deserialize, Serialize};
 
+const TELEMETRY_COMPACTOR_REPORT_TYPE: &str = "compactor";
+
 #[derive(Clone, Copy)]
 pub(crate) struct CompactorTelemetryCreator {}
 
@@ -46,7 +48,7 @@ impl TelemetryReportCreator for CompactorTelemetryCreator {
     }
 
     fn report_type(&self) -> &str {
-        "compactor"
+        TELEMETRY_COMPACTOR_REPORT_TYPE
     }
 }
 
@@ -79,5 +81,29 @@ impl CompactorTelemetryReport {
                 is_test: false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
+    use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
+
+    use crate::telemetry::TELEMETRY_COMPACTOR_REPORT_TYPE;
+
+    #[tokio::test]
+    async fn test_compactor_telemetry_report() {
+        let mut report = super::CompactorTelemetryReport::new(
+            "tracking_id".to_string(),
+            "session_id".to_string(),
+            100,
+        );
+        report.base.is_test = true;
+
+        let pb_report = report.to_pb_bytes();
+        let url =
+            (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_COMPACTOR_REPORT_TYPE).to_owned();
+        let post_res = post_telemetry_report_pb(&url, pb_report).await;
+        assert!(post_res.is_ok());
     }
 }
