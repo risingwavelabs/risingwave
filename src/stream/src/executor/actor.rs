@@ -95,8 +95,6 @@ impl ActorContext {
         }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let _err_str = err.to_report_string();
-
         GLOBAL_ERROR_METRICS.user_compute_error.report([
             "ExprError".to_owned(),
             executor_name.to_owned(),
