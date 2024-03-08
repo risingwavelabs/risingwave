@@ -111,9 +111,10 @@ pub async fn load_file_descriptor_from_s3(
     let bucket = location
         .domain()
         .with_context(|| format!("illegal file path {}", location))?;
-    let key = location.path().strip_prefix('/').ok_or(anyhow!(
-        "s3 url {location} should have a '/' at the start of path."
-    ))?;
+    let key = location
+        .path()
+        .strip_prefix('/')
+        .ok_or_else(|| anyhow!("s3 url {location} should have a '/' at the start of path."))?;
     let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
