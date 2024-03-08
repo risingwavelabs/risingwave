@@ -358,6 +358,16 @@ impl DdlController {
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
+        if !deferred
+            && !self
+                .metadata_manager
+                .list_background_creating_jobs()
+                .await?
+                .is_empty()
+        {
+            bail!("There are background creating jobs, please try again later")
+        }
+
         self.stream_manager
             .alter_table_parallelism(table_id, parallelism.into(), deferred)
             .await
