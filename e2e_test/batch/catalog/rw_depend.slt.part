@@ -2,6 +2,9 @@ statement ok
 create table t1 (a int);
 
 statement ok
+create index idx1 on t1(a);
+
+statement ok
 create source s1 (a int) with (connector='datagen');
 
 statement ok
@@ -22,6 +25,7 @@ from rw_depend d
 join rw_relations r1 on d.objid = r1.id
 join rw_relations r2 on d.refobjid = r2.id;
 ----
+idx1  t1
 mv1   s1
 mv1   t1
 mv2   mv1

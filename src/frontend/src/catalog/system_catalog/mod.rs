@@ -303,7 +303,8 @@ pub fn get_sys_tables_in_schema(schema_name: &str) -> Vec<Arc<SystemTableCatalog
         .enumerate()
         .filter_map(|(idx, c)| match c {
             BuiltinCatalog::Table(t) if t.schema == schema_name => Some(Arc::new(
-                SystemTableCatalog::from(t).with_id((idx as u32 + SYS_CATALOG_START_ID).into()),
+                SystemTableCatalog::from(t)
+                    .with_id((idx as u32 + SYS_CATALOG_START_ID as u32).into()),
             )),
             _ => None,
         })
@@ -316,9 +317,9 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
         .iter()
         .enumerate()
         .filter_map(|(idx, c)| match c {
-            BuiltinCatalog::View(v) if v.schema == schema_name => {
-                Some(Arc::new(ViewCatalog::from(v).with_id(idx as u32 + 1)))
-            }
+            BuiltinCatalog::View(v) if v.schema == schema_name => Some(Arc::new(
+                ViewCatalog::from(v).with_id(idx as u32 + SYS_CATALOG_START_ID as u32),
+            )),
             _ => None,
         })
         .collect()
@@ -327,7 +328,7 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
-    assert!(SYS_CATALOGS_SLICE.len() + 1 < MAX_SYS_CATALOG_NUM as usize);
+    assert!(SYS_CATALOGS_SLICE.len() <= MAX_SYS_CATALOG_NUM as usize);
     let catalogs = SYS_CATALOGS_SLICE
         .iter()
         .map(|f| f())
@@ -344,7 +345,7 @@ impl SysCatalogReader for SysCatalogReaderImpl {
     async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError> {
         let table_name = SYS_CATALOGS
             .catalogs
-            .get(table_id.table_id as usize - 1)
+            .get((table_id.table_id - SYS_CATALOG_START_ID as u32) as usize)
             .unwrap();
         match table_name {
             BuiltinCatalog::Table(t) => (t.function)(self).await,
