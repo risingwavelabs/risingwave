@@ -86,7 +86,7 @@ pub type ErrorMetricRef<const N: usize> = Arc<ErrorMetric<N>>;
 /// Please avoid adding new error metrics here. Instead, introduce new `error_type` for new errors.
 #[derive(Clone)]
 pub struct ErrorMetrics {
-    pub user_sink_error: ErrorMetricRef<2>,
+    pub user_sink_error: ErrorMetricRef<4>,
     pub user_compute_error: ErrorMetricRef<3>,
     pub user_source_error: ErrorMetricRef<4>,
 }
@@ -97,7 +97,7 @@ impl ErrorMetrics {
             user_sink_error: Arc::new(ErrorMetric::new(
                 "user_sink_error",
                 "Sink errors in the system, queryable by tags",
-                &["connector_name", "executor_id"],
+                &["error_type", "sink_id", "sink_name", "fragment_id"],
             )),
             user_compute_error: Arc::new(ErrorMetric::new(
                 "user_compute_error",
@@ -105,7 +105,7 @@ impl ErrorMetrics {
                 &["error_type", "executor_name", "fragment_id"],
             )),
             user_source_error: Arc::new(ErrorMetric::new(
-                "user_source_error_count",
+                "user_source_error",
                 "Source errors in the system, queryable by tags",
                 &["error_type", "source_id", "source_name", "fragment_id"],
             )),
