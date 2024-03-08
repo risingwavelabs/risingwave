@@ -839,7 +839,7 @@ impl GlobalBarrierManagerContext {
                 .collect()
         };
 
-        let schedulable_worker_ids = workers
+        let schedulable_worker_ids: BTreeSet<_> = workers
             .iter()
             .filter(|worker| {
                 !worker
