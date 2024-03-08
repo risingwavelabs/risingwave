@@ -33,6 +33,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use thiserror_ext::AsReport;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
@@ -63,7 +64,7 @@ pub(super) mod handlers {
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
-    use risingwave_pb::meta::{ActorLocation, PbTableFragments};
+    use risingwave_pb::meta::PbTableFragments;
     use risingwave_pb::monitor_service::{
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
@@ -440,7 +441,8 @@ impl DashboardService {
         let app = Router::new()
             .fallback_service(dashboard_router)
             .nest("/api", api_router)
-            .nest("/trace", trace_ui_router);
+            .nest("/trace", trace_ui_router)
+            .layer(CompressionLayer::new());
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())
