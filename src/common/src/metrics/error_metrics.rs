@@ -88,7 +88,6 @@ pub type ErrorMetricRef<const N: usize> = Arc<ErrorMetric<N>>;
 pub struct ErrorMetrics {
     pub user_sink_error: ErrorMetricRef<2>,
     pub user_compute_error: ErrorMetricRef<3>,
-    pub user_source_reader_error: ErrorMetricRef<4>,
     pub user_source_error: ErrorMetricRef<4>,
 }
 
@@ -105,12 +104,6 @@ impl ErrorMetrics {
                 "Compute errors in the system, queryable by tags",
                 &["error_type", "executor_name", "fragment_id"],
             )),
-            // TODO: merge it to source_error
-            user_source_reader_error: Arc::new(ErrorMetric::new(
-                "user_source_reader_error",
-                "Source reader error count",
-                &["error_type", "executor_name", "actor_id", "source_id"],
-            )),
             user_source_error: Arc::new(ErrorMetric::new(
                 "user_source_error_count",
                 "Source errors in the system, queryable by tags",
@@ -123,7 +116,6 @@ impl ErrorMetrics {
         vec![
             &self.user_sink_error.desc,
             &self.user_compute_error.desc,
-            &self.user_source_reader_error.desc,
             &self.user_source_error.desc,
         ]
     }
@@ -132,7 +124,6 @@ impl ErrorMetrics {
         vec![
             self.user_sink_error.collect(),
             self.user_compute_error.collect(),
-            self.user_source_reader_error.collect(),
             self.user_source_error.collect(),
         ]
     }

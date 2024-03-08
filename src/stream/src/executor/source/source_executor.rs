@@ -266,11 +266,11 @@ impl<S: StateStore> SourceExecutor<S> {
             source_id = %core.source_id,
             "stream source reader error",
         );
-        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
+        GLOBAL_ERROR_METRICS.user_source_error.report([
             "SourceReaderError".to_owned(),
-            "SourceExecutor".to_owned(),
-            self.actor_ctx.id.to_string(),
             core.source_id.to_string(),
+            core.source_name.to_owned(),
+            self.actor_ctx.fragment_id.to_string(),
         ]);
 
         self.rebuild_stream_reader(source_desc, stream).await
