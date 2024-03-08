@@ -2684,6 +2684,20 @@ impl GlobalStreamManager {
     }
 
     async fn trigger_parallelism_control(&self) -> MetaResult<bool> {
+        let background_streaming_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_streaming_jobs.is_empty() {
+            tracing::debug!(
+                "skipping parallelism control due to background jobs {:?}",
+                background_streaming_jobs
+            );
+            // skip if there are background creating jobs
+            return Ok(true);
+        }
+
         tracing::info!("trigger parallelism control");
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
