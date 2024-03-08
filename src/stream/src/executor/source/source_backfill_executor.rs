@@ -88,8 +88,8 @@ impl BackfillState {
             BackfillState::SourceCachingUp(backfill_offset) => {
                 match compare_kafka_offset(backfill_offset, offset) {
                     Ordering::Less => {
-                        // XXX: Is this possible? i.e., Source caught up, but doesn't contain the
-                        // last backfilled row.
+                        // Source caught up, but doesn't contain the last backfilled row.
+                        // This may happen e.g., if Kafka performed compaction.
                         vis = true;
                         *self = BackfillState::Finished;
                     }
