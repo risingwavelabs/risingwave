@@ -776,7 +776,6 @@ impl GlobalBarrierManagerContext {
                 .collect()
         };
 
-
         let workers = mgr
             .cluster_manager
             .list_active_streaming_compute_nodes()
