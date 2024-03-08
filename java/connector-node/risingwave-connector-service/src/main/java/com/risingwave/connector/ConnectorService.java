@@ -14,7 +14,6 @@
 
 package com.risingwave.connector;
 
-import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
