@@ -183,6 +183,29 @@ impl MetadataManager {
         }
     }
 
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                let tables = mgr.catalog_manager.list_creating_background_mvs().await;
+                Ok(tables
+                    .into_iter()
+                    .map(|table| TableId::from(table.id))
+                    .collect())
+            }
+            MetadataManager::V2(mgr) => {
+                let tables = mgr
+                    .catalog_controller
+                    .list_background_creating_mviews()
+                    .await?;
+
+                Ok(tables
+                    .into_iter()
+                    .map(|table| TableId::from(table.table_id as u32))
+                    .collect())
+            }
+        }
+    }
+
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         match self {
             MetadataManager::V1(mgr) => Ok(mgr.catalog_manager.list_sources().await),

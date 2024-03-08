@@ -378,12 +378,24 @@ impl GlobalBarrierManagerContext {
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.pre_apply_drop_cancel(scheduled_barriers).await?;
 
+                    let background_streaming_jobs = self
+                        .context
+                        .metadata_manager
+                        .list_background_creating_jobs()
+                        .await?;
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
-                    let mut info = if !self.env.opts.disable_automatic_parallelism_control {
-                        self.scale_actors().await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "scale actors failed");
-                        })?;
+                    // FIXME: Transactions should be used.
+                    let mut info = if !self.env.opts.disable_automatic_parallelism_control
+                        && background_streaming_jobs.is_empty()
+                    {
+                        self.context
+                            .scale_actors(all_nodes.clone())
+                            .await
+                            .inspect_err(|err| {
+                                warn!(error = %err.as_report(), "scale actors failed");
+                            })?;
 
                         self.resolve_actor_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
