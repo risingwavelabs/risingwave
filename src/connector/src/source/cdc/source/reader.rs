@@ -222,8 +222,8 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                         // TODO(eric): output ConnectorError's variant as label
                         "cdc_source".to_owned(),
                         source_id.clone(),
-                        self.source_ctx.source_info.source_name.clone(),
-                        self.source_ctx.source_info.fragment_id.to_string(),
+                        self.source_ctx.source_name.clone(),
+                        self.source_ctx.fragment_id.to_string(),
                     ]);
                     Err(e)?;
                 }
