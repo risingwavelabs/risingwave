@@ -174,6 +174,6 @@ pub async fn create_executor(
         NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
         NodeBody::OverWindow => OverWindowExecutorBuilder,
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
-        NodeBody::SourceBackfill => KafkaBackfillExecutorBuilder,
+        NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
     }
 }

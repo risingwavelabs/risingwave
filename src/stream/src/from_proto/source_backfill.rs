@@ -19,14 +19,14 @@ use risingwave_pb::stream_plan::SourceBackfillNode;
 use super::*;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::source_backfill_executor::{
-    KafkaBackfillExecutor, KafkaBackfillExecutorInner,
+    SourceBackfillExecutor, SourceBackfillExecutorInner,
 };
 use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::BackfillStateTableHandler;
 
-pub struct KafkaBackfillExecutorBuilder;
+pub struct SourceBackfillExecutorBuilder;
 
-impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
+impl ExecutorBuilder for SourceBackfillExecutorBuilder {
     type Node = SourceBackfillNode;
 
     async fn new_boxed_executor(
@@ -76,7 +76,7 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
             state_table_handler,
         );
 
-        let exec = KafkaBackfillExecutorInner::new(
+        let exec = SourceBackfillExecutorInner::new(
             params.actor_context.clone(),
             params.info.clone(),
             stream_source_core,
@@ -90,7 +90,7 @@ impl ExecutorBuilder for KafkaBackfillExecutorBuilder {
 
         Ok((
             params.info,
-            KafkaBackfillExecutor { inner: exec, input }.boxed(),
+            SourceBackfillExecutor { inner: exec, input }.boxed(),
         )
             .into())
     }

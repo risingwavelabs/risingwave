@@ -111,13 +111,13 @@ impl BackfillState {
     }
 }
 
-pub struct KafkaBackfillExecutor<S: StateStore> {
-    pub inner: KafkaBackfillExecutorInner<S>,
+pub struct SourceBackfillExecutor<S: StateStore> {
+    pub inner: SourceBackfillExecutorInner<S>,
     /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
     pub input: Executor,
 }
 
-pub struct KafkaBackfillExecutorInner<S: StateStore> {
+pub struct SourceBackfillExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -169,7 +169,7 @@ impl BackfillStage {
     }
 }
 
-impl<S: StateStore> KafkaBackfillExecutorInner<S> {
+impl<S: StateStore> SourceBackfillExecutorInner<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -872,16 +872,16 @@ fn compare_kafka_offset(a: &str, b: &str) -> Ordering {
     a.cmp(&b)
 }
 
-impl<S: StateStore> Execute for KafkaBackfillExecutor<S> {
+impl<S: StateStore> Execute for SourceBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }
 }
 
-impl<S: StateStore> Debug for KafkaBackfillExecutorInner<S> {
+impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let core = &self.stream_source_core;
-        f.debug_struct("KafkaBackfillExecutor")
+        f.debug_struct("SourceBackfillExecutor")
             .field("source_id", &core.source_id)
             .field("column_ids", &core.column_ids)
             .field("pk_indices", &self.info.pk_indices)
