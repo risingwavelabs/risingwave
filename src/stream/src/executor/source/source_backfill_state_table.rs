@@ -23,7 +23,7 @@ use risingwave_connector::source::SplitId;
 use risingwave_pb::catalog::PbTable;
 use risingwave_storage::StateStore;
 
-use super::kafka_backfill_executor::{BackfillState, BackfillStates};
+use super::source_backfill_executor::{BackfillState, BackfillStates};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;

@@ -22,7 +22,6 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use kafka_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::row::Row;
@@ -36,10 +35,11 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
+use source_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
-use super::kafka_backfill_state_table::BackfillStateTableHandler;
+use super::source_backfill_state_table::BackfillStateTableHandler;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 
