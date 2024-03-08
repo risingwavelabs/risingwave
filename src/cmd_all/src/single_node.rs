@@ -26,6 +26,7 @@ use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
 use shell_words::split;
 
+use crate::common::osstrs;
 use crate::ParsedStandaloneOpts;
 
 pub static DEFAULT_STORE_DIRECTORY: LazyLock<String> = LazyLock::new(|| {
@@ -120,10 +121,10 @@ pub struct SingleNodeOpts {
 }
 
 struct NormalizedSingleNodeOpts {
-    frontend_opts: Option<RawOpts>,
-    meta_opts: Option<RawOpts>,
-    compute_opts: Option<RawOpts>,
-    compactor_opts: Option<RawOpts>,
+    frontend_opts: Option<FrontendOpts>,
+    meta_opts: Option<MetaNodeOpts>,
+    compute_opts: Option<ComputeNodeOpts>,
+    compactor_opts: Option<CompactorOpts>,
 }
 
 pub fn make_single_node_sql_endpoint(store_directory: &String) -> String {
@@ -141,7 +142,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
     todo!()
 }
 
-pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNodeOpts {
+pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
     let mut meta_opts = RawOpts::default_meta_opts();
     let mut compute_opts = RawOpts::default_compute_opts();
     let mut frontend_opts = RawOpts::default_frontend_opts();
@@ -242,26 +243,32 @@ pub fn normalized_single_node_opts(opts: &SingleNodeOpts) -> NormalizedSingleNod
     let frontend_opts = if opts.disable_frontend {
         None
     } else {
+        let args = frontend_opts.raw_opts_to_args();
+        let frontend_opts = FrontendOpts::parse_from(osstrs(args));
         Some(frontend_opts)
     };
     let meta_opts = if opts.disable_meta {
         None
     } else {
-        // let mut meta_opts = meta_opts.map(|o| MetaNodeOpts::parse_from(osstrs(o)));
-
+        let args = meta_opts.raw_opts_to_args();
+        let meta_opts = MetaNodeOpts::parse_from(osstrs(args));
         Some(meta_opts)
     };
     let compute_opts = if opts.disable_compute {
         None
     } else {
+        let args = compute_opts.raw_opts_to_args();
+        let compute_opts = ComputeNodeOpts::parse_from(osstrs(args));
         Some(compute_opts)
     };
     let compactor_opts = if opts.disable_compactor {
         None
     } else {
+        let args = compactor_opts.raw_opts_to_args();
+        let compactor_opts = CompactorOpts::parse_from(osstrs(args));
         Some(compactor_opts)
     };
-    NormalizedSingleNodeOpts {
+    ParsedStandaloneOpts {
         frontend_opts,
         meta_opts,
         compute_opts,
@@ -396,6 +403,18 @@ impl RawOpts {
             flags: Default::default(),
             opts: inner,
         }
+    }
+
+    fn raw_opts_to_args(self) -> Vec<String> {
+        let mut args = vec![];
+        for (k, v) in self.opts {
+            args.push(k.clone());
+            args.push(v.clone());
+        }
+        for f in self.flags {
+            args.push(f.clone());
+        }
+        args
     }
 }
 

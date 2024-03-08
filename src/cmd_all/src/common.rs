@@ -14,10 +14,6 @@
 
 use std::ffi::OsString;
 
-pub fn osstrs_from_iter<T: Into<OsString>>(s: impl IntoIterator<Item = T>) -> Vec<OsString> {
-    s.into_iter().map(Into::into).collect()
-}
-
 pub fn osstrs<T: Into<OsString> + AsRef<std::ffi::OsStr>>(s: impl AsRef<[T]>) -> Vec<OsString> {
     s.as_ref().iter().map(OsString::from).collect()
 }
