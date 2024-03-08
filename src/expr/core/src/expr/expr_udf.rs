@@ -51,9 +51,13 @@ pub struct UserDefinedFunction {
     identifier: String,
     span: await_tree::Span,
     /// Number of remaining successful calls until retry is enabled.
+    /// This parameter is designed to prevent continuous retry on every call, which would increase delay.
+    /// Logic:
+    /// It resets to INITIAL_RETRY_COUNT after a single failure and then decrements with each call, enabling retry when it reaches zero.
     /// If non-zero, we will not retry on connection errors to prevent blocking the stream.
     /// On each connection error, the count will be reset to `INITIAL_RETRY_COUNT`.
     /// On each successful call, the count will be decreased by 1.
+    /// Link:
     /// See <https://github.com/risingwavelabs/risingwave/issues/13791>.
     disable_retry_count: AtomicU8,
     /// Always retry. Overrides `disable_retry_count`.
@@ -152,7 +156,11 @@ impl UserDefinedFunction {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
                     client
-                        .call_with_always_retry_on_network_error(&self.identifier, arrow_input)
+                        .call_with_always_retry_on_network_error(
+                            &self.identifier,
+                            arrow_input,
+                            &fragment_id,
+                        )
                         .instrument_await(self.span.clone())
                         .await
                 } else {
