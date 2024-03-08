@@ -64,6 +64,9 @@ pub struct TelemetryReportBase {
     pub time_stamp: u64,
     /// node_type is the node that creates the report
     pub node_type: TelemetryNodeType,
+    /// is_test is whether the report is from a test environment, default to be false
+    /// needed in CI for compatible tests with telemetry backend
+    pub is_test: bool,
 }
 
 pub trait TelemetryReport: Serialize {}
