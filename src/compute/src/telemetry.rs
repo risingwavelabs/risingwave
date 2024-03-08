@@ -74,6 +74,7 @@ impl ComputeTelemetryReport {
                 system_data: SystemData::new(),
                 time_stamp: current_timestamp(),
                 node_type: TelemetryNodeType::Compute,
+                is_test: false,
             },
         }
     }

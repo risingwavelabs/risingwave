@@ -74,6 +74,7 @@ impl FrontendTelemetryReport {
                 up_time,
                 time_stamp: current_timestamp(),
                 node_type: TelemetryNodeType::Frontend,
+                is_test: false,
             },
         }
     }

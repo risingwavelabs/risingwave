@@ -76,6 +76,7 @@ impl CompactorTelemetryReport {
                 up_time,
                 time_stamp: current_timestamp(),
                 node_type: TelemetryNodeType::Compactor,
+                is_test: false,
             },
         }
     }

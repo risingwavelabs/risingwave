@@ -142,6 +142,7 @@ impl TelemetryReportCreator for MetaReportCreator {
                 up_time,
                 time_stamp: current_timestamp(),
                 node_type: TelemetryNodeType::Meta,
+                is_test: false,
             },
             node_count: NodeCount {
                 meta_count: *node_map.get(&WorkerType::Meta).unwrap_or(&0),
