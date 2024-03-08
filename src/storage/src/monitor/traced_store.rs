@@ -66,11 +66,11 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    async fn traced_iter<'a, St: StateStoreIterItemStream>(
+    async fn traced_iter<'a, St: StateStoreIter>(
         &'a self,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
         span: MayTraceSpan,
-    ) -> StorageResult<TracedStateStoreIterStream<St>> {
+    ) -> StorageResult<TracedStateStoreIter<St>> {
         let res = iter_stream_future.await;
         if res.is_ok() {
             span.may_send_result(OperationResult::Iter(TraceResult::Ok(())));
@@ -105,10 +105,8 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-type TracedStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
-
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     fn may_exist(
         &self,
@@ -135,7 +133,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -276,7 +274,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
-    type IterStream = impl StateStoreReadIterStream;
+    type Iter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -297,7 +295,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -346,7 +344,7 @@ impl<S> TracedStateStoreIter<S> {
     }
 }
 
-impl<S: StateStoreIterItemStream> StateStoreIter for TracedStateStoreIter<S> {
+impl<S: StateStoreIter> StateStoreIter for TracedStateStoreIter<S> {
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
         if let Some((key, value)) = self
             .inner

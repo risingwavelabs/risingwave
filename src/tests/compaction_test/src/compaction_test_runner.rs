@@ -602,8 +602,7 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType =
-    Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::IterStream>>;
+type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,

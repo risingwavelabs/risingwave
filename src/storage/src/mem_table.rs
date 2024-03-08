@@ -458,7 +458,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 }
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -488,7 +488,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         async move {
             let iter = self
                 .inner

@@ -75,22 +75,20 @@ impl<S> MonitoredStateStore<S> {
 }
 
 /// A util function to break the type connection between two opaque return types defined by `impl`.
-pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+pub(crate) fn identity(input: impl StateStoreIter) -> impl StateStoreIter {
     input
 }
 
-pub type MonitoredStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
-
-// Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
+// Note: it is important to define the `MonitoredStateStoreIter` type alias, as it marks that
 // the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
-// `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
+// `'a`. If we simply use `impl StateStoreIter + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
 impl<S> MonitoredStateStore<S> {
-    async fn monitored_iter<'a, St: StateStoreIterItemStream + 'a>(
+    async fn monitored_iter<'a, St: StateStoreIter + 'a>(
         &'a self,
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
-    ) -> StorageResult<MonitoredStateStoreIterStream<St>> {
+    ) -> StorageResult<MonitoredStateStoreIter<St>> {
         // start time takes iterator build time into account
         let start_time = Instant::now();
         let table_id_label = table_id.to_string();
@@ -171,7 +169,7 @@ impl<S> MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type IterStream = impl StateStoreReadIterStream;
+    type Iter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -189,7 +187,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.monitored_iter(
             read_options.table_id,
             self.inner.iter(key_range, epoch, read_options),
@@ -199,7 +197,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     async fn may_exist(
         &self,
@@ -236,7 +234,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
         // TODO: may collect the metrics as local
         self.monitored_iter(table_id, self.inner.iter(key_range, read_options))

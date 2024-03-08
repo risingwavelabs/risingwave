@@ -111,7 +111,7 @@ pub struct KvLogStoreReader<S: StateStore> {
     first_write_epoch: Option<u64>,
 
     /// `Some` means consuming historical log data
-    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>,
+    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::Iter>>>>,
 
     /// Store the future that attempts to read a flushed stream chunk.
     /// This is for cancellation safety. Since it is possible that the future of `next_item`
@@ -182,7 +182,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
-    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
+    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::Iter>>>>> + Send
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch

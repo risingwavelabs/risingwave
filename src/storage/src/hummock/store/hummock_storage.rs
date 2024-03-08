@@ -399,7 +399,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type IterStream = HummockStorageIterator;
+    type Iter = HummockStorageIterator;
 
     fn get(
         &self,
@@ -415,7 +415,7 @@ impl StateStoreRead for HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.iter_inner(key_range, epoch, read_options)
     }
 }

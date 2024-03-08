@@ -54,13 +54,17 @@ pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<S
     Ok((key.copy_into(), Bytes::copy_from_slice(value)))
 }
 
-pub trait StateStoreIterExt: StateStoreIter {
+pub trait StateStoreIterExt: StateStoreIter + Sized {
     type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
 
     fn into_stream<O: Send, F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send>(
         self,
         f: F,
     ) -> Self::ItemStream<O, F>;
+
+    fn fused(self) -> FusedStateStoreIter<Self> {
+        FusedStateStoreIter::new(self)
+    }
 }
 
 #[try_stream(ok = O, error = StorageError)]
@@ -69,9 +73,10 @@ async fn into_stream_inner<
     O: Send,
     F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send,
 >(
-    mut iter: I,
+    iter: I,
     f: F,
 ) {
+    let mut iter = iter.fused();
     while let Some(item) = iter.try_next().await? {
         yield f(item)?;
     }
@@ -103,6 +108,34 @@ impl<S: Stream<Item = StorageResult<StateStoreIterItem>> + Unpin + Send> StateSt
     }
 }
 
+pub struct FusedStateStoreIter<I> {
+    inner: I,
+    finished: bool,
+}
+
+impl<I> FusedStateStoreIter<I> {
+    fn new(inner: I) -> Self {
+        Self {
+            inner,
+            finished: false,
+        }
+    }
+}
+
+impl<I: StateStoreIter> FusedStateStoreIter<I> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        assert!(!self.finished, "call try_next after finish");
+        let result = self.inner.try_next().await;
+        match &result {
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {
+                self.finished = true;
+            }
+        }
+        result
+    }
+}
+
 impl<I: StateStoreIter> StateStoreIterExt for I {
     type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
 
@@ -116,11 +149,10 @@ impl<I: StateStoreIter> StateStoreIterExt for I {
 
 pub type StateStoreIterItemRef<'a> = (FullKey<&'a [u8]>, &'a [u8]);
 pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
-pub trait StateStoreIterItemStream = StateStoreIter;
-pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
+pub trait StateStoreReadIter = StateStoreIter + 'static;
 
 pub trait StateStoreRead: StaticSendSync {
-    type IterStream: StateStoreReadIterStream;
+    type Iter: StateStoreReadIter;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -141,7 +173,7 @@ pub trait StateStoreRead: StaticSendSync {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + Send + '_;
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + Send + '_;
 }
 
 pub trait StateStoreReadExt: StaticSendSync {
@@ -250,7 +282,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StaticSendSync {
-    type IterStream<'a>: StateStoreIterItemStream + 'a;
+    type Iter<'a>: StateStoreIter + 'a;
 
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
@@ -269,7 +301,7 @@ pub trait LocalStateStore: StaticSendSync {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_;
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(

@@ -1439,7 +1439,8 @@ pub(crate) mod tests {
                 fast_iter.key().user_key.table_id.table_id,
             );
             assert_eq!(normal_iter.value(), fast_iter.value());
-            let key_ref = fast_iter.key().user_key.as_ref();
+            let key = fast_iter.key();
+            let key_ref = key.user_key.as_ref();
             assert!(normal_tables.iter().any(|table| {
                 table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
             }));

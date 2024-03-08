@@ -763,7 +763,7 @@ where
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
-        let mut is_new_user_key = full_key_tracker.observe(iter.key()).is_some();
+        let mut is_new_user_key = full_key_tracker.observe(iter.key());
         let mut drop = false;
 
         // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.

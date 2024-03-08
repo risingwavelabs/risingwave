@@ -62,5 +62,5 @@ pub mod mem_table;
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
 
-pub use store::{StateStore, StateStoreIter, StateStoreReadIterStream};
+pub use store::{StateStore, StateStoreIter, StateStoreReadIter};
 pub use store_impl::StateStoreImpl;

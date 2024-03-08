@@ -395,6 +395,23 @@ pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
     map_table_key_range((start, end))
 }
 
+pub trait SetSlice<S: AsRef<[u8]> + ?Sized> {
+    fn set(&mut self, value: &S);
+}
+
+impl<S: AsRef<[u8]> + ?Sized> SetSlice<S> for Vec<u8> {
+    fn set(&mut self, value: &S) {
+        self.clear();
+        self.extend_from_slice(value.as_ref());
+    }
+}
+
+impl SetSlice<Bytes> for Bytes {
+    fn set(&mut self, value: &Bytes) {
+        *self = value.clone()
+    }
+}
+
 pub trait CopyFromSlice {
     fn copy_from_slice(slice: &[u8]) -> Self;
 }
@@ -623,21 +640,22 @@ impl UserKey<Vec<u8>> {
         buf.advance(len);
         UserKey::new(TableId::new(table_id), TableKey(data))
     }
+}
 
-    pub fn extend_from_other(&mut self, other: &UserKey<&[u8]>) {
-        self.table_id = other.table_id;
-        self.table_key.0.clear();
-        self.table_key.0.extend_from_slice(other.table_key.as_ref());
-    }
-
+impl<T: AsRef<[u8]>> UserKey<T> {
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
     /// table key without reallocating a new `UserKey` object.
-    pub fn set(&mut self, other: UserKey<&[u8]>) {
+    pub fn set<F>(&mut self, other: UserKey<F>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
         self.table_id = other.table_id;
-        self.table_key.clear();
-        self.table_key.extend_from_slice(other.table_key.as_ref());
+        self.table_key.0.set(&other.table_key.0);
     }
+}
 
+impl UserKey<Vec<u8>> {
     pub fn into_bytes(self) -> UserKey<Bytes> {
         UserKey {
             table_id: self.table_id,
@@ -810,10 +828,14 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     }
 }
 
-impl FullKey<Vec<u8>> {
+impl<T: AsRef<[u8]>> FullKey<T> {
     /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
     /// table key without reallocating a new `FullKey` object.
-    pub fn set(&mut self, other: FullKey<&[u8]>) {
+    pub fn set<F>(&mut self, other: FullKey<F>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
         self.user_key.set(other.user_key);
         self.epoch_with_gap = other.epoch_with_gap;
     }
@@ -831,15 +853,6 @@ impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
 impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl<'a, T> From<UserKey<&'a [u8]>> for UserKey<T>
-where
-    T: AsRef<[u8]> + CopyFromSlice,
-{
-    fn from(value: UserKey<&'a [u8]>) -> Self {
-        value.copy_into()
     }
 }
 
@@ -976,20 +989,20 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
     /// // a.observe(full_key_with_smaller_user_key);
     ///
     /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3 << EPOCH_AVAILABLE_BITS);
-    /// assert_eq!(a.observe(full_key2.clone()), None);
+    /// assert_eq!(a.observe(full_key2.clone()), false);
     /// assert_eq!(a.latest_user_key(), &full_key2.user_key);
     ///
     /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4 << EPOCH_AVAILABLE_BITS);
-    /// assert_eq!(a.observe(full_key3.clone()), Some(full_key1.user_key));
+    /// assert_eq!(a.observe(full_key3.clone()), true);
     /// assert_eq!(a.latest_user_key(), &full_key3.user_key);
     /// ```
     ///
     /// Return:
-    /// - If the provided `key` contains a new user key, return the latest full key observed for the previous user key.
-    /// - Otherwise: return None
-    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<UserKey<T>>
+    /// - If the provided `key` contains a new user key, return true.
+    /// - Otherwise: return false
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> bool
     where
-        UserKey<F>: Into<UserKey<T>>,
+        T: SetSlice<F>,
         F: AsRef<[u8]>,
     {
         self.observe_multi_version(key.user_key, once(key.epoch_with_gap))
@@ -1000,9 +1013,9 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
         &mut self,
         user_key: UserKey<F>,
         mut epochs: impl Iterator<Item = EpochWithGap>,
-    ) -> Option<UserKey<T>>
+    ) -> bool
     where
-        UserKey<F>: Into<UserKey<T>>,
+        T: SetSlice<F>,
         F: AsRef<[u8]>,
     {
         let max_epoch_with_gap = epochs.next().expect("non-empty");
@@ -1032,16 +1045,11 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
                 self.last_observed_epoch_with_gap = min_epoch_with_gap;
 
                 // Take the previous key and set latest key
-                Some(
-                    std::mem::replace(
-                        &mut self.latest_full_key,
-                        FullKey {
-                            user_key: user_key.into(),
-                            epoch_with_gap: min_epoch_with_gap,
-                        },
-                    )
-                    .user_key,
-                )
+                self.latest_full_key.set(FullKey {
+                    user_key,
+                    epoch_with_gap: min_epoch_with_gap,
+                });
+                true
             }
             Ordering::Equal => {
                 if max_epoch_with_gap > self.last_observed_epoch_with_gap
@@ -1054,7 +1062,7 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
                     );
                 }
                 self.last_observed_epoch_with_gap = min_epoch_with_gap;
-                None
+                false
             }
             Ordering::Greater => {
                 // User key should be monotonically increasing

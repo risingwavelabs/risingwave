@@ -55,7 +55,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIterExt, StateStoreIterItemStream,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
@@ -1300,7 +1300,7 @@ where
         table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1385,7 +1385,7 @@ where
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
@@ -1450,18 +1450,17 @@ pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
 fn deserialize_keyed_row_stream<'a>(
-    stream: impl StateStoreIterItemStream + 'a,
+    iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
-    stream
-        .into_stream(move |(key, value)| {
-            Ok(KeyedRow::new(
-                // TODO: may avoid clone the key when key is not needed
-                key.user_key.table_key.copy_into(),
-                deserializer.deserialize(value).map(OwnedRow::new)?,
-            ))
-        })
-        .map_err(Into::into)
+    iter.into_stream(move |(key, value)| {
+        Ok(KeyedRow::new(
+            // TODO: may avoid clone the key when key is not needed
+            key.user_key.table_key.copy_into(),
+            deserializer.deserialize(value).map(OwnedRow::new)?,
+        ))
+    })
+    .map_err(Into::into)
 }
 
 pub fn prefix_range_to_memcomparable(

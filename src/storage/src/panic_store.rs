@@ -30,7 +30,7 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type IterStream = PanicStateStoreStream;
+    type Iter = PanicStateStoreStream;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -48,7 +48,7 @@ impl StateStoreRead for PanicStateStore {
         _key_range: TableKeyRange,
         _epoch: u64,
         _read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream> {
+    ) -> StorageResult<Self::Iter> {
         panic!("should not read from the state store!");
     }
 }
@@ -65,7 +65,7 @@ impl StateStoreWrite for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
-    type IterStream<'a> = PanicStateStoreStream;
+    type Iter<'a> = PanicStateStoreStream;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -90,7 +90,7 @@ impl LocalStateStore for PanicStateStore {
         &self,
         _key_range: TableKeyRange,
         _read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream<'_>> {
+    ) -> StorageResult<Self::Iter<'_>> {
         panic!("should not operate on the panic state store!");
     }
 

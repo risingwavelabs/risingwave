@@ -665,7 +665,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 /// [`StorageTableInnerIterInner`] iterates on the storage table.
 struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::IterStream,
+    iter: S::Iter,
 
     mapping: Arc<ColumnMapping>,
 

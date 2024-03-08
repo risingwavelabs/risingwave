@@ -41,7 +41,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
-use risingwave_storage::store::{StateStoreIterExt, StateStoreReadIterStream};
+use risingwave_storage::store::{StateStoreIterExt, StateStoreReadIter};
 use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
 use rw_futures_util::select_all;
 
@@ -357,7 +357,7 @@ impl LogStoreRowSerde {
 
     pub(crate) async fn deserialize_stream_chunk(
         &self,
-        streams: Vec<impl StateStoreReadIterStream>,
+        iters: Vec<impl StateStoreReadIter>,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         expected_epoch: u64,
@@ -368,7 +368,7 @@ impl LogStoreRowSerde {
             DataChunkBuilder::new(self.payload_schema.clone(), size_bound + 1);
         let mut ops = Vec::with_capacity(size_bound);
         let mut read_info = ReadInfo::new();
-        let stream = select_all(streams.into_iter().map(|iter| {
+        let stream = select_all(iters.into_iter().map(|iter| {
             iter.into_stream(move |(key, value)| {
                 let row_size = key.user_key.table_key.len() + value.len();
                 let output = self.deserialize(value)?;
@@ -443,7 +443,7 @@ pub(crate) enum KvLogStoreItem {
 
 type BoxPeekableLogStoreItemStream<S> = Pin<Box<Peekable<LogStoreItemStream<S>>>>;
 
-struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
+struct LogStoreRowOpStream<S: StateStoreReadIter> {
     serde: LogStoreRowSerde,
 
     /// Streams that have not reached a barrier
@@ -459,16 +459,16 @@ struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
     metrics: KvLogStoreReadMetrics,
 }
 
-impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     pub(crate) fn new(
-        streams: Vec<S>,
+        iters: Vec<S>,
         serde: LogStoreRowSerde,
         metrics: KvLogStoreReadMetrics,
     ) -> Self {
-        assert!(!streams.is_empty());
+        assert!(!iters.is_empty());
         Self {
             serde: serde.clone(),
-            barrier_streams: streams
+            barrier_streams: iters
                 .into_iter()
                 .map(|s| Box::pin(deserialize_stream(s, serde.clone()).peekable()))
                 .collect(),
@@ -546,33 +546,32 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
 
 pub(crate) type LogStoreItemMergeStream<S> =
     impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
-pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIterStream>(
-    streams: Vec<S>,
+pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
+    iters: Vec<S>,
     serde: LogStoreRowSerde,
     chunk_size: usize,
     metrics: KvLogStoreReadMetrics,
 ) -> LogStoreItemMergeStream<S> {
-    LogStoreRowOpStream::new(streams, serde, metrics).into_log_store_item_stream(chunk_size)
+    LogStoreRowOpStream::new(iters, serde, metrics).into_log_store_item_stream(chunk_size)
 }
 
-type LogStoreItemStream<S: StateStoreReadIterStream> =
+type LogStoreItemStream<S: StateStoreReadIter> =
     impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp, usize)>> + Send;
-fn deserialize_stream<S: StateStoreReadIterStream>(
-    stream: S,
+fn deserialize_stream<S: StateStoreReadIter>(
+    iter: S,
     serde: LogStoreRowSerde,
 ) -> LogStoreItemStream<S> {
-    stream
-        .into_stream(
-            move |(key, value)| -> StorageResult<(u64, LogStoreRowOp, usize)> {
-                let read_size = key.user_key.table_key.len() + value.len();
-                let (epoch, op) = serde.deserialize(value)?;
-                Ok((epoch, op, read_size))
-            },
-        )
-        .map_err(Into::into)
+    iter.into_stream(
+        move |(key, value)| -> StorageResult<(u64, LogStoreRowOp, usize)> {
+            let read_size = key.user_key.table_key.len() + value.len();
+            let (epoch, op) = serde.deserialize(value)?;
+            Ok((epoch, op, read_size))
+        },
+    )
+    .map_err(Into::into)
 }
 
-impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     // Return Ok(false) means all streams have reach the end.
     async fn init(&mut self) -> LogStoreResult<bool> {
         match &self.stream_state {
@@ -775,7 +774,7 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{
-        FromStreamStateStoreIter, StateStoreIterItem, StateStoreReadIterStream,
+        FromStreamStateStoreIter, StateStoreIterItem, StateStoreReadIter,
     };
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
@@ -1061,7 +1060,7 @@ mod tests {
         serde: LogStoreRowSerde,
         size: usize,
     ) -> (
-        LogStoreRowOpStream<impl StateStoreReadIterStream>,
+        LogStoreRowOpStream<impl StateStoreReadIter>,
         Vec<Option<Sender<()>>>,
         Vec<Option<Sender<()>>>,
         Vec<Vec<Op>>,

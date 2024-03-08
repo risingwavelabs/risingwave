@@ -206,7 +206,7 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type IterStream = HummockStorageIterator;
+    type Iter = HummockStorageIterator;
 
     fn get(
         &self,
@@ -223,7 +223,7 @@ impl StateStoreRead for LocalHummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         assert!(epoch <= self.epoch());
         self.iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
@@ -231,7 +231,7 @@ impl StateStoreRead for LocalHummockStorage {
 }
 
 impl LocalStateStore for LocalHummockStorage {
-    type IterStream<'a> = LocalHummockStorageIterator<'a>;
+    type Iter<'a> = LocalHummockStorageIterator<'a>;
 
     fn may_exist(
         &self,
@@ -259,7 +259,7 @@ impl LocalStateStore for LocalHummockStorage {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream<'_>> {
+    ) -> StorageResult<Self::Iter<'_>> {
         self.iter_all(key_range.clone(), self.epoch(), read_options)
             .await
     }
@@ -605,7 +605,6 @@ pub struct HummockStorageIteratorInner<'a> {
 impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
     async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
         let iter = &mut self.inner;
-        debug_assert!(iter.is_valid());
         if !self.initial_read {
             self.initial_read = true;
         } else {
@@ -613,7 +612,7 @@ impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
         }
 
         if iter.is_valid() {
-            Ok(Some((iter.key().to_ref(), iter.value().as_ref())))
+            Ok(Some((iter.key(), iter.value())))
         } else {
             Ok(None)
         }

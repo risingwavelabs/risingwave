@@ -33,22 +33,21 @@ use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
-    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreIterItemStream, StateStoreRead,
-    SyncResult,
+    to_owned_item, LocalStateStore, StateStoreIterExt, StateStoreRead, SyncResult,
 };
-use risingwave_storage::{StateStore, StateStoreReadIterStream};
+use risingwave_storage::{StateStore, StateStoreIter, StateStoreReadIter};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 pub(crate) struct GlobalReplayIter<S>
 where
-    S: StateStoreReadIterStream,
+    S: StateStoreReadIter,
 {
     inner: S,
 }
 
 impl<S> GlobalReplayIter<S>
 where
-    S: StateStoreReadIterStream,
+    S: StateStoreReadIter,
 {
     pub(crate) fn new(inner: S) -> Self {
         Self { inner }
@@ -68,8 +67,8 @@ pub(crate) struct LocalReplayIter {
 }
 
 impl LocalReplayIter {
-    pub(crate) async fn new(stream: impl StateStoreIterItemStream) -> Self {
-        let inner = stream
+    pub(crate) async fn new(iter: impl StateStoreIter) -> Self {
+        let inner = iter
             .into_stream(to_owned_item)
             .map_ok(|value| (value.0.user_key.table_key.0.into(), value.1.into()))
             .try_collect::<Vec<_>>()
