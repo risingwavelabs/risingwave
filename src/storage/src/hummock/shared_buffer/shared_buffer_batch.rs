@@ -32,7 +32,7 @@ use risingwave_hummock_sdk::EpochWithGap;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
-    HummockIteratorDirection,
+    HummockIteratorDirection, ValueMeta,
 };
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
@@ -656,6 +656,10 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta::default()
+    }
 }
 
 pub struct SharedBufferDeleteRangeIterator {

@@ -345,6 +345,9 @@ pub struct MetaConfig {
     #[serde(default, with = "meta_prefix")]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
+    /// Whether compactor should rewrite row to remove dropped column.
+    #[serde(default = "default::meta::enable_dropped_column_reclaim")]
+    pub enable_dropped_column_reclaim: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1144,6 +1147,9 @@ pub mod default {
 
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
+        }
+        pub fn enable_dropped_column_reclaim() -> bool {
+            false
         }
     }
 
