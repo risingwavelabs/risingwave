@@ -20,8 +20,6 @@ type Result<T> = std::result::Result<T, String>;
 
 pub const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
-const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-
 /// Parse a string into a bool.
 ///
 /// See [`https://www.postgresql.org/docs/9.5/datatype-boolean.html`]
@@ -60,15 +58,14 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
 pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
-    const E11: i64 = 100_000_000_000;
-    const E14: i64 = 100_000_000_000_000;
-    const E17: i64 = 100_000_000_000_000_000;
-    match t {
+    const E11: u64 = 100_000_000_000;
+    const E14: u64 = 100_000_000_000_000;
+    const E17: u64 = 100_000_000_000_000_000;
+    match t.abs_diff(0) {
         0..E11 => Ok(Timestamptz::from_secs(t).unwrap()), // s
         E11..E14 => Ok(Timestamptz::from_millis(t).unwrap()), // ms
         E14..E17 => Ok(Timestamptz::from_micros(t)),      // us
         E17.. => Ok(Timestamptz::from_micros(t / 1000)),  // ns
-        _ => Err(ERROR_INT_TO_TIMESTAMP.to_string()),
     }
 }
 
@@ -193,7 +190,18 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
+
     use super::*;
+
+    #[test]
+    fn test_negative_int_to_timestamptz() {
+        let x = i64_to_timestamptz(-2208988800000000000)
+            .unwrap()
+            .to_datetime_utc();
+        let ans: DateTime<Utc> = "1900-01-01T00:00:00Z".parse().unwrap();
+        assert_eq!(x, ans);
+    }
 
     #[test]
     fn test_bytea() {

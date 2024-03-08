@@ -30,7 +30,6 @@ use thiserror_ext::AsReport;
 use tokio::time::Duration as TokioDuration;
 use tonic::transport::Channel;
 
-use crate::metrics::GLOBAL_METRICS;
 use crate::{Error, Result};
 
 // Interval between two successive probes of the UDF DNS.
@@ -145,33 +144,7 @@ impl ArrowFlightUdfClient {
 
     /// Call a function.
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
-        let metrics = &*GLOBAL_METRICS;
-        let labels = &[self.addr.as_str(), id];
-        metrics
-            .udf_input_chunk_rows
-            .with_label_values(labels)
-            .observe(input.num_rows() as f64);
-        metrics
-            .udf_input_rows
-            .with_label_values(labels)
-            .inc_by(input.num_rows() as u64);
-        metrics
-            .udf_input_bytes
-            .with_label_values(labels)
-            .inc_by(input.get_array_memory_size() as u64);
-        let timer = metrics.udf_latency.with_label_values(labels).start_timer();
-
-        let result = self.call_internal(id, input).await;
-
-        timer.stop_and_record();
-        if result.is_ok() {
-            &metrics.udf_success_count
-        } else {
-            &metrics.udf_failure_count
-        }
-        .with_label_values(labels)
-        .inc();
-        result
+        self.call_internal(id, input).await
     }
 
     async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
@@ -213,10 +186,15 @@ impl ArrowFlightUdfClient {
         let mut backoff = Duration::from_millis(100);
         loop {
             match self.call(id, input.clone()).await {
-                Err(err) if err.is_connection_error() => {
-                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+                Err(err) if err.is_tonic_error() => {
+                    tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
                 }
-                ret => return ret,
+                ret => {
+                    if ret.is_err() {
+                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    }
+                    return ret;
+                }
             }
             tokio::time::sleep(backoff).await;
             backoff *= 2;
@@ -260,6 +238,10 @@ impl ArrowFlightUdfClient {
             // convert tonic::Status to FlightError
             stream.map_err(|e| e.into()),
         ))
+    }
+
+    pub fn get_addr(&self) -> &str {
+        &self.addr
     }
 }
 

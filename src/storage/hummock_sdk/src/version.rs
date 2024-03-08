@@ -24,7 +24,7 @@ use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
     BloomFilterType, LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta,
     PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
-    PbValidationTask, TableOption,
+    PbValidationTask, TableOption, TableSchema,
 };
 use serde::Serialize;
 
@@ -742,6 +742,8 @@ pub struct CompactTask {
     /// The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
     /// so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
     pub table_watermarks: BTreeMap<u32, TableWatermarks>,
+
+    pub table_schemas: BTreeMap<u32, TableSchema>,
 }
 
 impl ProtoSerializeSizeEstimatedExt for CompactTask {
@@ -839,6 +841,7 @@ impl ProtoSerializeExt for CompactTask {
                     )
                 })
                 .collect(),
+            table_schemas: pb_compact_task.table_schemas.clone(),
         }
     }
 
@@ -944,6 +947,7 @@ impl ProtoSerializeOwnExt for CompactTask {
                     )
                 })
                 .collect(),
+            table_schemas: pb_compact_task.table_schemas,
         }
     }
 

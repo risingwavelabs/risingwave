@@ -20,6 +20,7 @@ use await_tree::InstrumentAwait;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::util::epoch::is_max_epoch;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
@@ -27,7 +28,7 @@ use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::CompactTask;
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, LevelType};
 use thiserror_ext::AsReport;
@@ -47,6 +48,7 @@ use crate::hummock::compactor::{
 };
 use crate::hummock::iterator::{
     Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
+    ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -109,6 +111,12 @@ impl CompactorRunner {
                     || task.target_level == task.base_level,
                 use_block_based_filter,
                 table_vnode_partition: task.table_vnode_partition.clone(),
+                table_schemas: task
+                    .table_schemas
+                    .iter()
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect(),
+                disable_drop_column_optimization: false,
             },
             object_id_getter,
         );
@@ -763,6 +771,13 @@ where
     let mut last_table_stats = TableStats::default();
     let mut last_table_id = None;
     let mut compaction_statistics = CompactionStatistics::default();
+    // object id -> block id. For an object id, block id is updated in a monotonically increasing manner.
+    let mut skip_schema_check: HashMap<HummockSstableObjectId, u64> = HashMap::default();
+    let schemas: HashMap<u32, HashSet<i32>> = task_config
+        .table_schemas
+        .iter()
+        .map(|(table_id, schema)| (*table_id, schema.column_ids.iter().copied().collect()))
+        .collect();
     while iter.is_valid() {
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
@@ -773,6 +788,10 @@ where
         // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
         let epoch = iter_key.epoch_with_gap.pure_epoch();
         let value = iter.value();
+        let ValueMeta {
+            object_id,
+            block_id,
+        } = iter.value_meta();
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
@@ -887,11 +906,51 @@ where
             is_new_user_key = false;
         }
 
-        // Don't allow two SSTs to share same user key
-        sst_builder
-            .add_full_key(iter_key, value, is_new_user_key)
-            .verbose_instrument_await("add_full_key")
-            .await?;
+        // May drop stale columns
+        let check_table_id = iter_key.user_key.table_id.table_id;
+        let mut is_value_rewritten = false;
+        if let HummockValue::Put(v) = value
+            && let Some(object_id) = object_id
+            && let Some(block_id) = block_id
+            && !skip_schema_check
+                .get(&object_id)
+                .map(|prev_block_id| {
+                    assert!(*prev_block_id <= block_id);
+                    *prev_block_id == block_id
+                })
+                .unwrap_or(false)
+            && let Some(schema) = schemas.get(&check_table_id)
+        {
+            let value_size = v.len();
+            match try_drop_invalid_columns(v, schema) {
+                None => {
+                    if !task_config.disable_drop_column_optimization {
+                        // Under the assumption that all values in the same (object, block) group should share the same schema,
+                        // if one value drops no columns during a compaction, no need to check other values in the same group.
+                        skip_schema_check.insert(object_id, block_id);
+                    }
+                }
+                Some(new_value) => {
+                    is_value_rewritten = true;
+                    let new_put = HummockValue::put(new_value.as_slice());
+                    sst_builder
+                        .add_full_key(iter_key, new_put, is_new_user_key)
+                        .verbose_instrument_await("add_rewritten_full_key")
+                        .await?;
+                    let value_size_change = value_size as i64 - new_value.len() as i64;
+                    assert!(value_size_change >= 0);
+                    last_table_stats.total_value_size -= value_size_change;
+                }
+            }
+        }
+
+        if !is_value_rewritten {
+            // Don't allow two SSTs to share same user key
+            sst_builder
+                .add_full_key(iter_key, value, is_new_user_key)
+                .verbose_instrument_await("add_full_key")
+                .await?;
+        }
 
         iter.next().verbose_instrument_await("iter_next").await?;
     }
