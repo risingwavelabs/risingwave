@@ -140,6 +140,25 @@ impl From<String> for StreamExecutorError {
     }
 }
 
+impl StreamExecutorError {
+    pub fn variant_name(&self) -> &'static str {
+        match self.0.inner() {
+            ErrorKind::Storage(_) => "StorageError",
+            ErrorKind::ArrayError(_) => "ArrayError",
+            ErrorKind::ExprError(_) => "ExprError",
+            ErrorKind::SerdeError(_) => "SerdeError",
+            ErrorKind::SinkError(_) => "SinkError",
+            ErrorKind::RpcError(_) => "RpcError",
+            ErrorKind::ChannelClosed(_) => "ChannelClosed",
+            ErrorKind::AlignBarrier(_, _) => "AlignBarrier",
+            ErrorKind::ConnectorError(_) => "ConnectorError",
+            ErrorKind::DmlError(_) => "DmlError",
+            ErrorKind::NotImplemented(_) => "NotImplemented",
+            ErrorKind::Internal(_) => "Internal",
+        }
+    }
+}
+
 static_assertions::const_assert_eq!(std::mem::size_of::<StreamExecutorError>(), 8);
 
 #[cfg(test)]
