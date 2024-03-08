@@ -24,7 +24,6 @@ use risingwave_sqlparser::ast::{
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
-use self::cte_ref::BoundBackCteRef;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::bind_context::BindingCteState;
@@ -41,6 +40,7 @@ mod table_or_source;
 mod watermark;
 mod window_table_function;
 
+pub use cte_ref::BoundCteRef;
 pub use join::BoundJoin;
 pub use share::BoundShare;
 pub use subquery::BoundSubquery;
@@ -68,7 +68,7 @@ pub enum Relation {
     },
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
-    BackCteRef(Box<BoundBackCteRef>),
+    CteRef(Box<BoundCteRef>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -83,7 +83,7 @@ impl RewriteExprsRecursive for Relation {
             Relation::TableFunction { expr: inner, .. } => {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
-            Relation::BackCteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::CteRef(inner) => inner.rewrite_exprs_recursive(rewriter),
             _ => {}
         }
     }
@@ -358,13 +358,13 @@ impl Binder {
                 BindingCteState::Init => {
                     Err(ErrorCode::BindError(format!("Base term of recursive CTE not found, consider write it to left side of the `UNION` operator")).into())
                 }
-                BindingCteState::BaseResolved { schema } => {
+                BindingCteState::BaseResolved { base } => {
                     self.bind_table_to_context(
-                        schema.fields.iter().map(|f| (false, f.clone())),
+                        base.schema().fields.iter().map(|f| (false, f.clone())),
                         table_name.clone(),
                         Some(original_alias),
                     )?;
-                    Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
+                    Ok(Relation::CteRef(Box::new(BoundCteRef { share_id, base })))
                 }
                 BindingCteState::Bound { query } => {
                     self.bind_table_to_context(

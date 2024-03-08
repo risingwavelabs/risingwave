@@ -38,6 +38,8 @@ mod filter;
 pub use filter::*;
 mod expand;
 pub use expand::*;
+mod recursive_union;
+pub use recursive_union::*;
 mod source;
 pub use source::*;
 mod scan;
@@ -47,7 +49,8 @@ pub use sys_scan::*;
 
 mod cdc_scan;
 pub use cdc_scan::*;
-
+mod cte_ref;
+pub use cte_ref::*;
 mod union;
 pub use union::*;
 mod top_n;

@@ -20,8 +20,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundCteRef, BoundJoin, BoundShare, BoundSource, BoundSystemTable,
+    BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
@@ -54,7 +54,7 @@ impl Planner {
             } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
-            Relation::BackCteRef(..) => {
+            Relation::CteRef(..) => {
                 bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
             }
         }
@@ -195,6 +195,10 @@ impl Planner {
             }
             Some(result) => Ok(result.clone()),
         }
+    }
+
+    pub(super) fn plan_cte_ref(&mut self, cte_ref: BoundCteRef) -> Result<PlanRef> {
+        todo!()
     }
 
     pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {

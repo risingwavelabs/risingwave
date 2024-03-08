@@ -26,6 +26,7 @@ use crate::error::{ErrorCode, Result};
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
+use super::BoundSetExpr;
 use crate::binder::{BoundQuery, ShareId, COLUMN_GROUP_PREFIX};
 
 #[derive(Debug, Clone)]
@@ -86,7 +87,7 @@ pub enum BindingCteState {
     #[default]
     Init,
     /// We know the schema from after the base term resolved.
-    BaseResolved { schema: Schema },
+    BaseResolved { base: BoundSetExpr },
     /// We get the whole bound result.
     Bound { query: BoundQuery },
 }

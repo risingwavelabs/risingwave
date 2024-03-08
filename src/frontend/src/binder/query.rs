@@ -349,7 +349,7 @@ impl Binder {
                 let bound_base = self.bind_set_expr(*left)?;
 
                 entry.borrow_mut().1 = BindingCteState::BaseResolved {
-                    schema: bound_base.schema().clone(),
+                    base: bound_base.clone(),
                 };
 
                 let bound_recursive = self.bind_set_expr(*right)?;

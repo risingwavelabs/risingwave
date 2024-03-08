@@ -38,8 +38,8 @@ impl Planner {
                 left,
                 right,
             } => self.plan_set_operation(op, all, *left, *right),
-            BoundSetExpr::RecursiveUnion { .. } => {
-                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
+            BoundSetExpr::RecursiveUnion { base, recursive } => {
+                self.plan_recursive_union(*base, *recursive)
             }
         }
     }
