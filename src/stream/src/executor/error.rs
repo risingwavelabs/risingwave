@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::AsRef;
+
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NotImplemented};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -22,6 +24,7 @@ use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
+use strum_macros::AsRefStr;
 
 use super::Barrier;
 
@@ -31,6 +34,7 @@ pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
 /// The error type for streaming executors.
 #[derive(thiserror::Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
 #[thiserror_ext(newtype(name = StreamExecutorError, backtrace, report_debug))]
+#[derive(AsRefStr)]
 pub enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
@@ -141,21 +145,8 @@ impl From<String> for StreamExecutorError {
 }
 
 impl StreamExecutorError {
-    pub fn variant_name(&self) -> &'static str {
-        match self.0.inner() {
-            ErrorKind::Storage(_) => "StorageError",
-            ErrorKind::ArrayError(_) => "ArrayError",
-            ErrorKind::ExprError(_) => "ExprError",
-            ErrorKind::SerdeError(_) => "SerdeError",
-            ErrorKind::SinkError(_) => "SinkError",
-            ErrorKind::RpcError(_) => "RpcError",
-            ErrorKind::ChannelClosed(_) => "ChannelClosed",
-            ErrorKind::AlignBarrier(_, _) => "AlignBarrier",
-            ErrorKind::ConnectorError(_) => "ConnectorError",
-            ErrorKind::DmlError(_) => "DmlError",
-            ErrorKind::NotImplemented(_) => "NotImplemented",
-            ErrorKind::Internal(_) => "Internal",
-        }
+    pub fn variant_name(&self) -> &str {
+        self.0.inner().as_ref()
     }
 }
 
