@@ -3070,6 +3070,8 @@ impl Parser {
                 );
             };
             AlterTableOperation::AlterColumn { column_name, op }
+        } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
+            AlterTableOperation::RefreshSchema
         } else {
             return self.expected(
                 "ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE",
