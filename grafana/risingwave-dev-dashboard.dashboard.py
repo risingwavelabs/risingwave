@@ -4069,12 +4069,20 @@ def section_udf(outer_panels):
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
                             f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name, fragment_id)",
                             "udf_success_count - {{link}} {{name}} {{fragment_id}}",
                         ),
                         panels.target(
                             f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name, fragment_id)",
                             "udf_failure_count - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
