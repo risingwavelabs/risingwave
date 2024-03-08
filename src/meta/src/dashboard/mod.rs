@@ -175,30 +175,6 @@ pub(super) mod handlers {
         Ok(Json(views))
     }
 
-    pub async fn list_actors(
-        Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<ActorLocation>>> {
-        let mut node_actors = srv
-            .metadata_manager
-            .all_node_actors(true)
-            .await
-            .map_err(err)?;
-        let nodes = srv
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .map_err(err)?;
-        let actors = nodes
-            .into_iter()
-            .map(|node| ActorLocation {
-                node: Some(node.clone()),
-                actors: node_actors.remove(&node.id).unwrap_or_default(),
-            })
-            .collect::<Vec<_>>();
-
-        Ok(Json(actors))
-    }
-
     pub async fn list_fragments(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
@@ -405,7 +381,6 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters))
-            .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
