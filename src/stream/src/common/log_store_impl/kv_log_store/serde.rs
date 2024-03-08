@@ -569,6 +569,9 @@ fn deserialize_stream<S: StateStoreReadIter>(
         },
     )
     .map_err(Into::into)
+    .boxed()
+    // The `boxed` call was unnecessary in usual build. But when doing cargo doc,
+    // rustc will panic in auto_trait.rs. May remove it when using future version of tool chain.
 }
 
 impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
