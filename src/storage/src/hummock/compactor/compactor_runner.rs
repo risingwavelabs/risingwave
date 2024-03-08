@@ -917,6 +917,7 @@ where
                 .unwrap_or(false)
             && let Some(schema) = schemas.get(&check_table_id)
         {
+            let value_size = v.len();
             match try_drop_invalid_columns(v, schema) {
                 None => {
                     if !task_config.disable_drop_column_optimization {
@@ -932,6 +933,9 @@ where
                         .add_full_key(iter_key, new_put, is_new_user_key)
                         .verbose_instrument_await("add_rewritten_full_key")
                         .await?;
+                    let value_size_change = value_size as i64 - new_value.len() as i64;
+                    assert!(value_size_change >= 0);
+                    last_table_stats.total_value_size -= value_size_change;
                 }
             }
         }
