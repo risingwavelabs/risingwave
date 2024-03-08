@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::Poll;
 
-use anyhow::anyhow;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 
@@ -62,13 +62,13 @@ impl TruncateOffset {
         }
     }
 
-    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> anyhow::Result<()> {
+    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> LogStoreResult<()> {
         if *self >= next_offset {
-            Err(anyhow!(
+            bail!(
                 "next offset {:?} should be later than current offset {:?}",
                 next_offset,
                 self
-            ))
+            )
         } else {
             Ok(())
         }
@@ -81,22 +81,22 @@ impl TruncateOffset {
                 ..
             } => {
                 if epoch != *offset_epoch {
-                    return Err(anyhow!(
+                    bail!(
                         "new item epoch {} not match current chunk offset epoch {}",
                         epoch,
                         offset_epoch
-                    ));
+                    );
                 }
             }
             TruncateOffset::Barrier {
                 epoch: offset_epoch,
             } => {
                 if epoch <= *offset_epoch {
-                    return Err(anyhow!(
+                    bail!(
                         "new item epoch {} not exceed barrier offset epoch {}",
                         epoch,
                         offset_epoch
-                    ));
+                    );
                 }
             }
         }
@@ -165,11 +165,18 @@ pub trait LogReader: Send + Sized + 'static {
         &mut self,
         offset: TruncateOffset,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    /// Reset the log reader to after the latest truncate offset
+    ///
+    /// The return flag means whether the log store support rewind
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
 }
 
-pub trait LogStoreFactory: 'static {
-    type Reader: LogReader + Send + 'static;
-    type Writer: LogWriter + Send + 'static;
+pub trait LogStoreFactory: Send + 'static {
+    type Reader: LogReader;
+    type Writer: LogWriter;
 
     fn build(self) -> impl Future<Output = (Self::Reader, Self::Writer)> + Send;
 }
@@ -204,6 +211,12 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.truncate(offset)
     }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind()
+    }
 }
 
 pub struct MonitoredLogReader<R: LogReader> {
@@ -233,6 +246,12 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
 
     async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         self.inner.truncate(offset).await
+    }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind()
     }
 }
 
@@ -515,6 +534,7 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
+    use super::LogStoreResult;
     use crate::sink::log_store::{DeliveryFutureManager, TruncateOffset};
 
     #[test]
@@ -568,7 +588,7 @@ mod tests {
     }
 
     type TestFuture = impl TryFuture<Ok = (), Error = anyhow::Error> + Unpin + 'static;
-    fn to_test_future(rx: Receiver<anyhow::Result<()>>) -> TestFuture {
+    fn to_test_future(rx: Receiver<LogStoreResult<()>>) -> TestFuture {
         async move { rx.await.unwrap() }.boxed()
     }
 

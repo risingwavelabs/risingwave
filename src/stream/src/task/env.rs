@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,8 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
-#[cfg(test)]
-use risingwave_pb::connector_service::SinkPayloadFormat;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::MetaClient;
-use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;
@@ -94,7 +92,8 @@ impl StreamEnvironment {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
-        use risingwave_source::dml_manager::DmlManager;
+        use risingwave_dml::dml_manager::DmlManager;
+        use risingwave_pb::connector_service::SinkPayloadFormat;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),

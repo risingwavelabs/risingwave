@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
@@ -29,6 +28,7 @@ use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::utils::ActorInputMetrics;
 use crate::task::{FragmentId, SharedContext};
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -36,9 +36,6 @@ use crate::task::{FragmentId, SharedContext};
 pub struct MergeExecutor {
     /// The context of the actor.
     actor_context: ActorContextRef,
-
-    /// Logical Operator Info
-    info: ExecutorInfo,
 
     /// Upstream channels.
     upstreams: Vec<BoxedInput>,
@@ -60,7 +57,6 @@ impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
@@ -70,7 +66,6 @@ impl MergeExecutor {
     ) -> Self {
         Self {
             actor_context: ctx,
-            info,
             upstreams: inputs,
             fragment_id,
             upstream_fragment_id,
@@ -80,17 +75,12 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            ActorContext::create(114),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "MergeExecutor".to_string(),
-            },
+            ActorContext::for_test(114),
             514,
             1919,
             inputs
@@ -109,17 +99,20 @@ impl MergeExecutor {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
-        let actor_id_str = actor_id.to_string();
-        let fragment_id_str = self.fragment_id.to_string();
-        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+
+        let mut metrics = ActorInputMetrics::new(
+            &self.metrics,
+            actor_id,
+            self.fragment_id,
+            self.upstream_fragment_id,
+        );
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
-            self.metrics
+            metrics
                 .actor_input_buffer_blocking_duration_ns
-                .with_label_values(&[&actor_id_str, &fragment_id_str, &upstream_fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let mut msg: Message = msg?;
 
@@ -128,10 +121,7 @@ impl MergeExecutor {
                     // Do nothing.
                 }
                 Message::Chunk(chunk) => {
-                    self.metrics
-                        .actor_in_record_cnt
-                        .with_label_values(&[&actor_id_str, &fragment_id_str])
-                        .inc_by(chunk.cardinality() as _);
+                    metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
                     tracing::debug!(
@@ -226,7 +216,12 @@ impl MergeExecutor {
                         }
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
-                        upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+                        metrics = ActorInputMetrics::new(
+                            &self.metrics,
+                            actor_id,
+                            self.fragment_id,
+                            self.upstream_fragment_id,
+                        );
 
                         select_all.update_actor_ids();
                     }
@@ -239,21 +234,9 @@ impl MergeExecutor {
     }
 }
 
-impl Executor for MergeExecutor {
+impl Execute for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -458,7 +441,7 @@ mod tests {
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{Barrier, Executor, Mutation};
+    use crate::executor::{Barrier, Execute, Mutation};
     use crate::task::test_utils::helper_make_local_actor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
@@ -477,7 +460,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs, Schema::default());
+        let merger = MergeExecutor::for_test(rxs);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
@@ -550,8 +533,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let schema = Schema { fields: vec![] };
-
         let actor_id = 233;
         let (untouched, old, new) = (234, 235, 238); // upstream actors
         let ctx = Arc::new(SharedContext::for_test());
@@ -586,13 +567,8 @@ mod tests {
             .try_collect()
             .unwrap();
 
-        let merge = MergeExecutor::new(
-            ActorContext::create(actor_id),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "MergeExecutor".to_string(),
-            },
+        let mut merge = MergeExecutor::new(
+            ActorContext::for_test(actor_id),
             fragment_id,
             upstream_fragment_id,
             inputs,
@@ -602,8 +578,6 @@ mod tests {
         )
         .boxed()
         .execute();
-
-        pin_mut!(merge);
 
         // 2. Take downstream receivers.
         let txs = [untouched, old, new]

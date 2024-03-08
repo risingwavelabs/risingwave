@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -170,7 +170,7 @@ pub enum Operation {
     TryWaitEpoch(TracedHummockReadEpoch),
 
     /// clear shared buffer
-    ClearSharedBuffer,
+    ClearSharedBuffer(u64),
 
     /// Seal current epoch
     SealCurrentEpoch {
@@ -187,7 +187,7 @@ pub enum Operation {
 
     TryFlush,
 
-    Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
+    Flush,
     /// Finish operation of Hummock.
     Finish,
 }
@@ -299,7 +299,6 @@ pub enum OperationResult {
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    ClearSharedBuffer(TraceResult<()>),
     ValidateReadEpoch(TraceResult<()>),
     LocalStorageEpoch(TraceResult<u64>),
     LocalStorageIsDirty(TraceResult<bool>),

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
+use super::{expect_first_barrier, Execute, Executor, Message};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -25,11 +24,9 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
 /// existing MVs are dispatched.
 pub struct ChainExecutor {
-    info: ExecutorInfo,
+    snapshot: Executor,
 
-    snapshot: BoxedExecutor,
-
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     progress: CreateMviewProgress,
 
@@ -41,14 +38,12 @@ pub struct ChainExecutor {
 
 impl ChainExecutor {
     pub fn new(
-        info: ExecutorInfo,
-        snapshot: BoxedExecutor,
-        upstream: BoxedExecutor,
+        snapshot: Executor,
+        upstream: Executor,
         progress: CreateMviewProgress,
         upstream_only: bool,
     ) -> Self {
         Self {
-            info,
             snapshot,
             upstream,
             actor_id: progress.actor_id(),
@@ -104,28 +99,15 @@ impl ChainExecutor {
     }
 }
 
-impl Executor for ChainExecutor {
+impl Execute for ChainExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
 #[cfg(test)]
 mod test {
     use std::default::Default;
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -136,61 +118,45 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{
-        AddMutation, Barrier, Executor, ExecutorInfo, Message, Mutation, PkIndices,
-    };
+    use crate::executor::{AddMutation, Barrier, Execute, Message, Mutation, PkIndices};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_basic() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let progress = CreateMviewProgress::for_test(barrier_manager);
         let actor_id = progress.actor_id();
 
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let first = Box::new(
-            MockSource::with_chunks(
-                schema.clone(),
-                PkIndices::new(),
-                vec![
-                    StreamChunk::from_pretty("I\n + 1"),
-                    StreamChunk::from_pretty("I\n + 2"),
-                ],
-            )
-            .stop_on_finish(false),
-        );
+        let first = MockSource::with_chunks(vec![
+            StreamChunk::from_pretty("I\n + 1"),
+            StreamChunk::from_pretty("I\n + 2"),
+        ])
+        .stop_on_finish(false)
+        .into_executor(schema.clone(), PkIndices::new());
 
-        let second = Box::new(MockSource::with_messages(
-            schema.clone(),
-            PkIndices::new(),
-            vec![
-                Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add(
-                    AddMutation {
-                        adds: maplit::hashmap! {
-                            0 => vec![Dispatcher {
-                                downstream_actor_id: vec![actor_id],
-                                ..Default::default()
-                            }],
-                        },
-                        added_actors: maplit::hashset! { actor_id },
-                        splits: Default::default(),
-                        pause: false,
+        let second = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add(
+                AddMutation {
+                    adds: maplit::hashmap! {
+                        0 => vec![Dispatcher {
+                            downstream_actor_id: vec![actor_id],
+                            ..Default::default()
+                        }],
                     },
-                ))),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
-            ],
-        ));
+                    added_actors: maplit::hashset! { actor_id },
+                    splits: Default::default(),
+                    pause: false,
+                },
+            ))),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
+        ])
+        .into_executor(schema.clone(), PkIndices::new());
 
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: PkIndices::new(),
-            identity: "ChainExecutor".to_string(),
-        };
-        let chain = ChainExecutor::new(info, first, second, progress, false);
+        let chain = ChainExecutor::new(first, second, progress, false);
 
-        let mut chain = Box::new(chain).execute();
+        let mut chain = chain.boxed().execute();
         chain.next().await;
 
         let mut count = 0;

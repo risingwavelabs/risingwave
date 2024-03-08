@@ -17,8 +17,7 @@
     Failed to bind expression: must_be_unimplemented_func(1)
 
     Caused by:
-      Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function must_be_unimplemented_func(integer) does not exist
 - sql: |
     values(cast(1 as bigint));
   batch_plan: 'BatchValues { rows: [[1:Int64]] }'
@@ -49,6 +48,12 @@
     SELECT null < null;
   logical_plan: |-
     LogicalProject { exprs: [(null:Varchar < null:Varchar) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: hex bitwise-or bin
+  sql: |
+    SELECT 0x25 | 0b110;
+  logical_plan: |-
+    LogicalProject { exprs: [(37:Int32 | 6:Int32) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind is distinct from
   sql: |
@@ -567,8 +572,7 @@
     Failed to bind expression: pg_teminate_backend(1)
 
     Caused by:
-      Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+      function pg_teminate_backend(integer) does not exist, do you mean pg_terminate_backend
 - name: regression (#7571) - literal debug display for array with NULL values
   sql: |
     select ARRAY[1, null] t;
@@ -631,3 +635,19 @@
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
     See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- name: without variadic keyword
+  sql: |
+    create table t(a varchar, b varchar);
+    select concat_ws(',', a, b) from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [ConcatWs(',':Varchar, t.a, t.b) as $expr1] }
+      └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- name: with variadic keyword
+  sql: |
+    create table t(a varchar, b varchar);
+    select concat_ws(',', variadic array[a, b]) from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [ConcatWsVariadic(',':Varchar, Array(t.a, t.b)) as $expr1] }
+      └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }

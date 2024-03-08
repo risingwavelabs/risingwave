@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,10 @@ use async_trait::async_trait;
 use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -32,11 +35,12 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse, TableWatermarks, VacuumTask,
+    compact_task, CompactTask, HummockSnapshot, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -94,7 +98,7 @@ impl MockHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
-        new_table_watermarks: HashMap<u32, TableWatermarks>,
+        new_table_watermarks: HashMap<TableId, TableWatermarks>,
     ) -> Result<()> {
         let sst_to_worker = sstables
             .iter()
@@ -116,7 +120,7 @@ impl MockHummockMetaClient {
 }
 
 fn mock_err(error: super::error::Error) -> RpcError {
-    anyhow!("mock error: {}", error).into()
+    anyhow!(error).context("mock error").into()
 }
 
 #[async_trait]
@@ -232,9 +236,9 @@ impl HummockMetaClient for MockHummockMetaClient {
         UnboundedSender<SubscribeCompactionEventRequest>,
         BoxStream<'static, CompactionEventItem>,
     )> {
-        let worker_node = self
+        let context_id = self
             .hummock_manager
-            .cluster_manager()
+            .metadata_manager()
             .add_worker_node(
                 WorkerType::Compactor,
                 HostAddress {
@@ -246,7 +250,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             )
             .await
             .unwrap();
-        let context_id = worker_node.id;
         let _compactor_rx = self
             .hummock_manager
             .compactor_manager_ref_for_test()
@@ -305,7 +308,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         let hummock_manager_compact = self.hummock_manager.clone();
         let report_handle = tokio::spawn(async move {
             tracing::info!("report_handle start");
-
             loop {
                 if let Some(item) = request_receiver.recv().await {
                     if let Event::ReportTask(ReportTask {
@@ -324,7 +326,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                             )
                             .await
                         {
-                            tracing::error!("report compact_tack fail {e:?}");
+                            tracing::error!(error = %e.as_report(), "report compact_tack fail");
                         }
                     }
                 }

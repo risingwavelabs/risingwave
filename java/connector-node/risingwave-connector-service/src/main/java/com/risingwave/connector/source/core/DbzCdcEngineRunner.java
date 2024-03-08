@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,9 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.*;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
+import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import io.debezium.config.CommonConnectorConfig;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,7 +33,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
 
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private final CdcEngine engine;
+    private CdcEngine engine;
     private final DbzConnectorConfig config;
 
     public static CdcEngineRunner newCdcEngineRunner(
@@ -45,29 +47,33 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                             config.getResolvedDebeziumProps(),
                             (success, message, error) -> {
                                 if (!success) {
-                                    responseObserver.onError(error);
                                     LOG.error(
                                             "engine#{} terminated with error. message: {}",
                                             sourceId,
                                             message,
                                             error);
+                                    if (error != null) {
+                                        responseObserver.onError(error);
+                                    }
                                 } else {
                                     LOG.info("engine#{} stopped normally. {}", sourceId, message);
                                     responseObserver.onCompleted();
                                 }
                             });
 
-            runner = new DbzCdcEngineRunner(engine, config);
+            runner = new DbzCdcEngineRunner(config);
+            runner.withEngine(engine);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
         }
         return runner;
     }
 
-    public static CdcEngineRunner create(DbzConnectorConfig config) {
-        DbzCdcEngineRunner runner = null;
+    public static CdcEngineRunner create(DbzConnectorConfig config, long channelPtr) {
+        DbzCdcEngineRunner runner = new DbzCdcEngineRunner(config);
         try {
             var sourceId = config.getSourceId();
+            final DbzCdcEngineRunner finalRunner = runner;
             var engine =
                     new DbzCdcEngine(
                             config.getSourceId(),
@@ -79,25 +85,44 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                             sourceId,
                                             message,
                                             error);
+                                    String errorMsg =
+                                            (error != null ? error.getMessage() : message);
+                                    if (!Binding.sendCdcSourceErrorToChannel(
+                                            channelPtr, errorMsg)) {
+                                        LOG.warn(
+                                                "engine#{} unable to send error message: {}",
+                                                sourceId,
+                                                errorMsg);
+                                    }
+                                    // We need to stop the engine runner on debezium engine failure
+                                    try {
+                                        finalRunner.stop();
+                                    } catch (Exception e) {
+                                        LOG.warn("failed to stop the engine#{}", sourceId, e);
+                                    }
                                 } else {
                                     LOG.info("engine#{} stopped normally. {}", sourceId, message);
                                 }
                             });
 
-            runner = new DbzCdcEngineRunner(engine, config);
+            runner.withEngine(engine);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
+            runner = null;
         }
         return runner;
     }
 
     // private constructor
-    private DbzCdcEngineRunner(CdcEngine engine, DbzConnectorConfig config) {
+    private DbzCdcEngineRunner(DbzConnectorConfig config) {
         this.executor =
                 Executors.newSingleThreadExecutor(
-                        r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
-        this.engine = engine;
+                        r -> new Thread(r, "rw-dbz-engine-runner-" + config.getSourceId()));
         this.config = config;
+    }
+
+    private void withEngine(CdcEngine engine) {
+        this.engine = engine;
     }
 
     /** Start to run the cdc engine */
@@ -113,14 +138,15 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         // For backfill source, we need to wait for the streaming source to start before proceeding
         if (config.isBackfillSource()) {
             var databaseServerName =
-                    config.getResolvedDebeziumProps().getProperty("database.server.name");
+                    config.getResolvedDebeziumProps()
+                            .getProperty(CommonConnectorConfig.TOPIC_PREFIX.name());
             startOk =
                     DbzSourceUtils.waitForStreamingRunning(
                             config.getSourceType(), databaseServerName);
         }
 
         running.set(true);
-        LOG.info("engine#{} started", engine.getId());
+        LOG.info("engine#{} start ok: {}", engine.getId(), startOk);
         return startOk;
     }
 

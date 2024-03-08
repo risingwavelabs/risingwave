@@ -190,20 +190,13 @@ services:
     restart: always
     container_name: datagen
 
-  init_tidb:
-    image: mysql:8.0
-    depends_on:
-      - tidb
-    command:
-      - /bin/sh
-      - -c
-      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql &&
-         sleep 10 &&
-         mysql --password= -h tidb --port 4000 -u root test < tidb_prepare.sql"
+  mysql:
+    image: mysql:latest
+    command: tail -f /dev/null
     volumes:
       - "./tidb_create_tables.sql:/tidb_create_tables.sql"
       - "./tidb_prepare.sql:/tidb_prepare.sql"
-    container_name: init_tidb
+    container_name: mysql
     restart: on-failure
 
 volumes:
@@ -219,3 +212,4 @@ volumes:
     external: false
   message_queue:
     external: false
+name: risingwave-compose

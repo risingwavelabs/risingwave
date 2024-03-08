@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
+use crate::parser::{IncludeOption, IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -80,17 +80,21 @@ macro_rules! impl_fmt_display {
 pub struct CreateSourceStatement {
     pub if_not_exists: bool,
     pub columns: Vec<ColumnDef>,
+    // The wildchar position in columns defined in sql. Only exist when using external schema.
+    pub wildcard_idx: Option<usize>,
     pub constraints: Vec<TableConstraint>,
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
     pub source_schema: CompatibleSourceSchema,
     pub source_watermarks: Vec<SourceWatermark>,
+    pub include_column_options: IncludeOption,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     Native,
+    None,          // Keyword::NONE
     Debezium,      // Keyword::DEBEZIUM
     DebeziumMongo, // Keyword::DEBEZIUM_MONGO
     Maxwell,       // Keyword::MAXWELL
@@ -113,6 +117,7 @@ impl fmt::Display for Format {
                 Format::Canal => "CANAL",
                 Format::Upsert => "UPSERT",
                 Format::Plain => "PLAIN",
+                Format::None => "NONE",
             }
         )
     }
@@ -128,9 +133,10 @@ impl Format {
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
+            "NONE" => Format::None, // used by iceberg
             _ => {
                 return Err(ParserError::ParserError(
-                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE after FORMAT"
+                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
                         .to_string(),
                 ))
             }
@@ -146,6 +152,7 @@ pub enum Encode {
     Protobuf, // Keyword::PROTOBUF
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
+    None,     // Keyword::None
     Native,
     Template,
 }
@@ -164,6 +171,7 @@ impl fmt::Display for Encode {
                 Encode::Bytes => "BYTES",
                 Encode::Native => "NATIVE",
                 Encode::Template => "TEMPLATE",
+                Encode::None => "NONE",
             }
         )
     }
@@ -179,8 +187,9 @@ impl Encode {
             "JSON" => Encode::Json,
             "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native, // used internally for schema change
+            "NONE" => Encode::None, // used by iceberg
             _ => return Err(ParserError::ParserError(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
                     .to_string(),
             )),
         })
@@ -212,12 +221,16 @@ impl Parser {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
+        // FIXME: parse input `connector` to enum type instead using string here
         if connector.contains("-cdc") {
             let expected = if cdc_source_job {
                 ConnectorSchema::plain_json()
+            } else if connector.contains("mongodb") {
+                ConnectorSchema::debezium_mongo_json()
             } else {
                 ConnectorSchema::debezium_json()
             };
+
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
@@ -246,6 +259,18 @@ impl Parser {
             } else {
                 ConnectorSchema::native().into()
             })
+        } else if connector.contains("iceberg") {
+            let expected = ConnectorSchema::none();
+            if self.peek_source_schema_format() {
+                let schema = parse_source_schema(self)?.into_v2();
+                if schema != expected {
+                    return Err(ParserError::ParserError(format!(
+                        "Row format for iceberg connectors should be \
+                         either omitted or set to `{expected}`",
+                    )));
+                }
+            }
+            Ok(expected.into())
         } else {
             Ok(parse_source_schema(self)?)
         }
@@ -292,11 +317,29 @@ impl ConnectorSchema {
         }
     }
 
+    pub const fn debezium_mongo_json() -> Self {
+        ConnectorSchema {
+            format: Format::DebeziumMongo,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
     /// Create a new source schema with `Native` format and encoding.
     pub const fn native() -> Self {
         ConnectorSchema {
             format: Format::Native,
             row_encode: Encode::Native,
+            row_options: Vec::new(),
+        }
+    }
+
+    /// Create a new source schema with `None` format and encoding.
+    /// Used for self-explanatory source like iceberg.
+    pub const fn none() -> Self {
+        ConnectorSchema {
+            format: Format::None,
+            row_encode: Encode::None,
             row_options: Vec::new(),
         }
     }
@@ -324,7 +367,9 @@ impl ParseTo for CreateSourceStatement {
         impl_parse_to!(source_name: ObjectName, p);
 
         // parse columns
-        let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
+        let (columns, constraints, source_watermarks, wildcard_idx) =
+            p.parse_columns_with_watermark()?;
+        let include_options = p.parse_include_options()?;
 
         let with_options = p.parse_with_properties()?;
         let option = with_options
@@ -341,11 +386,13 @@ impl ParseTo for CreateSourceStatement {
         Ok(Self {
             if_not_exists,
             columns,
+            wildcard_idx,
             constraints,
             source_name,
             with_properties: WithProperties(with_options),
             source_schema,
             source_watermarks,
+            include_column_options: include_options,
         })
     }
 }
@@ -354,11 +401,28 @@ pub(super) fn fmt_create_items(
     columns: &[ColumnDef],
     constraints: &[TableConstraint],
     watermarks: &[SourceWatermark],
+    wildcard_idx: Option<usize>,
 ) -> std::result::Result<String, fmt::Error> {
     let mut items = String::new();
-    let has_items = !columns.is_empty() || !constraints.is_empty() || !watermarks.is_empty();
+    let has_items = !columns.is_empty()
+        || !constraints.is_empty()
+        || !watermarks.is_empty()
+        || wildcard_idx.is_some();
     has_items.then(|| write!(&mut items, "("));
-    write!(&mut items, "{}", display_comma_separated(columns))?;
+    if let Some(wildcard_idx) = wildcard_idx {
+        let (columns_l, columns_r) = columns.split_at(wildcard_idx);
+        write!(&mut items, "{}", display_comma_separated(columns_l))?;
+        if !columns_l.is_empty() {
+            write!(&mut items, ", ")?;
+        }
+        write!(&mut items, "{}", Token::Mul)?;
+        if !columns_r.is_empty() {
+            write!(&mut items, ", ")?;
+        }
+        write!(&mut items, "{}", display_comma_separated(columns_r))?;
+    } else {
+        write!(&mut items, "{}", display_comma_separated(columns))?;
+    }
     if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
         write!(&mut items, ", ")?;
     }
@@ -377,7 +441,12 @@ impl fmt::Display for CreateSourceStatement {
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(source_name, v, self);
 
-        let items = fmt_create_items(&self.columns, &self.constraints, &self.source_watermarks)?;
+        let items = fmt_create_items(
+            &self.columns,
+            &self.constraints,
+            &self.source_watermarks,
+            self.wildcard_idx,
+        )?;
         if !items.is_empty() {
             v.push(items);
         }
@@ -483,6 +552,10 @@ impl fmt::Display for CreateSinkStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
+        if let Some(into_table) = &self.into_table_name {
+            impl_fmt_display!([Keyword::INTO], v);
+            impl_fmt_display!([into_table], v);
+        }
         impl_fmt_display!(sink_from, v, self);
         if let Some(ref emit_mode) = self.emit_mode {
             v.push(format!("EMIT {}", emit_mode));
@@ -682,6 +755,7 @@ pub enum UserOption {
     NoLogin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
+    OAuth(Vec<SqlOption>),
 }
 
 impl fmt::Display for UserOption {
@@ -698,6 +772,9 @@ impl fmt::Display for UserOption {
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::OAuth(options) => {
+                write!(f, "({})", display_comma_separated(options.as_slice()))
+            }
         }
     }
 }
@@ -785,10 +862,14 @@ impl ParseTo for UserOptions {
                             UserOption::EncryptedPassword(AstString::parse_to(parser)?),
                         )
                     }
+                    Keyword::OAUTH => {
+                        let options = parser.parse_options()?;
+                        (&mut builder.password, UserOption::OAuth(options))
+                    }
                     _ => {
                         parser.expected(
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                             token,
                         )?;
                         unreachable!()
@@ -798,7 +879,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                     token,
                 )?
             }

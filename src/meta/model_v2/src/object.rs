@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,8 @@ pub enum ObjectType {
     Function,
     #[sea_orm(string_value = "CONNECTION")]
     Connection,
+    #[sea_orm(string_value = "SUBSCRIPTION")]
+    Subscription,
 }
 
 impl ObjectType {
@@ -51,6 +53,7 @@ impl ObjectType {
             ObjectType::Index => "index",
             ObjectType::Function => "function",
             ObjectType::Connection => "connection",
+            ObjectType::Subscription => "subscription",
         }
     }
 }
@@ -66,6 +69,8 @@ pub struct Model {
     pub database_id: Option<DatabaseId>,
     pub initialized_at: DateTime,
     pub created_at: DateTime,
+    pub initialized_at_cluster_version: Option<String>,
+    pub created_at_cluster_version: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -100,6 +105,8 @@ pub enum Relation {
     Schema,
     #[sea_orm(has_many = "super::sink::Entity")]
     Sink,
+    #[sea_orm(has_many = "super::subscription::Entity")]
+    Subscription,
     #[sea_orm(has_many = "super::source::Entity")]
     Source,
     #[sea_orm(has_many = "super::table::Entity")]
@@ -159,6 +166,12 @@ impl Related<super::schema::Entity> for Entity {
 impl Related<super::sink::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Sink.def()
+    }
+}
+
+impl Related<super::subscription::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Subscription.def()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,12 +36,17 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub function_id: FunctionId,
     pub name: String,
+    // encode Vec<String> as comma separated string
+    pub arg_names: String,
     pub arg_types: DataTypeArray,
     pub return_type: DataType,
     pub language: String,
-    pub link: String,
-    pub identifier: String,
+    pub link: Option<String>,
+    pub identifier: Option<String>,
+    pub body: Option<String>,
+    pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,
+    pub always_retry_on_network_error: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -74,17 +79,31 @@ impl From<Kind> for FunctionKind {
     }
 }
 
+impl From<FunctionKind> for Kind {
+    fn from(value: FunctionKind) -> Self {
+        match value {
+            FunctionKind::Scalar => Self::Scalar(Default::default()),
+            FunctionKind::Table => Self::Table(Default::default()),
+            FunctionKind::Aggregate => Self::Aggregate(Default::default()),
+        }
+    }
+}
+
 impl From<PbFunction> for ActiveModel {
     fn from(function: PbFunction) -> Self {
         Self {
             function_id: Set(function.id as _),
             name: Set(function.name),
+            arg_names: Set(function.arg_names.join(",")),
             arg_types: Set(DataTypeArray(function.arg_types)),
             return_type: Set(DataType(function.return_type.unwrap())),
             language: Set(function.language),
             link: Set(function.link),
             identifier: Set(function.identifier),
+            body: Set(function.body),
+            compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
+            always_retry_on_network_error: Set(function.always_retry_on_network_error),
         }
     }
 }

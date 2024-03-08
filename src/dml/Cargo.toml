@@ -1,0 +1,41 @@
+[package]
+name = "risingwave_dml"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = { workspace = true }
+itertools = "0.12"
+parking_lot = "0.12"
+rand = "0.8"
+risingwave_common = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_pb = { workspace = true }
+rw_futures_util = { workspace = true }
+thiserror = "1"
+thiserror-ext = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tracing = { version = "0.1" }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+assert_matches = "1"
+criterion = { workspace = true, features = ["async_tokio"] }
+paste = "1"
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@ use risingwave_storage::StateStore;
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
 use crate::common::metrics::MetricsInfo;
-use crate::common::JoinStreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
@@ -46,11 +46,11 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
-    pub arrangement: Box<dyn Executor>,
+    pub arrangement: Executor,
 
     /// The side for stream. It can be any stream, but it will generally be a
     /// `MaterializeExecutor`.
-    pub stream: Box<dyn Executor>,
+    pub stream: Executor,
 
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
@@ -198,7 +198,6 @@ impl<S: StateStore> LookupExecutor<S> {
 
         Self {
             ctx,
-            info,
             chunk_data_types,
             last_barrier: None,
             stream_executor: Some(stream),

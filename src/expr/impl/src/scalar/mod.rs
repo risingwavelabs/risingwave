@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ mod case;
 mod cast;
 mod cmp;
 mod coalesce;
+mod concat;
 mod concat_op;
 mod concat_ws;
 mod conjunction;
@@ -58,7 +59,7 @@ mod jsonb_object;
 mod jsonb_path;
 mod length;
 mod lower;
-mod make_timestamptz;
+mod make_time;
 mod md5;
 mod overlay;
 mod position;
@@ -68,6 +69,7 @@ mod repeat;
 mod replace;
 mod round;
 mod sha;
+mod similar_to_escape;
 mod split_part;
 mod string;
 mod string_to_array;
@@ -77,6 +79,8 @@ mod to_char;
 mod to_jsonb;
 mod vnode;
 pub use to_jsonb::*;
+mod encrypt;
+mod external;
 mod to_timestamp;
 mod translate;
 mod trigonometric;

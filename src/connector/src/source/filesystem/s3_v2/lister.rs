@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
 use async_trait::async_trait;
-use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 
+use crate::error::ConnectorResult;
 use crate::source::filesystem::{FsPageItem, S3SplitEnumerator};
 use crate::source::{FsFilterCtrlCtx, FsListInner};
 
@@ -25,7 +25,7 @@ use crate::source::{FsFilterCtrlCtx, FsListInner};
 impl FsListInner for S3SplitEnumerator {
     async fn get_next_page<T: for<'a> From<&'a Object>>(
         &mut self,
-    ) -> anyhow::Result<(Vec<T>, bool)> {
+    ) -> ConnectorResult<(Vec<T>, bool)> {
         let mut has_finished = false;
         let mut req = self
             .client
@@ -38,7 +38,7 @@ impl FsListInner for S3SplitEnumerator {
         let mut res = req
             .send()
             .await
-            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+            .with_context(|| format!("failed to list objects in bucket `{}`", self.bucket_name))?;
         if res.is_truncated().unwrap_or_default() {
             self.next_continuation_token = res.next_continuation_token.clone();
         } else {

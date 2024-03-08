@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -224,7 +224,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = StreamChunk::from(chunk?);
-            let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
+            let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
             let mut memory_usage_diff = 0;
             for (row_id, (key, visible)) in keys
                 .into_iter()

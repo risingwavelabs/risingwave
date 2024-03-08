@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 
 use super::unified::bytes::BytesAccess;
 use super::unified::AccessImpl;
 use super::{AccessBuilder, EncodingProperties};
+use crate::error::ConnectorResult;
 
 #[derive(Debug)]
 pub struct BytesAccessBuilder {
@@ -26,7 +26,7 @@ pub struct BytesAccessBuilder {
 
 impl AccessBuilder for BytesAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
         Ok(AccessImpl::Bytes(BytesAccess::new(
             &self.column_name,
             payload,
@@ -35,7 +35,7 @@ impl AccessBuilder for BytesAccessBuilder {
 }
 
 impl BytesAccessBuilder {
-    pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+    pub fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let config = try_match_expand!(encoding_properties, EncodingProperties::Bytes)?;
         Ok(Self {
             column_name: config.column_name,
@@ -74,7 +74,10 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
 
         let chunk = builder.finish();

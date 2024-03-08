@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use risingwave_batch::error::BatchError;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::session_config::QueryMode;
+use risingwave_connector::error::ConnectorError;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
 
 use crate::catalog::FragmentId;
+use crate::error::{ErrorCode, RwError};
 use crate::scheduler::plan_fragmenter::QueryId;
 
 #[derive(Error, Debug)]
@@ -49,9 +50,9 @@ pub enum SchedulerError {
     #[error("Task got killed because compute node running out of memory")]
     TaskRunningOutOfMemory,
 
-    /// Used when receive cancel request (ctrl-c) from user.
-    #[error("Cancelled by user")]
-    QueryCancelled,
+    /// Used when receive cancel request for some reason, such as user cancel or timeout.
+    #[error("Query cancelled: {0}")]
+    QueryCancelled(String),
 
     #[error("Reject query: the {0} query number reaches the limit: {1}")]
     QueryReachLimit(QueryMode, u64),
@@ -61,6 +62,13 @@ pub enum SchedulerError {
         #[from]
         #[backtrace]
         BatchError,
+    ),
+
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
     ),
 
     #[error(transparent)]

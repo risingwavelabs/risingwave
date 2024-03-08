@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -146,7 +146,7 @@ impl<K: HashKey> LookupJoinBase<K> {
 
             // Build hash map
             for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-                let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
+                let build_keys = K::build_many(&hash_join_build_side_key_idxs, build_chunk);
 
                 for (build_row_id, (build_key, visible)) in build_keys
                     .into_iter()

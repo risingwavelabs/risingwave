@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,6 @@
 import {
   Box,
   Button,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalOverlay,
   Table,
   TableContainer,
   Tbody,
@@ -32,20 +25,24 @@ import {
   Th,
   Thead,
   Tr,
-  useDisclosure,
-  useToast,
 } from "@chakra-ui/react"
 import loadable from "@loadable/component"
 import Head from "next/head"
 
 import Link from "next/link"
-import { Fragment, useEffect, useState } from "react"
+import { Fragment } from "react"
 import Title from "../components/Title"
+import useFetch from "../lib/api/fetch"
+import { Relation, StreamingJob } from "../lib/api/streaming"
 import extractColumnInfo from "../lib/extractInfo"
-import { Relation, StreamingJob } from "../pages/api/streaming"
-import { Table as RwTable } from "../proto/gen/catalog"
+import {
+  Sink as RwSink,
+  Source as RwSource,
+  Table as RwTable,
+} from "../proto/gen/catalog"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
 
-const ReactJson = loadable(() => import("react-json-view"))
+export const ReactJson = loadable(() => import("react-json-view"))
 
 export type Column<R> = {
   name: string
@@ -57,7 +54,7 @@ export const dependentsColumn: Column<Relation> = {
   name: "Depends",
   width: 1,
   content: (r) => (
-    <Link href={`/streaming_graph/?id=${r.id}`}>
+    <Link href={`/dependency_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view dependents"
@@ -74,7 +71,7 @@ export const fragmentsColumn: Column<StreamingJob> = {
   name: "Fragments",
   width: 1,
   content: (r) => (
-    <Link href={`/streaming_plan/?id=${r.id}`}>
+    <Link href={`/fragment_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view fragments"
@@ -98,7 +95,13 @@ export const primaryKeyColumn: Column<RwTable> = {
       .join(", "),
 }
 
-export const connectorColumn: Column<Relation> = {
+export const connectorColumnSource: Column<RwSource> = {
+  name: "Connector",
+  width: 3,
+  content: (r) => r.withProperties.connector ?? "unknown",
+}
+
+export const connectorColumnSink: Column<RwSink> = {
   name: "Connector",
   width: 3,
   content: (r) => r.properties.connector ?? "unknown",
@@ -111,63 +114,11 @@ export function Relations<R extends Relation>(
   getRelations: () => Promise<R[]>,
   extraColumns: Column<R>[]
 ) {
-  const toast = useToast()
-  const [relationList, setRelationList] = useState<R[]>([])
+  const { response: relationList } = useFetch(getRelations)
+  const [modalData, setModalId] = useCatalogModal(relationList)
 
-  useEffect(() => {
-    async function doFetch() {
-      try {
-        setRelationList(await getRelations())
-      } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
-      }
-    }
-    doFetch()
-    return () => {}
-  }, [toast, getRelations])
-
-  const { isOpen, onOpen, onClose } = useDisclosure()
-  const [currentRelation, setCurrentRelation] = useState<R>()
-  const openRelationCatalog = (relation: R) => {
-    if (relation) {
-      setCurrentRelation(relation)
-      onOpen()
-    }
-  }
-
-  const catalogModal = (
-    <Modal isOpen={isOpen} onClose={onClose} size="3xl">
-      <ModalOverlay />
-      <ModalContent>
-        <ModalHeader>
-          Catalog of {currentRelation?.id} - {currentRelation?.name}
-        </ModalHeader>
-        <ModalCloseButton />
-        <ModalBody>
-          {isOpen && currentRelation && (
-            <ReactJson
-              src={currentRelation}
-              collapsed={1}
-              name={null}
-              displayDataTypes={false}
-            />
-          )}
-        </ModalBody>
-
-        <ModalFooter>
-          <Button colorScheme="blue" mr={3} onClick={onClose}>
-            Close
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+  const modal = (
+    <CatalogModal modalData={modalData} onClose={() => setModalId(null)} />
   )
 
   const table = (
@@ -189,7 +140,7 @@ export function Relations<R extends Relation>(
             </Tr>
           </Thead>
           <Tbody>
-            {relationList.map((r) => (
+            {relationList?.map((r) => (
               <Tr key={r.id}>
                 <Td>
                   <Button
@@ -197,7 +148,7 @@ export function Relations<R extends Relation>(
                     aria-label="view catalog"
                     colorScheme="blue"
                     variant="link"
-                    onClick={() => openRelationCatalog(r)}
+                    onClick={() => setModalId(r.id)}
                   >
                     {r.id}
                   </Button>
@@ -226,7 +177,7 @@ export function Relations<R extends Relation>(
       <Head>
         <title>{title}</title>
       </Head>
-      {catalogModal}
+      {modal}
       {table}
     </Fragment>
   )

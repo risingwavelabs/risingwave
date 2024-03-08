@@ -448,3 +448,56 @@
     select (select 1 from t, di where t.a = dl.c1 and t.b = di.d1 limit 1) name, (select 1 from t, di where t.a = dl.c2 and t.c = di.d2 limit 1) name2 from dl;
   expected_outputs:
   - optimized_logical_plan_for_stream
+- name: correlated array subquery
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    select Array(select c from t2 where b = d) arr from t1;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: correlated array subquery \du
+  sql: |
+    SELECT r.rolname, r.rolsuper, r.rolinherit,
+      r.rolcreaterole, r.rolcreatedb, r.rolcanlogin,
+      r.rolconnlimit, r.rolvaliduntil,
+      ARRAY(SELECT b.rolname
+            FROM pg_catalog.pg_auth_members m
+            JOIN pg_catalog.pg_roles b ON (m.roleid = b.oid)
+            WHERE m.member = r.oid) as memberof
+    , r.rolreplication
+    , r.rolbypassrls
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname !~ '^pg_'
+    ORDER BY 1;
+  expected_outputs:
+    - batch_plan
+- name: correlated array subquery (issue 14423)
+  sql: |
+    CREATE TABLE array_types ( x BIGINT[] );
+    SELECT array(
+      ((((((
+        select t0.x
+      ))))))
+    )
+    FROM array_types AS t0;
+  expected_outputs:
+    - batch_plan
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a case could be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

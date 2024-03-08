@@ -7,8 +7,8 @@ create source mysql_mydb with (
     port = '3306',
     username = 'root',
     password = '123456',
-    database.name = 'my@db',
-    server.id = '2'
+    database.name = 'mydb',
+    server.id = '5085'
 );
 
 statement ok
@@ -16,7 +16,7 @@ create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) FROM mysql_mydb TABLE 'my@db.products';
+) FROM mysql_mydb TABLE 'mydb.products';
 
 
 statement ok
@@ -24,8 +24,9 @@ CREATE SINK s1 AS select * from products WITH (
     connector = 'iceberg',
     type = 'upsert',
     force_append_only = 'false',
-    database.name = 'demo',
-    table.name = 'demo_db.demo_table',
+    catalog.name = 'demo',
+    database.name = 'demo_db',
+    table.name = 'demo_table',
     catalog.type = 'storage',
     warehouse.path = 's3://icebergdata/demo',
     s3.endpoint = 'http://127.0.0.1:9301',
@@ -35,10 +36,9 @@ CREATE SINK s1 AS select * from products WITH (
     primary_key = 'id'
 );
 
+sleep 20s
+
 query I
 select count(*) from products;
 ----
 8
-
-statement ok
-flush;

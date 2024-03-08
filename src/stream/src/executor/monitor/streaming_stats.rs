@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
     register_int_counter_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, IntCounter, IntGauge, Registry,
+    register_int_gauge_with_registry, Histogram, IntCounter, IntCounterVec, IntGauge, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
@@ -32,6 +32,10 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::SinkMetrics;
+
+use crate::common::log_store_impl::kv_log_store::{
+    REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
+};
 
 #[derive(Clone)]
 pub struct StreamingMetrics {
@@ -55,17 +59,16 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
-    pub actor_in_record_cnt: LabelGuardedIntCounterVec<2>,
+    pub actor_in_record_cnt: LabelGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
 
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
 
     // Sink & materialized view
-    pub sink_input_row_count: GenericCounterVec<AtomicU64>,
-    pub mview_input_row_count: GenericCounterVec<AtomicU64>,
+    pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
+    pub mview_input_row_count: IntCounterVec,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -130,6 +133,10 @@ pub struct StreamingMetrics {
     pub over_window_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub over_window_cache_lookup_count: GenericCounterVec<AtomicU64>,
     pub over_window_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub over_window_range_cache_entry_count: GenericGaugeVec<AtomicI64>,
+    pub over_window_range_cache_lookup_count: GenericCounterVec<AtomicU64>,
+    pub over_window_range_cache_left_miss_count: GenericCounterVec<AtomicU64>,
+    pub over_window_range_cache_right_miss_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -150,12 +157,17 @@ pub struct StreamingMetrics {
     pub log_store_read_rows: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
     pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_rewind_count: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_rewind_delay: LabelGuardedHistogramVec<3>,
     pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
 
     // Sink iceberg metrics
-    pub iceberg_file_appender_write_qps: LabelGuardedIntCounterVec<2>,
-    pub iceberg_file_appender_write_latency: LabelGuardedHistogramVec<2>,
+    pub iceberg_write_qps: LabelGuardedIntCounterVec<2>,
+    pub iceberg_write_latency: LabelGuardedHistogramVec<2>,
+    pub iceberg_rolling_unflushed_data_file: LabelGuardedIntGaugeVec<2>,
+    pub iceberg_position_delete_cache_num: LabelGuardedIntGaugeVec<2>,
+    pub iceberg_partition_num: LabelGuardedIntGaugeVec<2>,
 
     // Memory management
     // FIXME(yuhao): use u64 here
@@ -166,6 +178,8 @@ pub struct StreamingMetrics {
     pub lru_evicted_watermark_time_ms: LabelGuardedIntGaugeVec<3>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
+    pub jemalloc_resident_bytes: IntGauge,
+    pub jemalloc_metadata_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
 
@@ -198,15 +212,7 @@ impl StreamingMetrics {
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
-            &["source_id", "source_name", "actor_id"],
-            registry
-        )
-        .unwrap();
-
-        let source_row_per_barrier = register_int_counter_vec_with_registry!(
-            "stream_source_rows_per_barrier_counts",
-            "Total number of rows that have been output from source per barrier",
-            &["actor_id", "executor_id"],
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -214,12 +220,12 @@ impl StreamingMetrics {
         let source_split_change_count = register_int_counter_vec_with_registry!(
             "stream_source_split_change_event_count",
             "Total number of split change events that have been operated by source",
-            &["source_id", "source_name", "actor_id"],
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
 
-        let sink_input_row_count = register_int_counter_vec_with_registry!(
+        let sink_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_sink_input_row_count",
             "Total number of rows streamed into sink executors",
             &["sink_id", "actor_id", "fragment_id"],
@@ -352,7 +358,7 @@ impl StreamingMetrics {
         let actor_in_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
-            &["actor_id", "fragment_id"],
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -728,6 +734,38 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let over_window_range_cache_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_over_window_range_cache_entry_count",
+            "Over window partition range cache entry count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry,
+        )
+        .unwrap();
+
+        let over_window_range_cache_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_range_cache_lookup_count",
+            "Over window partition range cache lookup count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_range_cache_left_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_range_cache_left_miss_count",
+            "Over window partition range cache left miss count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let over_window_range_cache_right_miss_count = register_int_counter_vec_with_registry!(
+            "stream_over_window_range_cache_right_miss_count",
+            "Over window partition range cache right miss count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -837,6 +875,39 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let kv_log_store_rewind_count = register_guarded_int_counter_vec_with_registry!(
+            "kv_log_store_rewind_count",
+            "Kv log store rewind rate",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_rewind_delay_opts = {
+            assert_eq!(2, REWIND_BACKOFF_FACTOR);
+            let bucket_count = (REWIND_MAX_DELAY.as_secs_f64().log2()
+                - REWIND_BASE_DELAY.as_secs_f64().log2())
+            .ceil() as usize;
+            let buckets = exponential_buckets(
+                REWIND_BASE_DELAY.as_secs_f64(),
+                REWIND_BACKOFF_FACTOR as _,
+                bucket_count,
+            )
+            .unwrap();
+            histogram_opts!(
+                "kv_log_store_rewind_delay",
+                "Kv log store rewind delay",
+                buckets,
+            )
+        };
+
+        let kv_log_store_rewind_delay = register_guarded_histogram_vec_with_registry!(
+            kv_log_store_rewind_delay_opts,
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -887,6 +958,20 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let jemalloc_resident_bytes = register_int_gauge_with_registry!(
+            "jemalloc_resident_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_metadata_bytes = register_int_gauge_with_registry!(
+            "jemalloc_metadata_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
         let jvm_allocated_bytes = register_int_gauge_with_registry!(
             "jvm_allocated_bytes",
             "The allocated jvm memory",
@@ -925,17 +1010,41 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let iceberg_file_appender_write_qps = register_guarded_int_counter_vec_with_registry!(
-            "iceberg_file_appender_write_qps",
-            "The qps of iceberg file appender write",
+        let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_write_qps",
+            "The qps of iceberg writer",
             &["executor_id", "sink_id"],
             registry
         )
         .unwrap();
 
-        let iceberg_file_appender_write_latency = register_guarded_histogram_vec_with_registry!(
-            "iceberg_file_appender_write_latency",
-            "The latency of iceberg file appender write",
+        let iceberg_write_latency = register_guarded_histogram_vec_with_registry!(
+            "iceberg_write_latency",
+            "The latency of iceberg writer",
+            &["executor_id", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_rolling_unflushed_data_file = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_rolling_unflushed_data_file",
+            "The unflushed data file count of iceberg rolling writer",
+            &["executor_id", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_position_delete_cache_num",
+            "The delete cache num of iceberg position delete writer",
+            &["executor_id", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_partition_num",
+            "The partition num of iceberg partition writer",
             &["executor_id", "sink_id"],
             registry
         )
@@ -959,7 +1068,6 @@ impl StreamingMetrics {
             actor_in_record_cnt,
             actor_out_record_cnt,
             source_output_row_count,
-            source_row_per_barrier,
             source_split_change_count,
             sink_input_row_count,
             mview_input_row_count,
@@ -1005,6 +1113,10 @@ impl StreamingMetrics {
             over_window_cached_entry_count,
             over_window_cache_lookup_count,
             over_window_cache_miss_count,
+            over_window_range_cache_entry_count,
+            over_window_range_cache_lookup_count,
+            over_window_range_cache_left_miss_count,
+            over_window_range_cache_right_miss_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_manager_progress,
@@ -1017,10 +1129,15 @@ impl StreamingMetrics {
             log_store_read_rows,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
+            kv_log_store_rewind_count,
+            kv_log_store_rewind_delay,
             kv_log_store_storage_read_count,
             kv_log_store_storage_read_size,
-            iceberg_file_appender_write_qps,
-            iceberg_file_appender_write_latency,
+            iceberg_write_qps,
+            iceberg_write_latency,
+            iceberg_rolling_unflushed_data_file,
+            iceberg_position_delete_cache_num,
+            iceberg_partition_num,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
@@ -1028,6 +1145,8 @@ impl StreamingMetrics {
             lru_evicted_watermark_time_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
+            jemalloc_resident_bytes,
+            jemalloc_metadata_bytes,
             jvm_allocated_bytes,
             jvm_active_bytes,
             materialize_cache_hit_count,
@@ -1048,33 +1167,48 @@ impl StreamingMetrics {
         connector: &str,
     ) -> SinkMetrics {
         let label_list = [identity, connector, sink_id_str];
-        let sink_commit_duration_metrics = self.sink_commit_duration.with_label_values(&label_list);
+        let sink_commit_duration_metrics = self
+            .sink_commit_duration
+            .with_guarded_label_values(&label_list);
         let connector_sink_rows_received = self
             .connector_sink_rows_received
-            .with_label_values(&[connector, sink_id_str]);
+            .with_guarded_label_values(&[connector, sink_id_str]);
 
         let log_store_latest_read_epoch = self
             .log_store_latest_read_epoch
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
         let log_store_latest_write_epoch = self
             .log_store_latest_write_epoch
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
         let log_store_first_write_epoch = self
             .log_store_first_write_epoch
-            .with_label_values(&label_list);
+            .with_guarded_label_values(&label_list);
 
-        let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
-        let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
+        let log_store_write_rows = self
+            .log_store_write_rows
+            .with_guarded_label_values(&label_list);
+        let log_store_read_rows = self
+            .log_store_read_rows
+            .with_guarded_label_values(&label_list);
 
         let label_list = [identity, sink_id_str];
-        let iceberg_file_appender_write_qps = self
-            .iceberg_file_appender_write_qps
-            .with_label_values(&label_list);
-        let iceberg_file_appender_write_latency = self
-            .iceberg_file_appender_write_latency
-            .with_label_values(&label_list);
+        let iceberg_write_qps = self
+            .iceberg_write_qps
+            .with_guarded_label_values(&label_list);
+        let iceberg_write_latency = self
+            .iceberg_write_latency
+            .with_guarded_label_values(&label_list);
+        let iceberg_rolling_unflushed_data_file = self
+            .iceberg_rolling_unflushed_data_file
+            .with_guarded_label_values(&label_list);
+        let iceberg_position_delete_cache_num = self
+            .iceberg_position_delete_cache_num
+            .with_guarded_label_values(&label_list);
+        let iceberg_partition_num = self
+            .iceberg_partition_num
+            .with_guarded_label_values(&label_list);
 
         SinkMetrics {
             sink_commit_duration_metrics,
@@ -1084,8 +1218,11 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
-            iceberg_file_appender_write_qps,
-            iceberg_file_appender_write_latency,
+            iceberg_write_qps,
+            iceberg_write_latency,
+            iceberg_rolling_unflushed_data_file,
+            iceberg_position_delete_cache_num,
+            iceberg_partition_num,
         }
     }
 }

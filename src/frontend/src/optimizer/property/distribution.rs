@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,6 @@ use fixedbitset::FixedBitSet;
 use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
-use risingwave_common::error::Result;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
@@ -60,6 +59,7 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 use super::super::plan_node::*;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
+use crate::error::Result;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;

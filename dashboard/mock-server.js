@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,11 @@
  */
 
 const express = require("express")
+const cors = require("cors")
 
 const app = express()
+app.use(cors())
+
 app.listen(32333, () => {
   console.log("Server running on port 32333")
 })
@@ -70,8 +73,8 @@ app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
 })
 
-app.get("/metrics/actor/back_pressures", (req, res, next) => {
-  res.json(require("./mock/actor_back_pressures.json"))
+app.get("/metrics/fragment/prometheus_back_pressures", (req, res, next) => {
+  res.json(require("./mock/fragment_prometheus_back_pressures.json"))
 })
 
 app.get("/monitor/await_tree/1", (req, res, next) => {

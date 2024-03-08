@@ -1,4 +1,4 @@
-//  Copyright 2023 RisingWave Labs
+//  Copyright 2024 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -994,12 +994,6 @@ pub enum LookupResult<K: LruKey, T: LruValue> {
 unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
 unsafe impl<K: LruKey, T: LruValue> Sync for CacheableEntry<K, T> {}
 
-impl<K: LruKey, T: LruValue> CacheableEntry<K, T> {
-    pub fn value(&self) -> &T {
-        unsafe { (*self.handle).get_value() }
-    }
-}
-
 impl<K: LruKey, T: LruValue> Deref for CacheableEntry<K, T> {
     type Target = T;
 
@@ -1080,7 +1074,7 @@ mod tests {
             block_offset.hash(&mut hasher);
             let h = hasher.finish();
             if let Some(block) = cache.lookup(h, &(sst, block_offset)) {
-                assert_eq!(block.value().offset, block_offset);
+                assert_eq!(block.offset, block_offset);
                 drop(block);
                 continue;
             }
@@ -1382,7 +1376,7 @@ mod tests {
                 cache.insert("b".to_string(), 0, 1, "v2".to_string(), CachePriority::Low);
                 recv.try_recv().unwrap();
                 assert!(
-                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.value().eq("v2"))
+                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.eq("v2"))
                 );
             }
             _ => panic!(),

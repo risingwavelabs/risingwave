@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@ use std::cmp::Ordering::{Equal, Less};
 use std::ops::Bound::*;
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::key::FullKey;
+use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
@@ -74,7 +76,7 @@ impl SstableIterator {
     fn init_block_prefetch_range(&mut self, start_idx: usize) {
         self.preload_end_block_idx = 0;
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
-            let block_metas = &self.sst.value().meta.block_metas;
+            let block_metas = &self.sst.meta.block_metas;
             let next_to_start_idx = start_idx + 1;
             if next_to_start_idx < block_metas.len() {
                 let end_idx = match bound {
@@ -112,7 +114,7 @@ impl SstableIterator {
         tracing::debug!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: sstable_object_id = {}, block_id = {}",
-            self.sst.value().id,
+            self.sst.id,
             idx,
         );
 
@@ -122,7 +124,7 @@ impl SstableIterator {
         tokio::task::consume_budget().await;
 
         let mut hit_cache = false;
-        if idx >= self.sst.value().block_count() {
+        if idx >= self.sst.block_count() {
             self.block_iter = None;
             return Ok(());
         }
@@ -130,12 +132,20 @@ impl SstableIterator {
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
             match self
                 .sstable_store
-                .prefetch_blocks(self.sst.value(), idx, self.preload_end_block_idx,
-                                 self.options.cache_policy,
-                                 &mut self.stats,
-                ).await {
+                .prefetch_blocks(
+                    &self.sst,
+                    idx,
+                    self.preload_end_block_idx,
+                    self.options.cache_policy,
+                    &mut self.stats,
+                )
+                .verbose_instrument_await("prefetch_blocks")
+                .await
+            {
                 Ok(preload_stream) => self.preload_stream = Some(preload_stream),
-                Err(e) => tracing::warn!("failed to create stream for prefetch data because of {:?}, fall back to block get.", e),
+                Err(e) => {
+                    tracing::warn!(error = %e.as_report(), "failed to create stream for prefetch data, fall back to block get")
+                }
             }
         }
 
@@ -174,7 +184,7 @@ impl SstableIterator {
                 }
                 if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
                     if let Err(e) = ret {
-                        tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
+                        tracing::warn!(error = %e.as_report(), "recreate stream because the connection to remote storage has closed");
                         if self.preload_retry_times >= self.options.max_preload_retry_times {
                             break;
                         }
@@ -184,19 +194,20 @@ impl SstableIterator {
                     match self
                         .sstable_store
                         .prefetch_blocks(
-                            self.sst.value(),
+                            &self.sst,
                             idx,
                             self.preload_end_block_idx,
                             self.options.cache_policy,
                             &mut self.stats,
                         )
+                        .verbose_instrument_await("prefetch_blocks")
                         .await
                     {
                         Ok(stream) => {
                             self.preload_stream = Some(stream);
                         }
                         Err(e) => {
-                            tracing::warn!("failed to recreate stream meet IO error: {:?}", e);
+                            tracing::warn!(error = %e.as_report(), "failed to recreate stream meet IO error");
                             break;
                         }
                     }
@@ -206,12 +217,7 @@ impl SstableIterator {
         if !hit_cache {
             let block = self
                 .sstable_store
-                .get(
-                    self.sst.value(),
-                    idx,
-                    self.options.cache_policy,
-                    &mut self.stats,
-                )
+                .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
                 .await?;
             self.block_iter = Some(BlockIterator::new(block));
         };
@@ -263,7 +269,6 @@ impl HummockIterator for SstableIterator {
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
         let block_idx = self
             .sst
-            .value()
             .meta
             .block_metas
             .partition_point(|block_meta| {
@@ -290,7 +295,7 @@ impl HummockIterator for SstableIterator {
 
     fn value_meta(&self) -> ValueMeta {
         ValueMeta {
-            object_id: Some(self.sst.value().id),
+            object_id: Some(self.sst.id),
             block_id: Some(self.cur_idx as _),
         }
     }
@@ -359,7 +364,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.value().meta.block_metas.len() > 10);
+        assert!(sstable.meta.block_metas.len() > 10);
 
         inner_test_forward_iterator(sstable_store.clone(), sstable).await;
     }
@@ -372,7 +377,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.value().meta.block_metas.len() > 10);
+        assert!(sstable.meta.block_metas.len() > 10);
         let mut sstable_iter = SstableIterator::create(
             sstable,
             sstable_store,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::Context as _;
 use async_trait::async_trait;
 use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
+use risingwave_common::bail;
 
+use crate::error::ConnectorResult as Result;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::*;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
@@ -56,15 +58,11 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 .set_next_token(next_token)
                 .stream_name(&self.stream_name)
                 .send()
-                .await?;
+                .await
+                .context("failed to list kinesis shards")?;
             match list_shard_output.shards {
                 Some(shard) => shard_collect.extend(shard),
-                None => {
-                    return Err(anyhow::Error::msg(format!(
-                        "no shards in stream {}",
-                        &self.stream_name
-                    )));
-                }
+                None => bail!("no shards in stream {}", &self.stream_name),
             }
 
             match list_shard_output.next_token {

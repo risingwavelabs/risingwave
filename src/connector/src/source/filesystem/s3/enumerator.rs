@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,10 +75,11 @@ impl SplitEnumerator for S3SplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> crate::error::ConnectorResult<Self> {
         let config = AwsAuthProps::from(&properties);
         let sdk_config = config.build_config().await?;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
+        let properties = properties.common;
         let (prefix, matcher) = if let Some(pattern) = properties.match_pattern.as_ref() {
             let prefix = get_prefix(pattern);
             let matcher = glob::Pattern::new(pattern)
@@ -97,7 +98,7 @@ impl SplitEnumerator for S3SplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<Self::Split>> {
         let mut objects = Vec::new();
         loop {
             let (files, has_finished) = self.get_next_page::<FsSplit>().await?;
@@ -125,11 +126,12 @@ mod tests {
     }
 
     use super::*;
+    use crate::source::filesystem::s3::S3PropertiesCommon;
     use crate::source::SourceEnumeratorContext;
     #[tokio::test]
     #[ignore]
     async fn test_s3_split_enumerator() {
-        let props = S3Properties {
+        let props = S3PropertiesCommon {
             region_name: "ap-southeast-1".to_owned(),
             bucket_name: "mingchao-s3-source".to_owned(),
             match_pattern: Some("happy[0-9].csv".to_owned()),
@@ -138,7 +140,7 @@ mod tests {
             endpoint_url: None,
         };
         let mut enumerator =
-            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+            S3SplitEnumerator::new(props.into(), SourceEnumeratorContext::default().into())
                 .await
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();

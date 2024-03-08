@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
@@ -47,10 +48,6 @@ pub struct StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn new(core: generic::Scan) -> Self {
-        Self::new_with_stream_scan_type(core, StreamScanType::Backfill)
-    }
-
     pub fn new_with_stream_scan_type(
         core: generic::Scan,
         stream_scan_type: StreamScanType,
@@ -158,8 +155,7 @@ impl StreamTableScan {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
-        let properties = self.ctx().with_options().internal_table_subset();
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // We use vnode as primary key in state table.
@@ -231,7 +227,10 @@ impl StreamNode for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self
@@ -279,7 +278,7 @@ impl StreamTableScan {
 
         // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.core.table_desc.to_protobuf()),
+            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             column_ids: upstream_column_ids.clone(),
         };
 
@@ -302,9 +301,8 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        // This refers to the output indices of the originating stream.
-        let upstream_table_catalog = self.get_upstream_state_table().clone();
         let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+            let upstream_table_catalog = self.get_upstream_state_table();
             Some(upstream_table_catalog.to_internal_table_prost())
         } else {
             None
@@ -317,14 +315,14 @@ impl StreamTableScan {
             output_indices,
             upstream_column_ids,
             // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.to_protobuf()),
+            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
             ..Default::default()
         });
 
-        PbStreamNode {
+        Ok(PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
                 // Upstream updates
@@ -352,7 +350,7 @@ impl StreamTableScan {
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
             append_only: self.append_only(),
-        }
+        })
     }
 }
 

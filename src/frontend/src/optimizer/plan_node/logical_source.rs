@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,18 +18,16 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::Result;
-use risingwave_connector::source::{ConnectorProperties, DataType};
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
-use super::generic::GenericPlanRef;
+use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
@@ -38,6 +36,7 @@ use super::{
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -60,6 +59,9 @@ pub struct LogicalSource {
     /// Expressions to output. This field presents and will be turned to a `Project` when
     /// converting to a physical plan, only if there are generated columns.
     output_exprs: Option<Vec<ExprImpl>>,
+    /// When there are generated columns, the `StreamRowIdGen`'s row_id_index is different from
+    /// the one in `core`. So we store the one in `output_exprs` here.
+    output_row_id_index: Option<usize>,
 }
 
 impl LogicalSource {
@@ -67,8 +69,7 @@ impl LogicalSource {
         source_catalog: Option<Rc<SourceCatalog>>,
         column_catalog: Vec<ColumnCatalog>,
         row_id_index: Option<usize>,
-        gen_row_id: bool,
-        for_table: bool,
+        kind: SourceNodeKind,
         ctx: OptimizerContextRef,
     ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
@@ -76,8 +77,7 @@ impl LogicalSource {
             catalog: source_catalog,
             column_catalog,
             row_id_index,
-            gen_row_id,
-            for_table,
+            kind,
             ctx,
             kafka_timestamp_range,
         };
@@ -85,33 +85,40 @@ impl LogicalSource {
         let base = PlanBase::new_logical_with_core(&core);
 
         let output_exprs = Self::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
+        let (core, output_row_id_index) = core.exclude_generated_columns();
 
         Ok(LogicalSource {
             base,
             core,
             output_exprs,
+            output_row_id_index,
         })
     }
 
     pub fn with_catalog(
         source_catalog: Rc<SourceCatalog>,
-        for_table: bool,
+        kind: SourceNodeKind,
         ctx: OptimizerContextRef,
     ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
-        let gen_row_id = source_catalog.append_only;
+        if !source_catalog.append_only {
+            assert!(row_id_index.is_none());
+        }
 
         Self::new(
             Some(source_catalog),
             column_catalogs,
             row_id_index,
-            gen_row_id,
-            for_table,
+            kind,
             ctx,
         )
     }
 
+    /// If there are no generated columns, returns `None`.
+    ///
+    /// Otherwise, the returned expressions correspond to all columns.
+    /// Non-generated columns are represented by `InputRef`.
     pub fn derive_output_exprs_from_generated_columns(
         columns: &[ColumnCatalog],
     ) -> Result<Option<Vec<ExprImpl>>> {
@@ -162,9 +169,9 @@ impl LogicalSource {
         Ok(Some(exprs))
     }
 
-    fn rewrite_new_s3_plan(&self) -> Result<PlanRef> {
+    /// `StreamSource` (list) -> shuffle -> `StreamDedup`
+    fn create_fs_list_plan(core: generic::Source) -> Result<PlanRef> {
         let logical_source = generic::Source {
-            catalog: self.core.catalog.clone(),
             column_catalog: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
@@ -182,7 +189,7 @@ impl LogicalSource {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "last_edit_time".to_string(),
-                            data_type: DataType::Timestamp,
+                            data_type: DataType::Timestamptz,
                             sub_fields: vec![],
                             type_name: "".to_string(),
                         },
@@ -204,8 +211,7 @@ impl LogicalSource {
                 },
             ],
             row_id_index: None,
-            gen_row_id: false,
-            ..self.core.clone()
+            ..core
         };
         let mut new_s3_plan: PlanRef = StreamSource {
             base: PlanBase::new_stream_with_core(
@@ -229,20 +235,6 @@ impl LogicalSource {
         Ok(new_s3_plan)
     }
 
-    /// `row_id_index` in source node should rule out generated column
-    #[must_use]
-    fn rewrite_row_id_idx(columns: &[ColumnCatalog], row_id_index: Option<usize>) -> Option<usize> {
-        row_id_index.map(|idx| {
-            let mut cnt = 0;
-            for col in columns.iter().take(idx + 1) {
-                if col.is_generated() {
-                    cnt += 1;
-                }
-            }
-            idx - cnt
-        })
-    }
-
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
@@ -254,52 +246,7 @@ impl LogicalSource {
             base: self.base.clone(),
             core,
             output_exprs: self.output_exprs.clone(),
-        }
-    }
-
-    /// The columns in stream/batch source node indicate the actual columns it will produce,
-    /// instead of the columns defined in source catalog. The difference is generated columns.
-    #[must_use]
-    fn rewrite_to_stream_batch_source(&self) -> generic::Source {
-        let column_catalog = self.core.column_catalog.clone();
-        // Filter out the generated columns.
-        let row_id_index = Self::rewrite_row_id_idx(&column_catalog, self.core.row_id_index);
-        let source_column_catalogs = column_catalog
-            .into_iter()
-            .filter(|c| !c.is_generated())
-            .collect_vec();
-        generic::Source {
-            catalog: self.core.catalog.clone(),
-            column_catalog: source_column_catalogs,
-            row_id_index,
-            ctx: self.core.ctx.clone(),
-            ..self.core
-        }
-    }
-
-    fn wrap_with_optional_generated_columns_stream_proj(
-        &self,
-        input: Option<PlanRef>,
-    ) -> Result<PlanRef> {
-        if let Some(exprs) = &self.output_exprs {
-            let source: PlanRef =
-                dispatch_new_s3_plan(self.rewrite_to_stream_batch_source(), input);
-            let logical_project = generic::Project::new(exprs.to_vec(), source);
-            Ok(StreamProject::new(logical_project).into())
-        } else {
-            let source = dispatch_new_s3_plan(self.core.clone(), input);
-            Ok(source)
-        }
-    }
-
-    fn wrap_with_optional_generated_columns_batch_proj(&self) -> Result<PlanRef> {
-        if let Some(exprs) = &self.output_exprs {
-            let source = BatchSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
-            Ok(BatchProject::new(logical_project).into())
-        } else {
-            let source = BatchSource::new(self.core.clone());
-            Ok(source.into())
+            output_row_id_index: self.output_row_id_index,
         }
     }
 }
@@ -542,49 +489,71 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self.core.catalog.is_some()
-            && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
-            )
-        {
-            bail_not_implemented!("New S3 connector for batch");
+        let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
+
+        if let Some(exprs) = &self.output_exprs {
+            let logical_project = generic::Project::new(exprs.to_vec(), plan);
+            plan = BatchProject::new(logical_project).into();
         }
-        let source = self.wrap_with_optional_generated_columns_batch_proj()?;
-        Ok(source)
+
+        Ok(plan)
     }
 }
 
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan_prefix: Option<PlanRef> = None;
         let mut plan: PlanRef;
-        if self.core.catalog.is_some()
-            && ConnectorProperties::is_new_fs_connector_b_tree_map(
-                &self.core.catalog.as_ref().unwrap().properties,
-            )
-        {
-            plan_prefix = Some(self.rewrite_new_s3_plan()?);
-        }
-        plan = if self.core.for_table {
-            dispatch_new_s3_plan(self.rewrite_to_stream_batch_source(), plan_prefix)
-        } else {
-            // Create MV on source.
-            self.wrap_with_optional_generated_columns_stream_proj(plan_prefix)?
-        };
+        match self.core.kind {
+            SourceNodeKind::CreateTable | SourceNodeKind::CreateSourceWithStreamjob => {
+                // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan
+                if self.core.is_new_fs_connector() {
+                    plan = Self::create_fs_list_plan(self.core.clone())?;
+                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                } else {
+                    plan = StreamSource::new(self.core.clone()).into()
+                }
+            }
+            SourceNodeKind::CreateMViewOrBatch => {
+                // Create MV on source.
+                if self.core.is_new_fs_connector() {
+                    plan = Self::create_fs_list_plan(self.core.clone())?;
+                    plan = StreamFsFetch::new(plan, self.core.clone()).into();
+                } else {
+                    plan = StreamSource::new(self.core.clone()).into()
+                }
 
-        if let Some(catalog) = self.source_catalog()
-            && !catalog.watermark_descs.is_empty()
-            && !self.core.for_table
-        {
-            plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
-        }
+                if let Some(exprs) = &self.output_exprs {
+                    let logical_project = generic::Project::new(exprs.to_vec(), plan);
+                    plan = StreamProject::new(logical_project).into();
+                }
 
-        assert!(!(self.core.gen_row_id && self.core.for_table));
-        if let Some(row_id_index) = self.core.row_id_index
-            && self.core.gen_row_id
-        {
-            plan = StreamRowIdGen::new_with_dist(plan, row_id_index, HashShard(vec![row_id_index]))
-                .into();
+                if let Some(catalog) = self.source_catalog()
+                    && !catalog.watermark_descs.is_empty()
+                {
+                    plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+                }
+
+                if let Some(row_id_index) = self.output_row_id_index {
+                    plan = StreamRowIdGen::new_with_dist(
+                        plan,
+                        row_id_index,
+                        HashShard(vec![row_id_index]),
+                    )
+                    .into();
+                }
+            }
+        }
+        if let Some(source) = &self.core.catalog {
+            let connector = &source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|s| s.to_lowercase())
+                .unwrap();
+            if ICEBERG_CONNECTOR == connector {
+                return Err(
+                    anyhow::anyhow!("Iceberg source is not supported in stream queries").into(),
+                );
+            }
         }
         Ok(plan)
     }
@@ -597,14 +566,5 @@ impl ToStream for LogicalSource {
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),
         ))
-    }
-}
-
-#[inline]
-fn dispatch_new_s3_plan(source: generic::Source, input: Option<PlanRef>) -> PlanRef {
-    if let Some(input) = input {
-        StreamFsFetch::new(input, source).into()
-    } else {
-        StreamSource::new(source).into()
     }
 }

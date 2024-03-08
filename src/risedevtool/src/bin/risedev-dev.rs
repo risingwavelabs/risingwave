@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use risedev::{
     RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
+use thiserror_ext::AsReport;
 use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
@@ -112,7 +113,7 @@ fn task_main(
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
-            ServiceConfig::OpenDal(_) => None,
+            ServiceConfig::Opendal(_) => None,
             ServiceConfig::RedPanda(_) => None,
         };
 
@@ -271,7 +272,7 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
-            ServiceConfig::OpenDal(c) => {
+            ServiceConfig::Opendal(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
 
@@ -444,9 +445,9 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {:?}", // with `Caused by`
+                "{} - Failed to start: {:#}", // pretty with `Caused by`
                 style("ERROR").red().bold(),
-                err,
+                err.as_report(),
             );
             println!();
             println!(

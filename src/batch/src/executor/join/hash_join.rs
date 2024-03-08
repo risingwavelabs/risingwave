@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -250,7 +250,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-            let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
+            let build_keys = K::build_many(&self.build_key_idxs, build_chunk);
 
             for (build_row_id, (build_key, visible)) in build_keys
                 .into_iter()
@@ -354,7 +354,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -417,7 +417,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -486,7 +486,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -564,7 +564,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -628,7 +628,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -703,7 +703,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -785,7 +785,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -850,7 +850,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -922,7 +922,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_key, visible) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -976,7 +976,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -1049,7 +1049,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())
@@ -1131,7 +1131,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = K::build_many(&probe_key_idxs, &probe_chunk);
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
                 .zip_eq_fast(probe_chunk.visibility().iter())

@@ -87,3 +87,29 @@ function download_and_prepare_rw() {
   cargo make pre-start-dev
   cargo make --allow-private link-all-in-one-binaries
 }
+
+function filter_stack_trace() {
+  # Only keep first 3 lines of backtrace: 0-2.
+  echo "filtering stack trace for $1"
+  touch tmp
+  cat "$1" \
+  | sed -E '/  [1-9][0-9]+:/d' \
+  | sed -E '/  [3-9]+:/d' \
+  | sed -E '/  at .rustc/d' \
+  | sed -E '/  at ...cargo/d' > tmp
+  cp tmp "$1"
+  rm tmp
+}
+
+get_latest_kafka_version() {
+    local versions=$(curl -s https://downloads.apache.org/kafka/ | grep -Eo 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | grep -Eo "[0-9]+\.[0-9]+\.[0-9]+")
+    # Sort the version numbers and get the latest one
+    local latest_version=$(echo "$versions" | sort -V | tail -n1)
+    echo $latest_version
+}
+
+get_latest_kafka_download_url() {
+    local latest_version=$(get_latest_kafka_version)
+    local download_url="https://downloads.apache.org/kafka/${latest_version}/kafka_2.13-${latest_version}.tgz"
+    echo $download_url
+}

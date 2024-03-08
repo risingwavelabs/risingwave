@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,31 +14,38 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{EpochWithGap, KeyComparator};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo, TableSchema,
+    compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType, SstableInfo, TableSchema,
 };
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
-    MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
+    ConcatSstableIterator, MultiCompactionFilter, StateCleanUpCompactionFilter, TaskProgress,
+    TtlCompactionFilter,
+};
+use crate::hummock::iterator::{
+    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
+    UserIterator,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
     CachePolicy, FilterBuilder, GetObjectId, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriterFactory, SstableWriterOptions,
+    SstableBuilderOptions, SstableDeleteRangeIterator, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -133,7 +140,6 @@ pub struct TaskConfig {
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
-    use risingwave_common::catalog::TableOption;
     let mut multi_filter = MultiCompactionFilter::default();
     let compaction_filter_flag =
         CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask).unwrap_or_default();
@@ -149,11 +155,11 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
         let id_to_ttl = compact_task
             .table_options
             .iter()
-            .filter(|id_to_option| {
-                let table_option: TableOption = id_to_option.1.into();
-                table_option.retention_seconds.is_some()
+            .filter_map(|(id, option)| {
+                option
+                    .retention_seconds
+                    .and_then(|ttl| if ttl > 0 { Some((*id, ttl)) } else { None })
             })
-            .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
             .collect();
 
         let ttl_filter = Box::new(TtlCompactionFilter::new(
@@ -241,7 +247,6 @@ pub async fn generate_splits(
                     .sstable_store
                     .sstable(sstable_info, &mut StoreLocalStatistic::default())
                     .await?
-                    .value()
                     .meta
                     .block_metas
                     .iter()
@@ -311,4 +316,187 @@ pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTa
 
     let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
     std::cmp::min(capacity, total_input_uncompressed_file_size as usize)
+}
+
+/// Compare result of compaction task and input. The data saw by user shall not change after applying compaction result.
+pub async fn check_compaction_result(
+    compact_task: &CompactTask,
+    context: CompactorContext,
+) -> HummockResult<bool> {
+    let has_ttl = compact_task
+        .table_options
+        .iter()
+        .any(|(_, table_option)| table_option.retention_seconds.is_some_and(|ttl| ttl > 0));
+
+    let mut compact_table_ids = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|sst| sst.table_ids.clone())
+        .collect_vec();
+    compact_table_ids.sort();
+    compact_table_ids.dedup();
+    let existing_table_ids: HashSet<u32> =
+        HashSet::from_iter(compact_task.existing_table_ids.clone());
+    let need_clean_state_table = compact_table_ids
+        .iter()
+        .any(|table_id| !existing_table_ids.contains(table_id));
+    // This check method does not consider dropped keys by compaction filter.
+    if has_ttl || need_clean_state_table {
+        return Ok(true);
+    }
+
+    let mut table_iters = Vec::new();
+    let mut del_iter = ForwardMergeRangeIterator::default();
+    let compact_io_retry_time = context.storage_opts.compact_iter_recreate_timeout_ms;
+    for level in &compact_task.input_ssts {
+        if level.table_infos.is_empty() {
+            continue;
+        }
+
+        // Do not need to filter the table because manager has done it.
+        if level.level_type == LevelType::Nonoverlapping as i32 {
+            debug_assert!(can_concat(&level.table_infos));
+            del_iter.add_concat_iter(level.table_infos.clone(), context.sstable_store.clone());
+
+            table_iters.push(ConcatSstableIterator::new(
+                compact_task.existing_table_ids.clone(),
+                level.table_infos.clone(),
+                KeyRange::inf(),
+                context.sstable_store.clone(),
+                Arc::new(TaskProgress::default()),
+                compact_io_retry_time,
+            ));
+        } else {
+            let mut stats = StoreLocalStatistic::default();
+            for table_info in &level.table_infos {
+                let table = context
+                    .sstable_store
+                    .sstable(table_info, &mut stats)
+                    .await?;
+                del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table));
+                table_iters.push(ConcatSstableIterator::new(
+                    compact_task.existing_table_ids.clone(),
+                    vec![table_info.clone()],
+                    KeyRange::inf(),
+                    context.sstable_store.clone(),
+                    Arc::new(TaskProgress::default()),
+                    compact_io_retry_time,
+                ));
+            }
+        }
+    }
+
+    let iter = MergeIterator::for_compactor(table_iters);
+    let left_iter = UserIterator::new(
+        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        (Bound::Unbounded, Bound::Unbounded),
+        u64::MAX,
+        0,
+        None,
+        del_iter,
+    );
+    let mut del_iter = ForwardMergeRangeIterator::default();
+    del_iter.add_concat_iter(
+        compact_task.sorted_output_ssts.clone(),
+        context.sstable_store.clone(),
+    );
+    let iter = ConcatSstableIterator::new(
+        compact_task.existing_table_ids.clone(),
+        compact_task.sorted_output_ssts.clone(),
+        KeyRange::inf(),
+        context.sstable_store.clone(),
+        Arc::new(TaskProgress::default()),
+        compact_io_retry_time,
+    );
+    let right_iter = UserIterator::new(
+        SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
+        (Bound::Unbounded, Bound::Unbounded),
+        u64::MAX,
+        0,
+        None,
+        del_iter,
+    );
+
+    check_result(left_iter, right_iter).await
+}
+
+pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
+    left_iter: UserIterator<I>,
+    existing_table_ids: Vec<StateTableId>,
+    sort_ssts: Vec<SstableInfo>,
+    context: CompactorContext,
+) -> HummockResult<bool> {
+    let mut del_iter = ForwardMergeRangeIterator::default();
+    del_iter.add_concat_iter(sort_ssts.clone(), context.sstable_store.clone());
+    let iter = ConcatSstableIterator::new(
+        existing_table_ids.clone(),
+        sort_ssts.clone(),
+        KeyRange::inf(),
+        context.sstable_store.clone(),
+        Arc::new(TaskProgress::default()),
+        0,
+    );
+    let right_iter = UserIterator::new(
+        iter,
+        (Bound::Unbounded, Bound::Unbounded),
+        u64::MAX,
+        0,
+        None,
+        del_iter,
+    );
+    check_result(left_iter, right_iter).await
+}
+
+async fn check_result<
+    I1: HummockIterator<Direction = Forward>,
+    I2: HummockIterator<Direction = Forward>,
+>(
+    mut left_iter: UserIterator<I1>,
+    mut right_iter: UserIterator<I2>,
+) -> HummockResult<bool> {
+    left_iter.rewind().await?;
+    right_iter.rewind().await?;
+    let mut right_count = 0;
+    let mut left_count = 0;
+    while left_iter.is_valid() && right_iter.is_valid() {
+        if left_iter.key() != right_iter.key() {
+            tracing::error!(
+                "The key of input and output not equal. key: {:?} vs {:?}",
+                left_iter.key(),
+                right_iter.key()
+            );
+            return Ok(false);
+        }
+        if left_iter.value() != right_iter.value() {
+            tracing::error!(
+                "The value of input and output not equal. key: {:?}, value: {:?} vs {:?}",
+                left_iter.key(),
+                left_iter.value(),
+                right_iter.value()
+            );
+            return Ok(false);
+        }
+        left_iter.next().await?;
+        right_iter.next().await?;
+        left_count += 1;
+        right_count += 1;
+    }
+    while left_iter.is_valid() {
+        left_count += 1;
+        left_iter.next().await?;
+    }
+    while right_iter.is_valid() {
+        right_count += 1;
+        right_iter.next().await?;
+    }
+    if left_count != right_count {
+        tracing::error!(
+            "The key count of input and output not equal: {} vs {}",
+            left_count,
+            right_count
+        );
+        return Ok(false);
+    }
+    Ok(true)
 }

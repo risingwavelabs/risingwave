@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::ArrayError;
-use risingwave_common::error::{ErrorCode, RwError};
+use std::fmt::{Debug, Display};
+
+use risingwave_common::array::{ArrayError, ArrayRef};
 use risingwave_common::types::DataType;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
 /// A specialized Result type for expression operations.
-pub type Result<T> = std::result::Result<T, ExprError>;
+pub type Result<T, E = ExprError> = std::result::Result<T, E>;
 
 pub struct ContextUnavailable(&'static str);
 
@@ -39,6 +40,10 @@ impl From<ContextUnavailable> for ExprError {
 /// The error type for expression operations.
 #[derive(Error, Debug)]
 pub enum ExprError {
+    /// A collection of multiple errors in batch evaluation.
+    #[error("multiple errors:\n{1}")]
+    Multiple(ArrayRef, MultiExprError),
+
     // Ideally "Unsupported" errors are caught by frontend. But when the match arms between
     // frontend and backend are inconsistent, we do not panic with `unreachable!`.
     #[error("Unsupported function: {0}")]
@@ -111,15 +116,26 @@ pub enum ExprError {
 
     #[error("invalid state: {0}")]
     InvalidState(String),
+
+    #[error("error in cryptography: {0}")]
+    Cryptography(Box<CryptographyError>),
+}
+
+#[derive(Debug)]
+pub enum CryptographyStage {
+    Encrypt,
+    Decrypt,
+}
+
+#[derive(Debug, Error)]
+#[error("{stage:?} stage, reason: {reason}")]
+pub struct CryptographyError {
+    pub stage: CryptographyStage,
+    #[source]
+    pub reason: openssl::error::ErrorStack,
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
-
-impl From<ExprError> for RwError {
-    fn from(s: ExprError) -> Self {
-        ErrorCode::ExprError(Box::new(s)).into()
-    }
-}
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
@@ -133,5 +149,40 @@ impl From<PbFieldNotFound> for ExprError {
             "Failed to decode prost: field not found `{}`",
             err.0
         ))
+    }
+}
+
+/// A collection of multiple errors.
+#[derive(Error, Debug)]
+pub struct MultiExprError(Box<[ExprError]>);
+
+impl MultiExprError {
+    /// Returns the first error.
+    pub fn into_first(self) -> ExprError {
+        self.0.into_vec().into_iter().next().expect("first error")
+    }
+}
+
+impl Display for MultiExprError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, e) in self.0.iter().enumerate() {
+            writeln!(f, "{i}: {}", e.as_report())?;
+        }
+        Ok(())
+    }
+}
+
+impl From<Vec<ExprError>> for MultiExprError {
+    fn from(v: Vec<ExprError>) -> Self {
+        Self(v.into_boxed_slice())
+    }
+}
+
+impl IntoIterator for MultiExprError {
+    type IntoIter = std::vec::IntoIter<ExprError>;
+    type Item = ExprError;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_vec().into_iter()
     }
 }

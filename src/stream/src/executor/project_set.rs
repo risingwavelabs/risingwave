@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -28,10 +27,7 @@ use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
-use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef,
-    StreamExecutorResult, Watermark,
-};
+use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult, Watermark};
 use crate::common::StreamChunkBuilder;
 
 const PROJ_ROW_ID_OFFSET: usize = 1;
@@ -40,13 +36,12 @@ const PROJ_ROW_ID_OFFSET: usize = 1;
 /// and returns a new data chunk. And then, `ProjectSetExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectSetExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
@@ -62,8 +57,7 @@ impl ProjectSetExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Executor,
         select_list: Vec<ProjectSetSelectItem>,
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
@@ -71,7 +65,6 @@ impl ProjectSetExecutor {
     ) -> Self {
         let inner = Inner {
             _ctx: ctx,
-            info,
             select_list,
             chunk_size,
             watermark_derivations,
@@ -90,27 +83,15 @@ impl Debug for ProjectSetExecutor {
     }
 }
 
-impl Executor for ProjectSetExecutor {
+impl Execute for ProjectSetExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.inner.execute(self.input).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(self, input: BoxedExecutor) {
+    async fn execute(self, input: Executor) {
         assert!(!self.select_list.is_empty());
         // First column will be `projected_row_id`, which represents the index in the
         // output table
@@ -270,8 +251,8 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, expr_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    expr_idx
                 );
             }
         }

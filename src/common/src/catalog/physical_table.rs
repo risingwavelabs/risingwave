@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,12 @@
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
+use crate::catalog::get_dist_key_in_pk_indices;
 use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
@@ -40,10 +41,13 @@ pub struct TableDesc {
     /// Column indices for primary keys.
     pub stream_key: Vec<usize>,
 
+    pub vnode_col_index: Option<usize>,
+
     /// Whether the table source is append-only
     pub append_only: bool,
 
-    pub retention_seconds: u32,
+    // TTL of the record in the table, to ensure the consistency with other tables in the streaming plan, it only applies to append-only tables.
+    pub retention_seconds: Option<u32>,
 
     pub value_indices: Vec<usize>,
 
@@ -77,29 +81,28 @@ impl TableDesc {
             .collect()
     }
 
-    pub fn to_protobuf(&self) -> StorageTableDesc {
+    pub fn try_to_protobuf(&self) -> anyhow::Result<StorageTableDesc> {
         let dist_key_indices: Vec<u32> = self.distribution_key.iter().map(|&k| k as u32).collect();
         let pk_indices: Vec<u32> = self
             .pk
             .iter()
             .map(|v| v.to_protobuf().column_index)
             .collect();
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
+        let vnode_col_idx_in_pk = self
+            .vnode_col_index
+            .and_then(|vnode_col_index| {
                 pk_indices
                     .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution key {:?} must be a subset of primary key {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
+                    .position(|&pk_index| pk_index == vnode_col_index as u32)
             })
-            .map(|d| d as u32)
-            .collect_vec();
-        StorageTableDesc {
+            .map(|i| i as u32);
+
+        let dist_key_in_pk_indices = if vnode_col_idx_in_pk.is_none() {
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)?
+        } else {
+            Vec::new()
+        };
+        Ok(StorageTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
@@ -109,7 +112,8 @@ impl TableDesc {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
-        }
+            vnode_col_idx_in_pk,
+        })
     }
 
     /// Helper function to create a mapping from `column id` to `column index`
@@ -119,5 +123,26 @@ impl TableDesc {
             id_to_idx.insert(c.column_id, idx);
         });
         id_to_idx
+    }
+
+    pub fn from_pb_table(table: &Table) -> Self {
+        Self {
+            table_id: TableId::new(table.id),
+            pk: table.pk.iter().map(ColumnOrder::from_protobuf).collect(),
+            columns: table
+                .columns
+                .iter()
+                .map(|col| ColumnDesc::from(col.column_desc.as_ref().unwrap()))
+                .collect(),
+            distribution_key: table.distribution_key.iter().map(|i| *i as _).collect(),
+            stream_key: table.stream_key.iter().map(|i| *i as _).collect(),
+            vnode_col_index: table.vnode_col_index.map(|i| i as _),
+            append_only: table.append_only,
+            retention_seconds: table.retention_seconds,
+            value_indices: table.value_indices.iter().map(|i| *i as _).collect(),
+            read_prefix_len_hint: table.read_prefix_len_hint as _,
+            watermark_columns: table.watermark_indices.iter().map(|i| *i as _).collect(),
+            versioned: table.version.is_some(),
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ mod varchar;
 
 use std::time::Duration;
 
+// TODO(error-handling): use a new error type
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 pub use numeric::*;

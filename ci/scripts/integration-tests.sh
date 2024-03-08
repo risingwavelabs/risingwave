@@ -34,14 +34,6 @@ docker volume prune -f
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-echo "--- install postgresql"
-sudo yum install -y postgresql15
-
-echo "--- download rwctest-key"
-aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
-
-cd integration_tests/scripts
-
 echo "--- case: ${case}, format: ${format}"
 
 if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
@@ -55,10 +47,33 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   echo Docker image: $RW_IMAGE
 fi
 
+if [ "${case}" == "client-library" ]; then
+  cd integration_tests/client-library
+  python3 client_test.py
+  exit 0
+fi
+
+echo "--- install postgresql"
+sudo yum install -y postgresql15
+
+echo "--- install poetry"
+curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -
+
+
+
+echo "--- download rwctest-key"
+aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
+
+cd integration_tests/scripts
+
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then
   python3 gen_pb_compose.py ${case} ${format}
 fi
+
+echo "--- set vm.max_map_count=2000000 for doris"
+max_map_count_original_value=$(sysctl -n vm.max_map_count)
+sudo sysctl -w vm.max_map_count=2000000
 
 echo "--- run Demos"
 python3 run_demos.py --case ${case} --format ${format}
@@ -69,14 +84,10 @@ docker ps
 echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
 upstream=$(echo ${case} | cut -d'-' -f 1)
-if [ "${upstream}" == "mysql" ]; then
-  echo "install mysql"
-  sudo rpm -Uvh https://dev.mysql.com/get/mysql80-community-release-el9-1.noarch.rpm
-  sudo dnf -y install mysql-community-server
-fi
-
-export PGPASSWORD=123456
 python3 check_data.py ${case} ${upstream}
 
 echo "--- clean Demos"
 python3 clean_demos.py --case ${case}
+
+echo "--- reset vm.max_map_count={$max_map_count_original_value}"
+sudo sysctl -w vm.max_map_count=$max_map_count_original_value

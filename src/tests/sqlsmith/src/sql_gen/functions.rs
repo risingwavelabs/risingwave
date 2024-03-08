@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -258,6 +258,7 @@ pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     Function {
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
+        variadic: false,
         over: None,
         distinct: false,
         order_by: vec![],

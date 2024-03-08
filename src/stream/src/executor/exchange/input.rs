@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -236,7 +236,7 @@ pub(crate) fn new_input(
 
     let input = if is_local_address(&context.addr, &upstream_addr) {
         LocalInput::new(
-            context.take_receiver(&(upstream_actor_id, actor_id))?,
+            context.take_receiver((upstream_actor_id, actor_id))?,
             upstream_actor_id,
         )
         .boxed_input()

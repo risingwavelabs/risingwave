@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,9 @@ impl StreamNode for StreamSource {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
-                generic::Source::infer_internal_table_catalog()
+                // `StreamSource` can write all data to the same vnode
+                // but it is ok because we only do point get on each key rather than range scan.
+                generic::Source::infer_internal_table_catalog(false)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
@@ -87,7 +89,7 @@ impl StreamNode for StreamSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            properties: source_catalog.properties.clone().into_iter().collect(),
+            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         PbNodeBody::Source(SourceNode { source_inner })

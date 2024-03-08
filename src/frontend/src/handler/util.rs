@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyhow::Context as _;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::Stream;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -27,16 +27,16 @@ use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::error::{ErrorCode, Result as RwResult};
+use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_sqlparser::ast::{display_comma_separated, CompatibleSourceSchema, ConnectorSchema};
+use risingwave_sqlparser::ast::{CompatibleSourceSchema, ConnectorSchema};
 
-use crate::catalog::IndexCatalog;
-use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
+use crate::error::{ErrorCode, Result as RwResult};
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::{current, SessionImpl};
 
 pin_project! {
@@ -139,10 +139,9 @@ fn timestamptz_to_string_with_session_data(
     let tz = d.into_timestamptz();
     let time_zone = Timestamptz::lookup_time_zone(&session_data.timezone).unwrap();
     let instant_local = tz.to_datetime_in_zone(time_zone);
-    instant_local
-        .format("%Y-%m-%d %H:%M:%S%.f%:z")
-        .to_string()
-        .into()
+    let mut result_string = BytesMut::new();
+    write_date_time_tz(instant_local, &mut result_string).unwrap();
+    result_string.into()
 }
 
 fn to_pg_rows(
@@ -172,66 +171,6 @@ fn to_pg_rows(
         .try_collect()
 }
 
-/// Convert column descs to rows which conclude name and type
-pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
-    columns
-        .iter()
-        .flat_map(|col| {
-            col.column_desc
-                .flatten()
-                .into_iter()
-                .map(|c| {
-                    let type_name = if let DataType::Struct { .. } = c.data_type {
-                        c.type_name.clone()
-                    } else {
-                        c.data_type.to_string()
-                    };
-                    Row::new(vec![
-                        Some(c.name.into()),
-                        Some(type_name.into()),
-                        Some(col.is_hidden.to_string().into()),
-                        c.description.map(Into::into),
-                    ])
-                })
-                .collect_vec()
-        })
-        .collect_vec()
-}
-
-pub fn indexes_to_rows(indexes: Vec<Arc<IndexCatalog>>) -> Vec<Row> {
-    indexes
-        .iter()
-        .map(|index| {
-            let index_display = index.display();
-            Row::new(vec![
-                Some(index.name.clone().into()),
-                Some(index.primary_table.name.clone().into()),
-                Some(
-                    format!(
-                        "{}",
-                        display_comma_separated(&index_display.index_columns_with_ordering)
-                    )
-                    .into(),
-                ),
-                Some(
-                    format!(
-                        "{}",
-                        display_comma_separated(&index_display.include_columns)
-                    )
-                    .into(),
-                ),
-                Some(
-                    format!(
-                        "{}",
-                        display_comma_separated(&index_display.distributed_by_columns)
-                    )
-                    .into(),
-                ),
-            ])
-        })
-        .collect_vec()
-}
-
 /// Convert from [`Field`] to [`PgFieldDescriptor`].
 pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
     PgFieldDescriptor::new(
@@ -239,6 +178,11 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
         f.data_type().to_oid(),
         f.data_type().type_len(),
     )
+}
+
+pub fn connector_need_pk(with_properties: &HashMap<String, String>) -> bool {
+    // Currently only iceberg connector doesn't need primary key
+    !is_iceberg_connector(with_properties)
 }
 
 #[inline(always)]
@@ -266,10 +210,11 @@ pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
 }
 
 #[inline(always)]
-pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
-    with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase())
+pub fn is_iceberg_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector == ICEBERG_CONNECTOR
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]

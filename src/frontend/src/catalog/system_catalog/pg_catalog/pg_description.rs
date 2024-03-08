@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,34 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::BuiltinView;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_description` stores description.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-description.html`]
-pub static PG_DESCRIPTION: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_description",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "objoid"),
-        (DataType::Int32, "classoid"),
-        (DataType::Int32, "objsubid"),
-        (DataType::Varchar, "description"),
-    ],
+#[system_catalog(view, "pg_catalog.pg_description",
     // objsubid = 0     => _row_id (hidden column)
     // objsubid is NULL => table self
-    sql: "SELECT objoid, \
-                 classoid, \
-                 CASE \
-                     WHEN objsubid = 0 THEN -1 \
-                     WHEN objsubid IS NULL THEN 0 \
-                     ELSE objsubid \
-                 END AS objsubid, \
-                 description FROM rw_catalog.rw_description \
-          WHERE description IS NOT NULL;"
-        .into(),
-});
+    "SELECT objoid,
+        classoid,
+        CASE
+            WHEN objsubid = 0 THEN -1
+            WHEN objsubid IS NULL THEN 0
+            ELSE objsubid
+        END AS objsubid,
+        description
+    FROM rw_catalog.rw_description
+    WHERE description IS NOT NULL;"
+)]
+#[derive(Fields)]
+struct PgDescription {
+    objoid: i32,
+    classoid: i32,
+    objsubid: i32,
+    description: String,
+}

@@ -154,3 +154,14 @@
           │ └─BatchScan { table: t, columns: [t.a, t.b, t._row_id], distribution: UpstreamHashShard(t._row_id) }
           └─BatchExchange { order: [], dist: HashShard(t.b) }
             └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
+- name: distributed update
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    update t set a = a + 1;
+  batch_distributed_plan: |-
+    BatchSimpleAgg { aggs: [sum()] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchUpdate { table: t, exprs: [($0 + 1:Int32), $1, $2] }
+        └─BatchExchange { order: [], dist: HashShard(t.a, t.b, t._row_id) }
+          └─BatchScan { table: t, columns: [t.a, t.b, t._row_id], distribution: UpstreamHashShard(t._row_id) }

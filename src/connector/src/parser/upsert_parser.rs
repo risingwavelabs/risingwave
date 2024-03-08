@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::DEFAULT_KEY_COLUMN_NAME;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::bail;
+use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use super::bytes_parser::BytesAccessBuilder;
 use super::unified::upsert::UpsertChangeEvent;
@@ -24,7 +23,7 @@ use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
-use crate::extract_key_config;
+use crate::error::ConnectorResult;
 use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -39,26 +38,28 @@ pub struct UpsertParser {
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
-) -> Result<AccessBuilderImpl> {
+) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Json(_)
         | EncodingProperties::Protobuf(_)
         | EncodingProperties::Avro(_) => {
             Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
         }
-        _ => Err(RwError::from(ProtocolError(
-            "unsupported encoding for Upsert".to_string(),
-        ))),
+        _ => bail!("unsupported encoding for Upsert"),
     }
 }
 
-fn check_rw_default_key(columns: &Vec<SourceColumnDesc>) -> bool {
-    for col in columns {
-        if col.name.starts_with(DEFAULT_KEY_COLUMN_NAME) {
-            return true;
+pub fn get_key_column_name(columns: &[SourceColumnDesc]) -> Option<String> {
+    columns.iter().find_map(|column| {
+        if matches!(
+            column.additional_column.column_type,
+            Some(AdditionalColumnType::Key(_))
+        ) {
+            Some(column.name.clone())
+        } else {
+            None
         }
-    }
-    false
+    })
 }
 
 impl UpsertParser {
@@ -66,18 +67,19 @@ impl UpsertParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> Result<Self> {
-        // check whether columns has `DEFAULT_KEY_COLUMN_NAME`, if so, the key accessor should be
+    ) -> ConnectorResult<Self> {
+        // check whether columns has Key as AdditionalColumnType, if so, the key accessor should be
         // bytes
-        let key_builder = if check_rw_default_key(&rw_columns) {
+        let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
+            // later: if key column has other type other than bytes, build other accessor.
+            // For now, all key columns are bytes
             AccessBuilderImpl::Bytes(BytesAccessBuilder::new(EncodingProperties::Bytes(
                 BytesProperties {
-                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
+                    column_name: Some(key_column_name),
                 },
             ))?)
         } else {
-            let (key_config, key_type) = extract_key_config!(props);
-            build_accessor_builder(key_config, key_type).await?
+            unreachable!("format upsert must have key column")
         };
         let payload_builder =
             build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
@@ -94,7 +96,7 @@ impl UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
         let mut change_event_op = ChangeEventOperation::Delete;
@@ -132,7 +134,7 @@ impl ByteStreamSourceParser for UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<()> {
+    ) -> ConnectorResult<()> {
         self.parse_inner(key, payload, writer).await
     }
 }

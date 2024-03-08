@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
-use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -31,6 +29,7 @@ use super::{
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
+use crate::error::Result;
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -106,7 +105,6 @@ impl LogicalScan {
         self.core.table_desc.as_ref()
     }
 
-    /// FIXME
     pub fn table_catalog(&self) -> Arc<TableCatalog> {
         self.core.table_catalog.clone()
     }
@@ -245,7 +243,7 @@ impl LogicalScan {
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
             self.required_col_idx().to_vec(),
-            self.core.table_catalog.clone(), // FIXME
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
@@ -522,20 +520,11 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
-            if self
-                .ctx()
-                .session_ctx()
-                .config()
-                .streaming_enable_arrangement_backfill()
-            {
-                Ok(StreamTableScan::new_with_stream_scan_type(
-                    self.core.clone(),
-                    StreamScanType::ArrangementBackfill,
-                )
-                .into())
-            } else {
-                Ok(StreamTableScan::new(self.core.clone()).into())
-            }
+            Ok(StreamTableScan::new_with_stream_scan_type(
+                self.core.clone(),
+                ctx.stream_scan_type(),
+            )
+            .into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

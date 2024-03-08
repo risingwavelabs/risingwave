@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,22 @@ use risingwave_expr::function;
 
 /// Concatenates all but the first argument, with separators. The first argument is used as the
 /// separator string, and should not be NULL. Other NULL arguments are ignored.
-#[function("concat_ws(varchar, ...) -> varchar")]
-fn concat_ws(sep: &str, vals: impl Row, writer: &mut impl Write) -> Option<()> {
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select concat_ws(',', 'abcde', 2, NULL, 22);
+/// ----
+/// abcde,2,22
+///
+/// query T
+/// select concat_ws(',', variadic array['abcde', 2, NULL, 22] :: varchar[]);
+/// ----
+/// abcde,2,22
+/// ```
+#[function("concat_ws(varchar, variadic anyarray) -> varchar")]
+fn concat_ws(sep: &str, vals: impl Row, writer: &mut impl Write) {
     let mut string_iter = vals.iter().flatten();
     if let Some(string) = string_iter.next() {
         string.write(writer).unwrap();
@@ -30,7 +44,6 @@ fn concat_ws(sep: &str, vals: impl Row, writer: &mut impl Write) -> Option<()> {
         write!(writer, "{}", sep).unwrap();
         string.write(writer).unwrap();
     }
-    Some(())
 }
 
 #[cfg(test)]

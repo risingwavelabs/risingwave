@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,11 @@ macro_rules! for_all_classified_sources {
             {
                 { Mysql },
                 { Postgres },
-                { Citus }
+                { Citus },
+                { Mongodb }
             },
             // other sources
+            // todo: file source do not nest with mq source.
             {
                 { Kafka, $crate::source::kafka::KafkaProperties, $crate::source::kafka::KafkaSplit },
                 { Pulsar, $crate::source::pulsar::PulsarProperties, $crate::source::pulsar::PulsarSplit },
@@ -32,7 +34,11 @@ macro_rules! for_all_classified_sources {
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
                 { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
-                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
+                { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
+                { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },
+                { PosixFs, $crate::source::filesystem::opendal_source::PosixFsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalPosixFs> },
+                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit},
+                { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit}
             }
             $(
                 ,$extra_args
@@ -128,6 +134,7 @@ macro_rules! match_source_name_str_inner {
     }}
 }
 
+/// Matches against `SourceProperties::SOURCE_NAME` to dispatch logic.
 #[macro_export]
 macro_rules! match_source_name_str {
     ($source_name_str:expr, $prop_type_name:ident, $body:expr, $on_other_closure:expr) => {{
@@ -162,12 +169,12 @@ macro_rules! impl_split {
 
         $(
             impl TryFrom<SplitImpl> for $split {
-                type Error = anyhow::Error;
+                type Error = $crate::error::ConnectorError;
 
                 fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
                     match split {
                         SplitImpl::$variant_name(inner) => Ok(inner),
-                        other => Err(anyhow::anyhow!("expect {} but get {:?}", stringify!($split), other))
+                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($split), other),
                     }
                 }
             }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
+use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::WatermarkFilterNode;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::TableDistribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -30,8 +34,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let watermark_descs = node.get_watermark_descs().clone();
         let [watermark_desc]: [_; 1] = watermark_descs.try_into().unwrap();
@@ -46,17 +49,29 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
 
         // TODO: may use consistent op for watermark filter after we have upsert.
         let [table]: [_; 1] = node.get_tables().clone().try_into().unwrap();
+        let desc = TableDesc::from_pb_table(&table).try_to_protobuf()?;
+        let column_ids = desc
+            .value_indices
+            .iter()
+            .map(|i| ColumnId::new(*i as _))
+            .collect_vec();
+        let other_vnodes =
+            Arc::new((!(*vnodes).clone()) & TableDistribution::all_vnodes_ref().deref());
+        let global_watermark_table =
+            StorageTable::new_partial(store.clone(), column_ids, Some(other_vnodes), &desc);
+
         let table =
             StateTable::from_table_catalog_inconsistent_op(&table, store, Some(vnodes)).await;
 
-        Ok(WatermarkFilterExecutor::new(
+        let exec = WatermarkFilterExecutor::new(
             params.actor_context,
-            params.info,
+            &params.info,
             input,
             watermark_expr,
             event_time_col_idx,
             table,
-        )
-        .boxed())
+            global_watermark_table,
+        );
+        Ok((params.info, exec).into())
     }
 }

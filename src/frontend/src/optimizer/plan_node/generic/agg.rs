@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -168,13 +168,14 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 impl<PlanRef: BatchPlanRef> Agg<PlanRef> {
     // Check if the input is already sorted on group keys.
     pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
-        self.group_key.indices().all(|group_by_idx| {
-            self.input
-                .order()
-                .column_orders
-                .iter()
-                .any(|order| order.column_index == group_by_idx)
-        })
+        let mut input_order_prefix = IndexSet::empty();
+        for input_order_col in &self.input.order().column_orders {
+            if !self.group_key.contains(input_order_col.column_index) {
+                break;
+            }
+            input_order_prefix.insert(input_order_col.column_index);
+        }
+        self.group_key == input_order_prefix
     }
 }
 
@@ -313,13 +314,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// - column mapping from upstream to table
     fn create_table_builder(
         &self,
-        ctx: OptimizerContextRef,
+        _ctx: OptimizerContextRef,
         window_col_idx: Option<usize>,
     ) -> (TableCatalogBuilder, Vec<usize>, BTreeMap<usize, usize>) {
         // NOTE: this function should be called to get a table builder, so that all state tables
         // created for Agg node have the same group key columns and pk ordering.
-        let mut table_builder =
-            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
+        let mut table_builder = TableCatalogBuilder::default();
 
         assert!(table_builder.columns().is_empty());
         assert_eq!(table_builder.get_current_pk_len(), 0);

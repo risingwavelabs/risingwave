@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,16 +105,20 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        // update
-        for w in &mut write_guard.worker_nodes {
-            if w.id == node.id {
+        match write_guard
+            .worker_nodes
+            .iter_mut()
+            .find(|w| w.id == node.id)
+        {
+            None => {
+                // insert
+                write_guard.worker_nodes.push(node);
+            }
+            Some(w) => {
+                // update
                 *w = node;
-                return;
             }
         }
-        // insert
-        write_guard.worker_nodes.push(node);
-
         // Update `pu_to_worker`
         write_guard.pu_to_worker = get_pu_to_worker_mapping(&write_guard.worker_nodes);
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ public enum SourceTypeE {
     MYSQL,
     POSTGRES,
     CITUS,
+    MONGODB,
     INVALID;
 
     public static SourceTypeE valueOf(ConnectorServiceProto.SourceType type) {
@@ -30,6 +31,8 @@ public enum SourceTypeE {
                 return SourceTypeE.POSTGRES;
             case CITUS:
                 return SourceTypeE.CITUS;
+            case MONGODB:
+                return SourceTypeE.MONGODB;
             default:
                 return SourceTypeE.INVALID;
         }

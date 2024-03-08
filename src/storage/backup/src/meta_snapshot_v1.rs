@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,11 @@ use std::fmt::{Display, Formatter};
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
 };
-use risingwave_pb::hummock::{CompactionGroup, HummockVersion, HummockVersionStats};
+use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats};
 use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
 
@@ -119,6 +120,7 @@ pub struct ClusterMetadata {
     pub connection: Vec<Connection>,
     pub system_param: SystemParams,
     pub cluster_id: String,
+    pub subscription: Vec<Subscription>,
 }
 
 impl ClusterMetadata {
@@ -127,7 +129,7 @@ impl ClusterMetadata {
         let default_cf_values = self.default_cf.values().collect_vec();
         Self::encode_prost_message_list(&default_cf_keys, buf);
         Self::encode_prost_message_list(&default_cf_values, buf);
-        Self::encode_prost_message(&self.hummock_version, buf);
+        Self::encode_prost_message(&self.hummock_version.to_protobuf(), buf);
         Self::encode_prost_message(&self.version_stats, buf);
         Self::encode_prost_message_list(&self.compaction_groups.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.table_fragments.iter().collect_vec(), buf);
@@ -143,6 +145,7 @@ impl ClusterMetadata {
         Self::encode_prost_message_list(&self.connection.iter().collect_vec(), buf);
         Self::encode_prost_message(&self.system_param, buf);
         Self::encode_prost_message(&self.cluster_id, buf);
+        Self::encode_prost_message_list(&self.subscription.iter().collect_vec(), buf);
         Ok(())
     }
 
@@ -153,7 +156,8 @@ impl ClusterMetadata {
             .into_iter()
             .zip_eq_fast(default_cf_values.into_iter())
             .collect();
-        let hummock_version = Self::decode_prost_message(&mut buf)?;
+        let hummock_version =
+            HummockVersion::from_persisted_protobuf(&Self::decode_prost_message(&mut buf)?);
         let version_stats = Self::decode_prost_message(&mut buf)?;
         let compaction_groups: Vec<CompactionGroup> = Self::decode_prost_message_list(&mut buf)?;
         let table_fragments: Vec<TableFragments> = Self::decode_prost_message_list(&mut buf)?;
@@ -169,6 +173,8 @@ impl ClusterMetadata {
         let connection: Vec<Connection> = Self::decode_prost_message_list(&mut buf)?;
         let system_param: SystemParams = Self::decode_prost_message(&mut buf)?;
         let cluster_id: String = Self::decode_prost_message(&mut buf)?;
+        let subscription: Vec<Subscription> =
+            Self::try_decode_prost_message_list(&mut buf).unwrap_or_else(|| Ok(vec![]))?;
 
         Ok(Self {
             default_cf,
@@ -188,6 +194,7 @@ impl ClusterMetadata {
             connection,
             system_param,
             cluster_id,
+            subscription,
         })
     }
 
@@ -225,6 +232,16 @@ impl ClusterMetadata {
             result.push(v);
         }
         Ok(result)
+    }
+
+    fn try_decode_prost_message_list<T>(buf: &mut &[u8]) -> Option<BackupResult<Vec<T>>>
+    where
+        T: prost::Message + Default,
+    {
+        if buf.is_empty() {
+            return None;
+        }
+        Some(Self::decode_prost_message_list(buf))
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -212,7 +212,7 @@ impl<S: StateStore> SortBuffer<S> {
         );
 
         let streams: Vec<_> =
-            futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
+            futures::future::try_join_all(buffer_table.vnodes().iter_vnodes().map(|vnode| {
                 buffer_table.iter_with_vnode(
                     vnode,
                     &pk_range,

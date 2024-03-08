@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,7 +62,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
 
     #[tokio::test]
     async fn test_schema_ok() {
@@ -73,7 +72,8 @@ mod tests {
             ],
         };
 
-        let (mut tx, source) = MockSource::channel(schema, vec![1]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![1]);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I     F
             + 100 200.0
@@ -82,7 +82,7 @@ mod tests {
         ));
         tx.push_barrier(1, false);
 
-        let checked = schema_check(source.info().into(), source.boxed().execute());
+        let checked = schema_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
@@ -99,7 +99,8 @@ mod tests {
             ],
         };
 
-        let (mut tx, source) = MockSource::channel(schema, vec![1]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![1]);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I
             + 100 200
@@ -108,7 +109,7 @@ mod tests {
         ));
         tx.push_barrier(1, false);
 
-        let checked = schema_check(source.info().into(), source.boxed().execute());
+        let checked = schema_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
         checked.next().await.unwrap().unwrap();
     }

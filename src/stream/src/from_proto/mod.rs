@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ mod source;
 mod stateless_simple_agg;
 mod stream_cdc_scan;
 mod stream_scan;
+mod subscription;
 mod temporal_join;
 mod top_n;
 mod union;
@@ -92,28 +93,28 @@ use self::top_n::*;
 use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::executor::{Execute, Executor, ExecutorInfo};
+use crate::from_proto::subscription::SubscriptionExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 trait ExecutorBuilder {
     type Node;
 
-    /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    /// Create an [`Executor`] from [`StreamNode`].
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
+    ) -> StreamResult<Executor>;
 }
 
 macro_rules! build_executor {
-    ($source:expr, $node:expr, $store:expr, $stream:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
+    ($source:expr, $node:expr, $store:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
         match $node.get_node_body().unwrap() {
             $(
                 $proto_type_name(node) => {
-                    <$data_type>::new_boxed_executor($source, node, $store, $stream).await
+                    <$data_type>::new_boxed_executor($source, node, $store).await
                 },
             )*
             NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
@@ -124,15 +125,13 @@ macro_rules! build_executor {
 /// Create an executor from protobuf [`StreamNode`].
 pub async fn create_executor(
     params: ExecutorParams,
-    stream: &mut LocalStreamManagerCore,
     node: &StreamNode,
     store: impl StateStore,
-) -> StreamResult<BoxedExecutor> {
+) -> StreamResult<Executor> {
     build_executor! {
         params,
         node,
         store,
-        stream,
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
@@ -148,6 +147,7 @@ pub async fn create_executor(
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,
+        NodeBody::Subscription => SubscriptionExecutorBuilder,
         NodeBody::Filter => FilterExecutorBuilder,
         NodeBody::CdcFilter => CdcFilterExecutorBuilder,
         NodeBody::Arrange => ArrangeExecutorBuilder,

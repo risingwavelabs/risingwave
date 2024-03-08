@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,22 +16,21 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::stream::BoxStream;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
-use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::tracing::TracingContext;
+use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -44,19 +43,18 @@ use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
-use tracing_futures::Instrument;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
+use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
-use crate::session::{AuthContext, FrontendEnv, SessionImpl};
+use crate::session::{FrontendEnv, SessionImpl};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
-
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
@@ -66,6 +64,7 @@ pub struct LocalQueryExecution {
     snapshot: ReadSnapshot,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
+    timeout: Option<Duration>,
 }
 
 impl LocalQueryExecution {
@@ -75,6 +74,7 @@ impl LocalQueryExecution {
         sql: S,
         snapshot: ReadSnapshot,
         session: Arc<SessionImpl>,
+        timeout: Option<Duration>,
     ) -> Self {
         let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
@@ -89,11 +89,8 @@ impl LocalQueryExecution {
             snapshot,
             session,
             worker_node_manager,
+            timeout,
         }
-    }
-
-    fn auth_context(&self) -> Arc<AuthContext> {
-        self.session.auth_context()
     }
 
     fn shutdown_rx(&self) -> ShutdownToken {
@@ -104,7 +101,7 @@ impl LocalQueryExecution {
     pub async fn run_inner(self) {
         debug!(%self.query.query_id, self.sql, "Starting to run query");
 
-        let context = FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context());
+        let context = FrontendBatchTaskContext::new(self.session.clone());
 
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
@@ -145,19 +142,24 @@ impl LocalQueryExecution {
         let shutdown_rx = self.shutdown_rx().clone();
 
         let catalog_reader = self.front_env.catalog_reader().clone();
+        let user_info_reader = self.front_env.user_info_reader().clone();
         let auth_context = self.session.auth_context().clone();
         let db_name = self.session.database().to_string();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
+        let timeout = self.timeout;
 
+        let sender1 = sender.clone();
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
             while let Some(mut r) = data_stream.next().await {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
-                    r = Err(Box::new(SchedulerError::QueryCancelled) as BoxedError);
+                    r = Err(Box::new(SchedulerError::QueryCancelled(
+                        "Cancelled by user".to_string(),
+                    )) as BoxedError);
                 }
-                if sender.send(r).await.is_err() {
+                if sender1.send(r).await.is_err() {
                     tracing::info!("Receiver closed.");
                     return;
                 }
@@ -167,16 +169,40 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
         };
 
-        let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await };
-        let exec = async move { DB_NAME::scope(db_name, exec).await };
-        let exec = async move { SEARCH_PATH::scope(search_path, exec).await };
-        let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await };
-        let exec = async move { TIME_ZONE::scope(time_zone, exec).await };
+        // box is necessary, otherwise the size of `exec` will double each time it is nested.
+        let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await }.boxed();
+        let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
+        let exec = async move { DB_NAME::scope(db_name, exec).await }.boxed();
+        let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
+        let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
+        let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
 
-        compute_runtime.spawn(exec);
+        if let Some(timeout) = timeout {
+            let exec = async move {
+                if let Err(_e) = tokio::time::timeout(timeout, exec).await {
+                    tracing::error!(
+                        "Local query execution timeout after {} seconds",
+                        timeout.as_secs()
+                    );
+                    if sender
+                        .send(Err(Box::new(SchedulerError::QueryCancelled(format!(
+                            "timeout after {} seconds",
+                            timeout.as_secs(),
+                        ))) as BoxedError))
+                        .await
+                        .is_err()
+                    {
+                        tracing::info!("Receiver closed.");
+                    }
+                }
+            };
+            compute_runtime.spawn(exec);
+        } else {
+            compute_runtime.spawn(exec);
+        }
 
         ReceiverStream::new(receiver)
     }
@@ -327,11 +353,21 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
-                    for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
+                    // For file source batch read, all the files  to be read  are divide into several parts to prevent the task from taking up too many resources.
+
+                    let chunk_size = (source_info.split_info().unwrap().len() as f32
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
+                        .ceil() as usize;
+                    for (id, split) in source_info
+                        .split_info()
+                        .unwrap()
+                        .chunks(chunk_size)
+                        .enumerate()
+                    {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
-                            Some(PartitionInfo::Source(split.clone())),
+                            Some(PartitionInfo::Source(split.to_vec())),
                             next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
@@ -443,7 +479,10 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
-                            source_node.split = partition.encode_to_bytes().into();
+                            source_node.split = partition
+                                .into_iter()
+                                .map(|split| split.encode_to_bytes().into())
+                                .collect_vec();
                         }
                     }
                     _ => unreachable!(),
@@ -551,7 +590,10 @@ impl LocalQueryExecution {
                     .worker_node_manager
                     .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+                if candidates.is_empty() {
+                    return Err(SchedulerError::EmptyWorkerNodes);
+                }
+                candidates[stage.session_id.0 as usize % candidates.len()].clone()
             };
             Ok(vec![worker_node])
         } else {

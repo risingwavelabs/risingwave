@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
@@ -22,9 +21,11 @@ use super::batch::prelude::*;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use crate::error::Result;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
+use crate::optimizer::plan_node::{utils, PlanBase, ToLocalBatch};
+use crate::optimizer::plan_visitor::DistributedDmlVisitor;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchInsert` implements [`super::LogicalInsert`]
@@ -36,7 +37,6 @@ pub struct BatchInsert {
 
 impl BatchInsert {
     pub fn new(core: generic::Insert<PlanRef>) -> Self {
-        assert_eq!(core.input.distribution(), &Distribution::Single);
         let base: PlanBase<Batch> =
             PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
 
@@ -69,9 +69,23 @@ impl_plan_tree_node_for_unary! { BatchInsert }
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = RequiredDist::single()
+        if DistributedDmlVisitor::dml_should_run_in_distributed(self.input()) {
+            // Add an hash shuffle between the insert and its input.
+            let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
+                (0..self.input().schema().len()).collect(),
+            ))
             .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-        Ok(self.clone_with_input(new_input).into())
+            let new_insert: PlanRef = self.clone_with_input(new_input).into();
+            if self.core.returning {
+                Ok(new_insert)
+            } else {
+                utils::sum_affected_row(new_insert)
+            }
+        } else {
+            let new_input = RequiredDist::single()
+                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            Ok(self.clone_with_input(new_input).into())
+        }
     }
 }
 
@@ -101,6 +115,7 @@ impl ToBatchPb for BatchInsert {
             },
             row_id_index: self.core.row_id_index.map(|index| index as _),
             returning: self.core.returning,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }

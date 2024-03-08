@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::Result;
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
-use super::{HandlerArgs, RwPgResponse};
+use super::{HandlerArgs, RwPgResponse, RwPgResponseBuilderExt};
+use crate::error::Result;
 use crate::session::transaction::AccessMode;
 
 macro_rules! not_impl {
@@ -113,5 +114,23 @@ pub async fn handle_set(
 
     Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
         .notice(MESSAGE)
+        .into())
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowVariableRow {
+    name: String,
+}
+
+pub fn handle_show_isolation_level(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
+
+    let rows = [ShowVariableRow {
+        name: config_reader.get("transaction_isolation")?,
+    }];
+
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .rows(rows)
         .into())
 }

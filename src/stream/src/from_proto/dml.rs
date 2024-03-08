@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
 use crate::executor::dml::DmlExecutor;
-use crate::executor::BoxedExecutor;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::executor::Executor;
+use crate::task::ExecutorParams;
 
 pub struct DmlExecutorBuilder;
 
@@ -32,18 +32,19 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream_manager: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         let table_id = TableId::new(node.table_id);
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
-        Ok(Box::new(DmlExecutor::new(
-            params.info,
+
+        let exec = DmlExecutor::new(
             upstream,
             params.env.dml_manager_ref(),
             table_id,
             node.table_version_id,
             column_descs,
-        )))
+            params.env.config().developer.chunk_size,
+        );
+        Ok((params.info, exec).into())
     }
 }

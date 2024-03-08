@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,10 +38,11 @@ async fn test_hash_agg_count_sum() {
         AggCall::from_pretty("(sum:int8 $2:int8)"),
     ];
 
-    let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, PkIndices::new());
     let hash_agg = new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         false,
         agg_calls,
         0,
@@ -116,10 +117,11 @@ async fn test_hash_agg_min() {
         AggCall::from_pretty("(min:int8 $1:int8)"),
     ];
 
-    let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, vec![2]);
     let hash_agg = new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         false,
         agg_calls,
         0,
@@ -191,10 +193,11 @@ async fn test_hash_agg_min_append_only() {
         AggCall::from_pretty("(min:int8 $1:int8)"),
     ];
 
-    let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, vec![2]);
     let hash_agg = new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         true, // is append only
         agg_calls,
         0,
@@ -266,10 +269,11 @@ async fn test_hash_agg_emit_on_window_close() {
     let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
 
     let create_executor = || async {
-        let (tx, source) = MockSource::channel(input_schema.clone(), PkIndices::new());
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(input_schema.clone(), PkIndices::new());
         let hash_agg = new_boxed_hash_agg_executor(
             store.clone(),
-            Box::new(source),
+            source,
             false,
             agg_calls.clone(),
             0,

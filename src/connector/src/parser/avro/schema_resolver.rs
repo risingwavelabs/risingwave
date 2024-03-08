@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
 use apache_avro::Schema;
 use moka::future::Cache;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 
+use crate::error::ConnectorResult;
 use crate::schema::schema_registry::{Client, ConfluentSchema};
 
 #[derive(Debug)]
@@ -28,9 +28,12 @@ pub struct ConfluentSchemaResolver {
 }
 
 impl ConfluentSchemaResolver {
-    async fn parse_and_cache_schema(&self, raw_schema: ConfluentSchema) -> Result<Arc<Schema>> {
-        let schema = Schema::parse_str(&raw_schema.content)
-            .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
+    async fn parse_and_cache_schema(
+        &self,
+        raw_schema: ConfluentSchema,
+    ) -> ConnectorResult<Arc<Schema>> {
+        let schema =
+            Schema::parse_str(&raw_schema.content).context("failed to parse avro schema")?;
         let schema = Arc::new(schema);
         self.writer_schemas
             .insert(raw_schema.id, Arc::clone(&schema))
@@ -46,7 +49,7 @@ impl ConfluentSchemaResolver {
         }
     }
 
-    pub async fn get_by_subject_name(&self, subject_name: &str) -> Result<Arc<Schema>> {
+    pub async fn get_by_subject_name(&self, subject_name: &str) -> ConnectorResult<Arc<Schema>> {
         let raw_schema = self.get_raw_schema_by_subject_name(subject_name).await?;
         self.parse_and_cache_schema(raw_schema).await
     }
@@ -54,14 +57,15 @@ impl ConfluentSchemaResolver {
     pub async fn get_raw_schema_by_subject_name(
         &self,
         subject_name: &str,
-    ) -> Result<ConfluentSchema> {
+    ) -> ConnectorResult<ConfluentSchema> {
         self.confluent_client
             .get_schema_by_subject(subject_name)
             .await
+            .map_err(Into::into)
     }
 
     // get the writer schema by id
-    pub async fn get(&self, schema_id: i32) -> Result<Arc<Schema>> {
+    pub async fn get(&self, schema_id: i32) -> ConnectorResult<Arc<Schema>> {
         // TODO: use `get_with`
         if let Some(schema) = self.writer_schemas.get(&schema_id).await {
             Ok(schema)

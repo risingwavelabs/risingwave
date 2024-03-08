@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{
     ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
@@ -50,6 +51,7 @@ use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
+    table_distribution: TableDistribution,
     vnode_mapping: ExpandedParallelUnitMapping,
     outer_side_key_types: Vec<DataType>,
     inner_side_schema: Schema,
@@ -81,15 +83,8 @@ pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Gets the virtual node based on the given `scan_range`
     fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
-        let dist_key_in_pk_indices = self
-            .table_desc
-            .dist_key_in_pk_indices
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
-
         let virtual_node = scan_range
-            .try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices)
+            .try_compute_vnode(&self.table_distribution)
             .context("Could not compute vnode for lookup join")?;
         Ok(virtual_node)
     }
@@ -224,6 +219,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let exchange_node = NodeBody::Exchange(ExchangeNode {
             sources,
+            sequential: true,
             input_schema: self.inner_side_schema.to_prost(),
         });
 
@@ -379,6 +375,10 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
+            table_distribution: TableDistribution::new_from_storage_table_desc(
+                Some(TableDistribution::all_vnodes()),
+                table_desc,
+            ),
             vnode_mapping,
             outer_side_key_types,
             inner_side_schema,

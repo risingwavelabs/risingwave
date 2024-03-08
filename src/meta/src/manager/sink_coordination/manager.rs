@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,12 @@ use futures::future::{select, BoxFuture, Either};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::pending_on_none;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_request::Msg;
 use risingwave_pb::connector_service::{coordinate_request, CoordinateRequest, CoordinateResponse};
+use rw_futures_util::pending_on_none;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
@@ -292,14 +293,15 @@ impl ManagerWorker {
         match join_result {
             Ok(()) => {
                 info!(
-                    "sink coordinator of {} has gracefully finished",
-                    sink_id.sink_id
+                    id = sink_id.sink_id,
+                    "sink coordinator has gracefully finished",
                 );
             }
             Err(err) => {
                 error!(
-                    "sink coordinator of {} finished with error {:?}",
-                    sink_id.sink_id, err
+                    id = sink_id.sink_id,
+                    error = %err.as_report(),
+                    "sink coordinator finished with error",
                 );
             }
         }
@@ -407,7 +409,6 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            target_table: None,
         };
 
         let epoch1 = 233;
@@ -578,7 +579,6 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            target_table: None,
         };
 
         let epoch1 = 233;
@@ -698,7 +698,6 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            target_table: None,
         };
 
         let (manager, (_join_handle, _stop_tx)) = SinkCoordinatorManager::start_worker();
@@ -738,7 +737,6 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            target_table: None,
         };
 
         let epoch = 233;
@@ -818,7 +816,6 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            target_table: None,
         };
 
         let epoch = 233;

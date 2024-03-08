@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -322,6 +322,10 @@ impl<D: ToDatumRef, const N: usize> Row for [D; N] {
     impl_slice_row!();
 }
 
+impl<D: ToDatumRef + Default, const N: usize> Row for ArrayVec<[D; N]> {
+    impl_slice_row!();
+}
+
 /// Implements [`Row`] for an optional row.
 impl<R: Row> Row for Option<R> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
@@ -451,6 +455,7 @@ mod owned_row;
 mod project;
 mod repeat_n;
 mod slice;
+pub use ::tinyvec::ArrayVec;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};

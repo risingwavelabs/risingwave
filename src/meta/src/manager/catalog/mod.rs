@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,10 +32,11 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
+use risingwave_connector::source::{should_copy_to_format_encode_options, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbSource, PbStreamJobStatus,
-    Schema, Sink, Source, StreamJobStatus, Table, View,
+    Schema, Sink, Source, StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -57,6 +58,7 @@ pub type SchemaId = u32;
 pub type TableId = u32;
 pub type SourceId = u32;
 pub type SinkId = u32;
+pub type SubscriptionId = u32;
 pub type RelationId = u32;
 pub type IndexId = u32;
 pub type ViewId = u32;
@@ -70,6 +72,7 @@ pub enum RelationIdEnum {
     Index(IndexId),
     View(ViewId),
     Sink(SinkId),
+    Subscription(SubscriptionId),
     Source(SourceId),
 }
 
@@ -86,7 +89,7 @@ macro_rules! commit_meta_with_trx {
                     $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
-                $manager.env.meta_store().txn($trx).await?;
+                $manager.env.meta_store_checked().txn($trx).await?;
                 // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
@@ -119,7 +122,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -166,11 +168,57 @@ impl CatalogManager {
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        self.source_backward_compat_check().await?;
         Ok(())
     }
 
     pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore> {
         self.core.lock().await
+    }
+
+    /// This function is for maintaining backward compatibility with older source formats when `format_encode_options` is
+    /// merged into `with_properties`.
+    /// Context: <https://github.com/risingwavelabs/risingwave/pull/13762>.
+    ///
+    /// We identify a 'legacy' source based on two conditions:
+    /// 1. The `format_encode_options` in `source_info` is empty.
+    /// 2. Keys with certain prefixes belonging to `format_encode_options` exist in `with_properties` instead.
+    /// And if the source is identified as 'legacy', we copy the misplaced keys from `with_properties` to `format_encode_options`.
+    async fn source_backward_compat_check(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let mut sources = BTreeMapTransaction::new(&mut core.database.sources);
+        let legacy_sources = sources
+            .tree_ref()
+            .iter()
+            .filter(|(_, source)| {
+                if let Some(source_info) = &source.info
+                    && source_info.format_encode_options.is_empty()
+                {
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(|t| t.1.clone())
+            .collect_vec();
+        for mut source in legacy_sources {
+            let connector = source
+                .with_properties
+                .get(UPSTREAM_SOURCE_KEY)
+                .unwrap_or(&String::default())
+                .to_owned();
+            if let Some(source_info) = source.info.as_mut() {
+                source_info
+                    .format_encode_options
+                    .extend(source.with_properties.iter().filter_map(|(k, v)| {
+                        should_copy_to_format_encode_options(k, &connector)
+                            .then_some((k.to_owned(), v.to_owned()))
+                    }))
+            }
+            sources.insert(source.id, source);
+        }
+        commit_meta!(self, sources)?;
+        Ok(())
     }
 }
 
@@ -268,6 +316,7 @@ impl CatalogManager {
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
@@ -300,6 +349,7 @@ impl CatalogManager {
             let schemas_to_drop = drop_by_database_id!(schemas, database_id);
             let sources_to_drop = drop_by_database_id!(sources, database_id);
             let sinks_to_drop = drop_by_database_id!(sinks, database_id);
+            let subscriptions_to_drop = drop_by_database_id!(subscriptions, database_id);
             let tables_to_drop = drop_by_database_id!(tables, database_id);
             let indexes_to_drop = drop_by_database_id!(indexes, database_id);
             let views_to_drop = drop_by_database_id!(views, database_id);
@@ -334,6 +384,7 @@ impl CatalogManager {
                 schemas,
                 sources,
                 sinks,
+                subscriptions,
                 tables,
                 indexes,
                 views,
@@ -346,6 +397,11 @@ impl CatalogManager {
                 .chain(schemas_to_drop.iter().map(|schema| schema.owner))
                 .chain(sources_to_drop.iter().map(|source| source.owner))
                 .chain(sinks_to_drop.iter().map(|sink| sink.owner))
+                .chain(
+                    subscriptions_to_drop
+                        .iter()
+                        .map(|subscription| subscription.owner),
+                )
                 .chain(
                     tables_to_drop
                         .iter()
@@ -394,6 +450,11 @@ impl CatalogManager {
                     sinks_to_drop
                         .into_iter()
                         .map(|sink| StreamingJobId::new(sink.id)),
+                )
+                .chain(
+                    subscriptions_to_drop
+                        .into_iter()
+                        .map(|subscription| StreamingJobId::new(subscription.id)),
                 )
                 .collect_vec();
             let source_deleted_ids = sources_to_drop
@@ -593,6 +654,7 @@ impl CatalogManager {
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;
 
+        tracing::debug!("create function: {:?}", function);
         let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
         functions.insert(function.id, function.clone());
         commit_meta!(self, functions)?;
@@ -649,6 +711,9 @@ impl CatalogManager {
                     .await
             }
             StreamingJob::Sink(sink, _) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::Subscription(subscription) => {
+                self.start_create_subscription_procedure(subscription).await
+            }
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
@@ -750,13 +815,15 @@ impl CatalogManager {
         Ok(())
     }
 
-    fn assert_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
-        if let Some(t) = tables.get(&table.id)
-            && let Ok(StreamJobStatus::Creating) = t.get_stream_job_status()
-        {
+    fn check_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) -> MetaResult<()> {
+        return if let Some(t) = tables.get(&table.id) {
+            assert_eq!(t.get_stream_job_status(), Ok(StreamJobStatus::Creating));
+            Ok(())
         } else {
-            panic!("Table must be in creating procedure: {table:#?}")
-        }
+            // If the table does not exist, it should be created in Foreground and cleaned during recovery in some cases.
+            assert_eq!(table.create_type(), CreateType::Foreground);
+            Err(anyhow!("failed to create table during recovery").into())
+        };
     }
 
     pub async fn assert_tables_deleted(&self, table_ids: Vec<TableId>) {
@@ -829,8 +896,8 @@ impl CatalogManager {
                     let fragment: TableFragments = fragment;
                     // 3. For those in initial state (i.e. not running / created),
                     // we should purge them.
-                    if fragment.state() == State::Initial {
-                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                    if fragment.is_initial() {
+                        tracing::debug!("cleaning table_id with initial state: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
@@ -854,6 +921,27 @@ impl CatalogManager {
             }
         }
 
+        let mut tables_to_update = vec![];
+        for table in database_core.tables.values() {
+            if table.incoming_sinks.is_empty() {
+                continue;
+            }
+
+            if table
+                .incoming_sinks
+                .iter()
+                .all(|sink_id| database_core.sinks.contains_key(sink_id))
+            {
+                continue;
+            }
+
+            let mut table = table.clone();
+            table
+                .incoming_sinks
+                .retain(|sink_id| database_core.sinks.contains_key(sink_id));
+            tables_to_update.push(table);
+        }
+
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
@@ -862,7 +950,32 @@ impl CatalogManager {
             let table = tables.remove(table_id);
             assert!(table.is_some(), "table_id {} missing", table_id)
         }
+
+        for table in &tables_to_update {
+            let table_id = table.id;
+            if tables.contains_key(&table_id) {
+                tracing::debug!("updating sink target table_id: {}", table_id);
+                tables.insert(table_id, table.clone());
+            }
+        }
+
         commit_meta!(self, tables)?;
+
+        if !tables_to_update.is_empty() {
+            let _ = self
+                .notify_frontend(
+                    Operation::Update,
+                    Info::RelationGroup(RelationGroup {
+                        relations: tables_to_update
+                            .into_iter()
+                            .map(|table| Relation {
+                                relation_info: RelationInfo::Table(table).into(),
+                            })
+                            .collect(),
+                    }),
+                )
+                .await;
+        }
 
         // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
         // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
@@ -914,7 +1027,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         if cfg!(not(test)) {
-            Self::assert_table_creating(tables, &table);
+            Self::check_table_creating(tables, &table)?;
         }
         let mut tables = BTreeMapTransaction::new(tables);
 
@@ -1027,6 +1140,7 @@ impl CatalogManager {
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
@@ -1050,6 +1164,7 @@ impl CatalogManager {
         let mut all_internal_table_ids: HashSet<TableId> = HashSet::default();
         let mut all_index_ids: HashSet<IndexId> = HashSet::default();
         let mut all_sink_ids: HashSet<SinkId> = HashSet::default();
+        let mut all_subscription_ids: HashSet<SubscriptionId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
         let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
@@ -1079,6 +1194,18 @@ impl CatalogManager {
                 })
                 .collect_vec();
 
+            let subscriptions_depend_on = subscriptions
+                .tree_ref()
+                .iter()
+                .filter_map(|(_, subscription)| {
+                    if subscription.dependent_relations.contains(&relation_id) {
+                        Some(RelationInfo::Subscription(subscription.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+
             let views_depend_on = views
                 .tree_ref()
                 .iter()
@@ -1095,6 +1222,7 @@ impl CatalogManager {
             tables_depend_on
                 .into_iter()
                 .chain(sinks_depend_on)
+                .chain(subscriptions_depend_on)
                 .chain(views_depend_on)
                 .collect()
         };
@@ -1130,6 +1258,14 @@ impl CatalogManager {
                     deque.push_back(RelationInfo::Sink(sink));
                 } else {
                     bail!("sink doesn't exist");
+                }
+            }
+            RelationIdEnum::Subscription(subscription_id) => {
+                let subscription = subscriptions.get(&subscription_id).cloned();
+                if let Some(subscription) = subscription {
+                    deque.push_back(RelationInfo::Subscription(subscription));
+                } else {
+                    bail!("subscription doesn't exist");
                 }
             }
             RelationIdEnum::View(view_id) => {
@@ -1406,6 +1542,41 @@ impl CatalogManager {
                         }
                     }
                 }
+                RelationInfo::Subscription(subscription) => {
+                    if !all_subscription_ids.insert(subscription.id) {
+                        continue;
+                    }
+                    let table_fragments = fragment_manager
+                        .select_table_fragments_by_table_id(&subscription.id.into())
+                        .await?;
+
+                    all_internal_table_ids.extend(table_fragments.internal_table_ids());
+
+                    if let Some(ref_count) = database_core
+                        .relation_ref_count
+                        .get(&subscription.id)
+                        .cloned()
+                    {
+                        if ref_count > 0 {
+                            // Other relations depend on it.
+                            match drop_mode {
+                                DropMode::Restrict => {
+                                    return Err(MetaError::permission_denied(format!(
+                                        "Fail to delete subscription `{}` because {} other relation(s) depend on it",
+                                        subscription.name, ref_count
+                                    )));
+                                }
+                                DropMode::Cascade => {
+                                    for relation_info in
+                                        relations_depend_on(subscription.id as RelationId)
+                                    {
+                                        deque.push_back(relation_info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1432,6 +1603,10 @@ impl CatalogManager {
         let sinks_removed = all_sink_ids
             .iter()
             .map(|sink_id| sinks.remove(*sink_id).unwrap())
+            .collect_vec();
+        let subscriptions_removed = all_subscription_ids
+            .iter()
+            .map(|subscription_id| subscriptions.remove(*subscription_id).unwrap())
             .collect_vec();
 
         if !matches!(relation, RelationIdEnum::Sink(_)) {
@@ -1491,7 +1666,16 @@ impl CatalogManager {
             )
         };
 
-        commit_meta!(self, tables, indexes, sources, views, sinks, users)?;
+        commit_meta!(
+            self,
+            tables,
+            indexes,
+            sources,
+            views,
+            sinks,
+            users,
+            subscriptions
+        )?;
 
         for index in &indexes_removed {
             user_core.decrease_ref(index.owner);
@@ -1513,6 +1697,10 @@ impl CatalogManager {
 
         for sink in &sinks_removed {
             user_core.decrease_ref(sink.owner);
+        }
+
+        for subscription in &subscriptions_removed {
+            user_core.decrease_ref(subscription.owner);
         }
 
         for user in users_need_update {
@@ -1543,6 +1731,12 @@ impl CatalogManager {
             }
         }
 
+        for subscription in &subscriptions_removed {
+            for dependent_relation_id in &subscription.dependent_relations {
+                database_core.decrease_ref_count(*dependent_relation_id);
+            }
+        }
+
         let version = self
             .notify_frontend(
                 Operation::Delete,
@@ -1567,6 +1761,13 @@ impl CatalogManager {
                         .chain(sinks_removed.into_iter().map(|sink| Relation {
                             relation_info: RelationInfo::Sink(sink).into(),
                         }))
+                        .chain(
+                            subscriptions_removed
+                                .into_iter()
+                                .map(|subscription| Relation {
+                                    relation_info: RelationInfo::Subscription(subscription).into(),
+                                }),
+                        )
                         .collect_vec(),
                 }),
             )
@@ -1576,6 +1777,7 @@ impl CatalogManager {
             .into_iter()
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
+            .chain(all_subscription_ids.into_iter().map(|id| id.into()))
             .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
             .collect_vec();
 
@@ -1621,6 +1823,7 @@ impl CatalogManager {
             vec![table],
             vec![],
             vec![],
+            vec![],
             source,
         )
         .await
@@ -1637,6 +1840,7 @@ impl CatalogManager {
         mut to_update_tables: Vec<Table>,
         mut to_update_views: Vec<View>,
         mut to_update_sinks: Vec<Sink>,
+        mut to_update_subscriptions: Vec<Subscription>,
         to_update_source: Option<Source>,
     ) -> MetaResult<NotificationVersion> {
         for table in database_mgr.tables.values() {
@@ -1656,10 +1860,21 @@ impl CatalogManager {
         }
 
         for sink in database_mgr.sinks.values() {
-            if sink.dependent_relations.contains(&relation_id) {
+            if sink.dependent_relations.contains(&relation_id)
+                || sink.target_table == Some(relation_id)
+            {
                 let mut sink = sink.clone();
                 sink.definition = alter_relation_rename_refs(&sink.definition, from, to);
                 to_update_sinks.push(sink);
+            }
+        }
+
+        for subscription in database_mgr.subscriptions.values() {
+            if subscription.dependent_relations.contains(&relation_id) {
+                let mut subscription = subscription.clone();
+                subscription.definition =
+                    alter_relation_rename_refs(&subscription.definition, from, to);
+                to_update_subscriptions.push(subscription);
             }
         }
 
@@ -1667,6 +1882,8 @@ impl CatalogManager {
         let mut tables = BTreeMapTransaction::new(&mut database_mgr.tables);
         let mut views = BTreeMapTransaction::new(&mut database_mgr.views);
         let mut sinks = BTreeMapTransaction::new(&mut database_mgr.sinks);
+        let mut subscriptions: BTreeMapTransaction<'_, u32, risingwave_pb::catalog::Subscription> =
+            BTreeMapTransaction::new(&mut database_mgr.subscriptions);
         let mut sources = BTreeMapTransaction::new(&mut database_mgr.sources);
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
@@ -1676,6 +1893,9 @@ impl CatalogManager {
         });
         to_update_sinks.iter().for_each(|sink| {
             sinks.insert(sink.id, sink.clone());
+        });
+        to_update_subscriptions.iter().for_each(|subscription| {
+            subscriptions.insert(subscription.id, subscription.clone());
         });
         if let Some(source) = &to_update_source {
             sources.insert(source.id, source.clone());
@@ -1687,6 +1907,7 @@ impl CatalogManager {
             !to_update_tables.is_empty()
                 || !to_update_views.is_empty()
                 || !to_update_sinks.is_empty()
+                || !to_update_subscriptions.is_empty()
                 || to_update_source.is_some()
         );
         let version = self
@@ -1704,6 +1925,13 @@ impl CatalogManager {
                         .chain(to_update_sinks.into_iter().map(|sink| Relation {
                             relation_info: RelationInfo::Sink(sink).into(),
                         }))
+                        .chain(
+                            to_update_subscriptions
+                                .into_iter()
+                                .map(|subscription| Relation {
+                                    relation_info: RelationInfo::Subscription(subscription).into(),
+                                }),
+                        )
                         .chain(to_update_source.into_iter().map(|source| Relation {
                             relation_info: RelationInfo::Source(source).into(),
                         }))
@@ -1746,6 +1974,7 @@ impl CatalogManager {
             vec![],
             vec![view],
             vec![],
+            vec![],
             None,
         )
         .await
@@ -1784,6 +2013,47 @@ impl CatalogManager {
         Ok(version)
     }
 
+    pub async fn alter_subscription_name(
+        &self,
+        subscription_id: SubscriptionId,
+        subscription_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_subscription_id(subscription_id)?;
+
+        // 1. validate new subscription name.
+        let mut subscription = database_core
+            .subscriptions
+            .get(&subscription_id)
+            .unwrap()
+            .clone();
+        database_core.check_relation_name_duplicated(&(
+            subscription.database_id,
+            subscription.schema_id,
+            subscription_name.to_string(),
+        ))?;
+
+        // 2. rename subscription and its definition.
+        subscription.name = subscription_name.to_string();
+        subscription.definition =
+            alter_relation_rename(&subscription.definition, subscription_name);
+
+        // 3. commit meta.
+        let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
+        subscriptions.insert(subscription_id, subscription.clone());
+        commit_meta!(self, subscriptions)?;
+
+        let version = self
+            .notify_frontend_relation_info(
+                Operation::Update,
+                RelationInfo::Subscription(subscription),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_source_name(
         &self,
         source_id: SourceId,
@@ -1812,6 +2082,7 @@ impl CatalogManager {
             source_id,
             &old_name,
             source_name,
+            vec![],
             vec![],
             vec![],
             vec![],
@@ -2118,6 +2389,40 @@ impl CatalogManager {
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
             }
+            alter_owner_request::Object::SubscriptionId(subscription_id) => {
+                database_core.ensure_subscription_id(subscription_id)?;
+                let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                let mut subscription = subscriptions.get_mut(subscription_id).unwrap();
+                let old_owner_id = subscription.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+                subscription.owner = owner_id;
+
+                let mut relations = vec![Relation {
+                    relation_info: Some(RelationInfo::Subscription(subscription.clone())),
+                }];
+
+                // internal tables
+                let internal_table_ids = fragment_manager
+                    .select_table_fragments_by_table_id(&(subscription_id.into()))
+                    .await?
+                    .internal_table_ids();
+                for id in internal_table_ids {
+                    let mut table = tables.get_mut(id).unwrap();
+                    assert_eq!(old_owner_id, table.owner);
+                    table.owner = owner_id;
+                    relations.push(Relation {
+                        relation_info: Some(RelationInfo::Table(table.clone())),
+                    });
+                }
+
+                relation_info = Info::RelationGroup(RelationGroup { relations });
+                commit_meta!(self, subscriptions, tables)?;
+                user_core.increase_ref(owner_id);
+                user_core.decrease_ref(old_owner_id);
+            }
         };
 
         let version = self.notify_frontend(Operation::Update, relation_info).await;
@@ -2341,6 +2646,42 @@ impl CatalogManager {
                 commit_meta!(self, functions)?;
                 let version = self.notify_frontend(Operation::Update, notify_info).await;
                 return Ok(version);
+            }
+            alter_set_schema_request::Object::SubscriptionId(subscription_id) => {
+                database_core.ensure_subscription_id(subscription_id)?;
+                let Subscription {
+                    name, schema_id, ..
+                } = database_core.subscriptions.get(&subscription_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                // internal tables.
+                let to_update_internal_table_ids = Vec::from_iter(
+                    fragment_manager
+                        .select_table_fragments_by_table_id(&(subscription_id.into()))
+                        .await?
+                        .internal_table_ids(),
+                );
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
+                let mut subscription = subscriptions.get_mut(subscription_id).unwrap();
+                subscription.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Subscription(subscription.clone())));
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                commit_meta!(self, subscriptions, tables)?;
             }
         }
 
@@ -2841,6 +3182,114 @@ impl CatalogManager {
         }
     }
 
+    pub async fn start_create_subscription_procedure(
+        &self,
+        subscription: &Subscription,
+    ) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(subscription.database_id)?;
+        database_core.ensure_schema_id(subscription.schema_id)?;
+        for dependent_id in &subscription.dependent_relations {
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
+        }
+        let key = (
+            subscription.database_id,
+            subscription.schema_id,
+            subscription.name.clone(),
+        );
+        database_core.check_relation_name_duplicated(&key)?;
+        #[cfg(not(test))]
+        user_core.ensure_user_id(subscription.owner)?;
+
+        if database_core.has_in_progress_creation(&key) {
+            bail!("subscription already in creating procedure");
+        } else {
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(subscription.id, key);
+            for &dependent_relation_id in &subscription.dependent_relations {
+                database_core.increase_ref_count(dependent_relation_id);
+            }
+            user_core.increase_ref(subscription.owner);
+            Ok(())
+        }
+    }
+
+    pub async fn finish_create_subscription_procedure(
+        &self,
+        mut internal_tables: Vec<Table>,
+        mut subscription: Subscription,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let key = (
+            subscription.database_id,
+            subscription.schema_id,
+            subscription.name.clone(),
+        );
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut subscriptions = BTreeMapTransaction::new(&mut database_core.subscriptions);
+        assert!(
+            !subscriptions.contains_key(&subscription.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "subscription must be in creating procedure"
+        );
+
+        database_core.in_progress_creation_tracker.remove(&key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&subscription.id);
+
+        subscription.stream_job_status = PbStreamJobStatus::Created.into();
+        subscriptions.insert(subscription.id, subscription.clone());
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
+            tables.insert(table.id, table.clone());
+        }
+        commit_meta!(self, subscriptions, tables)?;
+
+        let version = self
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Subscription(subscription.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn cancel_create_subscription_procedure(&self, subscription: &Subscription) {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let key = (
+            subscription.database_id,
+            subscription.schema_id,
+            subscription.name.clone(),
+        );
+        assert!(
+            !database_core.subscriptions.contains_key(&subscription.id),
+            "subscription must be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(subscription.id);
+        for &dependent_relation_id in &subscription.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
+        }
+        user_core.decrease_ref(subscription.owner);
+    }
+
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn start_replace_table_procedure(&self, stream_job: &StreamingJob) -> MetaResult<()> {
         let StreamingJob::Table(source, table, ..) = stream_job else {
@@ -2886,7 +3335,8 @@ impl CatalogManager {
         source: &Option<Source>,
         table: &Table,
         table_col_index_mapping: Option<ColIndexMapping>,
-        incoming_sink_id: Option<SinkId>,
+        creating_sink_id: Option<SinkId>,
+        dropping_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2925,7 +3375,7 @@ impl CatalogManager {
 
         let mut updated_indexes = vec![];
 
-        if let Some(table_col_index_mapping) = table_col_index_mapping.clone() {
+        if let Some(table_col_index_mapping) = table_col_index_mapping {
             let expr_rewriter = ReplaceTableExprRewriter {
                 table_col_index_mapping,
             };
@@ -2945,8 +3395,15 @@ impl CatalogManager {
 
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
-        if let Some(incoming_sink_id) = incoming_sink_id {
+
+        if let Some(incoming_sink_id) = creating_sink_id {
             table.incoming_sinks.push(incoming_sink_id);
+        }
+
+        if let Some(dropping_sink_id) = dropping_sink_id {
+            table
+                .incoming_sinks
+                .retain(|sink_id| *sink_id != dropping_sink_id);
         }
 
         tables.insert(table.id, table.clone());
@@ -3074,6 +3531,18 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|table| table.table_type == table_type as i32)
+            .cloned()
+            .collect_vec()
+    }
+
     /// Lists table catalogs for mviews, without their internal tables.
     pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.core
@@ -3114,6 +3583,18 @@ impl CatalogManager {
 
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
+    }
+
+    pub async fn list_sinks(&self) -> Vec<Sink> {
+        self.core.lock().await.database.list_sinks()
+    }
+
+    pub async fn list_subscriptions(&self) -> Vec<Subscription> {
+        self.core.lock().await.database.list_subscriptions()
+    }
+
+    pub async fn list_views(&self) -> Vec<View> {
+        self.core.lock().await.database.list_views()
     }
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
@@ -3221,7 +3702,9 @@ impl CatalogManager {
         table_ids
             .iter()
             .filter_map(|table_id| {
-                if let Some(t) = guard.database.tables.get(table_id) && t.version.is_some() {
+                if let Some(t) = guard.database.tables.get(table_id)
+                    && t.version.is_some()
+                {
                     let ret = (
                         t.id,
                         t.columns
@@ -3234,6 +3717,56 @@ impl CatalogManager {
                 None
             })
             .collect()
+    }
+
+    // TODO: replace *_count with SQL
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn source_count(&self) -> usize {
+        self.core.lock().await.database.sources.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn table_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::Table as i32)
+            .count()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn materialized_view_count(&self) -> usize {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .values()
+            .filter(|t| t.table_type == TableType::MaterializedView as i32)
+            .count()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn index_count(&self) -> usize {
+        self.core.lock().await.database.indexes.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn sink_count(&self) -> usize {
+        self.core.lock().await.database.sinks.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn subscription_count(&self) -> usize {
+        self.core.lock().await.database.subscriptions.len()
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    pub async fn function_count(&self) -> usize {
+        self.core.lock().await.database.functions.len()
     }
 }
 
@@ -3256,7 +3789,7 @@ impl CatalogManager {
                     ..Default::default()
                 };
 
-                default_user.insert(self.env.meta_store()).await?;
+                default_user.insert(self.env.meta_store_checked()).await?;
                 core.user_info.insert(default_user.id, default_user);
             }
         }
@@ -3438,14 +3971,28 @@ impl CatalogManager {
         true
     }
 
+    /// Check whether the user is the owner of the object.
+    #[inline(always)]
+    fn check_owner(
+        database_manager: &DatabaseManager,
+        object: &Object,
+        user_id: UserId,
+    ) -> MetaResult<bool> {
+        database_manager
+            .get_object_owner(object)
+            .map(|owner_id| owner_id == user_id)
+    }
+
     pub async fn grant_privilege(
         &self,
         user_ids: &[UserId],
         new_grant_privileges: &[GrantPrivilege],
         grantor: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.user;
-        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let core = &mut *self.core.lock().await;
+        let user_core = &mut core.user;
+        let catalog_core = &core.database;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut user_updated = Vec::with_capacity(user_ids.len());
         let grantor_info = users
             .get(&grantor)
@@ -3464,6 +4011,13 @@ impl CatalogManager {
             }
             if !grantor_info.is_super {
                 for new_grant_privilege in new_grant_privileges {
+                    if Self::check_owner(
+                        catalog_core,
+                        new_grant_privilege.object.as_ref().unwrap(),
+                        grantor,
+                    )? {
+                        continue;
+                    }
                     if let Some(privilege) = grantor_info
                         .grant_privileges
                         .iter()
@@ -3499,7 +4053,7 @@ impl CatalogManager {
 
         commit_meta!(self, users)?;
 
-        let grant_user = core
+        let grant_user = user_core
             .user_grant_relation
             .entry(grantor)
             .or_insert_with(HashSet::new);
@@ -3560,8 +4114,10 @@ impl CatalogManager {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.user;
-        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let core = &mut *self.core.lock().await;
+        let user_core = &mut core.user;
+        let catalog_core = &core.database;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut user_updated = HashMap::new();
         let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
@@ -3572,6 +4128,13 @@ impl CatalogManager {
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_super {
             for privilege in revoke_grant_privileges {
+                if Self::check_owner(
+                    catalog_core,
+                    privilege.object.as_ref().unwrap(),
+                    revoke_by.id,
+                )? {
+                    continue;
+                }
                 if let Some(user_privilege) = revoke_by
                     .grant_privileges
                     .iter()
@@ -3607,7 +4170,7 @@ impl CatalogManager {
         }
         while !users_info.is_empty() {
             let mut cur_user = users_info.pop_front().unwrap();
-            let cur_relations = core
+            let cur_relations = user_core
                 .user_grant_relation
                 .get(&cur_user.id)
                 .cloned()
@@ -3662,7 +4225,7 @@ impl CatalogManager {
 
         // Since we might revoke privileges recursively, just simply re-build the grant relation
         // map here.
-        core.build_grant_relation_map();
+        user_core.build_grant_relation_map();
 
         let mut version = 0;
         // FIXME: user might not be updated.

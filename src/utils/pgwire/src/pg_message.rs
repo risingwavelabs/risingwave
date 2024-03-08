@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
+use anyhow::anyhow;
 use byteorder::{BigEndian, ByteOrder, NetworkEndian};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -58,7 +59,7 @@ impl FeStartupMessage {
             Ok(v) => Ok(v.trim_end_matches('\0')),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Input end error: {}", err),
+                anyhow!(err).context("Input end error"),
             )),
         }?;
         let mut map = HashMap::new();
@@ -242,12 +243,12 @@ impl FeQueryMessage {
             Ok(cstr) => cstr.to_str().map_err(|err| {
                 Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Invalid UTF-8 sequence: {}", err),
+                    anyhow!(err).context("Invalid UTF-8 sequence"),
                 )
             }),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
-                format!("Input end error: {}", err),
+                anyhow!(err).context("Input end error"),
             )),
         }
     }

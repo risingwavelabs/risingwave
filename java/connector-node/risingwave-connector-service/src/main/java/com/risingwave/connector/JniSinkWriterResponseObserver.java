@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,11 +41,12 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onError(Throwable throwable) {
-        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage())) {
+        LOG.error("JniSinkWriterHandler onError: ", throwable);
+        var errMsg = throwable.getMessage() == null ? "unknown error" : throwable.getMessage();
+        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, errMsg)) {
             LOG.warn("unable to send error: {}", throwable.getMessage());
         }
         this.success = false;
-        LOG.error("JniSinkWriterHandler onError: ", throwable);
     }
 
     @Override

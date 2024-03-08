@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::iter::once;
 use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
@@ -45,6 +46,44 @@ pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
     Bound<FullKey<KeyPayloadType>>,
 );
+
+pub fn is_empty_key_range(key_range: &TableKeyRange) -> bool {
+    match key_range {
+        (Included(start), Excluded(end)) => start == end,
+        _ => false,
+    }
+}
+
+// returning left inclusive and right exclusive
+pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
+    let (left, right) = range;
+    let left = match left {
+        Included(key) | Excluded(key) => key.vnode_part().to_index(),
+        Unbounded => 0,
+    };
+    let right = match right {
+        Included(key) => key.vnode_part().to_index() + 1,
+        Excluded(key) => {
+            let (vnode, inner_key) = key.split_vnode();
+            if inner_key.is_empty() {
+                // When the exclusive end key range contains only a vnode,
+                // the whole vnode is excluded.
+                vnode.to_index()
+            } else {
+                vnode.to_index() + 1
+            }
+        }
+        Unbounded => VirtualNode::COUNT,
+    };
+    (left, right)
+}
+
+// Ensure there is only one vnode involved in table key range and return the vnode
+pub fn vnode(range: &TableKeyRange) -> VirtualNode {
+    let (l, r_exclusive) = vnode_range(range);
+    assert_eq!(r_exclusive - l, 1);
+    VirtualNode::from_index(l)
+}
 
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
@@ -339,7 +378,7 @@ pub fn prefix_slice_with_vnode(vnode: VirtualNode, slice: &[u8]) -> Bytes {
 pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     vnode: VirtualNode,
-) -> (Bound<Bytes>, Bound<Bytes>) {
+) -> TableKeyRange {
     let prefixed = |b: &B| -> Bytes { prefix_slice_with_vnode(vnode, b.as_ref()) };
 
     let start: Bound<Bytes> = match range.start_bound() {
@@ -360,7 +399,7 @@ pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
         Unbounded => end_bound_of_vnode(vnode),
     };
 
-    (start, end)
+    map_table_key_range((start, end))
 }
 
 pub trait CopyFromSlice {
@@ -621,10 +660,11 @@ impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}}}",
+            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}, spill_offset: {}}}",
             self.user_key,
+            self.epoch_with_gap.pure_epoch(),
             self.epoch_with_gap.as_u64(),
-            self.epoch_with_gap.pure_epoch()
+            self.epoch_with_gap.as_u64() - self.epoch_with_gap.pure_epoch(),
         )
     }
 }
@@ -795,6 +835,15 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+impl<'a, T> From<UserKey<&'a [u8]>> for UserKey<T>
+where
+    T: AsRef<[u8]> + CopyFromSlice,
+{
+    fn from(value: UserKey<&'a [u8]>) -> Self {
+        value.copy_into()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PointRange<T: AsRef<[u8]>> {
     // When comparing `PointRange`, we first compare `left_user_key`, then
@@ -888,6 +937,143 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     };
 
     (start, end)
+}
+
+/// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool = false> {
+    pub latest_full_key: FullKey<T>,
+    last_observed_epoch_with_gap: EpochWithGap,
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_DEDUP> {
+    pub fn new(init_full_key: FullKey<T>) -> Self {
+        let epoch_with_gap = init_full_key.epoch_with_gap;
+        Self {
+            latest_full_key: init_full_key,
+            last_observed_epoch_with_gap: epoch_with_gap,
+        }
+    }
+
+    /// Check and observe a new full key during iteration
+    ///
+    /// # Examples:
+    /// ```
+    /// use bytes::Bytes;
+    /// use risingwave_common::catalog::TableId;
+    /// use risingwave_common::util::epoch::EPOCH_AVAILABLE_BITS;
+    /// use risingwave_hummock_sdk::EpochWithGap;
+    /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
+    ///
+    /// let table_id = TableId { table_id: 1 };
+    /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
+    /// let mut a: FullKeyTracker<_> = FullKeyTracker::<Bytes>::new(full_key1.clone());
+    ///
+    /// // Panic on non-decreasing epoch observed for the same user key.
+    /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6 << EPOCH_AVAILABLE_BITS);
+    /// // a.observe(full_key_with_larger_epoch);
+    ///
+    /// // Panic on non-increasing user key observed.
+    /// // let full_key_with_smaller_user_key = FullKey::new(table_id, TableKey(Bytes::from("b")), 3 << EPOCH_AVAILABLE_BITS);
+    /// // a.observe(full_key_with_smaller_user_key);
+    ///
+    /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3 << EPOCH_AVAILABLE_BITS);
+    /// assert_eq!(a.observe(full_key2.clone()), None);
+    /// assert_eq!(a.latest_user_key(), &full_key2.user_key);
+    ///
+    /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4 << EPOCH_AVAILABLE_BITS);
+    /// assert_eq!(a.observe(full_key3.clone()), Some(full_key1.user_key));
+    /// assert_eq!(a.latest_user_key(), &full_key3.user_key);
+    /// ```
+    ///
+    /// Return:
+    /// - If the provided `key` contains a new user key, return the latest full key observed for the previous user key.
+    /// - Otherwise: return None
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<UserKey<T>>
+    where
+        UserKey<F>: Into<UserKey<T>>,
+        F: AsRef<[u8]>,
+    {
+        self.observe_multi_version(key.user_key, once(key.epoch_with_gap))
+    }
+
+    /// `epochs` comes from greater to smaller
+    pub fn observe_multi_version<F>(
+        &mut self,
+        user_key: UserKey<F>,
+        mut epochs: impl Iterator<Item = EpochWithGap>,
+    ) -> Option<UserKey<T>>
+    where
+        UserKey<F>: Into<UserKey<T>>,
+        F: AsRef<[u8]>,
+    {
+        let max_epoch_with_gap = epochs.next().expect("non-empty");
+        let min_epoch_with_gap = epochs.fold(
+            max_epoch_with_gap,
+            |prev_epoch_with_gap, curr_epoch_with_gap| {
+                assert!(
+                    prev_epoch_with_gap > curr_epoch_with_gap,
+                    "epoch list not sorted. prev: {:?}, curr: {:?}, user_key: {:?}",
+                    prev_epoch_with_gap,
+                    curr_epoch_with_gap,
+                    user_key
+                );
+                curr_epoch_with_gap
+            },
+        );
+        match self
+            .latest_full_key
+            .user_key
+            .as_ref()
+            .cmp(&user_key.as_ref())
+        {
+            Ordering::Less => {
+                // Observe a new user key
+
+                // Reset epochs
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+
+                // Take the previous key and set latest key
+                Some(
+                    std::mem::replace(
+                        &mut self.latest_full_key,
+                        FullKey {
+                            user_key: user_key.into(),
+                            epoch_with_gap: min_epoch_with_gap,
+                        },
+                    )
+                    .user_key,
+                )
+            }
+            Ordering::Equal => {
+                if max_epoch_with_gap > self.last_observed_epoch_with_gap
+                    || (!SKIP_DEDUP && max_epoch_with_gap == self.last_observed_epoch_with_gap)
+                {
+                    // Epoch from the same user key should be monotonically decreasing
+                    panic!(
+                        "key {:?} epoch {:?} >= prev epoch {:?}",
+                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
+                    );
+                }
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+                None
+            }
+            Ordering::Greater => {
+                // User key should be monotonically increasing
+                panic!(
+                    "key {:?} <= prev key {:?}",
+                    user_key,
+                    FullKey {
+                        user_key: self.latest_full_key.user_key.as_ref(),
+                        epoch_with_gap: self.last_observed_epoch_with_gap
+                    }
+                );
+            }
+        }
+    }
+
+    pub fn latest_user_key(&self) -> &UserKey<T> {
+        &self.latest_full_key.user_key
+    }
 }
 
 #[cfg(test)]
@@ -1048,21 +1234,30 @@ mod tests {
                 (Included(Bytes::from("1")), Included(Bytes::from("2"))),
                 VirtualNode::from_index(233),
             ),
-            (Included(concat(233, b"1")), Included(concat(233, b"2")))
+            (
+                Included(TableKey(concat(233, b"1"))),
+                Included(TableKey(concat(233, b"2")))
+            )
         );
         assert_eq!(
             prefixed_range_with_vnode(
                 (Excluded(Bytes::from("1")), Excluded(Bytes::from("2"))),
                 VirtualNode::from_index(233),
             ),
-            (Excluded(concat(233, b"1")), Excluded(concat(233, b"2")))
+            (
+                Excluded(TableKey(concat(233, b"1"))),
+                Excluded(TableKey(concat(233, b"2")))
+            )
         );
         assert_eq!(
             prefixed_range_with_vnode(
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
                 VirtualNode::from_index(233),
             ),
-            (Included(concat(233, b"")), Excluded(concat(234, b"")))
+            (
+                Included(TableKey(concat(233, b""))),
+                Excluded(TableKey(concat(234, b"")))
+            )
         );
         let max_vnode = VirtualNode::COUNT - 1;
         assert_eq!(
@@ -1070,7 +1265,7 @@ mod tests {
                 (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
                 VirtualNode::from_index(max_vnode),
             ),
-            (Included(concat(max_vnode, b"")), Unbounded)
+            (Included(TableKey(concat(max_vnode, b""))), Unbounded)
         );
         let second_max_vnode = max_vnode - 1;
         assert_eq!(
@@ -1079,9 +1274,36 @@ mod tests {
                 VirtualNode::from_index(second_max_vnode),
             ),
             (
-                Included(concat(second_max_vnode, b"")),
-                Excluded(concat(max_vnode, b""))
+                Included(TableKey(concat(second_max_vnode, b""))),
+                Excluded(TableKey(concat(max_vnode, b"")))
             )
         );
+    }
+
+    #[test]
+    fn test_single_vnode_range() {
+        let left_bound = vec![
+            Included(b"0".as_slice()),
+            Excluded(b"0".as_slice()),
+            Unbounded,
+        ];
+        let right_bound = vec![
+            Included(b"1".as_slice()),
+            Excluded(b"1".as_slice()),
+            Unbounded,
+        ];
+        for vnode in 0..VirtualNode::COUNT {
+            for left in &left_bound {
+                for right in &right_bound {
+                    assert_eq!(
+                        (vnode, vnode + 1),
+                        vnode_range(&prefixed_range_with_vnode::<&[u8]>(
+                            (*left, *right),
+                            VirtualNode::from_index(vnode)
+                        ))
+                    )
+                }
+            }
+        }
     }
 }

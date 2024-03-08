@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub mod external;
 pub mod source;
 pub mod split;
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
 
+use crate::error::ConnectorResult;
 use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
@@ -34,10 +36,15 @@ pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
 pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
 pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
+// User can set snapshot='false' to disable cdc backfill
+pub const CDC_BACKFILL_ENABLE_KEY: &str = "snapshot";
+// We enable transaction for shared cdc source by default
+pub const CDC_TRANSACTIONAL_KEY: &str = "transactional";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
 pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
+pub const MONGODB_CDC_CONNECTOR: &str = Mongodb::CDC_CONNECTOR_NAME;
 
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
@@ -52,6 +59,7 @@ impl<'a> From<&'a str> for CdcSourceType {
             MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
+            MONGODB_CDC_CONNECTOR => CdcSourceType::Mongodb,
             _ => CdcSourceType::Unspecified,
         }
     }
@@ -63,6 +71,7 @@ impl CdcSourceType {
             CdcSourceType::Mysql => "MySQL",
             CdcSourceType::Postgres => "Postgres",
             CdcSourceType::Citus => "Citus",
+            CdcSourceType::Mongodb => "MongoDB",
             CdcSourceType::Unspecified => "Unspecified",
         }
     }
@@ -83,7 +92,10 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
 }
 
 impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
-    fn try_from_hashmap(properties: HashMap<String, String>) -> anyhow::Result<Self> {
+    fn try_from_hashmap(
+        properties: HashMap<String, String>,
+        _deny_unknown_fields: bool,
+    ) -> ConnectorResult<Self> {
         let is_multi_table_shared = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
@@ -99,7 +111,7 @@ impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
 
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where
-    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = crate::error::ConnectorError> + Into<SplitImpl>,
     DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
 {
     type Split = DebeziumCdcSplit<T>;
@@ -137,12 +149,8 @@ where
     }
 
     fn init_from_pb_cdc_table_desc(&mut self, table_desc: &ExternalTableDesc) {
-        let properties: HashMap<String, String> = table_desc
-            .connect_properties
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (k, v))
-            .collect();
+        let properties: HashMap<String, String> =
+            table_desc.connect_properties.clone().into_iter().collect();
 
         let table_schema = TableSchema {
             columns: table_desc.columns.clone(),
@@ -153,6 +161,13 @@ where
         self.table_schema = table_schema;
         // properties are not shared, so mark it as false
         self.is_multi_table_shared = false;
+    }
+}
+
+impl<T: CdcSourceTypeTrait> crate::source::UnknownFields for CdcProperties<T> {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        // FIXME: CDC does not handle unknown fields yet
+        HashMap::new()
     }
 }
 

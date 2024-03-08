@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,14 @@
 
 use std::time::Duration;
 
-use anyhow::Result;
-use itertools::Itertools;
-use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
+use anyhow::{anyhow, Result};
+use risingwave_common::error::v2::AsReport;
+use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
+
+use crate::utils::{
+    kill_cn_and_meta_and_wait_recover, kill_cn_and_wait_recover, kill_random_and_wait_recover,
+};
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const DROP_TABLE: &str = "DROP TABLE t;";
@@ -31,39 +35,6 @@ const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 const DROP_MV1: &str = "DROP MATERIALIZED VIEW mv1;";
 const WAIT: &str = "WAIT;";
 
-async fn kill_cn_and_wait_recover(cluster: &Cluster) {
-    cluster
-        .kill_nodes(["compute-1", "compute-2", "compute-3"], 0)
-        .await;
-    sleep(Duration::from_secs(10)).await;
-}
-
-async fn kill_cn_and_meta_and_wait_recover(cluster: &Cluster) {
-    cluster
-        .kill_nodes(
-            [
-                "compute-1",
-                "compute-2",
-                "compute-3",
-                "meta-1",
-                "meta-2",
-                "meta-3",
-            ],
-            0,
-        )
-        .await;
-    sleep(Duration::from_secs(10)).await;
-}
-
-async fn kill_random_and_wait_recover(cluster: &Cluster) {
-    // Kill it again
-    for _ in 0..3 {
-        sleep(Duration::from_secs(2)).await;
-        cluster.kill_node(&KillOpts::ALL_FAST).await;
-    }
-    sleep(Duration::from_secs(10)).await;
-}
-
 async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("finding streaming jobs to cancel");
     let ids = session
@@ -76,8 +47,11 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("cancelled streaming jobs, {}", result);
     let ids = result
         .split('\n')
-        .map(|s| s.parse::<u32>().unwrap())
-        .collect_vec();
+        .map(|s| {
+            s.parse::<u32>()
+                .map_err(|_e| anyhow!("failed to parse {}", s))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(ids)
 }
 
@@ -273,6 +247,131 @@ async fn test_ddl_cancel() -> Result<()> {
     session.run("DROP TABLE t").await?;
 
     Ok(())
+}
+
+/// When cancelling a stream job under high latency,
+/// the cancel should take a long time to take effect.
+/// If we trigger a recovery however, the cancel should take effect immediately,
+/// since cancel will immediately drop the table fragment.
+async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    // Join 2 fact tables together to create a high barrier latency scenario.
+
+    session.run("CREATE TABLE fact1 (v1 int)").await?;
+    session
+        .run("INSERT INTO fact1 select 1 from generate_series(1, 100000)")
+        .await?;
+
+    session.run("CREATE TABLE fact2 (v1 int)").await?;
+    session
+        .run("INSERT INTO fact2 select 1 from generate_series(1, 100000)")
+        .await?;
+    session.flush().await?;
+
+    tracing::info!("seeded base tables");
+
+    // Create high barrier latency scenario
+    // Keep creating mv1, if it's not created.
+    loop {
+        session.run(SET_BACKGROUND_DDL).await?;
+        session.run("CREATE MATERIALIZED VIEW mv1 as select fact1.v1 from fact1 join fact2 on fact1.v1 = fact2.v1").await?;
+        tracing::info!("created mv in background");
+        sleep(Duration::from_secs(1)).await;
+
+        cluster
+            .kill_nodes_and_restart(["compute-1", "compute-2", "compute-3"], 2)
+            .await;
+        sleep(Duration::from_secs(2)).await;
+
+        tracing::debug!("killed cn, waiting recovery");
+
+        // Check if mv stream job is created in the background
+        match session
+            .run("select * from rw_catalog.rw_ddl_progress;")
+            .await
+        {
+            Ok(s) if s.is_empty() => {
+                // MV was dropped
+                continue;
+            }
+            Err(e) => {
+                return Err(e);
+            }
+            Ok(s) => {
+                tracing::info!("created mv stream job with status: {}", s);
+                break;
+            }
+        }
+    }
+
+    tracing::info!("restarted cn: trigger stream job recovery");
+
+    // Make sure there's some progress first.
+    loop {
+        // Wait until at least 10% of records are ingested.
+        let progress = session
+            .run("select progress from rw_catalog.rw_ddl_progress;")
+            .await
+            .unwrap();
+        tracing::info!(progress, "get progress before cancel stream job");
+        let progress = progress.replace('%', "");
+        let progress = progress.parse::<f64>().unwrap();
+        if progress > 0.01 {
+            break;
+        } else {
+            sleep(Duration::from_micros(1)).await;
+        }
+    }
+    // Loop in case the cancel gets dropped after
+    // cn kill, before it drops the table fragment.
+    for iteration in 0..5 {
+        tracing::info!(iteration, "cancelling stream job");
+        let mut session2 = cluster.start_session();
+        let handle = tokio::spawn(async move {
+            let result = cancel_stream_jobs(&mut session2).await;
+            tracing::info!(?result, "cancel stream jobs");
+        });
+
+        sleep(Duration::from_millis(500)).await;
+        kill_cn_and_wait_recover(&cluster).await;
+        tracing::info!("restarted cn: cancel should take effect");
+
+        handle.await.unwrap();
+
+        // Create MV with same relation name should succeed,
+        // since the previous job should be cancelled.
+        tracing::info!("recreating mv");
+        session.run("SET BACKGROUND_DDL=false").await?;
+        if let Err(e) = session
+            .run("CREATE MATERIALIZED VIEW mv1 as values(1)")
+            .await
+        {
+            tracing::info!(error = %e.as_report(), "Recreate mv failed");
+            continue;
+        } else {
+            tracing::info!("recreated mv");
+            break;
+        }
+    }
+
+    session.run(DROP_MV1).await?;
+    session.run("DROP TABLE fact1").await?;
+    session.run("DROP TABLE fact2").await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_high_barrier_latency_cancel_for_arrangement_backfill() -> Result<()> {
+    test_high_barrier_latency_cancel(Configuration::for_arrangement_backfill()).await
+}
+
+#[tokio::test]
+async fn test_high_barrier_latency_cancel_for_no_shuffle() -> Result<()> {
+    test_high_barrier_latency_cancel(Configuration::for_scale_no_shuffle()).await
 }
 
 // When cluster stop, foreground ddl job must be cancelled.

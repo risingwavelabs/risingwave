@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
-use risingwave_hummock_sdk::key::{map_table_key_range, TableKey};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -29,19 +30,23 @@ use risingwave_storage::store::{
 };
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
+use crate::test_utils::{
+    gen_key_from_bytes, with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch,
+};
 
 macro_rules! assert_count_range_scan {
-    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
+    ($storage:expr, $vnode:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
         let bounds: (Bound<Bytes>, Bound<Bytes>) = (
             range.start_bound().map(|x: &Bytes| x.clone()),
             range.end_bound().map(|x: &Bytes| x.clone()),
         );
+        let vnode = $vnode;
+        let table_key_range = prefixed_range_with_vnode(bounds, vnode);
         let it = $storage
             .iter(
-                map_table_key_range(bounds),
+                table_key_range,
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
@@ -112,10 +117,15 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
             ],
-            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -142,16 +152,24 @@ async fn test_snapshot_inner(
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 2, epoch1);
 
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                    StorageValue::new_delete(),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
-            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -178,17 +196,25 @@ async fn test_snapshot_inner(
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 3, epoch2);
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 3, epoch2);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 2, epoch1);
 
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("2")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("3")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("4")), StorageValue::new_delete()),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                    StorageValue::new_delete(),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                    StorageValue::new_delete(),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                    StorageValue::new_delete(),
+                ),
             ],
-            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -214,9 +240,9 @@ async fn test_snapshot_inner(
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 0, epoch3);
-    assert_count_range_scan!(hummock_storage, .., 3, epoch2);
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 0, epoch3);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 3, epoch2);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 2, epoch1);
 }
 
 async fn test_snapshot_range_scan_inner(
@@ -234,12 +260,23 @@ async fn test_snapshot_range_scan_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
-            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -271,12 +308,24 @@ async fn test_snapshot_range_scan_inner(
         };
     }
 
-    assert_count_range_scan!(hummock_storage, key!(2)..=key!(3), 2, epoch);
-    assert_count_range_scan!(hummock_storage, key!(2)..key!(3), 1, epoch);
-    assert_count_range_scan!(hummock_storage, key!(2).., 3, epoch);
-    assert_count_range_scan!(hummock_storage, ..=key!(3), 3, epoch);
-    assert_count_range_scan!(hummock_storage, ..key!(3), 2, epoch);
-    assert_count_range_scan!(hummock_storage, .., 4, epoch);
+    assert_count_range_scan!(
+        hummock_storage,
+        VirtualNode::ZERO,
+        key!(2)..=key!(3),
+        2,
+        epoch
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        VirtualNode::ZERO,
+        key!(2)..key!(3),
+        1,
+        epoch
+    );
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, key!(2).., 3, epoch);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, ..=key!(3), 3, epoch);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, ..key!(3), 2, epoch);
+    assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 4, epoch);
 }
 
 #[tokio::test]

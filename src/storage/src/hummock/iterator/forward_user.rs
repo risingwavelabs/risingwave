@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::ops::Bound::*;
 
 use bytes::Bytes;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
 use super::DeleteRangeIterator;
@@ -31,14 +31,11 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
     iterator: I,
 
-    /// Last full key.
-    last_key: FullKey<Bytes>,
+    // Track the last seen full key
+    full_key_tracker: FullKeyTracker<Bytes, true>,
 
     /// Last user value
-    last_val: Bytes,
-
-    /// Flag for whether the iterator reach over the right end of the range.
-    out_of_range: bool,
+    latest_val: Bytes,
 
     /// Start and end bounds of user key.
     key_range: UserKeyRange,
@@ -55,6 +52,9 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     stats: StoreLocalStatistic,
 
     delete_range_iter: ForwardMergeRangeIterator,
+
+    /// Whether the iterator is pointing to a valid position
+    is_current_pos_valid: bool,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -70,15 +70,15 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     ) -> Self {
         Self {
             iterator,
-            out_of_range: false,
             key_range,
-            last_key: FullKey::default(),
-            last_val: Bytes::new(),
+            latest_val: Bytes::new(),
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
             delete_range_iter,
             _version: version,
+            is_current_pos_valid: false,
+            full_key_tracker: FullKeyTracker::new(FullKey::default()),
         }
     }
 
@@ -96,62 +96,20 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     }
 
     /// Gets the iterator move to the next step.
+    /// See `IteratorState` for the state machine details.
     ///
     /// Returned result:
     /// - if `Ok(())` is returned, it means that the iterator successfully move to the next position
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
-        while self.iterator.is_valid() {
-            let full_key = self.iterator.key();
-            let epoch = full_key.epoch_with_gap.pure_epoch();
+        // Reset the valid flag to make sure if error happens, `is_valid` should return false.
+        self.is_current_pos_valid = false;
+        // Move the iterator to the next step if it is currently potined to a ready entry.
+        self.iterator.next().await?;
 
-            // handle multi-version
-            if epoch < self.min_epoch || epoch > self.read_epoch {
-                self.iterator.next().await?;
-                continue;
-            }
-
-            if self.last_key.user_key.as_ref() != full_key.user_key {
-                // It is better to early return here if the user key is already
-                // out of range to avoid unnecessary access on the range tomestones
-                // via `delete_range_iter`.
-                // For example, if we are iterating with key range [0x0a, 0x0c) and the
-                // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
-                // which is a waste of work.
-                if self.key_out_of_range() {
-                    self.out_of_range = true;
-                    return Ok(());
-                }
-
-                self.last_key = full_key.copy_into();
-                // handle delete operation
-                match self.iterator.value() {
-                    HummockValue::Put(val) => {
-                        self.delete_range_iter.next_until(full_key.user_key).await?;
-                        if self.delete_range_iter.current_epoch() >= epoch {
-                            self.stats.skip_delete_key_count += 1;
-                        } else {
-                            self.last_val = Bytes::copy_from_slice(val);
-                            self.stats.processed_key_count += 1;
-                            return Ok(());
-                        }
-                    }
-                    // It means that the key is deleted from the storage.
-                    // Deleted kv and the previous versions (if any) of the key should not be
-                    // returned to user.
-                    HummockValue::Delete => {
-                        self.stats.skip_delete_key_count += 1;
-                    }
-                }
-            } else {
-                self.stats.skip_multi_version_key_count += 1;
-            }
-
-            self.iterator.next().await?;
-        }
-
-        Ok(()) // not valid, EOF
+        // Check and move onto the next valid position if any
+        self.try_advance_to_next_valid().await
     }
 
     /// Returns the key with the newest version. Thus no version in it, and only the `user_key` will
@@ -163,7 +121,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn key(&self) -> &FullKey<Bytes> {
         assert!(self.is_valid());
-        &self.last_key
+        &self.full_key_tracker.latest_full_key
     }
 
     /// The returned value is in the form of user value.
@@ -171,13 +129,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn value(&self) -> &Bytes {
         assert!(self.is_valid());
-        &self.last_val
+        &self.latest_val
     }
 
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Reset
-        self.out_of_range = false;
+        self.is_current_pos_valid = false;
+        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan
         match &self.key_range.0 {
@@ -187,12 +146,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
+                // We check `is_valid` and `user_key_out_of_range` here to avoid `delete_range_iter.seek`
+                // as much as possible because it can be expensive. We can simplify this logic after delete
+                // range is deprecated and replaced with vnode watermark.
                 if !self.iterator.is_valid() {
                     return Ok(());
                 }
 
-                if self.key_out_of_range() {
-                    self.out_of_range = true;
+                if self.user_key_out_of_range(self.iterator.key().user_key) {
                     return Ok(());
                 }
 
@@ -200,6 +161,9 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
+                // We check `is_valid` here to avoid `delete_range_iter.rewind`
+                // as much as possible because it can be expensive. We can simplify this logic after delete
+                // range is deprecated and replaced with vnode watermark.
                 self.iterator.rewind().await?;
                 if !self.iterator.is_valid() {
                     return Ok(());
@@ -209,16 +173,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
         };
 
-        // Handle multi-version
-        self.last_key = FullKey::default();
-        // Handles range scan when key > end_key
-        self.next().await
+        self.try_advance_to_next_valid().await
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
-        self.out_of_range = false;
+        self.is_current_pos_valid = false;
+        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
@@ -239,29 +201,25 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
+        // We check `is_valid` and `user_key_out_of_range` here to avoid `delete_range_iter.seek`
+        // as much as possible because it can be expensive. We can simplify this logic after delete
+        // range is deprecated and replaced with vnode watermark.
         if !self.iterator.is_valid() {
             return Ok(());
         }
 
-        if self.key_out_of_range() {
-            self.out_of_range = true;
+        if self.user_key_out_of_range(self.iterator.key().user_key) {
             return Ok(());
         }
 
         self.delete_range_iter.seek(full_key.user_key).await?;
 
-        // Handle multi-version
-        self.last_key = FullKey::default();
-        // Handle range scan when key > end_key
-
-        self.next().await
+        self.try_advance_to_next_valid().await
     }
 
     /// Indicates whether the iterator can be used.
     pub fn is_valid(&self) -> bool {
-        // Handle range scan
-        // key >= begin_key is guaranteed by seek/rewind function
-        (!self.out_of_range) && self.iterator.is_valid()
+        self.is_current_pos_valid
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -269,14 +227,75 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.iterator.collect_local_statistic(stats);
     }
 
+    /// Advance the inner iterator to a valid position, in which the entry can be exposed.
+    /// Iterator will not be advanced if it already pointed to a valid position.
+    async fn try_advance_to_next_valid(&mut self) -> HummockResult<()> {
+        loop {
+            if !self.iterator.is_valid() {
+                break;
+            }
+
+            let full_key = self.iterator.key();
+            let epoch = full_key.epoch_with_gap.pure_epoch();
+
+            // Handle epoch visibility
+            if epoch < self.min_epoch || epoch > self.read_epoch {
+                self.iterator.next().await?;
+                continue;
+            }
+
+            // Skip older version entry for the same user key
+            if self.full_key_tracker.observe(full_key).is_none() {
+                self.stats.skip_multi_version_key_count += 1;
+                self.iterator.next().await?;
+                continue;
+            }
+
+            // A new user key is observed.
+
+            // It is better to early return here if the user key is already
+            // out of range to avoid unnecessary access on the range tomestones
+            // via `delete_range_iter`.
+            // For example, if we are iterating with key range [0x0a, 0x0c) and the
+            // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
+            // which is a waste of work.
+            if self.user_key_out_of_range(full_key.user_key) {
+                break;
+            }
+
+            // Handle delete operation
+            match self.iterator.value() {
+                HummockValue::Put(val) => {
+                    self.delete_range_iter.next_until(full_key.user_key).await?;
+                    if self.delete_range_iter.current_epoch() >= epoch {
+                        self.stats.skip_delete_key_count += 1;
+                    } else {
+                        self.latest_val = Bytes::copy_from_slice(val);
+                        self.stats.processed_key_count += 1;
+                        self.is_current_pos_valid = true;
+                        return Ok(());
+                    }
+                }
+                // It means that the key is deleted from the storage.
+                // Deleted kv and the previous versions (if any) of the key should not be
+                // returned to user.
+                HummockValue::Delete => {
+                    self.stats.skip_delete_key_count += 1;
+                }
+            }
+            self.iterator.next().await?;
+        }
+
+        self.is_current_pos_valid = false;
+        Ok(())
+    }
+
     // Validate whether the current key is already out of range.
-    fn key_out_of_range(&self) -> bool {
-        assert!(self.iterator.is_valid());
-        let current_user_key = self.iterator.key().user_key;
+    fn user_key_out_of_range(&self, user_key: UserKey<&[u8]>) -> bool {
         // handle range scan
         match &self.key_range.1 {
-            Included(end_key) => current_user_key > end_key.as_ref(),
-            Excluded(end_key) => current_user_key >= end_key.as_ref(),
+            Included(end_key) => user_key > end_key.as_ref(),
+            Excluded(end_key) => user_key >= end_key.as_ref(),
             Unbounded => false,
         }
     }
@@ -314,7 +333,7 @@ mod tests {
         iterator_test_bytes_key_of_epoch, iterator_test_bytes_user_key_of, iterator_test_value_of,
         mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::UnorderedMergeIteratorInner;
+    use crate::hummock::iterator::MergeIterator;
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
@@ -356,7 +375,7 @@ mod tests {
             SstableIterator::create(table2, sstable_store, read_options.clone()),
         ];
 
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
@@ -410,7 +429,7 @@ mod tests {
             SstableIterator::create(table2, sstable_store, read_options),
         ];
 
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
 
         // right edge case
@@ -473,7 +492,7 @@ mod tests {
             SstableIterator::create(table1, sstable_store.clone(), read_options),
         ];
 
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
@@ -529,7 +548,7 @@ mod tests {
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
         let end_key = Included(iterator_test_bytes_user_key_of(7));
@@ -607,7 +626,7 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
         let end_key = Excluded(iterator_test_bytes_user_key_of(7));
@@ -670,7 +689,7 @@ mod tests {
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
@@ -734,7 +753,7 @@ mod tests {
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));
@@ -814,7 +833,7 @@ mod tests {
         )];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let mut ui =
             UserIterator::for_test_with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch);
         ui.rewind().await.unwrap();
@@ -848,7 +867,7 @@ mod tests {
             sstable_store.clone(),
             Arc::new(read_options),
         )];
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
 
         let mut del_iter = ForwardMergeRangeIterator::new(150);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
@@ -880,7 +899,7 @@ mod tests {
         )];
         let mut del_iter = ForwardMergeRangeIterator::new(300);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
-        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mi = MergeIterator::new(iters);
         let mut ui: UserIterator<_> =
             UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter);
         ui.rewind().await.unwrap();

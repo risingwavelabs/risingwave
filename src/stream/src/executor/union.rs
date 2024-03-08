@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,56 +17,36 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::stream::{FusedStream, FuturesUnordered};
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
-use risingwave_common::catalog::Schema;
 
 use super::watermark::BufferedWatermarks;
-use super::*;
-use crate::executor::{BoxedMessageStream, ExecutorInfo};
+use super::{
+    Barrier, BoxedMessageStream, Execute, Executor, Message, MessageStreamItem, StreamExecutorError,
+};
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
-    info: ExecutorInfo,
-    inputs: Vec<BoxedExecutor>,
+    inputs: Vec<Executor>,
 }
 
 impl std::fmt::Debug for UnionExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UnionExecutor")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
-            .finish()
+        f.debug_struct("UnionExecutor").finish()
     }
 }
 
 impl UnionExecutor {
-    pub fn new(info: ExecutorInfo, inputs: Vec<BoxedExecutor>) -> Self {
-        Self { info, inputs }
+    pub fn new(inputs: Vec<Executor>) -> Self {
+        Self { inputs }
     }
 }
 
-impl Executor for UnionExecutor {
+impl Execute for UnionExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let streams = self.inputs.into_iter().map(|e| e.execute()).collect();
         merge(streams).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
     }
 }
 
@@ -170,8 +150,10 @@ mod tests {
     use async_stream::try_stream;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
+    use crate::executor::Watermark;
 
     #[tokio::test]
     async fn union() {

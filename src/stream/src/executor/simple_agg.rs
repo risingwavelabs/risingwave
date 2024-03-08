@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ use crate::task::AtomicU64Ref;
 /// Therefore, we "automatically" implemented a window function inside
 /// `SimpleAggExecutor`.
 pub struct SimpleAggExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
@@ -111,27 +111,15 @@ struct ExecutionVars<S: StateStore> {
     state_changed: bool,
 }
 
-impl<S: StateStore> Executor for SimpleAggExecutor<S> {
+impl<S: StateStore> Execute for SimpleAggExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
-        let input_info = args.input.info();
+        let input_info = args.input.info().clone();
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -214,12 +202,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             this.intermediate_state_table
                 .update_without_old_value(encoded_states);
 
-            // Commit all state tables.
-            futures::future::try_join_all(
-                this.all_state_tables_mut().map(|table| table.commit(epoch)),
-            )
-            .await?;
-
             // Retrieve modified states and put the changes into the builders.
             vars.agg_group
                 .build_change(&this.storages, &this.agg_funcs)
@@ -227,12 +209,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 .map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
         } else {
             // No state is changed.
-            // Call commit on state table to increment the epoch.
-            this.all_state_tables_mut().for_each(|table| {
-                table.commit_no_data_expected(epoch);
-            });
             None
         };
+
+        // Commit all state tables.
+        futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.commit(epoch)))
+            .await?;
 
         vars.state_changed = false;
         Ok(chunk)
@@ -241,7 +223,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn try_flush_data(this: &mut ExecutorInner<S>) -> StreamExecutorResult<()> {
         futures::future::try_join_all(this.all_state_tables_mut().map(|table| table.try_flush()))
             .await?;
-
         Ok(())
     }
 
@@ -342,7 +323,8 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![2]);
         tx.push_barrier(1, false);
         tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
@@ -369,9 +351,9 @@ mod tests {
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             store,
-            Box::new(source),
+            source,
             false,
             agg_calls,
             0,

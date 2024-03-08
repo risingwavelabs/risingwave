@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,6 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Error, Debug, Box, Construct)]
 #[thiserror_ext(newtype(name = Error))]
 pub enum ErrorInner {
-    #[error("failed to connect to UDF service: {0}")]
-    Connect(#[from] tonic::transport::Error),
-
     #[error("failed to send requests to UDF service: {0}")]
     Tonic(#[from] tonic::Status),
 
@@ -57,6 +54,10 @@ impl Error {
             ErrorInner::Tonic(status) if status.code() == tonic::Code::Unavailable => true,
             _ => false,
         }
+    }
+
+    pub fn is_tonic_error(&self) -> bool {
+        matches!(self.inner(), ErrorInner::Tonic(_))
     }
 }
 

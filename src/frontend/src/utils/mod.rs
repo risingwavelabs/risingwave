@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,6 @@ pub use rewrite_index::*;
 mod index_set;
 pub use index_set::*;
 pub(crate) mod group_by;
-pub mod infer_stmt_row_desc;
 pub mod overwrite_options;
 pub use group_by::*;
 pub use overwrite_options::*;
