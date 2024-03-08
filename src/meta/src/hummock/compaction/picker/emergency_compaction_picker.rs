@@ -55,22 +55,20 @@ impl EmergencyCompactionPicker {
         let overlapping_count = l0
             .sub_levels
             .iter()
-            .filter(|level| level.level_type == LevelType::Overlapping as i32)
+            .filter(|level| level.level_type == LevelType::Overlapping)
             .count();
         let no_overlap_count = l0
             .sub_levels
             .iter()
             .filter(|level| {
-                level.level_type == LevelType::Nonoverlapping as i32
-                    && level.vnode_partition_count == 0
+                level.level_type == LevelType::Nonoverlapping && level.vnode_partition_count == 0
             })
             .count();
         let partitioned_count = l0
             .sub_levels
             .iter()
             .filter(|level| {
-                level.level_type == LevelType::Nonoverlapping as i32
-                    && level.vnode_partition_count > 0
+                level.level_type == LevelType::Nonoverlapping && level.vnode_partition_count > 0
             })
             .count();
         // We trigger `EmergencyCompactionPicker` only when some unexpected condition cause the number of l0 levels increase and the origin strategy

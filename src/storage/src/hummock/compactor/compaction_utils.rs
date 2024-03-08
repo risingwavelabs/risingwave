@@ -348,7 +348,7 @@ pub async fn check_compaction_result(
         }
 
         // Do not need to filter the table because manager has done it.
-        if level.level_type == LevelType::Nonoverlapping as i32 {
+        if level.level_type == LevelType::Nonoverlapping {
             debug_assert!(can_concat(&level.table_infos));
             del_iter.add_concat_iter(level.table_infos.clone(), context.sstable_store.clone());
 

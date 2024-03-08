@@ -336,7 +336,6 @@ impl VnodeWatermark {
 
 impl ProtoSerializeExt for VnodeWatermark {
     type PB = PbVnodeWatermark;
-    type T = VnodeWatermark;
 
     fn to_protobuf(&self) -> Self::PB {
         Self::PB {
@@ -345,8 +344,8 @@ impl ProtoSerializeExt for VnodeWatermark {
         }
     }
 
-    fn from_protobuf(pb: &Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf(pb: &Self::PB) -> Self {
+        Self {
             vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
             watermark: Bytes::from(pb.watermark.clone()),
         }
@@ -355,7 +354,6 @@ impl ProtoSerializeExt for VnodeWatermark {
 
 impl ProtoSerializeOwnExt for VnodeWatermark {
     type PB = PbVnodeWatermark;
-    type T = VnodeWatermark;
 
     fn to_protobuf_own(self) -> Self::PB {
         Self::PB {
@@ -364,8 +362,8 @@ impl ProtoSerializeOwnExt for VnodeWatermark {
         }
     }
 
-    fn from_protobuf_own(pb: Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf_own(pb: Self::PB) -> Self {
+        Self {
             vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
             watermark: Bytes::from(pb.watermark),
         }
@@ -583,7 +581,6 @@ impl ProtoSerializeSizeEstimatedExt for TableWatermarks {
 
 impl ProtoSerializeExt for TableWatermarks {
     type PB = PbTableWatermarks;
-    type T = TableWatermarks;
 
     fn to_protobuf(&self) -> Self::PB {
         Self::PB {
@@ -602,8 +599,8 @@ impl ProtoSerializeExt for TableWatermarks {
         }
     }
 
-    fn from_protobuf(pb: &Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf(pb: &Self::PB) -> Self {
+        Self {
             watermarks: pb
                 .epoch_watermarks
                 .iter()
@@ -628,7 +625,6 @@ impl ProtoSerializeExt for TableWatermarks {
 
 impl ProtoSerializeOwnExt for TableWatermarks {
     type PB = PbTableWatermarks;
-    type T = TableWatermarks;
 
     fn to_protobuf_own(self) -> Self::PB {
         Self::PB {
@@ -650,8 +646,8 @@ impl ProtoSerializeOwnExt for TableWatermarks {
         }
     }
 
-    fn from_protobuf_own(pb: Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf_own(pb: Self::PB) -> Self {
+        Self {
             watermarks: pb
                 .epoch_watermarks
                 .into_iter()

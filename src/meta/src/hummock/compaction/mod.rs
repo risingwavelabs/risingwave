@@ -69,7 +69,7 @@ pub struct CompactionTask {
     pub compaction_task_type: compact_task::TaskType,
 }
 
-pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<impl OverlapStrategy> {
+pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
         CompactionMode::Unspecified => unreachable!(),

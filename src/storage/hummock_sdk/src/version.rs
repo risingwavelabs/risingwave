@@ -18,12 +18,13 @@ use std::mem::size_of;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType};
+use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{
-    LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta, PbInputLevel, PbKeyRange,
-    PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo, PbValidationTask, TableOption,
+    BloomFilterType, LevelType, PbCompactTask, PbHummockVersion, PbHummockVersionDelta,
+    PbInputLevel, PbKeyRange, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
+    PbValidationTask, TableOption,
 };
 use serde::Serialize;
 
@@ -43,10 +44,9 @@ pub struct OverlappingLevel {
 
 impl ProtoSerializeExt for OverlappingLevel {
     type PB = PbOverlappingLevel;
-    type T = OverlappingLevel;
 
-    fn from_protobuf(pb_overlapping_level: &Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf(pb_overlapping_level: &Self::PB) -> Self {
+        Self {
             sub_levels: pb_overlapping_level
                 .sub_levels
                 .iter()
@@ -90,7 +90,7 @@ impl OverlappingLevel {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Level {
     pub level_idx: u32,
-    pub level_type: i32,
+    pub level_type: LevelType,
     pub table_infos: Vec<SstableInfo>,
     pub total_file_size: u64,
     pub sub_level_id: u64,
@@ -100,12 +100,11 @@ pub struct Level {
 
 impl ProtoSerializeExt for Level {
     type PB = PbLevel;
-    type T = Level;
 
-    fn from_protobuf(pb_level: &Self::PB) -> Self::T {
+    fn from_protobuf(pb_level: &Self::PB) -> Self {
         Self {
             level_idx: pb_level.level_idx,
-            level_type: pb_level.level_type,
+            level_type: LevelType::try_from(pb_level.level_type).unwrap(),
             table_infos: pb_level
                 .table_infos
                 .iter()
@@ -121,7 +120,7 @@ impl ProtoSerializeExt for Level {
     fn to_protobuf(&self) -> Self::PB {
         Self::PB {
             level_idx: self.level_idx,
-            level_type: self.level_type,
+            level_type: self.level_type.into(),
             table_infos: self
                 .table_infos
                 .iter()
@@ -157,7 +156,7 @@ impl Level {
     }
 
     pub fn level_type(&self) -> LevelType {
-        LevelType::try_from(self.level_type).unwrap()
+        self.level_type
     }
 
     pub fn get_sub_level_id(&self) -> u64 {
@@ -212,9 +211,8 @@ impl ProtoSerializeSizeEstimatedExt for Levels {
 
 impl ProtoSerializeExt for Levels {
     type PB = PbLevels;
-    type T = Levels;
 
-    fn from_protobuf(pb_levels: &Self::PB) -> Self::T {
+    fn from_protobuf(pb_levels: &Self::PB) -> Self {
         Self {
             l0: if pb_levels.l0.is_some() {
                 Some(OverlappingLevel::from_protobuf(
@@ -301,10 +299,9 @@ impl ProtoSerializeSizeEstimatedExt for HummockVersion {
 
 impl ProtoSerializeExt for HummockVersion {
     type PB = PbHummockVersion;
-    type T = HummockVersion;
 
-    fn from_protobuf(pb_version: &Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf(pb_version: &Self::PB) -> Self {
+        Self {
             id: pb_version.id,
             levels: pb_version
                 .levels
@@ -385,10 +382,9 @@ impl HummockVersionDelta {
 
 impl ProtoSerializeExt for HummockVersionDelta {
     type PB = PbHummockVersionDelta;
-    type T = HummockVersionDelta;
 
-    fn from_protobuf(delta: &Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf(delta: &Self::PB) -> Self {
+        Self {
             id: delta.id,
             prev_id: delta.prev_id,
             group_deltas: delta.group_deltas.clone(),
@@ -451,7 +447,7 @@ pub struct SstableInfo {
     pub max_epoch: u64,
     pub uncompressed_file_size: u64,
     pub range_tombstone_count: u64,
-    pub bloom_filter_kind: i32,
+    pub bloom_filter_kind: BloomFilterType,
 }
 
 impl ProtoSerializeSizeEstimatedExt for SstableInfo {
@@ -479,9 +475,8 @@ impl ProtoSerializeSizeEstimatedExt for SstableInfo {
 
 impl ProtoSerializeExt for SstableInfo {
     type PB = PbSstableInfo;
-    type T = SstableInfo;
 
-    fn from_protobuf(pb_sstable_info: &Self::PB) -> Self::T {
+    fn from_protobuf(pb_sstable_info: &Self::PB) -> Self {
         Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
@@ -506,7 +501,8 @@ impl ProtoSerializeExt for SstableInfo {
             max_epoch: pb_sstable_info.max_epoch,
             uncompressed_file_size: pb_sstable_info.uncompressed_file_size,
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
-            bloom_filter_kind: pb_sstable_info.bloom_filter_kind,
+            bloom_filter_kind: BloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
+                .unwrap(),
         }
     }
 
@@ -535,17 +531,16 @@ impl ProtoSerializeExt for SstableInfo {
             max_epoch: self.max_epoch,
             uncompressed_file_size: self.uncompressed_file_size,
             range_tombstone_count: self.range_tombstone_count,
-            bloom_filter_kind: self.bloom_filter_kind,
+            bloom_filter_kind: self.bloom_filter_kind.into(),
         }
     }
 }
 
 impl ProtoSerializeOwnExt for SstableInfo {
     type PB = PbSstableInfo;
-    type T = SstableInfo;
 
-    fn from_protobuf_own(pb_sstable_info: Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf_own(pb_sstable_info: Self::PB) -> Self {
+        Self {
             object_id: pb_sstable_info.object_id,
             sst_id: pb_sstable_info.sst_id,
             key_range: if pb_sstable_info.key_range.is_some() {
@@ -569,7 +564,8 @@ impl ProtoSerializeOwnExt for SstableInfo {
             max_epoch: pb_sstable_info.max_epoch,
             uncompressed_file_size: pb_sstable_info.uncompressed_file_size,
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
-            bloom_filter_kind: pb_sstable_info.bloom_filter_kind,
+            bloom_filter_kind: BloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
+                .unwrap(),
         }
     }
 
@@ -598,7 +594,7 @@ impl ProtoSerializeOwnExt for SstableInfo {
             max_epoch: self.max_epoch,
             uncompressed_file_size: self.uncompressed_file_size,
             range_tombstone_count: self.range_tombstone_count,
-            bloom_filter_kind: self.bloom_filter_kind,
+            bloom_filter_kind: self.bloom_filter_kind.into(),
         }
     }
 }
@@ -620,7 +616,7 @@ impl SstableInfo {
 #[derive(Clone, PartialEq, Default, Debug, Serialize)]
 pub struct InputLevel {
     pub level_idx: u32,
-    pub level_type: i32,
+    pub level_type: LevelType,
     pub table_infos: Vec<SstableInfo>,
 }
 
@@ -638,12 +634,11 @@ impl ProtoSerializeSizeEstimatedExt for InputLevel {
 
 impl ProtoSerializeExt for InputLevel {
     type PB = PbInputLevel;
-    type T = InputLevel;
 
-    fn from_protobuf(pb_input_level: &Self::PB) -> Self::T {
+    fn from_protobuf(pb_input_level: &Self::PB) -> Self {
         Self {
             level_idx: pb_input_level.level_idx,
-            level_type: pb_input_level.level_type,
+            level_type: LevelType::try_from(pb_input_level.level_type).unwrap(),
             table_infos: pb_input_level
                 .table_infos
                 .iter()
@@ -655,7 +650,7 @@ impl ProtoSerializeExt for InputLevel {
     fn to_protobuf(&self) -> Self::PB {
         Self::PB {
             level_idx: self.level_idx,
-            level_type: self.level_type,
+            level_type: self.level_type.into(),
             table_infos: self
                 .table_infos
                 .iter()
@@ -667,12 +662,11 @@ impl ProtoSerializeExt for InputLevel {
 
 impl ProtoSerializeOwnExt for InputLevel {
     type PB = PbInputLevel;
-    type T = InputLevel;
 
-    fn from_protobuf_own(pb_input_level: Self::PB) -> Self::T {
+    fn from_protobuf_own(pb_input_level: Self::PB) -> Self {
         Self {
             level_idx: pb_input_level.level_idx,
-            level_type: pb_input_level.level_type,
+            level_type: LevelType::try_from(pb_input_level.level_type).unwrap(),
             table_infos: pb_input_level
                 .table_infos
                 .into_iter()
@@ -684,7 +678,7 @@ impl ProtoSerializeOwnExt for InputLevel {
     fn to_protobuf_own(self) -> Self::PB {
         Self::PB {
             level_idx: self.level_idx,
-            level_type: self.level_type,
+            level_type: self.level_type.into(),
             table_infos: self
                 .table_infos
                 .into_iter()
@@ -700,7 +694,7 @@ impl InputLevel {
     }
 
     pub fn level_type(&self) -> PbLevelType {
-        LevelType::try_from(self.level_type).unwrap()
+        self.level_type
     }
 
     pub fn get_level_idx(&self) -> u32 {
@@ -726,7 +720,7 @@ pub struct CompactTask {
     pub gc_delete_keys: bool,
     /// Lbase in LSM
     pub base_level: u32,
-    pub task_status: i32,
+    pub task_status: TaskStatus,
     /// compaction group the task belongs to
     pub compaction_group_id: u64,
     /// existing_table_ids for compaction drop key
@@ -738,7 +732,7 @@ pub struct CompactTask {
     pub current_epoch_time: u64,
     pub target_sub_level_id: u64,
     /// Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
-    pub task_type: i32,
+    pub task_type: TaskType,
     /// Deprecated. use table_vnode_partition instead;
     pub split_by_state_table: bool,
     /// Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
@@ -794,10 +788,9 @@ impl ProtoSerializeSizeEstimatedExt for CompactTask {
 
 impl ProtoSerializeExt for CompactTask {
     type PB = PbCompactTask;
-    type T = CompactTask;
 
-    fn from_protobuf(pb_compact_task: &Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf(pb_compact_task: &Self::PB) -> Self {
+        Self {
             input_ssts: pb_compact_task
                 .input_ssts
                 .iter()
@@ -822,7 +815,7 @@ impl ProtoSerializeExt for CompactTask {
             target_level: pb_compact_task.target_level,
             gc_delete_keys: pb_compact_task.gc_delete_keys,
             base_level: pb_compact_task.base_level,
-            task_status: pb_compact_task.task_status,
+            task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
             compaction_group_id: pb_compact_task.compaction_group_id,
             existing_table_ids: pb_compact_task.existing_table_ids.clone(),
             compression_algorithm: pb_compact_task.compression_algorithm,
@@ -831,7 +824,7 @@ impl ProtoSerializeExt for CompactTask {
             table_options: pb_compact_task.table_options.clone(),
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
-            task_type: pb_compact_task.task_type,
+            task_type: TaskType::try_from(pb_compact_task.task_type).unwrap(),
             #[allow(deprecated)]
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
@@ -875,7 +868,7 @@ impl ProtoSerializeExt for CompactTask {
             target_level: self.target_level,
             gc_delete_keys: self.gc_delete_keys,
             base_level: self.base_level,
-            task_status: self.task_status,
+            task_status: self.task_status.into(),
             compaction_group_id: self.compaction_group_id,
             existing_table_ids: self.existing_table_ids.clone(),
             compression_algorithm: self.compression_algorithm,
@@ -884,7 +877,7 @@ impl ProtoSerializeExt for CompactTask {
             table_options: self.table_options.clone(),
             current_epoch_time: self.current_epoch_time,
             target_sub_level_id: self.target_sub_level_id,
-            task_type: self.task_type,
+            task_type: self.task_type.into(),
             //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
             split_weight_by_vnode: self.split_weight_by_vnode,
             table_vnode_partition: self.table_vnode_partition.clone(),
@@ -900,10 +893,9 @@ impl ProtoSerializeExt for CompactTask {
 
 impl ProtoSerializeOwnExt for CompactTask {
     type PB = PbCompactTask;
-    type T = CompactTask;
 
-    fn from_protobuf_own(pb_compact_task: Self::PB) -> Self::T {
-        Self::T {
+    fn from_protobuf_own(pb_compact_task: Self::PB) -> Self {
+        Self {
             input_ssts: pb_compact_task
                 .input_ssts
                 .into_iter()
@@ -928,7 +920,7 @@ impl ProtoSerializeOwnExt for CompactTask {
             target_level: pb_compact_task.target_level,
             gc_delete_keys: pb_compact_task.gc_delete_keys,
             base_level: pb_compact_task.base_level,
-            task_status: pb_compact_task.task_status,
+            task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
             compaction_group_id: pb_compact_task.compaction_group_id,
             existing_table_ids: pb_compact_task.existing_table_ids.clone(),
             compression_algorithm: pb_compact_task.compression_algorithm,
@@ -937,7 +929,7 @@ impl ProtoSerializeOwnExt for CompactTask {
             table_options: pb_compact_task.table_options.clone(),
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
-            task_type: pb_compact_task.task_type,
+            task_type: TaskType::try_from(pb_compact_task.task_type).unwrap(),
             #[allow(deprecated)]
             split_by_state_table: pb_compact_task.split_by_state_table,
             split_weight_by_vnode: pb_compact_task.split_weight_by_vnode,
@@ -981,7 +973,7 @@ impl ProtoSerializeOwnExt for CompactTask {
             target_level: self.target_level,
             gc_delete_keys: self.gc_delete_keys,
             base_level: self.base_level,
-            task_status: self.task_status,
+            task_status: self.task_status.into(),
             compaction_group_id: self.compaction_group_id,
             existing_table_ids: self.existing_table_ids.clone(),
             compression_algorithm: self.compression_algorithm,
@@ -990,7 +982,7 @@ impl ProtoSerializeOwnExt for CompactTask {
             table_options: self.table_options.clone(),
             current_epoch_time: self.current_epoch_time,
             target_sub_level_id: self.target_sub_level_id,
-            task_type: self.task_type,
+            task_type: self.task_type.into(),
             //#[allow(deprecated)] split_by_state_table: self.split_by_state_table,
             split_weight_by_vnode: self.split_weight_by_vnode,
             table_vnode_partition: self.table_vnode_partition.clone(),
@@ -1014,7 +1006,7 @@ impl CompactTask {
     }
 
     pub fn set_task_status(&mut self, s: PbTaskStatus) {
-        self.task_status = s as i32;
+        self.task_status = s;
     }
 
     pub fn get_input_ssts(&self) -> &Vec<InputLevel> {
@@ -1046,9 +1038,8 @@ impl ProtoSerializeSizeEstimatedExt for ValidationTask {
 
 impl ProtoSerializeOwnExt for ValidationTask {
     type PB = PbValidationTask;
-    type T = ValidationTask;
 
-    fn from_protobuf_own(pb_validation_task: Self::PB) -> Self::T {
+    fn from_protobuf_own(pb_validation_task: Self::PB) -> Self {
         Self {
             sst_infos: pb_validation_task
                 .sst_infos

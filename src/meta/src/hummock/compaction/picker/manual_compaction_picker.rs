@@ -163,7 +163,7 @@ impl ManualCompactionPicker {
         input_levels.reverse();
         input_levels.push(InputLevel {
             level_idx: self.target_level as u32,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: target_input_ssts,
         });
 
@@ -380,7 +380,7 @@ pub mod tests {
         let levels = vec![
             Level {
                 level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(0, 1, 0, 100, 1),
                     generate_table(1, 1, 101, 200, 1),
@@ -390,7 +390,7 @@ pub mod tests {
             },
             Level {
                 level_idx: 2,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(4, 1, 0, 100, 1),
                     generate_table(5, 1, 101, 150, 1),
@@ -555,7 +555,7 @@ pub mod tests {
         let mut levels = vec![
             Level {
                 level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(3, 1, 0, 100, 1),
                     generate_table(4, 2, 2000, 3000, 1),
@@ -564,7 +564,7 @@ pub mod tests {
             },
             Level {
                 level_idx: 2,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(1, 1, 0, 100, 1),
                     generate_table(2, 2, 2000, 3000, 1),
@@ -604,7 +604,7 @@ pub mod tests {
         let l0 = generate_l0_overlapping_sublevels(vec![]);
         let levels = vec![Level {
             level_idx: 1,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![
                 generate_table(1, 1, 0, 100, 1),
                 generate_table(2, 2, 100, 200, 1),
@@ -628,7 +628,7 @@ pub mod tests {
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         let levels = vec![Level {
             level_idx: 1,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
@@ -1164,7 +1164,7 @@ pub mod tests {
             generate_level(3, vec![]),
             Level {
                 level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(2, 1, 0, 100, 1),
                     generate_table(3, 1, 101, 200, 1),
@@ -1271,7 +1271,7 @@ pub mod tests {
             ),
             Level {
                 level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table(2, 1, 0, 100, 1),
                     generate_table(3, 1, 101, 200, 1),

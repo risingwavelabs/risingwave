@@ -984,7 +984,7 @@ impl HummockManager {
                 .get_compaction_group_levels(compaction_group_id)
                 .is_last_level(target_level_id),
             base_level: compact_task.base_level as u32,
-            task_status: TaskStatus::Pending as i32,
+            task_status: TaskStatus::Pending,
             compaction_group_id: group_config.group_id,
             existing_table_ids: member_table_ids.clone(),
             compression_algorithm,
@@ -1002,7 +1002,7 @@ impl HummockManager {
             current_epoch_time: Epoch::now().0,
             compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
             target_sub_level_id: compact_task.input.target_sub_level_id,
-            task_type: compact_task.compaction_task_type as i32,
+            task_type: compact_task.compaction_task_type,
             split_weight_by_vnode: compact_task.input.vnode_partition_count,
             ..Default::default()
         };

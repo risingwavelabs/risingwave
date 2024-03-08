@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::hummock::compact_task::TaskType;
 use risingwave_pb::hummock::LevelType;
 
 use crate::version::{CompactTask, SstableInfo};
@@ -26,7 +25,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         "Compaction task id: {:?}, group-id: {:?}, task type: {:?}, target level: {:?}, target sub level: {:?}",
         compact_task.task_id,
         compact_task.compaction_group_id,
-        TaskType::try_from(compact_task.task_type).unwrap(),
+        compact_task.task_type.as_str_name(),
         compact_task.target_level,
         compact_task.target_sub_level_id
     )
@@ -171,7 +170,7 @@ pub fn estimate_memory_for_compact_task(
 
     // input
     for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
+        if level.level_type == LevelType::Nonoverlapping {
             let mut cur_level_max_sst_meta_size = 0;
             for sst in &level.table_infos {
                 let meta_size = sst.file_size - sst.meta_offset;

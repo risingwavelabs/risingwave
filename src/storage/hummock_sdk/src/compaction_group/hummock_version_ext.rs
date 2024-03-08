@@ -823,7 +823,7 @@ pub fn build_initial_compaction_group_levels(
     for l in 0..compaction_config.get_max_level() {
         levels.push(Level {
             level_idx: (l + 1) as u32,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
@@ -974,7 +974,7 @@ pub fn new_sub_level(
         .sum();
     Level {
         level_idx: 0,
-        level_type: level_type as i32,
+        level_type,
         table_infos,
         total_file_size,
         sub_level_id,
@@ -997,7 +997,7 @@ pub fn add_ssts_to_sub_level(
     l0.sub_levels[sub_level_idx]
         .table_infos
         .extend(insert_table_infos);
-    if l0.sub_levels[sub_level_idx].level_type == LevelType::Nonoverlapping as i32 {
+    if l0.sub_levels[sub_level_idx].level_type == LevelType::Nonoverlapping {
         l0.sub_levels[sub_level_idx]
             .table_infos
             .sort_by(|sst1, sst2| {
@@ -1114,8 +1114,8 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
         let b = sst2.key_range.as_ref().unwrap();
         a.cmp(b)
     });
-    if operand.level_type == LevelType::Overlapping as i32 {
-        operand.level_type = LevelType::Nonoverlapping as i32;
+    if operand.level_type == LevelType::Overlapping {
+        operand.level_type = LevelType::Nonoverlapping;
     }
     assert!(
         can_concat(&operand.table_infos),
@@ -1440,7 +1440,7 @@ mod tests {
         );
         cg1.levels[0] = Level {
             level_idx: 1,
-            level_type: LevelType::Nonoverlapping as i32,
+            level_type: LevelType::Nonoverlapping,
             table_infos: vec![SstableInfo {
                 object_id: 1,
                 sst_id: 1,

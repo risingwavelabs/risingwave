@@ -485,19 +485,19 @@ pub fn start_compactor(
                                             Err(err) => {
                                                 tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
                                                 let mut compact_task = compact_task;
-                                                compact_task.task_status = TaskStatus::TrackSstObjectIdFailed as i32;
+                                                compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
                                                 ((compact_task, HashMap::default()),None)
                                             }
                                         };
                                         shutdown.lock().unwrap().remove(&task_id);
 
                                         let enable_check_compaction_result = context.storage_opts.check_compaction_result;
-                                        let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success as i32;
+                                        let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
                                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                                             event: Some(RequestEvent::ReportTask(
                                                 ReportTask {
                                                     task_id: compact_task.task_id,
-                                                    task_status: compact_task.task_status,
+                                                    task_status: compact_task.task_status.into(),
                                                     sorted_output_ssts: compact_task.sorted_output_ssts.iter().map(|sst| sst.to_protobuf()).collect_vec(),
                                                     table_stats_change:to_prost_table_stats_map(table_stats),
                                                 }
@@ -700,7 +700,7 @@ pub fn start_shared_compactor(
                                         Ok(_) => {
                                             // TODO: remove this method after we have running risingwave cluster with fast compact algorithm stably for a long time.
                                             let enable_check_compaction_result = context.storage_opts.check_compaction_result;
-                                            let need_check_task =  !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success as i32;
+                                            let need_check_task =  !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
                                             if enable_check_compaction_result && need_check_task {
                                                 match check_compaction_result(&compact_task, context.clone()).await {
                                                     Err(e) => {

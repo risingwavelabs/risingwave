@@ -1487,12 +1487,12 @@ pub(crate) mod tests {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: ssts.drain(..select_file_count).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: ssts,
                 },
             ],
@@ -1736,12 +1736,12 @@ pub(crate) mod tests {
             input_ssts: vec![
                 InputLevel {
                     level_idx: 5,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: sst_infos.drain(..1).collect_vec(),
                 },
                 InputLevel {
                     level_idx: 6,
-                    level_type: 1,
+                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
                     table_infos: sst_infos,
                 },
             ],

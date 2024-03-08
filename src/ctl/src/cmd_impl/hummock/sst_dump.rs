@@ -156,7 +156,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 }
 
 fn print_level(level: &Level, sst_info: &SstableInfo) {
-    println!("Level Type: {}", level.level_type);
+    println!("Level Type: {}", level.level_type.as_str_name());
     println!("Level Idx: {}", level.level_idx);
     if level.level_idx == 0 {
         println!("L0 Sub-Level Idx: {}", level.sub_level_id);

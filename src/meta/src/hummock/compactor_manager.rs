@@ -297,7 +297,7 @@ impl CompactorManagerInner {
                         task.target_level,
                         task.base_level,
                         task.target_sub_level_id,
-                        task.task_type,
+                        task.task_type.as_str_name(),
                         compact_task_statistics
                 );
             }

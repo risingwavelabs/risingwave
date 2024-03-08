@@ -950,7 +950,7 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+            if level.level_type == LevelType::Nonoverlapping {
                 let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
                 let sstables = table_infos
                     .filter(|sstable_info| {

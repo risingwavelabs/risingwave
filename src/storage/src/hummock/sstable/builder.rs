@@ -630,7 +630,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
-            bloom_filter_kind: bloom_filter_kind as i32,
+            bloom_filter_kind,
             key_range: Some(KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
