@@ -504,7 +504,7 @@ impl CheckState for NormalState {
         while let Some(item) = iter.try_next().await.unwrap() {
             let (full_key, value) = item;
             delete_item.push((
-                TableKey(Bytes::copy_from_slice(&full_key.user_key.table_key)),
+                full_key.user_key.table_key.copy_into(),
                 Bytes::copy_from_slice(value),
             ));
         }

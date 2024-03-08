@@ -22,7 +22,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
-use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, TableKeyRange};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -55,7 +55,7 @@ fn to_deserialized_stream(
 ) -> SingleIterStream {
     iter.into_stream(move |(key, value)| {
         Ok(KeyedRow::new(
-            TableKey(Bytes::copy_from_slice(key.user_key.table_key.as_ref())),
+            key.user_key.table_key.copy_into(),
             row_serde.deserialize(value).map(OwnedRow::new)?,
         ))
     })

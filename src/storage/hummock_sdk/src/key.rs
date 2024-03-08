@@ -477,6 +477,12 @@ impl EstimateSize for TableKey<Bytes> {
     }
 }
 
+impl<'a> TableKey<&'a [u8]> {
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> TableKey<T> {
+        TableKey(T::copy_from_slice(self.as_ref()))
+    }
+}
+
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))

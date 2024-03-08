@@ -34,7 +34,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKey, TableKeyRange,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -773,13 +773,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 
                     // TODO: may optimize the key clone
                     yield KeyedRow {
-                        vnode_prefixed_key: TableKey(Bytes::copy_from_slice(table_key.as_ref())),
+                        vnode_prefixed_key: table_key.copy_into(),
                         row,
                     }
                 }
                 None => {
                     yield KeyedRow {
-                        vnode_prefixed_key: TableKey(Bytes::copy_from_slice(table_key.as_ref())),
+                        vnode_prefixed_key: table_key.copy_into(),
                         row: result_row_in_value,
                     }
                 }

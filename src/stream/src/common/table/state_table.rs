@@ -1456,7 +1456,8 @@ fn deserialize_keyed_row_stream<'a>(
     stream
         .into_stream(move |(key, value)| {
             Ok(KeyedRow::new(
-                TableKey(Bytes::copy_from_slice(key.user_key.table_key.as_ref())),
+                // TODO: may avoid clone the key when key is not needed
+                key.user_key.table_key.copy_into(),
                 deserializer.deserialize(value).map(OwnedRow::new)?,
             ))
         })
