@@ -106,9 +106,9 @@ def check_risingwave_iceberg_source(docker):
 def run_case(case):
     with DockerCompose(case) as docker:
         init_spark_table(docker)
-        time.sleep(5000)
         init_risingwave_source(docker)
         print("Let risingwave to run")
+        time.sleep(5)
         check_risingwave_iceberg_source(docker)
 
 
