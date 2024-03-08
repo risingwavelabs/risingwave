@@ -207,6 +207,7 @@ fn datum_to_json_object(
             if let CustomJsonType::BigQuery = custom_json_type
                 && matches!(field.data_type(), DataType::List(_))
             {
+                // Bigquery need to convert null of array to empty array https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types
                 return Ok(Value::Array(vec![]));
             } else {
                 return Ok(Value::Null);

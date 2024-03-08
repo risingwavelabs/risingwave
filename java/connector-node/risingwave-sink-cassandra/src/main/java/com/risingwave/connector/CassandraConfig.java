@@ -107,7 +107,7 @@ public class CassandraConfig extends CommonSinkConfig {
     public CassandraConfig withMaxBatchRows(Integer maxBatchRows) {
         if (maxBatchRows > 65536 || maxBatchRows < 1) {
             throw new IllegalArgumentException(
-                    "cassandra.max_batch_rows must be <= 65535 and >= 1");
+                    "Cassandra sink option: maxBatchRows must be <= 65535 and >= 1");
         }
         this.maxBatchRows = maxBatchRows;
         return this;
@@ -119,7 +119,8 @@ public class CassandraConfig extends CommonSinkConfig {
 
     public CassandraConfig withRequestTimeoutMs(Integer requestTimeoutMs) {
         if (requestTimeoutMs < 1) {
-            throw new IllegalArgumentException("cassandra.request_timeout_ms must be >= 1");
+            throw new IllegalArgumentException(
+                    "Cassandra sink option: requestTimeoutMs must be >= 1");
         }
         this.requestTimeoutMs = requestTimeoutMs;
         return this;
