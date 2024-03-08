@@ -73,7 +73,6 @@ impl ActorContext {
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        _unique_user_errors: usize,
         dispatch_num: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
