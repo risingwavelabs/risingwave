@@ -767,7 +767,7 @@ where
     let mut last_table_stats = TableStats::default();
     let mut last_table_id = None;
     let mut compaction_statistics = CompactionStatistics::default();
-    // object id -> block id. For an object id, block id is updated in a monotonically non-decreasing manner.
+    // object id -> block id. For an object id, block id is updated in a monotonically increasing manner.
     let mut skip_schema_check: HashMap<HummockSstableObjectId, u64> = HashMap::default();
     let schemas: HashMap<u32, HashSet<i32>> = task_config
         .table_schemas
@@ -903,7 +903,7 @@ where
         }
 
         // May drop stale columns
-        let check_table_id = full_key_tracker.latest_full_key.user_key.table_id.table_id;
+        let check_table_id = iter_key.user_key.table_id.table_id;
         let mut is_value_rewritten = false;
         if let HummockValue::Put(v) = value
             && let Some(object_id) = object_id
