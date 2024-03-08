@@ -106,14 +106,14 @@ def check_risingwave_iceberg_source(docker):
 def run_case(case):
     with DockerCompose(case) as docker:
         init_spark_table(docker)
+        time.sleep(5000)
         init_risingwave_source(docker)
         print("Let risingwave to run")
-        time.sleep(5)
         check_risingwave_iceberg_source(docker)
 
 
 if __name__ == "__main__":
-    case_names = ["storage"]
+    case_names = ["rest", "storage"]
     for case_name in case_names:
         print(f"Running test case: {case_name}")
         run_case(case_name)
