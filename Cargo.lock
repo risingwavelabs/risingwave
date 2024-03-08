@@ -2176,6 +2176,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmsketch"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17a94b4d5dca45a6aa85960fbb1d60096203102716732e8997515cc8ff2b6fff"
+dependencies = [
+ "paste",
+]
+
+[[package]]
 name = "coarsetime"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4101,7 +4110,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.5.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=3deeb81#3deeb81310b6ffd43cf60e72973727fdc529c73c"
+source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -4113,7 +4122,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.3.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=3deeb81#3deeb81310b6ffd43cf60e72973727fdc529c73c"
+source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4128,10 +4137,10 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=3deeb81#3deeb81310b6ffd43cf60e72973727fdc529c73c"
+source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
 dependencies = [
  "bytes",
- "cmsketch",
+ "cmsketch 0.1.5",
  "foyer-common",
  "foyer-workspace-hack",
  "itertools 0.12.0",
@@ -4145,10 +4154,11 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=3deeb81#3deeb81310b6ffd43cf60e72973727fdc529c73c"
+source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.4.0",
+ "cmsketch 0.2.0",
  "crossbeam",
  "foyer-intrusive",
  "foyer-workspace-hack",
@@ -4163,13 +4173,13 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.4.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=3deeb81#3deeb81310b6ffd43cf60e72973727fdc529c73c"
+source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
  "bitmaps",
  "bytes",
- "cmsketch",
+ "cmsketch 0.1.5",
  "foyer-common",
  "foyer-intrusive",
  "foyer-workspace-hack",
@@ -4193,7 +4203,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=3deeb81#3deeb81310b6ffd43cf60e72973727fdc529c73c"
+source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
 dependencies = [
  "ahash 0.8.6",
  "cc",

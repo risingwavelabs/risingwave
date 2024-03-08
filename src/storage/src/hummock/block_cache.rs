@@ -24,10 +24,11 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
 
-use super::{Block, HummockResult};
+use super::{Block, BlockCacheEventListener, HummockResult};
 use crate::hummock::HummockError;
 
-type CachedBlockEntry = LruCacheEntry<(HummockSstableObjectId, u64), Box<Block>>;
+type CachedBlockEntry =
+    LruCacheEntry<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
 
@@ -79,12 +80,9 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
-// type BlockCacheEventListener =
-//     Arc<dyn LruCacheEventListener<K = (HummockSstableObjectId, u64), T = Box<Block>>>;
-
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>>>,
+    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>>,
 }
 
 pub enum BlockResponse {
@@ -112,30 +110,11 @@ impl BlockResponse {
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize, max_shard_bits: usize, high_priority_ratio: usize) -> Self {
-        // Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
-        Self::new_inner(capacity, max_shard_bits, high_priority_ratio)
-    }
-
-    // pub fn with_event_listener(
-    //     capacity: usize,
-    //     max_shard_bits: usize,
-    //     high_priority_ratio: usize,
-    //     listener: BlockCacheEventListener,
-    // ) -> Self {
-    //     Self::new_inner(
-    //         capacity,
-    //         max_shard_bits,
-    //         high_priority_ratio,
-    //         Some(listener),
-    //     )
-    // }
-
-    fn new_inner(
+    pub fn new(
         capacity: usize,
         mut max_shard_bits: usize,
         high_priority_ratio: usize,
-        // listener: Option<BlockCacheEventListener>,
+        event_listener: BlockCacheEventListener,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
@@ -153,6 +132,7 @@ impl BlockCache {
             },
             object_pool_capacity: shards * 1024,
             hash_builder: RandomState::default(),
+            event_listener,
         });
 
         Self {
