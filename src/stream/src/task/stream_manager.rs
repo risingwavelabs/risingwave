@@ -207,6 +207,8 @@ impl LocalStreamManager {
         }
     }
 
+    /// Receive a new control stream request from meta. Notify the barrier worker to reset the CN and use the new control stream
+    /// to receive control message from meta
     pub fn handle_new_control_stream(
         &self,
         sender: UnboundedSender<Result<StreamingControlStreamResponse, Status>>,

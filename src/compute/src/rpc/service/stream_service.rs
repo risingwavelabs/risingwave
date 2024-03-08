@@ -137,13 +137,10 @@ impl StreamService for StreamServiceImpl {
         request: Request<Streaming<StreamingControlStreamRequest>>,
     ) -> Result<Response<Self::StreamingControlStreamStream>, Status> {
         let mut stream = request.into_inner().boxed();
-        let first_request = stream
-            .try_next()
-            .await?
-            .ok_or_else(|| Status::invalid_argument("failed to receive first request"))?;
-        let StreamingControlStreamRequest {
+        let first_request = stream.try_next().await?;
+        let Some(StreamingControlStreamRequest {
             request: Some(streaming_control_stream_request::Request::Init(init_request)),
-        } = first_request
+        }) = first_request
         else {
             return Err(Status::invalid_argument(format!(
                 "unexpected first request: {:?}",

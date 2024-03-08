@@ -15,12 +15,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
-use std::task::Poll;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::future::{poll_fn, try_join_all};
+use futures::future::try_join_all;
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{pin_mut, FutureExt, StreamExt};
 use itertools::Itertools;
@@ -36,6 +35,7 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClient;
+use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::timeout;
@@ -146,13 +146,13 @@ impl ControlStreamManager {
         Ok(())
     }
 
-    pub(super) fn next_response(
+    pub(super) async fn next_response(
         &mut self,
-    ) -> impl Future<Output = MetaResult<(WorkerId, u64, StreamingControlStreamResponse)>> + '_
-    {
-        poll_fn(|cx| match self.response_streams.poll_next_unpin(cx) {
-            Poll::Ready(None) | Poll::Pending => Poll::Pending,
-            Poll::Ready(Some((worker_id, response_stream, result))) => match result {
+    ) -> MetaResult<(WorkerId, u64, StreamingControlStreamResponse)> {
+        loop {
+            let (worker_id, response_stream, result) =
+                pending_on_none(self.response_streams.next()).await;
+            match result {
                 Ok(resp) => match &resp.response {
                     Some(streaming_control_stream_response::Response::CompleteBarrier(_)) => {
                         self.response_streams
@@ -165,9 +165,11 @@ impl ControlStreamManager {
                             .inflight_barriers
                             .pop_front()
                             .expect("should exist when get collect resp");
-                        Poll::Ready(Ok((worker_id, command.prev_epoch.value().0, resp)))
+                        break Ok((worker_id, command.prev_epoch.value().0, resp));
                     }
-                    resp => Poll::Ready(Err(anyhow!("get unexpected resp: {:?}", resp).into())),
+                    resp => {
+                        break Err(anyhow!("get unexpected resp: {:?}", resp).into());
+                    }
                 },
                 Err(err) => {
                     let mut node = self
@@ -177,14 +179,14 @@ impl ControlStreamManager {
                     warn!(node = ?node.worker, err = ?err.as_report(), "get error from response stream");
                     if let Some(command) = node.inflight_barriers.pop_front() {
                         self.context.report_collect_failure(&command, &err);
-                        Poll::Ready(Err(err))
+                        break Err(err);
                     } else {
                         // for node with no inflight barrier, simply ignore the error
-                        Poll::Pending
+                        continue;
                     }
                 }
-            },
-        })
+            }
+        }
     }
 }
 

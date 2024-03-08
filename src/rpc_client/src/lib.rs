@@ -279,6 +279,8 @@ impl<REQ, RSP> BidiStreamHandle<REQ, RSP> {
     }
 }
 
+/// The handle of a bidi-stream started from the rpc client. It is similar to the `BidiStreamHandle`
+/// except that its sender is unbounded.
 pub struct UnboundedBidiStreamHandle<REQ, RSP> {
     pub request_sender: UnboundedSender<REQ>,
     pub response_stream: BoxStream<'static, Result<RSP>>,
@@ -312,7 +314,7 @@ impl<REQ, RSP> UnboundedBidiStreamHandle<REQ, RSP> {
         let first_response = response_stream
             .next()
             .await
-            .ok_or_else(|| anyhow!("get empty response from first request"))??;
+            .context("get empty response from first request")??;
 
         Ok((
             Self {
