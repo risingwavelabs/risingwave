@@ -163,10 +163,10 @@ impl QueryManager {
         }
     }
 
-    fn get_permit(&self) -> SchedulerResult<Option<OwnedSemaphorePermit>> {
+    async fn get_permit(&self) -> SchedulerResult<Option<OwnedSemaphorePermit>> {
         match self.distributed_query_semaphore {
             Some(ref semaphore) => {
-                let permit = semaphore.clone().try_acquire_owned();
+                let permit = semaphore.clone().acquire_owned().await;
                 match permit {
                     Ok(permit) => Ok(Some(permit)),
                     Err(_) => {
@@ -198,7 +198,7 @@ impl QueryManager {
             ));
         }
         let query_id = query.query_id.clone();
-        let permit = self.get_permit()?;
+        let permit = self.get_permit().await?;
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id(), permit));
 
         // Add queries status when begin.
