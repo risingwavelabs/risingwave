@@ -38,7 +38,7 @@ use super::doris_starrocks_connector::{
     POOL_IDLE_TIMEOUT,
 };
 use super::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
 
@@ -293,12 +293,7 @@ impl DorisSinkWriter {
             inserter_inner_builder: doris_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(
-                schema,
-                None,
-                TimestampHandlingMode::String,
-                decimal_map,
-            ),
+            row_encoder: JsonEncoder::new_with_doris(schema, None, decimal_map),
         })
     }
 
