@@ -3692,6 +3692,33 @@ impl CatalogManager {
             .collect()
     }
 
+    /// Returns column ids of `table_ids` that is versioned.
+    /// Being versioned implies using `ColumnAwareSerde`.
+    pub async fn get_versioned_table_schemas(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<TableId, Vec<i32>> {
+        let guard = self.core.lock().await;
+        table_ids
+            .iter()
+            .filter_map(|table_id| {
+                if let Some(t) = guard.database.tables.get(table_id)
+                    && t.version.is_some()
+                {
+                    let ret = (
+                        t.id,
+                        t.columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec(),
+                    );
+                    return Some(ret);
+                }
+                None
+            })
+            .collect()
+    }
+
     // TODO: replace *_count with SQL
     #[cfg_attr(coverage, coverage(off))]
     pub async fn source_count(&self) -> usize {
