@@ -235,6 +235,18 @@ impl Sstable {
         }
     }
 
+    pub fn with_filter_reader(
+        id: HummockSstableObjectId,
+        meta: SstableMeta,
+        filter_reader: XorFilterReader,
+    ) -> Self {
+        Self {
+            id,
+            meta,
+            filter_reader,
+        }
+    }
+
     #[inline(always)]
     pub fn has_bloom_filter(&self) -> bool {
         !self.filter_reader.is_empty()
@@ -441,7 +453,7 @@ impl SstableMeta {
         buf.put_u32_le(MAGIC);
     }
 
-    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
+    pub fn decode(buf: &[u8]) -> HummockResult<(Self, XorFilterReader)> {
         let mut cursor = buf.len();
 
         cursor -= 4;
@@ -473,7 +485,10 @@ impl SstableMeta {
             }
         }
 
-        let bloom_filter = get_length_prefixed_slice(buf);
+        let filter_size = buf.get_u32_le() as usize;
+        let filter_reader = XorFilterReader::new(&buf[..filter_size], &block_metas);
+        buf.advance(filter_size);
+
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -485,10 +500,9 @@ impl SstableMeta {
             monotonic_tombstone_events.push(monotonic_tombstone_event);
         }
         let meta_offset = buf.get_u64_le();
-
-        Ok(Self {
+        let meta = Self {
             block_metas,
-            bloom_filter,
+            bloom_filter: vec![],
             estimated_size,
             key_count,
             smallest_key,
@@ -496,7 +510,8 @@ impl SstableMeta {
             meta_offset,
             monotonic_tombstone_events,
             version,
-        })
+        };
+        Ok((meta, filter_reader))
     }
 
     #[inline]
@@ -567,7 +582,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            bloom_filter: b"0123456789".to_vec(),
+            bloom_filter: vec![],
             estimated_size: 123,
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),
@@ -579,7 +594,7 @@ mod tests {
         let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
         assert_eq!(sz, buf.len());
-        let decoded_meta = SstableMeta::decode(&buf[..]).unwrap();
+        let (decoded_meta, _filter_reader) = SstableMeta::decode(&buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }
 }
