@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use aws_config::timeout::TimeoutConfig;
 use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
@@ -112,13 +113,16 @@ pub async fn load_file_descriptor_from_s3(
     let bucket = location
         .domain()
         .ok_or_else(|| RwError::from(InternalError(format!("Illegal file path {}", location))))?;
-    let key = location.path().replace('/', "");
+    let key = location
+        .path()
+        .strip_prefix('/')
+        .ok_or_else(|| anyhow!("s3 url {location} should have a '/' at the start of path."))?;
     let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
         .get_object()
         .bucket(bucket.to_string())
-        .key(&key)
+        .key(key)
         .send()
         .await
         .map_err(|e| {
