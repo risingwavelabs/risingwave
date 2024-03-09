@@ -104,9 +104,8 @@ from
   s5 with (
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'sink_target',
-    type = 'append-only',
     connector = 'kafka'
-  )
+  ) format plain encode json;
 
 query T
 show sinks
