@@ -217,7 +217,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                        .flush_current_epoch(
+                            barrier.epoch.curr,
+                            barrier.kind.is_checkpoint(),
+                            barrier.is_checkpoint_triggered_by_flush,
+                        )
                         .await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {

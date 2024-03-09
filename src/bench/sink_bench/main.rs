@@ -92,9 +92,7 @@ impl LogReader for MockRangeLogReader {
                         self.current_epoch = barrier.epoch.curr;
                         Ok((
                             prev_epoch,
-                            LogStoreReadItem::Barrier {
-                                is_checkpoint: true,
-                            },
+                            LogStoreReadItem::Barrier {is_checkpoint:true, trigger_by_flush: false },
                         ))
                     }
                     Message::Chunk(chunk) => {

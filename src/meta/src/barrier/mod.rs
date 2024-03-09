@@ -136,6 +136,7 @@ struct Scheduled {
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
+    trigger_by_flush: bool,
 }
 
 #[derive(Clone)]
@@ -698,6 +699,7 @@ impl GlobalBarrierManager {
             send_latency_timer,
             checkpoint,
             span,
+            trigger_by_flush,
         } = scheduled;
 
         let info = self.state.apply_command(&command);
@@ -722,6 +724,7 @@ impl GlobalBarrierManager {
             self.state.paused_reason(),
             command,
             kind,
+            trigger_by_flush,
             self.context.clone(),
             span,
         ));

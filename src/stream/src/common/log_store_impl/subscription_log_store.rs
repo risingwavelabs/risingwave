@@ -85,10 +85,13 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
         next_epoch: u64,
         is_checkpoint: bool,
         truncate_offset: Option<ReaderTruncationOffsetType>,
+        trigger_by_flush: bool,
     ) -> LogStoreResult<()> {
         let epoch = self.state_store.epoch();
         for vnode in self.serde.vnodes().iter_vnodes() {
-            let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
+            let (key, value) =
+                self.serde
+                    .serialize_barrier(epoch, vnode, is_checkpoint, trigger_by_flush);
             self.state_store.insert(key, value, None)?;
         }
 

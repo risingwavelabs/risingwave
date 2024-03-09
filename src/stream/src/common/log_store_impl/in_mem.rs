@@ -181,7 +181,15 @@ impl LogReader for BoundedInMemLogStoreReader {
                         self.latest_offset = TruncateOffset::Barrier {
                             epoch: current_epoch,
                         };
-                        Ok((current_epoch, LogStoreReadItem::Barrier { is_checkpoint }))
+                        Ok((
+                            current_epoch,
+                            LogStoreReadItem::Barrier {
+                                is_checkpoint,
+                                // In-memory log store does not support trigger_by_flush, it will always be treat
+                                // the barrier as trigger_by_flush. This behavior will not affect the correctness.
+                                trigger_by_flush: true,
+                            },
+                        ))
                     }
                     InMemLogStoreItem::UpdateVnodeBitmap(vnode_bitmap) => Ok((
                         current_epoch,
@@ -265,6 +273,8 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        // In memory log store don't support trigger_by_flush, it will always be treat as true.
+        _trigger_by_flush: bool,
     ) -> LogStoreResult<()> {
         self.item_tx
             .send(InMemLogStoreItem::Barrier {
@@ -363,9 +373,15 @@ mod tests {
                 .write_chunk(stream_chunk_clone.clone())
                 .await
                 .unwrap();
-            writer.flush_current_epoch(epoch1, false).await.unwrap();
+            writer
+                .flush_current_epoch(epoch1, false, false)
+                .await
+                .unwrap();
             writer.write_chunk(stream_chunk_clone).await.unwrap();
-            writer.flush_current_epoch(epoch2, true).await.unwrap();
+            writer
+                .flush_current_epoch(epoch2, true, false)
+                .await
+                .unwrap();
         });
 
         reader.init().await.unwrap();
@@ -388,7 +404,13 @@ mod tests {
         };
 
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert!(!is_checkpoint);
                 assert_eq!(epoch, init_epoch);
             }
@@ -405,7 +427,13 @@ mod tests {
         };
 
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert!(is_checkpoint);
                 assert_eq!(epoch, epoch1);
             }

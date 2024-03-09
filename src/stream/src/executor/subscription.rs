@@ -111,6 +111,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                             barrier.epoch.curr,
                             barrier.kind.is_checkpoint(),
                             truncate_offset,
+                            barrier.is_checkpoint_triggered_by_flush,
                         )
                         .await?;
 

@@ -176,6 +176,8 @@ impl StreamRpcManager {
                         .to_protobuf(),
                         kind: command_context.kind as i32,
                         passed_actors: vec![],
+                        is_checkpoint_triggered_by_flush: command_context
+                            .is_checkpoint_trigger_by_flush,
                     };
                     Some((
                         node,

@@ -292,6 +292,8 @@ pub struct Barrier {
     pub mutation: Option<Arc<Mutation>>,
     pub kind: BarrierKind,
 
+    pub is_checkpoint_triggered_by_flush: bool,
+
     /// Tracing context for the **current** epoch of this barrier.
     tracing_context: TracingContext,
 
@@ -308,6 +310,7 @@ impl Barrier {
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
+            is_checkpoint_triggered_by_flush: false,
         }
     }
 
@@ -318,6 +321,7 @@ impl Barrier {
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
+            is_checkpoint_triggered_by_flush: false,
         }
     }
 
@@ -693,6 +697,7 @@ impl Barrier {
             tracing_context: tracing_context.to_protobuf(),
             kind: kind as _,
             passed_actors,
+            is_checkpoint_triggered_by_flush: self.is_checkpoint_triggered_by_flush,
         }
     }
 
@@ -711,6 +716,7 @@ impl Barrier {
             mutation,
             passed_actors: prost.get_passed_actors().clone(),
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
+            is_checkpoint_triggered_by_flush: prost.is_checkpoint_triggered_by_flush,
         })
     }
 }

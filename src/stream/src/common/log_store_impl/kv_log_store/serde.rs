@@ -54,6 +54,7 @@ const UPDATE_INSERT_OP_CODE: RowOpCodeType = 3;
 const UPDATE_DELETE_OP_CODE: RowOpCodeType = 4;
 const BARRIER_OP_CODE: RowOpCodeType = 5;
 const CHECKPOINT_BARRIER_OP_CODE: RowOpCodeType = 6;
+const CHECKPOINT_TRIGGER_BY_FLUSH: RowOpCodeType = 7;
 
 struct ReadInfo {
     read_size: usize,
@@ -83,8 +84,14 @@ impl ReadInfo {
 
 #[derive(Eq, PartialEq, Debug)]
 enum LogStoreRowOp {
-    Row { op: Op, row: OwnedRow },
-    Barrier { is_checkpoint: bool },
+    Row {
+        op: Op,
+        row: OwnedRow,
+    },
+    Barrier {
+        is_checkpoint: bool,
+        trigger_by_flush: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -255,11 +262,16 @@ impl LogStoreRowSerde {
         epoch: u64,
         vnode: VirtualNode,
         is_checkpoint: bool,
+        is_trigger_by_flush: bool,
     ) -> (TableKey<Bytes>, Bytes) {
         let pk = (self.pk_info.compute_pk)(vnode, Self::encode_epoch(epoch), None);
 
         let op_code = if is_checkpoint {
-            CHECKPOINT_BARRIER_OP_CODE
+            if is_trigger_by_flush {
+                CHECKPOINT_TRIGGER_BY_FLUSH
+            } else {
+                CHECKPOINT_BARRIER_OP_CODE
+            }
         } else {
             BARRIER_OP_CODE
         };
@@ -341,12 +353,21 @@ impl LogStoreRowSerde {
                 assert!(row_data[self.pk_info.seq_id_column_index].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: false,
+                    trigger_by_flush: false,
                 }
             }
             CHECKPOINT_BARRIER_OP_CODE => {
                 assert!(row_data[self.pk_info.seq_id_column_index].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: true,
+                    trigger_by_flush: false,
+                }
+            }
+            CHECKPOINT_TRIGGER_BY_FLUSH => {
+                assert!(row_data[self.pk_info.seq_id_column_index].is_none());
+                LogStoreRowOp::Barrier {
+                    is_checkpoint: true,
+                    trigger_by_flush: true,
                 }
             }
             _ => unreachable!("invalid row op code: {}", row_op_code),
@@ -430,7 +451,10 @@ enum StreamState {
 
 pub(crate) enum KvLogStoreItem {
     StreamChunk(StreamChunk),
-    Barrier { is_checkpoint: bool },
+    Barrier {
+        is_checkpoint: bool,
+        trigger_by_flush: bool,
+    },
 }
 
 type BoxPeekableLogStoreItemStream<S> = Pin<Box<Peekable<LogStoreItemStream<S>>>>;
@@ -520,7 +544,10 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         );
                     }
                 }
-                LogStoreRowOp::Barrier { is_checkpoint } => {
+                LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush,
+                } => {
                     read_info.report(&this.metrics);
                     if let Some(chunk) = data_chunk_builder.consume_all() {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
@@ -529,7 +556,13 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
-                    yield (epoch, KvLogStoreItem::Barrier { is_checkpoint })
+                    yield (
+                        epoch,
+                        KvLogStoreItem::Barrier {
+                            is_checkpoint,
+                            trigger_by_flush,
+                        },
+                    )
                 }
             }
         }
@@ -690,7 +723,10 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         read_size,
                     )));
                 }
-                LogStoreRowOp::Barrier { is_checkpoint } => {
+                LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush,
+                } => {
                     self.check_is_checkpoint(is_checkpoint)?;
                     // Put the current stream to the barrier streams
                     self.barrier_streams.push(stream);
@@ -704,7 +740,10 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         }
                         return Ok(Some((
                             decoded_epoch,
-                            LogStoreRowOp::Barrier { is_checkpoint },
+                            LogStoreRowOp::Barrier {
+                                is_checkpoint,
+                                trigger_by_flush,
+                            },
                             read_size,
                         )));
                     } else {
@@ -848,10 +887,16 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
+        let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_barrier).unwrap() {
-            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (
+                decoded_epoch,
+                LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert!(!is_checkpoint);
                 assert_eq!(decoded_epoch, epoch);
             }
@@ -886,10 +931,17 @@ mod tests {
             seq_id += 1;
         }
 
-        let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
+        let (key, encoded_checkpoint_barrier) =
+            serde.serialize_barrier(epoch, DEFAULT_VNODE, true, false);
         let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_checkpoint_barrier).unwrap() {
-            (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
+            (
+                decoded_epoch,
+                LogStoreRowOp::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(decoded_epoch, epoch);
                 assert!(is_checkpoint);
             }
@@ -1021,7 +1073,7 @@ mod tests {
     ) {
         let (ops, rows) = gen_test_data(base);
         let first_barrier = {
-            let (key, value) = serde.serialize_barrier(EPOCH0, DEFAULT_VNODE, true);
+            let (key, value) = serde.serialize_barrier(EPOCH0, DEFAULT_VNODE, true, false);
             Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH0), value))
         };
         let stream = stream::once(async move { first_barrier });
@@ -1031,7 +1083,7 @@ mod tests {
         let stream = stream.chain(stream::once({
             let serde = serde.clone();
             async move {
-                let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false);
+                let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false, false);
                 Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH1), value))
             }
         }));
@@ -1039,7 +1091,7 @@ mod tests {
             gen_row_stream(serde.clone(), ops.clone(), rows.clone(), EPOCH2, seq_id);
         let stream = stream.chain(row_stream).chain(stream::once({
             async move {
-                let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true);
+                let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true, false);
                 Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH2), value))
             }
         }));
@@ -1121,7 +1173,8 @@ mod tests {
             (
                 EPOCH0,
                 LogStoreRowOp::Barrier {
-                    is_checkpoint: true
+                    is_checkpoint: true,
+                    trigger_by_flush: false
                 }
             ),
             (epoch, op)
@@ -1153,7 +1206,8 @@ mod tests {
             (
                 EPOCH1,
                 LogStoreRowOp::Barrier {
-                    is_checkpoint: false
+                    is_checkpoint: false,
+                    trigger_by_flush: false
                 }
             ),
             (epoch, op)
@@ -1185,6 +1239,7 @@ mod tests {
                 EPOCH2,
                 LogStoreRowOp::Barrier {
                     is_checkpoint: true,
+                    trigger_by_flush: false
                 }
             ),
             (epoch, op)
@@ -1234,7 +1289,10 @@ mod tests {
         assert_eq!(EPOCH0, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier {
+                is_checkpoint,
+                trigger_by_flush: _,
+            } => {
                 assert!(is_checkpoint);
             }
         }
@@ -1270,7 +1328,10 @@ mod tests {
         assert_eq!(EPOCH1, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier {
+                is_checkpoint,
+                trigger_by_flush: _,
+            } => {
                 assert!(!is_checkpoint);
             }
         }
@@ -1306,7 +1367,10 @@ mod tests {
         assert_eq!(EPOCH2, epoch);
         match item {
             KvLogStoreItem::StreamChunk(_) => unreachable!(),
-            KvLogStoreItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::Barrier {
+                is_checkpoint,
+                trigger_by_flush: _,
+            } => {
                 assert!(is_checkpoint);
             }
         }

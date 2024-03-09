@@ -134,6 +134,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        trigger_by_flush: bool,
     ) -> LogStoreResult<()> {
         let epoch = self.state_store.epoch();
         let mut flush_info = FlushInfo::new();
@@ -142,7 +143,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
         if !self.is_paused {
             for vnode in self.serde.vnodes().iter_vnodes() {
-                let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
+                let (key, value) =
+                    self.serde
+                        .serialize_barrier(epoch, vnode, is_checkpoint, trigger_by_flush);
                 flush_info.flush_one(key.estimated_size() + value.estimated_size());
                 self.state_store.insert(key, value, None)?;
             }
@@ -183,7 +186,8 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 switch_op_consistency_level: None,
             },
         );
-        self.tx.barrier(epoch, is_checkpoint, next_epoch);
+        self.tx
+            .barrier(epoch, is_checkpoint, next_epoch, trigger_by_flush);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())
     }

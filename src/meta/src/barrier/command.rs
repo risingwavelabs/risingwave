@@ -309,6 +309,7 @@ pub struct CommandContext {
     pub command: Command,
 
     pub kind: BarrierKind,
+    pub is_checkpoint_trigger_by_flush: bool,
 
     barrier_manager_context: GlobalBarrierManagerContext,
 
@@ -329,6 +330,7 @@ impl CommandContext {
         current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
+        is_checkpoint_trigger_by_flush: bool,
         barrier_manager_context: GlobalBarrierManagerContext,
         span: tracing::Span,
     ) -> Self {
@@ -341,6 +343,7 @@ impl CommandContext {
             kind,
             barrier_manager_context,
             span,
+            is_checkpoint_trigger_by_flush,
         }
     }
 

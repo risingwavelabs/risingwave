@@ -136,6 +136,8 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
+  // If kind is checkpoint, indicates whether the checkpoint caused by flush. It's meaningless if the kind isn't checkpoint.
+  bool is_checkpoint_triggered_by_flush = 10;
 
   // Record the actors that the barrier has passed. Only used for debugging.
   repeated uint32 passed_actors = 255;

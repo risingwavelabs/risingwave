@@ -69,7 +69,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let snapshot = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let snapshot = self.barrier_scheduler.flush(req.checkpoint, true).await?;
         Ok(Response::new(FlushResponse {
             status: None,
             snapshot: Some(snapshot),

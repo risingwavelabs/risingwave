@@ -475,10 +475,16 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
-        writer.flush_current_epoch(epoch2, false).await.unwrap();
+        writer
+            .flush_current_epoch(epoch2, false, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2 + 1;
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch3, true, false)
+            .await
+            .unwrap();
 
         test_env.storage.seal_epoch(epoch1, false);
         test_env.storage.seal_epoch(epoch2, true);
@@ -500,7 +506,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -520,7 +532,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -577,10 +595,16 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
-        writer.flush_current_epoch(epoch2, false).await.unwrap();
+        writer
+            .flush_current_epoch(epoch2, false, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2 + 1;
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch3, true, false)
+            .await
+            .unwrap();
 
         test_env.storage.seal_epoch(epoch1, false);
 
@@ -599,7 +623,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -619,7 +649,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -673,7 +709,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint)
             }
@@ -693,7 +735,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -759,7 +807,10 @@ mod tests {
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
         writer.write_chunk(stream_chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
-        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch2, true, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
 
         test_env.commit_epoch(epoch1).await;
@@ -795,7 +846,13 @@ mod tests {
         };
         assert!(chunk_id2 > chunk_id1);
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: false,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(is_checkpoint)
             }
@@ -825,10 +882,19 @@ mod tests {
             .await
             .unwrap();
         let epoch3 = epoch2 + 1;
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch3, true, false)
+            .await
+            .unwrap();
 
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -882,7 +948,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(is_checkpoint)
             }
@@ -902,7 +974,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint)
             }
@@ -984,8 +1062,14 @@ mod tests {
         writer1.write_chunk(chunk1_1.clone()).await.unwrap();
         writer2.write_chunk(chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
-        writer1.flush_current_epoch(epoch2, false).await.unwrap();
-        writer2.flush_current_epoch(epoch2, false).await.unwrap();
+        writer1
+            .flush_current_epoch(epoch2, false, false)
+            .await
+            .unwrap();
+        writer2
+            .flush_current_epoch(epoch2, false, false)
+            .await
+            .unwrap();
         let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100, pk_info);
         writer1.write_chunk(chunk2_1.clone()).await.unwrap();
         writer2.write_chunk(chunk2_2.clone()).await.unwrap();
@@ -998,7 +1082,13 @@ mod tests {
             _ => unreachable!(),
         };
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -1013,7 +1103,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -1042,18 +1138,36 @@ mod tests {
         }
 
         let epoch3 = epoch2 + 1;
-        writer1.flush_current_epoch(epoch3, true).await.unwrap();
-        writer2.flush_current_epoch(epoch3, true).await.unwrap();
+        writer1
+            .flush_current_epoch(epoch3, true, false)
+            .await
+            .unwrap();
+        writer2
+            .flush_current_epoch(epoch3, true, false)
+            .await
+            .unwrap();
 
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
@@ -1099,7 +1213,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(!is_checkpoint);
             }
@@ -1116,7 +1236,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
             }
@@ -1161,7 +1287,10 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
-        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch2, true, false)
+            .await
+            .unwrap();
 
         reader.init().await.unwrap();
 
@@ -1186,7 +1315,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+            (
+                epoch,
+                LogStoreReadItem::Barrier {
+                    is_checkpoint,
+                    trigger_by_flush: _,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(is_checkpoint)
             }
@@ -1260,7 +1395,13 @@ mod tests {
                 }
                 if last_sealed || i != size - 1 {
                     match reader.next_item().await.unwrap() {
-                        (item_epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                        (
+                            item_epoch,
+                            LogStoreReadItem::Barrier {
+                                is_checkpoint,
+                                trigger_by_flush: _,
+                            },
+                        ) => {
                             assert_eq!(item_epoch, *epoch);
                             assert!(is_checkpoint)
                         }
@@ -1298,12 +1439,21 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
-        writer.flush_current_epoch(epoch2, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch2, true, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
         let epoch3 = epoch2 + 1;
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch3, true, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
-        writer.flush_current_epoch(u64::MAX, true).await.unwrap();
+        writer
+            .flush_current_epoch(u64::MAX, true, false)
+            .await
+            .unwrap();
 
         test_env.commit_epoch(epoch1).await;
         test_env.commit_epoch(epoch2).await;
@@ -1455,7 +1605,10 @@ mod tests {
             .unwrap();
         writer.write_chunk(stream_chunk4.clone()).await.unwrap();
         let epoch5 = epoch4 + 1;
-        writer.flush_current_epoch(epoch5, true).await.unwrap();
+        writer
+            .flush_current_epoch(epoch5, true, false)
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk5.clone()).await.unwrap();
 
         reader.init().await.unwrap();

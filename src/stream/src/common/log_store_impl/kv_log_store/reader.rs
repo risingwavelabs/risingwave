@@ -275,9 +275,15 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                             self.latest_offset = Some(TruncateOffset::Chunk { epoch, chunk_id });
                             LogStoreReadItem::StreamChunk { chunk, chunk_id }
                         }
-                        KvLogStoreItem::Barrier { is_checkpoint } => {
+                        KvLogStoreItem::Barrier {
+                            is_checkpoint,
+                            trigger_by_flush,
+                        } => {
                             self.latest_offset = Some(TruncateOffset::Barrier { epoch });
-                            LogStoreReadItem::Barrier { is_checkpoint }
+                            LogStoreReadItem::Barrier {
+                                is_checkpoint,
+                                trigger_by_flush,
+                            }
                         }
                     };
                     return Ok((epoch, item));
@@ -419,6 +425,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                trigger_by_flush,
             } => {
                 assert!(
                     item_epoch < next_epoch,
@@ -427,7 +434,13 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     item_epoch
                 );
                 self.latest_offset = Some(TruncateOffset::Barrier { epoch: item_epoch });
-                (item_epoch, LogStoreReadItem::Barrier { is_checkpoint })
+                (
+                    item_epoch,
+                    LogStoreReadItem::Barrier {
+                        is_checkpoint,
+                        trigger_by_flush,
+                    },
+                )
             }
             LogStoreBufferItem::UpdateVnodes(bitmap) => {
                 self.serde.update_vnode_bitmap(bitmap.clone());

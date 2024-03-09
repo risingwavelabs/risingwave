@@ -44,6 +44,7 @@ pub(crate) enum LogStoreBufferItem {
     Barrier {
         is_checkpoint: bool,
         next_epoch: u64,
+        trigger_by_flush: bool,
     },
 
     UpdateVnodes(Arc<Bitmap>),
@@ -235,12 +236,19 @@ impl LogStoreBufferSender {
         ret
     }
 
-    pub(crate) fn barrier(&self, epoch: u64, is_checkpoint: bool, next_epoch: u64) {
+    pub(crate) fn barrier(
+        &self,
+        epoch: u64,
+        is_checkpoint: bool,
+        next_epoch: u64,
+        trigger_by_flush: bool,
+    ) {
         self.buffer.inner().add_item(
             epoch,
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                trigger_by_flush,
             },
         );
         self.update_notify.notify_waiters();

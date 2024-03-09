@@ -188,7 +188,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         return Err(e);
                     }
                 }
-                LogStoreReadItem::Barrier { is_checkpoint } => {
+                LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
                         _ => unreachable!("epoch must have begun before handling barrier"),
@@ -261,7 +261,7 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                             let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
                             self.writer.write_chunk(chunk, add_future).await?;
                         }
-                        LogStoreReadItem::Barrier { is_checkpoint } => {
+                        LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                             self.writer.barrier(is_checkpoint).await?;
                             self.future_manager.add_barrier(epoch);
                         }

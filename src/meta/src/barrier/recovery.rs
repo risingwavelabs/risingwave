@@ -474,6 +474,7 @@ impl GlobalBarrierManager {
                         paused_reason,
                         command,
                         BarrierKind::Initial,
+                        false,
                         self.context.clone(),
                         tracing::Span::current(), // recovery span
                     ));

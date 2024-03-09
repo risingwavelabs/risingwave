@@ -107,6 +107,7 @@ impl Inner {
         checkpoint: bool,
         command: Command,
         notifiers: impl IntoIterator<Item = Notifier>,
+        trigger_by_flush: bool,
     ) -> Scheduled {
         // Create a span only if we're being traced, instead of for every periodic barrier.
         let span = if tracing::Span::current().is_none() {
@@ -121,6 +122,7 @@ impl Inner {
             send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
             span,
             checkpoint,
+            trigger_by_flush,
         }
     }
 }
@@ -208,6 +210,7 @@ impl BarrierScheduler {
         &self,
         new_notifiers: Vec<Notifier>,
         new_checkpoint: bool,
+        trigger_by_flush: bool,
     ) -> MetaResult<()> {
         let mut queue = self.inner.queue.lock();
         match queue.queue.front_mut() {
@@ -225,6 +228,7 @@ impl BarrierScheduler {
                     new_checkpoint,
                     Command::barrier(),
                     new_notifiers,
+                    trigger_by_flush,
                 ))?;
                 self.inner.changed_tx.send(()).ok();
             }
@@ -234,13 +238,17 @@ impl BarrierScheduler {
 
     /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
     /// ignored, if exists.
-    pub async fn wait_for_next_barrier_to_collect(&self, checkpoint: bool) -> MetaResult<()> {
+    pub async fn wait_for_next_barrier_to_collect(
+        &self,
+        checkpoint: bool,
+        trigger_by_flush: bool,
+    ) -> MetaResult<()> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
             collected: Some(tx),
             ..Default::default()
         };
-        self.attach_notifiers(vec![notifier], checkpoint)?;
+        self.attach_notifiers(vec![notifier], checkpoint, trigger_by_flush)?;
         rx.await.unwrap()
     }
 
@@ -268,6 +276,7 @@ impl BarrierScheduler {
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
                 }),
+                false,
             ));
         }
 
@@ -320,11 +329,16 @@ impl BarrierScheduler {
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockSnapshot> {
+    pub async fn flush(
+        &self,
+        checkpoint: bool,
+        trigger_by_flush: bool,
+    ) -> MetaResult<HummockSnapshot> {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
-        self.wait_for_next_barrier_to_collect(checkpoint).await?;
+        self.wait_for_next_barrier_to_collect(checkpoint, trigger_by_flush)
+            .await?;
 
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
@@ -374,7 +388,7 @@ impl ScheduledBarriers {
             },
             _ = self.min_interval.as_mut().expect("should have set min interval").tick() => {
                 self.inner
-                    .new_scheduled(checkpoint, Command::barrier(), std::iter::empty())
+                    .new_scheduled(checkpoint, Command::barrier(), std::iter::empty(),false)
             }
         };
         self.update_num_uncheckpointed_barrier(scheduled.checkpoint);

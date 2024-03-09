@@ -1023,7 +1023,7 @@ mod tests {
             // Wait until the bootstrap recovery is done.
             loop {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                if barrier_scheduler.flush(false).await.is_ok() {
+                if barrier_scheduler.flush(false, false).await.is_ok() {
                     break;
                 }
             }

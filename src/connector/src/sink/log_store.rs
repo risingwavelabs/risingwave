@@ -112,6 +112,7 @@ pub enum LogStoreReadItem {
     },
     Barrier {
         is_checkpoint: bool,
+        trigger_by_flush: bool,
     },
     UpdateVnodeBitmap(Arc<Bitmap>),
 }
@@ -135,6 +136,7 @@ pub trait LogWriter: Send {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        trigger_by_flush: bool,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Update the vnode bitmap of the log writer
@@ -307,9 +309,10 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
+        trigger_by_flush: bool,
     ) -> LogStoreResult<()> {
         self.inner
-            .flush_current_epoch(next_epoch, is_checkpoint)
+            .flush_current_epoch(next_epoch, is_checkpoint, trigger_by_flush)
             .await?;
         self.metrics
             .log_store_latest_write_epoch
