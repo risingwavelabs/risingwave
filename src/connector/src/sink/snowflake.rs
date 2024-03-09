@@ -45,8 +45,14 @@ pub struct SnowflakeCommon {
     #[serde(rename = "snowflake.database.schema.pipe")]
     pub pipe: String,
 
-    #[serde(rename = "snowflake.account")]
-    pub account: String,
+    #[serde(rename = "snowflake.account_identifier")]
+    pub account_identifier: String,
+
+    #[serde(rename = "snowflake.user")]
+    pub user: String,
+
+    #[serde(rename = "snowflake.rsa_public_key_fp")]
+    pub rsa_public_key_fp: String,
 
     #[serde(rename = "snowflake.private.key")]
     pub private_key: String,
@@ -57,11 +63,11 @@ pub struct SnowflakeCommon {
     #[serde(rename = "snowflake.role")]
     pub role: String,
 
-    #[serde(rename = "snowflake.jwt_token")]
-    pub jwt_token: String,
+    #[serde(rename = "snowflake.s3_bucket")]
+    pub s3_bucket: String,
 
-    #[serde(rename = "snowflake.s3")]
-    pub s3: String,
+    #[serde(rename = "snowflake.s3_file")]
+    pub s3_file: Option<String>,
 }
 
 #[serde_as]
