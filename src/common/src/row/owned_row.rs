@@ -59,6 +59,10 @@ impl OwnedRow {
         self.0
     }
 
+    pub fn take(&mut self, idx: usize) -> Datum {
+        self.0[idx].take()
+    }
+
     pub fn as_inner(&self) -> &[Datum] {
         &self.0
     }

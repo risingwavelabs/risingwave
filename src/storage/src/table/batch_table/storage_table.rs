@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::default::Default;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};
@@ -676,8 +677,14 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 
     output_indices: Vec<usize>,
 
+    /// If all values of `output_indices` is unique, set `exist_index_duplicate` false.
+    exist_index_duplicate: bool,
+
     /// the key part of output_indices.
     key_output_indices: Option<Vec<usize>>,
+
+    /// If all values of `key_output_indices` is unique, set `exist_key_index_duplicate` false.
+    exist_key_index_duplicate: bool,
 
     /// the value part of output_indices.
     value_output_indices: Vec<usize>,
@@ -710,13 +717,20 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
         // result if any recovery has happened after `try_wait_epoch`.
         store.validate_read_epoch(epoch)?;
+        let exist_key_index_duplicate = key_output_indices
+            .as_ref()
+            .map(|indices| !indices.iter().all_unique())
+            .unwrap_or(false);
+        let exist_index_duplicate = !output_indices.iter().all_unique();
         let iter = Self {
             iter,
             mapping,
             row_deserializer,
             pk_serializer,
             output_indices,
+            exist_index_duplicate,
             key_output_indices,
+            exist_key_index_duplicate,
             value_output_indices,
             output_row_in_key_indices,
         };
@@ -737,17 +751,22 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             .await?
         {
             let full_row = self.row_deserializer.deserialize(&value)?;
-            let result_row_in_value = self
-                .mapping
-                .project(OwnedRow::new(full_row))
-                .into_owned_row();
+            let mut result_row_in_value = self.mapping.project_to_row(full_row).into_owned_row();
             match &self.key_output_indices {
                 Some(key_output_indices) => {
-                    let result_row_in_key = match self.pk_serializer.clone() {
+                    let mut result_row_in_key = match self.pk_serializer.clone() {
                         Some(pk_serializer) => {
-                            let pk = pk_serializer.deserialize(table_key.key_part().as_ref())?;
-
-                            pk.project(&self.output_row_in_key_indices).into_owned_row()
+                            if self.exist_key_index_duplicate {
+                                let pk =
+                                    pk_serializer.deserialize(table_key.key_part().as_ref())?;
+                                // `into_owned_row` will clone every datum once.
+                                pk.project(&self.output_row_in_key_indices).into_owned_row()
+                            } else {
+                                pk_serializer.deserialize_by_indices(
+                                    table_key.key_part().as_ref(),
+                                    &self.output_row_in_key_indices,
+                                )?
+                            }
                         }
                         None => OwnedRow::empty(),
                     };
@@ -760,16 +779,28 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                                 .iter()
                                 .position(|p| idx == p)
                                 .unwrap();
-                            result_row_vec.push(
-                                result_row_in_value
-                                    .index(*item_position_in_value_indices)
-                                    .clone(),
-                            );
+                            if self.exist_index_duplicate {
+                                result_row_vec.push(
+                                    result_row_in_value
+                                        .index(*item_position_in_value_indices)
+                                        .clone(),
+                                );
+                            } else {
+                                result_row_vec.push(
+                                    result_row_in_value.take(*item_position_in_value_indices),
+                                );
+                            }
                         } else {
                             let item_position_in_pk_indices =
                                 key_output_indices.iter().position(|p| idx == p).unwrap();
-                            result_row_vec
-                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                            if self.exist_index_duplicate {
+                                result_row_vec.push(
+                                    result_row_in_key.index(item_position_in_pk_indices).clone(),
+                                );
+                            } else {
+                                result_row_vec
+                                    .push(result_row_in_key.take(item_position_in_pk_indices));
+                            }
                         }
                     }
                     let row = OwnedRow::new(result_row_vec);

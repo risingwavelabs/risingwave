@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::row::{OwnedRow, Project, RowExt};
+use risingwave_common::row::{OwnedRow, Project, Row, RowExt};
+use risingwave_common::types::Datum;
 
 pub mod row_serde_util;
 
@@ -48,18 +49,37 @@ pub fn find_columns_by_ids(
 #[derive(Clone)]
 pub struct ColumnMapping {
     output_indices: Vec<usize>,
+    is_duplicate: bool,
 }
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnMapping {
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
     pub fn new(output_indices: Vec<usize>) -> Self {
-        Self { output_indices }
+        let indices: HashSet<usize> = HashSet::from_iter(output_indices.clone());
+        let is_duplicate = indices.len() != output_indices.len();
+        Self {
+            output_indices,
+            is_duplicate,
+        }
     }
 
     /// Project a row with this mapping
     pub fn project(&self, origin_row: OwnedRow) -> Project<'_, OwnedRow> {
         origin_row.project(&self.output_indices)
+    }
+
+    /// Project column values to a new row. Compare to `project`, this method could avoid calling `into_owned_row`,
+    /// which would clone all datum once.
+    pub fn project_to_row(&self, mut values: Vec<Datum>) -> OwnedRow {
+        if self.is_duplicate {
+            return self.project(OwnedRow::new(values)).into_owned_row();
+        }
+        let mut rows = Vec::with_capacity(self.output_indices.len());
+        for pos in &self.output_indices {
+            rows.push(values[*pos].take());
+        }
+        OwnedRow::new(rows)
     }
 }
 
