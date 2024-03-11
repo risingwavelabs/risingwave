@@ -240,6 +240,16 @@ message ListActorStatesResponse {
   repeated ActorState states = 1;
 }
 
+message ListObjectDependenciesRequest {}
+
+message ListObjectDependenciesResponse {
+  message ObjectDependencies {
+    uint32 object_id = 1;
+    uint32 referenced_object_id = 2;
+  }
+  repeated ObjectDependencies dependencies = 1;
+}
+
 enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
@@ -265,6 +275,7 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
 }
 

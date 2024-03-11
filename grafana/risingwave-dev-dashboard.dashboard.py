@@ -720,6 +720,16 @@ def section_streaming(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_rowsps(
+                    "Source Backfill Throughput(rows/s)",
+                    "The figure shows the number of rows read by each source per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_source_backfill_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Source Upstream Status",
                     "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",

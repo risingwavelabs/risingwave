@@ -992,20 +992,20 @@
     select Array(select c from t2 where b = d) arr from t1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: t1.b = t2.d, output: [array_agg(t2.c)] }
+    └─BatchHashJoin { type: LeftOuter, predicate: t1.b = t2.d, output: [$expr1] }
       ├─BatchExchange { order: [], dist: HashShard(t1.b) }
       │ └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
-      └─BatchProject { exprs: [array_agg(t2.c), t2.d] }
+      └─BatchProject { exprs: [Coalesce(array_agg(t2.c), ARRAY[]:List(Int32)) as $expr1, t2.d] }
         └─BatchHashAgg { group_key: [t2.d], aggs: [array_agg(t2.c)] }
           └─BatchExchange { order: [], dist: HashShard(t2.d) }
             └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [arr, t1._row_id(hidden), t1.b(hidden), t2.d(hidden)], stream_key: [t1._row_id, t1.b], pk_columns: [t1._row_id, t1.b], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1._row_id, t1.b) }
-      └─StreamHashJoin { type: LeftOuter, predicate: t1.b = t2.d, output: [array_agg(t2.c), t1._row_id, t1.b, t2.d] }
+      └─StreamHashJoin { type: LeftOuter, predicate: t1.b = t2.d, output: [$expr1, t1._row_id, t1.b, t2.d] }
         ├─StreamExchange { dist: HashShard(t1.b) }
         │ └─StreamTableScan { table: t1, columns: [t1.b, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamProject { exprs: [array_agg(t2.c), t2.d] }
+        └─StreamProject { exprs: [Coalesce(array_agg(t2.c), ARRAY[]:List(Int32)) as $expr1, t2.d] }
           └─StreamHashAgg { group_key: [t2.d], aggs: [array_agg(t2.c), count] }
             └─StreamExchange { dist: HashShard(t2.d) }
               └─StreamTableScan { table: t2, columns: [t2.c, t2.d, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
@@ -1025,13 +1025,13 @@
     ORDER BY 1;
   batch_plan: |-
     BatchExchange { order: [rw_users.name ASC], dist: Single }
-    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, array_agg(rw_users.name), true:Boolean, true:Boolean] }
+    └─BatchProject { exprs: [rw_users.name, rw_users.is_super, true:Boolean, rw_users.create_user, rw_users.create_db, rw_users.can_login, -1:Int32, null:Timestamptz, $expr1, true:Boolean, true:Boolean] }
       └─BatchSort { order: [rw_users.name ASC] }
         └─BatchHashJoin { type: LeftOuter, predicate: rw_users.id = null:Int32, output: all }
           ├─BatchExchange { order: [], dist: HashShard(rw_users.id) }
           │ └─BatchFilter { predicate: Not(RegexpEq(rw_users.name, '^pg_':Varchar)) }
           │   └─BatchScan { table: rw_users, columns: [rw_users.id, rw_users.name, rw_users.is_super, rw_users.create_db, rw_users.create_user, rw_users.can_login], distribution: Single }
-          └─BatchProject { exprs: [array_agg(rw_users.name), null:Int32] }
+          └─BatchProject { exprs: [Coalesce(array_agg(rw_users.name), ARRAY[]:List(Varchar)) as $expr1, null:Int32] }
             └─BatchHashAgg { group_key: [null:Int32], aggs: [array_agg(rw_users.name)] }
               └─BatchExchange { order: [], dist: HashShard(null:Int32) }
                 └─BatchHashJoin { type: Inner, predicate: null:Int32 = rw_users.id, output: [rw_users.name, null:Int32] }
@@ -1050,19 +1050,20 @@
     FROM array_types AS t0;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [array_agg(array_types.x) filter(IsNotNull(1:Int32))] }
+    └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [$expr1] }
       ├─BatchExchange { order: [], dist: HashShard(array_types.x) }
       │ └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
-      └─BatchHashAgg { group_key: [array_types.x], aggs: [array_agg(array_types.x) filter(IsNotNull(1:Int32))] }
-        └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [array_types.x, array_types.x, 1:Int32] }
-          ├─BatchHashAgg { group_key: [array_types.x], aggs: [] }
-          │ └─BatchExchange { order: [], dist: HashShard(array_types.x) }
-          │   └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
-          └─BatchExchange { order: [], dist: HashShard(array_types.x) }
-            └─BatchProject { exprs: [array_types.x, array_types.x, 1:Int32] }
-              └─BatchHashAgg { group_key: [array_types.x], aggs: [] }
-                └─BatchExchange { order: [], dist: HashShard(array_types.x) }
-                  └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
+      └─BatchProject { exprs: [array_types.x, Coalesce(array_agg(array_types.x) filter(IsNotNull(1:Int32)), ARRAY[]:List(List(Int64))) as $expr1] }
+        └─BatchHashAgg { group_key: [array_types.x], aggs: [array_agg(array_types.x) filter(IsNotNull(1:Int32))] }
+          └─BatchHashJoin { type: LeftOuter, predicate: array_types.x IS NOT DISTINCT FROM array_types.x, output: [array_types.x, array_types.x, 1:Int32] }
+            ├─BatchHashAgg { group_key: [array_types.x], aggs: [] }
+            │ └─BatchExchange { order: [], dist: HashShard(array_types.x) }
+            │   └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
+            └─BatchExchange { order: [], dist: HashShard(array_types.x) }
+              └─BatchProject { exprs: [array_types.x, array_types.x, 1:Int32] }
+                └─BatchHashAgg { group_key: [array_types.x], aggs: [] }
+                  └─BatchExchange { order: [], dist: HashShard(array_types.x) }
+                    └─BatchScan { table: array_types, columns: [array_types.x], distribution: SomeShard }
 - name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
   sql: |
     CREATE TABLE T (A INT, B INT);

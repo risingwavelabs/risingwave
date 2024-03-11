@@ -421,6 +421,7 @@ impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
 #[cfg(test)]
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -464,12 +465,12 @@ mod test {
         let pk_indices = vec![0];
 
         let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
                     + 3 2 1",
             ))),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 "  I I I
                     U- 3 2 1
@@ -585,12 +586,12 @@ mod test {
             .collect();
 
         let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
                     + 1 1 10",
             ))),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
                     + 1 3 30",
@@ -604,7 +605,7 @@ mod test {
                 " I I I
                     - 1 1 10",
             ))),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .into_executor(schema.clone(), vec![0, 1]);
 
@@ -724,9 +725,9 @@ mod test {
         let pk_indices = vec![0];
 
         let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
-            Message::Barrier(Barrier::new_test_barrier(2)),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .into_executor(schema.clone(), pk_indices.clone());
 
@@ -769,19 +770,19 @@ mod test {
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(1))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))
         );
 
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(2))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2)))
         );
 
         // The last barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(3))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
         );
     }
 }

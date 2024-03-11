@@ -24,9 +24,7 @@ use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
-use risingwave_pb::connector_service::{
-    GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
-};
+use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
@@ -106,9 +104,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             start_offset: split.start_offset().clone().unwrap_or_default(),
             properties,
             snapshot_done: split.snapshot_done(),
-            common_param: Some(SourceCommonParam {
-                is_multi_table_shared: conn_props.is_multi_table_shared,
-            }),
+            is_source_job: conn_props.is_cdc_source_job,
         };
 
         std::thread::spawn(move || {
@@ -219,11 +215,10 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                 }
                 Err(e) => {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
-                        // TODO(eric): output ConnectorError's variant as label
                         "cdc_source".to_owned(),
                         source_id.clone(),
-                        self.source_ctx.source_info.source_name.clone(),
-                        self.source_ctx.source_info.fragment_id.to_string(),
+                        self.source_ctx.source_name.clone(),
+                        self.source_ctx.fragment_id.to_string(),
                     ]);
                     Err(e)?;
                 }

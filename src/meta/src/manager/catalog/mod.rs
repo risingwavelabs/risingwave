@@ -121,6 +121,7 @@ macro_rules! commit_meta {
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
@@ -3639,6 +3640,39 @@ impl CatalogManager {
                     })
             })
             .collect_vec()
+    }
+
+    pub async fn list_object_dependencies(&self) -> Vec<PbObjectDependencies> {
+        let core = &self.core.lock().await.database;
+        let mut dependencies = vec![];
+        for table in core.tables.values() {
+            let table_type = table.get_table_type().unwrap();
+            let job_status = table.get_stream_job_status().unwrap();
+            if table_type != TableType::Internal && job_status != StreamJobStatus::Creating {
+                for referenced in &table.dependent_relations {
+                    dependencies.push(PbObjectDependencies {
+                        object_id: table.id,
+                        referenced_object_id: *referenced,
+                    });
+                }
+                for incoming_sinks in &table.incoming_sinks {
+                    dependencies.push(PbObjectDependencies {
+                        object_id: table.id,
+                        referenced_object_id: *incoming_sinks,
+                    });
+                }
+            }
+        }
+        for sink in core.sinks.values() {
+            for referenced in &sink.dependent_relations {
+                dependencies.push(PbObjectDependencies {
+                    object_id: sink.id,
+                    referenced_object_id: *referenced,
+                });
+            }
+        }
+
+        dependencies
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
