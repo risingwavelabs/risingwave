@@ -28,7 +28,7 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
+    use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt, EPOCH_AVAILABLE_BITS};
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -304,7 +304,7 @@ pub(crate) mod tests {
             .unwrap()
         {
             let compaction_filter_flag = CompactionFilterFlag::TTL;
-            compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
+            compact_task.watermark = (TEST_WATERMARK * 1000) << EPOCH_AVAILABLE_BITS;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
             compact_task.table_options = BTreeMap::from([(
                 0,
@@ -376,7 +376,7 @@ pub(crate) mod tests {
 
         // we have removed these 31 keys before watermark 32.
         assert_eq!(table_key_count, (SST_COUNT - TEST_WATERMARK + 1) as u32);
-        let read_epoch = (TEST_WATERMARK * 1000) << 16;
+        let read_epoch = test_epoch(TEST_WATERMARK * 1000);
 
         let get_ret = storage
             .get(
@@ -394,7 +394,7 @@ pub(crate) mod tests {
         let ret = storage
             .get(
                 TableKey(key.clone()),
-                ((TEST_WATERMARK - 1) * 1000) << 16,
+                test_epoch((TEST_WATERMARK - 1) * 1000),
                 ReadOptions {
                     prefix_hint: Some(key.clone()),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -934,7 +934,7 @@ pub(crate) mod tests {
         // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
-        let millisec_interval_epoch: u64 = (1 << 16) * 100;
+        let millisec_interval_epoch: u64 = test_epoch(100);
         let vnode = VirtualNode::from_index(1);
         let mut epoch_set = BTreeSet::new();
 
@@ -1138,7 +1138,7 @@ pub(crate) mod tests {
         // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
-        let millisec_interval_epoch: u64 = (1 << 16) * 100;
+        let millisec_interval_epoch: u64 = test_epoch(100);
         let mut epoch_set = BTreeSet::new();
 
         let mut local = storage

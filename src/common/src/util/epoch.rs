@@ -33,7 +33,7 @@ pub struct Epoch(pub u64);
 /// `INVALID_EPOCH` defines the invalid epoch value.
 pub const INVALID_EPOCH: u64 = 0;
 
-const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
+const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 12;
 
 impl Epoch {
     pub fn now() -> Self {
@@ -115,7 +115,7 @@ impl Epoch {
     }
 }
 
-pub const EPOCH_AVAILABLE_BITS: u64 = 16;
+pub const EPOCH_AVAILABLE_BITS: u64 = 12;
 pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
 // Low EPOCH_AVAILABLE_BITS bits set to 1
 pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
