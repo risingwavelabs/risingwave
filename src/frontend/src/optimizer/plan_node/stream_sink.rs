@@ -20,10 +20,7 @@ use fixedbitset::FixedBitSet;
 use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
-use risingwave_common::constants::log_store::v2::{
-    KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
-};
+use risingwave_common::catalog::{ColumnCatalog, TableId};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -43,7 +40,7 @@ use risingwave_pb::stream_plan::SinkLogStoreType;
 use super::derive::{derive_columns, derive_pk};
 use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
+use super::utils::{childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
@@ -510,55 +507,7 @@ impl StreamSink {
     /// The table schema is: | epoch | seq id | row op | sink columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        Self::infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
-    }
-
-    pub fn infer_kv_log_store_table_catalog_inner(
-        input: &PlanRef,
-        columns: &[ColumnCatalog],
-    ) -> TableCatalog {
-        let mut table_catalog_builder = TableCatalogBuilder::default();
-
-        let mut value_indices =
-            Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len());
-
-        for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
-            let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
-            value_indices.push(indice);
-        }
-
-        table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
-
-        for (i, ordering) in PK_ORDERING.iter().enumerate() {
-            table_catalog_builder.add_order_column(i, *ordering);
-        }
-
-        let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
-
-        let payload_indices = table_catalog_builder.extend_columns(
-            &columns
-                .iter()
-                .map(|column| {
-                    // make payload hidden column visible in kv log store batch query
-                    let mut column = column.clone();
-                    column.is_hidden = false;
-                    column
-                })
-                .collect_vec(),
-        );
-
-        value_indices.extend(payload_indices);
-        table_catalog_builder.set_value_indices(value_indices);
-
-        // Modify distribution key indices based on the pre-defined columns.
-        let dist_key = input
-            .distribution()
-            .dist_column_indices()
-            .iter()
-            .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
-            .collect_vec();
-
-        table_catalog_builder.build(dist_key, read_prefix_len_hint)
+        infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
 }
 
