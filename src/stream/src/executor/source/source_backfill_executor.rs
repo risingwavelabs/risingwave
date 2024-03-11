@@ -22,6 +22,7 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use prometheus::IntCounter;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::row::Row;
@@ -128,6 +129,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
+    source_split_change_count: IntCounter,
 
     // /// Receiver of barrier channel.
     // barrier_receiver: Option<UnboundedReceiver<Barrier>>,
@@ -181,12 +183,19 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         connector_params: ConnectorParams,
         backfill_state_store: BackfillStateTableHandler<S>,
     ) -> Self {
+        let source_split_change_count = metrics.source_split_change_count.with_label_values(&[
+            &stream_source_core.source_id.to_string(),
+            &stream_source_core.source_name,
+            &actor_ctx.id.to_string(),
+            &actor_ctx.fragment_id.to_string(),
+        ]);
         Self {
             actor_ctx,
             info,
             stream_source_core,
             backfill_state_store,
             metrics,
+            source_split_change_count,
             system_params,
             source_ctrl_opts,
             connector_params,
@@ -219,17 +228,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .to_stream(Some(splits), column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
-    }
-
-    /// `source_id | source_name | actor_id | fragment_id`
-    #[inline]
-    fn get_metric_labels(&self) -> [String; 4] {
-        [
-            self.stream_source_core.source_id.to_string(),
-            format!("{}_backfill", self.stream_source_core.source_name.clone()),
-            self.actor_ctx.id.to_string(),
-            self.actor_ctx.fragment_id.to_string(),
-        ]
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -348,6 +346,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         };
 
         if !self.backfill_finished(&backfill_stage.states).await? {
+            let source_backfill_row_count = self
+                .metrics
+                .source_backfill_row_count
+                .with_guarded_label_values(&[
+                    &self.stream_source_core.source_id.to_string(),
+                    &self.stream_source_core.source_name,
+                    &self.actor_ctx.id.to_string(),
+                    &self.actor_ctx.fragment_id.to_string(),
+                ]);
+
             // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
             // milliseconds, considering some other latencies like network and cost in Meta.
             let mut max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
@@ -561,16 +569,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 }
                             }
                         });
-                        self.metrics
-                            .source_backfill_row_count
-                            .with_label_values(
-                                &self
-                                    .get_metric_labels()
-                                    .iter()
-                                    .map(AsRef::as_ref)
-                                    .collect::<Vec<&str>>(),
-                            )
-                            .inc_by(chunk.cardinality() as u64);
+
+                        source_backfill_row_count.inc_by(chunk.cardinality() as u64);
 
                         yield Message::Chunk(chunk);
                     }
@@ -654,16 +654,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         stage: &mut BackfillStage,
         should_trim_state: bool,
     ) -> StreamExecutorResult<bool> {
-        self.metrics
-            .source_split_change_count
-            .with_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
-            )
-            .inc();
+        self.source_split_change_count.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, stage, should_trim_state)
@@ -769,16 +760,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         splits: &mut HashSet<SplitId>,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
-        self.metrics
-            .source_split_change_count
-            .with_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
-            )
-            .inc();
+        self.source_split_change_count.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             self.update_state_if_changed_forward_stage(target_splits, splits, should_trim_state)
                 .await?;
