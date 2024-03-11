@@ -1142,6 +1142,7 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
+    # How frequently Prometheus scrape targets (collect metrics)
     scrape-interval: 15s
 
   frontend:
