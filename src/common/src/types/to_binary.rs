@@ -15,7 +15,7 @@
 use bytes::{Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
 
-use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
+use super::{DataType, DatumRef, ListRef, ScalarRefImpl, F32, F64};
 use crate::error::NotImplemented;
 
 /// Error type for [`ToBinary`] trait.
@@ -87,11 +87,49 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => bail_not_implemented!(
+            ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Struct(_) => bail_not_implemented!(
                 issue = 7949,
                 "the pgwire extended-mode encoding for {ty} is unsupported"
             ),
         }
+    }
+}
+
+impl<'a> ToBinary for ListRef<'a> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+        // safe since ListRef
+        let elem_ty = ty.as_list();
+
+        let array_ty = match elem_ty {
+            DataType::Boolean => Type::BOOL_ARRAY,
+            DataType::Int16 => Type::INT2_ARRAY,
+            DataType::Int32 => Type::INT4_ARRAY,
+            DataType::Int64 => Type::INT8_ARRAY,
+            DataType::Int256 => Type::NUMERIC_ARRAY, // HACK: NOT SURE
+            DataType::Float32 => Type::FLOAT4_ARRAY,
+            DataType::Float64 => Type::FLOAT8_ARRAY,
+            DataType::Decimal => Type::NUMERIC_ARRAY,
+            DataType::Date => Type::DATE_ARRAY,
+            DataType::Varchar => Type::VARCHAR_ARRAY,
+            DataType::Time => Type::TIME_ARRAY,
+            DataType::Timestamp => Type::TIMESTAMP_ARRAY,
+            DataType::Timestamptz => Type::TIMESTAMPTZ_ARRAY,
+            DataType::Interval => Type::INTERVAL_ARRAY,
+            DataType::Bytea => Type::BYTEA_ARRAY,
+            DataType::Jsonb => Type::JSONB_ARRAY,
+            DataType::Serial => Type::INT4_ARRAY,
+            DataType::Struct(_) | DataType::List(_)  => bail_not_implemented!(
+                issue = 7949,
+                "the pgwire extended-mode encoding for lists with more than one dimension ({ty}) is unsupported"
+            ),
+        };
+
+        let mut buf = BytesMut::new();
+        self.to_sql(&array_ty, &mut buf)
+            .map_err(ToBinaryError::ToSql)?;
+
+        Ok(Some(buf.freeze()))
     }
 }
 
