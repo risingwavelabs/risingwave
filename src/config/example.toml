@@ -176,6 +176,7 @@ object_store_streaming_read_timeout_ms = 480000
 object_store_streaming_upload_timeout_ms = 480000
 object_store_upload_timeout_ms = 480000
 object_store_read_timeout_ms = 480000
+object_store_set_atomic_write_dir = false
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000
