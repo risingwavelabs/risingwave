@@ -418,17 +418,10 @@ impl Cluster {
                 "0.0.0.0:5690",
                 "--advertise-addr",
                 &format!("meta-{i}:5690"),
-                // sqlite backend
                 "--backend",
                 "sql",
                 "--sql-endpoint",
-                // "sqlite::memory:",
-                "sqlite://posts.sqlite?mode=rwc",
-                // etcd backend
-                // "--backend",
-                // "etcd",
-                // "--etcd-endpoints",
-                // "etcd:2388",
+                "sqlite::memory:",
                 "--state-store",
                 "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",
