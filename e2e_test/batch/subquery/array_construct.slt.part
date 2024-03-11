@@ -29,3 +29,14 @@ query T
 select array(select unnest from unnest(array['c', 'a', 'b']) with ordinality order by ordinality desc);
 ----
 {b,a,c}
+
+# Test 0 rows.
+query T
+select array_agg(n) from generate_series(1, 5, 2) as t(n) where n > 10;
+----
+NULL
+
+query T
+select array(select n from generate_series(1, 5, 2) as t(n) where n > 10);
+----
+NULL
