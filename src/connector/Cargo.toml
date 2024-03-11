@@ -120,7 +120,7 @@ risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.22.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs =  "0.6"
-rustls-pemfile = "1"
+rustls-pemfile = "2"
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
