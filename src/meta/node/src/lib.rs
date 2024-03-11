@@ -38,12 +38,6 @@ use crate::manager::MetaOpts;
 #[derive(Debug, Clone, Parser, OverrideConfig)]
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
-    #[clap(long, env = "RW_VPC_ID")]
-    pub vpc_id: Option<String>,
-
-    #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
-    pub security_group_id: Option<String>,
-
     // TODO: use `SocketAddr`
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     pub listen_addr: String,
@@ -64,26 +58,26 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_HOST", alias = "prometheus-host")]
     pub prometheus_listener_addr: Option<String>,
 
-    #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
+    #[clap(long, hide = true, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
     pub etcd_endpoints: String,
 
     /// Enable authentication with etcd. By default disabled.
-    #[clap(long, env = "RW_ETCD_AUTH")]
+    #[clap(long, hide = true, env = "RW_ETCD_AUTH")]
     pub etcd_auth: bool,
 
     /// Username of etcd, required when --etcd-auth is enabled.
-    #[clap(long, env = "RW_ETCD_USERNAME", default_value = "")]
+    #[clap(long, hide = true, env = "RW_ETCD_USERNAME", default_value = "")]
     pub etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
-    #[clap(long, env = "RW_ETCD_PASSWORD", default_value = "")]
+    #[clap(long, hide = true, env = "RW_ETCD_PASSWORD", default_value = "")]
     pub etcd_password: Secret<String>,
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
-    #[clap(long, env = "RW_SQL_ENDPOINT")]
+    #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
     pub sql_endpoint: Option<String>,
 
-    #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
+    #[clap(long, hide = true, env = "RW_DASHBOARD_UI_PATH")]
     pub dashboard_ui_path: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
@@ -98,16 +92,23 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
     pub prometheus_selector: Option<String>,
 
+    // TODO(eric): remove me
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
-    #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
     /// Default tag for the endpoint created when creating a privatelink connection.
     /// Will be appended to the tags specified in the `tags` field in with clause in `create
     /// connection`.
-    #[clap(long, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
+    #[clap(long, hide = true, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
     pub privatelink_endpoint_default_tags: Option<String>,
+
+    #[clap(long, hide = true, env = "RW_VPC_ID")]
+    pub vpc_id: Option<String>,
+
+    #[clap(long, hide = true, env = "RW_VPC_SECURITY_GROUP_ID")]
+    pub security_group_id: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -115,57 +116,57 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(long, env = "RW_BACKEND", value_enum)]
+    #[clap(long, hide = true, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     pub backend: Option<MetaBackend>,
 
     /// The interval of periodic barrier.
-    #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
+    #[clap(long, hide = true, env = "RW_BARRIER_INTERVAL_MS")]
     #[override_opts(path = system.barrier_interval_ms)]
     pub barrier_interval_ms: Option<u32>,
 
     /// Target size of the Sstable.
-    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
+    #[clap(long, hide = true, env = "RW_SSTABLE_SIZE_MB")]
     #[override_opts(path = system.sstable_size_mb)]
     pub sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
-    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
+    #[clap(long, hide = true, env = "RW_BLOCK_SIZE_KB")]
     #[override_opts(path = system.block_size_kb)]
     pub block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
-    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
+    #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,
 
     /// State store url
-    #[clap(long, env = "RW_STATE_STORE")]
+    #[clap(long, hide = true, env = "RW_STATE_STORE")]
     #[override_opts(path = system.state_store)]
     pub state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
-    #[clap(long, env = "RW_DATA_DIRECTORY")]
+    #[clap(long, hide = true, env = "RW_DATA_DIRECTORY")]
     #[override_opts(path = system.data_directory)]
     pub data_directory: Option<String>,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
-    #[clap(long, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
+    #[clap(long, hide = true, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
     #[override_opts(path = meta.do_not_config_object_storage_lifecycle)]
     pub do_not_config_object_storage_lifecycle: Option<bool>,
 
     /// Remote storage url for storing snapshots.
-    #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
+    #[clap(long, hide = true, env = "RW_BACKUP_STORAGE_URL")]
     #[override_opts(path = system.backup_storage_url)]
     pub backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
-    #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
+    #[clap(long, hide = true, env = "RW_BACKUP_STORAGE_DIRECTORY")]
     #[override_opts(path = system.backup_storage_directory)]
     pub backup_storage_directory: Option<String>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
 }
