@@ -666,6 +666,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
       uint32 tombstone_reclaim_ratio = 16;
+      uint32 partition_vnode_count = 17;
     }
   }
   repeated uint64 compaction_group_ids = 1;

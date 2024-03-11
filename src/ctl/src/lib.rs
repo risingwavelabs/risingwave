@@ -240,6 +240,8 @@ enum HummockCommands {
         enable_emergency_picker: Option<bool>,
         #[clap(long)]
         tombstone_reclaim_ratio: Option<u32>,
+        #[clap(long)]
+        partition_vnode_count: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -648,6 +650,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_overlapping_sub_level_compact_level_count,
             enable_emergency_picker,
             tombstone_reclaim_ratio,
+            partition_vnode_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -668,6 +671,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_overlapping_sub_level_compact_level_count,
                     enable_emergency_picker,
                     tombstone_reclaim_ratio,
+                    partition_vnode_count,
                 ),
             )
             .await?

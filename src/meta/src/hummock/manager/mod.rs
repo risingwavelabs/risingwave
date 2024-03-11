@@ -3056,19 +3056,21 @@ impl HummockManager {
             }
 
             if let Some(levels) = current_version.levels.get(cg_id) {
-                if levels.member_table_ids.len() == 1 {
-                    restore_cg_to_partition_vnode.insert(
-                        *cg_id,
-                        vec![(
-                            levels.member_table_ids[0],
-                            compaction_group_config
-                                .compaction_config
-                                .split_weight_by_vnode,
-                        )]
-                        .into_iter()
+                restore_cg_to_partition_vnode.insert(
+                    *cg_id,
+                    levels
+                        .member_table_ids
+                        .iter()
+                        .map(|table_id| {
+                            (
+                                *table_id,
+                                compaction_group_config
+                                    .compaction_config
+                                    .split_weight_by_vnode,
+                            )
+                        })
                         .collect(),
-                    );
-                }
+                );
             }
         }
 
