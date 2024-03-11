@@ -20,12 +20,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::is_max_epoch;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
-use super::MonotonicDeleteEvent;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -183,30 +181,9 @@ where
         // the captured reference to `current_builder` is also required to be `Send`, and then
         // `current_builder` itself is required to be `Sync`, which is unnecessary.
         let mut need_seal_current = false;
-        let mut last_range_tombstone_epoch = HummockEpoch::MAX;
         if let Some(builder) = self.current_builder.as_mut() {
             if is_new_user_key {
                 need_seal_current = switch_builder || builder.reach_capacity();
-            }
-            if need_seal_current
-                && let Some(event) = builder.last_range_tombstone()
-                && !is_max_epoch(event.new_epoch)
-            {
-                last_range_tombstone_epoch = event.new_epoch;
-                if event
-                    .event_key
-                    .left_user_key
-                    .as_ref()
-                    .eq(&full_key.user_key)
-                {
-                    // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
-                    need_seal_current = false;
-                } else {
-                    builder.add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
-                        new_epoch: HummockEpoch::MAX,
-                    });
-                }
             }
         }
 
@@ -218,15 +195,7 @@ where
             if let Some(progress) = &self.task_progress {
                 progress.inc_num_pending_write_io();
             }
-            let mut builder = self.builder_factory.open_builder().await?;
-            // If last_range_tombstone_epoch is not MAX, it means that we cut one range-tombstone to
-            // two half and add the right half as a new range to next sstable.
-            if need_seal_current && !is_max_epoch(last_range_tombstone_epoch) {
-                builder.add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
-                    new_epoch: last_range_tombstone_epoch,
-                });
-            }
+            let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }
 
@@ -288,37 +257,6 @@ where
             .as_ref()
             .map(|builder| builder.reach_capacity())
             .unwrap_or(false)
-    }
-
-    /// Add kv pair to sstable.
-    pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
-        if let Some(builder) = self.current_builder.as_mut()
-            && builder.reach_capacity()
-            && !is_max_epoch(event.new_epoch)
-        {
-            if !is_max_epoch(builder.last_range_tombstone_epoch()) {
-                builder.add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: event.event_key.clone(),
-                    new_epoch: HummockEpoch::MAX,
-                });
-            }
-            self.seal_current().await?;
-        }
-
-        if self.current_builder.is_none() {
-            if is_max_epoch(event.new_epoch) {
-                return Ok(());
-            }
-
-            if let Some(progress) = &self.task_progress {
-                progress.inc_num_pending_write_io();
-            }
-            let builder = self.builder_factory.open_builder().await?;
-            self.current_builder = Some(builder);
-        }
-        let builder = self.current_builder.as_mut().unwrap();
-        builder.add_monotonic_delete(event);
-        Ok(())
     }
 
     /// Marks the current builder as sealed. Next call of `add` will always create a new table.
@@ -438,13 +376,12 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::can_concat;
-    use risingwave_hummock_sdk::key::PointRange;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
-    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{HummockEpoch, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
@@ -553,6 +490,7 @@ mod tests {
             .unwrap();
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_expand_boundary_by_range_tombstone() {
         let opts = default_builder_opt_for_test();
@@ -582,8 +520,8 @@ mod tests {
                 )),
             )],
         );
-        let mut del_iter = builder.build_for_compaction();
-        del_iter.rewind().await.unwrap();
+        // let mut del_iter = builder.build_for_compaction();
+        // del_iter.rewind().await.unwrap();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
@@ -595,33 +533,33 @@ mod tests {
             [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
             test_epoch(1),
         );
-        let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
-        while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
-            let event_key = del_iter.key().to_vec();
-            del_iter.next().await.unwrap();
-            builder
-                .add_monotonic_delete(MonotonicDeleteEvent {
-                    new_epoch: del_iter.earliest_epoch(),
-                    event_key,
-                })
-                .await
-                .unwrap();
-        }
+        // let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
+        // while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
+        //     let event_key = del_iter.key().to_vec();
+        //     del_iter.next().await.unwrap();
+        //     builder
+        //         .add_monotonic_delete(MonotonicDeleteEvent {
+        //             new_epoch: del_iter.earliest_epoch(),
+        //             event_key,
+        //         })
+        //         .await
+        //         .unwrap();
+        // }
         builder
             .add_full_key(full_key.to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
-        while del_iter.is_valid() {
-            let event_key = del_iter.key().to_vec();
-            del_iter.next().await.unwrap();
-            builder
-                .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key,
-                    new_epoch: del_iter.earliest_epoch(),
-                })
-                .await
-                .unwrap();
-        }
+        // while del_iter.is_valid() {
+        //     let event_key = del_iter.key().to_vec();
+        //     del_iter.next().await.unwrap();
+        //     builder
+        //         .add_monotonic_delete(MonotonicDeleteEvent {
+        //             event_key,
+        //             new_epoch: del_iter.earliest_epoch(),
+        //         })
+        //         .await
+        //         .unwrap();
+        // }
         let mut sst_infos = builder.finish().await.unwrap();
         let key_range = sst_infos
             .pop()
@@ -650,6 +588,7 @@ mod tests {
         );
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_only_delete_range() {
         let block_size = 1 << 10;
@@ -679,31 +618,32 @@ mod tests {
                 (Bound::Excluded(Bytes::copy_from_slice(b"ddd"))),
             )],
         );
-        let mut del_iter = builder.build_for_compaction();
-        let mut builder = CapacitySplitTableBuilder::new(
+        // let mut del_iter = builder.build_for_compaction();
+        let builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
             BTreeMap::default(),
         );
-        del_iter.rewind().await.unwrap();
-        assert!(is_max_epoch(del_iter.earliest_epoch()));
-        while del_iter.is_valid() {
-            let event_key = del_iter.key().to_vec();
-            del_iter.next().await.unwrap();
-            builder
-                .add_monotonic_delete(MonotonicDeleteEvent {
-                    new_epoch: del_iter.earliest_epoch(),
-                    event_key,
-                })
-                .await
-                .unwrap();
-        }
+        // del_iter.rewind().await.unwrap();
+        // assert!(is_max_epoch(del_iter.earliest_epoch()));
+        // while del_iter.is_valid() {
+        //     let event_key = del_iter.key().to_vec();
+        //     del_iter.next().await.unwrap();
+        //     builder
+        //         .add_monotonic_delete(MonotonicDeleteEvent {
+        //             new_epoch: del_iter.earliest_epoch(),
+        //             event_key,
+        //         })
+        //         .await
+        //         .unwrap();
+        // }
 
         let results = builder.finish().await.unwrap();
         assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_delete_range_cut_sst() {
         let block_size = 256;
@@ -722,16 +662,16 @@ mod tests {
             None,
             BTreeMap::default(),
         );
-        builder
-            .add_monotonic_delete(MonotonicDeleteEvent {
-                event_key: PointRange::from_user_key(
-                    UserKey::for_test(table_id, b"aaaa".to_vec()),
-                    false,
-                ),
-                new_epoch: 10,
-            })
-            .await
-            .unwrap();
+        // builder
+        //     .add_monotonic_delete(MonotonicDeleteEvent {
+        //         event_key: PointRange::from_user_key(
+        //             UserKey::for_test(table_id, b"aaaa".to_vec()),
+        //             false,
+        //         ),
+        //         new_epoch: 10,
+        //     })
+        //     .await
+        //     .unwrap();
         let v = vec![5u8; 220];
         let epoch = test_epoch(12);
         builder
@@ -750,26 +690,26 @@ mod tests {
             )
             .await
             .unwrap();
-        builder
-            .add_monotonic_delete(MonotonicDeleteEvent {
-                event_key: PointRange::from_user_key(
-                    UserKey::for_test(table_id, b"eeee".to_vec()),
-                    false,
-                ),
-                new_epoch: test_epoch(11),
-            })
-            .await
-            .unwrap();
-        builder
-            .add_monotonic_delete(MonotonicDeleteEvent {
-                event_key: PointRange::from_user_key(
-                    UserKey::for_test(table_id, b"ffff".to_vec()),
-                    false,
-                ),
-                new_epoch: test_epoch(10),
-            })
-            .await
-            .unwrap();
+        // builder
+        //     .add_monotonic_delete(MonotonicDeleteEvent {
+        //         event_key: PointRange::from_user_key(
+        //             UserKey::for_test(table_id, b"eeee".to_vec()),
+        //             false,
+        //         ),
+        //         new_epoch: test_epoch(11),
+        //     })
+        //     .await
+        //     .unwrap();
+        // builder
+        //     .add_monotonic_delete(MonotonicDeleteEvent {
+        //         event_key: PointRange::from_user_key(
+        //             UserKey::for_test(table_id, b"ffff".to_vec()),
+        //             false,
+        //         ),
+        //         new_epoch: test_epoch(10),
+        //     })
+        //     .await
+        //     .unwrap();
         builder
             .add_full_key(
                 FullKey::from_user_key(UserKey::for_test(table_id, b"ffff"), epoch),
@@ -778,16 +718,16 @@ mod tests {
             )
             .await
             .unwrap();
-        builder
-            .add_monotonic_delete(MonotonicDeleteEvent {
-                event_key: PointRange::from_user_key(
-                    UserKey::for_test(table_id, b"gggg".to_vec()),
-                    false,
-                ),
-                new_epoch: HummockEpoch::MAX,
-            })
-            .await
-            .unwrap();
+        // builder
+        //     .add_monotonic_delete(MonotonicDeleteEvent {
+        //         event_key: PointRange::from_user_key(
+        //             UserKey::for_test(table_id, b"gggg".to_vec()),
+        //             false,
+        //         ),
+        //         new_epoch: HummockEpoch::MAX,
+        //     })
+        //     .await
+        //     .unwrap();
         let ret = builder.finish().await.unwrap();
         assert_eq!(ret.len(), 2);
         assert_eq!(ret[0].sst_info.sst_info.range_tombstone_count, 2);

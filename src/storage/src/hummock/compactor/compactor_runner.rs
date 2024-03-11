@@ -20,15 +20,14 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{can_concat, HummockSstableObjectId};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use thiserror_ext::AsReport;
@@ -47,16 +46,14 @@ use crate::hummock::compactor::{
     fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, SkipWatermarkIterator,
-    ValueMeta,
+    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, CompressionAlgorithm,
-    GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
-    SstableDeleteRangeIterator, SstableStoreRef,
+    BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 pub struct CompactorRunner {
@@ -136,13 +133,12 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        let (iter, del_iter) = self.build_sst_iter(task_progress.clone()).await?;
+        let iter = self.build_sst_iter(task_progress.clone())?;
         let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
                 compaction_filter,
-                del_iter,
                 filter_key_extractor,
                 Some(task_progress),
                 Some(self.compact_task.task_id),
@@ -153,21 +149,16 @@ impl CompactorRunner {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(
+    fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
-    ) -> HummockResult<(
-        impl HummockIterator<Direction = Forward>,
-        CompactionDeleteRangeIterator,
-    )> {
+    ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
-        let mut local_stats = StoreLocalStatistic::default();
         let compact_io_retry_time = self
             .compactor
             .context
             .storage_opts
             .compact_iter_recreate_timeout_ms;
-        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -191,14 +182,7 @@ impl CompactorRunner {
                     })
                     .cloned()
                     .collect_vec();
-                let delete_range_ssts = tables
-                    .iter()
-                    .filter(|sst| sst.range_tombstone_count > 0)
-                    .cloned()
-                    .collect_vec();
-                if !delete_range_ssts.is_empty() {
-                    del_iter.add_concat_iter(delete_range_ssts, self.sstable_store.clone());
-                }
+
                 table_iters.push(ConcatSstableIterator::new(
                     self.compact_task.existing_table_ids.clone(),
                     tables,
@@ -218,13 +202,7 @@ impl CompactorRunner {
                     if !self.key_range.full_key_overlap(&key_range) || !exist_table {
                         continue;
                     }
-                    if table_info.range_tombstone_count > 0 {
-                        let table = self
-                            .sstable_store
-                            .sstable(table_info, &mut local_stats)
-                            .await?;
-                        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table));
-                    }
+
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
                         vec![table_info.clone()],
@@ -239,15 +217,12 @@ impl CompactorRunner {
 
         // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
-        Ok((
-            SkipWatermarkIterator::from_safe_epoch_watermarks(
-                MonitoredCompactorIterator::new(
-                    MergeIterator::for_compactor(table_iters),
-                    task_progress.clone(),
-                ),
-                &self.compact_task.table_watermarks,
+        Ok(SkipWatermarkIterator::from_safe_epoch_watermarks(
+            MonitoredCompactorIterator::new(
+                MergeIterator::for_compactor(table_iters),
+                task_progress.clone(),
             ),
-            CompactionDeleteRangeIterator::new(del_iter),
+            &self.compact_task.table_watermarks,
         ))
     }
 }
@@ -715,7 +690,6 @@ fn compact_done(
 
 pub async fn compact_and_build_sst<F>(
     sst_builder: &mut CapacitySplitTableBuilder<F>,
-    mut del_iter: CompactionDeleteRangeIterator,
     task_config: &TaskConfig,
     compactor_metrics: Arc<CompactorMetrics>,
     mut iter: impl HummockIterator<Direction = Forward>,
@@ -729,25 +703,8 @@ where
         iter.seek(full_key)
             .verbose_instrument_await("iter_seek")
             .await?;
-        del_iter.seek(full_key.user_key).await?;
-        if !task_config.gc_delete_keys
-            && del_iter.is_valid()
-            && !is_max_epoch(del_iter.earliest_epoch())
-            && !compaction_filter.should_delete(FullKey::from_user_key(
-                full_key.user_key,
-                del_iter.earliest_epoch(),
-            ))
-        {
-            sst_builder
-                .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
-                    new_epoch: del_iter.earliest_epoch(),
-                })
-                .await?;
-        }
     } else {
         iter.rewind().verbose_instrument_await("rewind").await?;
-        del_iter.rewind().await?;
     };
 
     let end_key = if task_config.key_range.right.is_empty() {
@@ -759,7 +716,6 @@ where
 
     let mut full_key_tracker = FullKeyTracker::<Vec<u8>>::new(FullKey::default());
     let mut watermark_can_see_last_key = false;
-    let mut user_key_last_delete_epoch = HummockEpoch::MAX;
     let mut local_stats = StoreLocalStatistic::default();
 
     // Keep table stats changes due to dropping KV.
@@ -775,10 +731,10 @@ where
         .map(|(table_id, schema)| (*table_id, schema.column_ids.iter().copied().collect()))
         .collect();
     while iter.is_valid() {
-        let mut iter_key = iter.key();
+        let iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
-        let mut is_new_user_key = full_key_tracker.observe(iter.key()).is_some();
+        let is_new_user_key = full_key_tracker.observe(iter.key()).is_some();
         let mut drop = false;
 
         // CRITICAL WARN: Because of memtable spill, there may be several versions of the same user-key share the same `pure_epoch`. Do not change this code unless necessary.
@@ -793,7 +749,6 @@ where
                 break;
             }
             watermark_can_see_last_key = false;
-            user_key_last_delete_epoch = HummockEpoch::MAX;
             if value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
@@ -810,28 +765,6 @@ where
             last_table_id = Some(iter_key.user_key.table_id.table_id);
         }
 
-        let target_extended_user_key = PointRange::from_user_key(iter_key.user_key, false);
-        while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
-            let event_key = del_iter.key().to_vec();
-            del_iter.next().await?;
-            let new_epoch = del_iter.earliest_epoch();
-            if !task_config.gc_delete_keys
-                && !compaction_filter.should_delete(FullKey::from_user_key(
-                    event_key.left_user_key.as_ref(),
-                    new_epoch,
-                ))
-            {
-                sst_builder
-                    .add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key,
-                        new_epoch,
-                    })
-                    .await?;
-            }
-        }
-
-        let earliest_range_delete_which_can_see_iter_key = del_iter.earliest_delete_since(epoch);
-
         // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
         // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
         // key which satisfies `epoch` < `watermark`
@@ -841,9 +774,7 @@ where
         // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
         // Do not assume that "the epoch of keys behind must be smaller than the current key."
         if (epoch < task_config.watermark && task_config.gc_delete_keys && value.is_delete())
-            || (epoch < task_config.watermark
-                && (watermark_can_see_last_key
-                    || earliest_range_delete_which_can_see_iter_key <= task_config.watermark))
+            || (epoch < task_config.watermark && (watermark_can_see_last_key))
         {
             drop = true;
         }
@@ -873,33 +804,6 @@ where
                 .verbose_instrument_await("iter_next_in_drop")
                 .await?;
             continue;
-        }
-
-        if value.is_delete() {
-            user_key_last_delete_epoch = epoch;
-        } else if earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch {
-            debug_assert!(
-                iter_key.epoch_with_gap.pure_epoch() < earliest_range_delete_which_can_see_iter_key
-                    && earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch
-            );
-            user_key_last_delete_epoch = earliest_range_delete_which_can_see_iter_key;
-
-            // In each SST, since a union set of delete ranges is constructed and thus original
-            // delete ranges are replaced with the union set and not used in read, we lose exact
-            // information about whether a key is deleted by a delete range in
-            // the same SST. Therefore we need to construct a corresponding
-            // delete key to represent this.
-            iter_key.epoch_with_gap =
-                EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_iter_key);
-            sst_builder
-                .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
-                .verbose_instrument_await("add_full_key_delete")
-                .await?;
-            last_table_stats.total_key_count += 1;
-            last_table_stats.total_key_size += iter_key.encoded_len() as i64;
-            last_table_stats.total_value_size += 1;
-            iter_key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
-            is_new_user_key = false;
         }
 
         // May drop stale columns
@@ -951,38 +855,6 @@ where
         iter.next().verbose_instrument_await("iter_next").await?;
     }
 
-    if !task_config.gc_delete_keys {
-        let extended_largest_user_key = PointRange::from_user_key(end_key.user_key.clone(), false);
-
-        let end_key_ref = extended_largest_user_key.as_ref();
-        while del_iter.is_valid() {
-            if !end_key_ref.is_empty() && del_iter.key().ge(&end_key_ref) {
-                // We do not need to check right bound of delete-range because build would not add it.
-                sst_builder
-                    .add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key: extended_largest_user_key,
-                        new_epoch: HummockEpoch::MAX,
-                    })
-                    .await?;
-                break;
-            }
-            let event_key = del_iter.key().to_vec();
-            del_iter.next().await?;
-            let new_epoch = del_iter.earliest_epoch();
-            let drop = compaction_filter.should_delete(FullKey::from_user_key(
-                event_key.left_user_key.as_ref(),
-                new_epoch,
-            ));
-            if !drop {
-                sst_builder
-                    .add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key,
-                        new_epoch,
-                    })
-                    .await?;
-            }
-        }
-    }
     if let Some(last_table_id) = last_table_id.take() {
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
     }
@@ -1007,13 +879,11 @@ mod tests {
     use crate::filter_key_extractor::FullKeyFilterKeyExtractor;
     use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::delete_range::create_monotonic_events;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_impl};
-    use crate::hummock::{
-        DeleteRangeTombstone, SharedComapctorObjectIdManager, Xor16FilterBuilder,
-    };
+    use crate::hummock::{SharedComapctorObjectIdManager, Xor16FilterBuilder};
     use crate::opts::StorageOpts;
 
+    #[ignore]
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
         let sstable_store = mock_sstable_store();
@@ -1022,31 +892,31 @@ mod tests {
             default_builder_opt_for_test(),
             1,
             kv_pairs.clone().into_iter(),
-            vec![
-                DeleteRangeTombstone::new_for_test(
-                    TableId::new(1),
-                    b"abc".to_vec(),
-                    b"ccc".to_vec(),
-                    test_epoch(2),
-                ),
-                DeleteRangeTombstone::new_for_test(
-                    TableId::new(1),
-                    b"ddd".to_vec(),
-                    b"eee".to_vec(),
-                    test_epoch(2),
-                ),
-            ],
+            // vec![
+            //     DeleteRangeTombstone::new_for_test(
+            //         TableId::new(1),
+            //         b"abc".to_vec(),
+            //         b"ccc".to_vec(),
+            //         test_epoch(2),
+            //     ),
+            //     DeleteRangeTombstone::new_for_test(
+            //         TableId::new(1),
+            //         b"ddd".to_vec(),
+            //         b"eee".to_vec(),
+            //         test_epoch(2),
+            //     ),
+            // ],
             sstable_store.clone(),
             CachePolicy::NotFill,
         )
         .await;
         sstable_info_1.table_ids = vec![1];
-        let tombstone = DeleteRangeTombstone::new_for_test(
-            TableId::new(2),
-            b"abc".to_vec(),
-            b"def".to_vec(),
-            test_epoch(1),
-        );
+        // let tombstone = DeleteRangeTombstone::new_for_test(
+        //     TableId::new(2),
+        //     b"abc".to_vec(),
+        //     b"def".to_vec(),
+        //     test_epoch(1),
+        // );
         let mut sstable_info_2 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             2,
@@ -1058,7 +928,7 @@ mod tests {
                 HummockValue::put(Bytes::copy_from_slice(b"value")),
             )]
             .into_iter(),
-            vec![tombstone.clone()],
+            // vec![tombstone.clone()],
             sstable_store.clone(),
             CachePolicy::NotFill,
         )
@@ -1115,12 +985,12 @@ mod tests {
                 .unwrap();
             ret.append(&mut sst.meta.monotonic_tombstone_events.clone());
         }
-        let expected_result = create_monotonic_events(vec![tombstone]);
-
-        assert_eq!(
-            ret, expected_result,
-            "{:?} vs {:?}",
-            ret[0], expected_result[0],
-        );
+        // let expected_result = create_monotonic_events(vec![tombstone]);
+        //
+        // assert_eq!(
+        //     ret, expected_result,
+        //     "{:?} vs {:?}",
+        //     ret[0], expected_result[0],
+        // );
     }
 }

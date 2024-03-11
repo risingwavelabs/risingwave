@@ -26,7 +26,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
@@ -37,16 +37,14 @@ use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{check_flush_result, CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
-use crate::hummock::iterator::{
-    Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator, UserIterator,
-};
+use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, UserIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferKeyEntry, VersionedSharedBufferValue,
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
-    HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef,
+    BlockedXor16FilterBuilder, CachePolicy, GetObjectId, HummockError, HummockResult,
+    SstableBuilderOptions, SstableObjectIdManagerRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
@@ -234,7 +232,6 @@ async fn compact_shared_buffer(
         if context.storage_opts.check_compaction_result {
             let compaction_executor = context.compaction_executor.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
-            let del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
             for imm in &payload {
                 if !existing_table_ids.contains(&imm.table_id.table_id) {
                     continue;
@@ -248,7 +245,6 @@ async fn compact_shared_buffer(
                 u64::MAX,
                 0,
                 None,
-                del_iter,
             );
             compaction_executor.spawn(async move {
                 match check_flush_result(
@@ -527,9 +523,6 @@ impl SharedBufferCompactRunner {
             .compact_key_range(
                 iter,
                 dummy_compaction_filter,
-                CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(
-                    HummockEpoch::MAX,
-                )),
                 filter_key_extractor,
                 None,
                 None,

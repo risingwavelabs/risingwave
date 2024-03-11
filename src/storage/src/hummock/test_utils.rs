@@ -204,7 +204,6 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
-    range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> SstableInfo {
@@ -226,44 +225,15 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     );
 
     let mut last_key = FullKey::<B>::default();
-    let mut user_key_last_delete = HummockEpoch::MAX;
-    for (mut key, value) in kv_iter {
+    for (key, value) in kv_iter {
         let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
-        let epoch = key.epoch_with_gap.pure_epoch();
         if is_new_user_key {
             last_key = key.clone();
-            user_key_last_delete = HummockEpoch::MAX;
-        }
-
-        let mut earliest_delete_epoch = HummockEpoch::MAX;
-        let extended_user_key = PointRange::from_user_key(key.user_key.as_ref(), false);
-        for range_tombstone in &range_tombstones {
-            if range_tombstone
-                .start_user_key
-                .as_ref()
-                .le(&extended_user_key)
-                && range_tombstone.end_user_key.as_ref().gt(&extended_user_key)
-                && range_tombstone.sequence >= key.epoch_with_gap.pure_epoch()
-                && range_tombstone.sequence < earliest_delete_epoch
-            {
-                earliest_delete_epoch = range_tombstone.sequence;
-            }
-        }
-
-        if value.is_delete() {
-            user_key_last_delete = epoch;
-        } else if earliest_delete_epoch < user_key_last_delete {
-            user_key_last_delete = earliest_delete_epoch;
-
-            key.epoch_with_gap = EpochWithGap::new_from_epoch(earliest_delete_epoch);
-            b.add(key.to_ref(), HummockValue::Delete).await.unwrap();
-            key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
         }
 
         b.add(key.to_ref(), value.as_slice()).await.unwrap();
     }
-    b.add_monotonic_deletes(delete_range::create_monotonic_events(range_tombstones));
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
     output.sst_info.sst_info
@@ -280,7 +250,6 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         opts,
         object_id,
         kv_iter,
-        vec![],
         sstable_store.clone(),
         CachePolicy::NotFill,
     )
@@ -302,7 +271,6 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
         opts,
         object_id,
         kv_iter,
-        vec![],
         sstable_store,
         CachePolicy::NotFill,
     )
@@ -314,14 +282,12 @@ pub async fn gen_test_sstable_with_range_tombstone(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
-    range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
     gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
-        range_tombstones,
         sstable_store.clone(),
         CachePolicy::Fill(CachePriority::High),
     )
@@ -461,7 +427,7 @@ pub mod delete_range {
         result
     }
 
-    pub(crate) fn create_monotonic_events(
+    pub fn create_monotonic_events(
         mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
     ) -> Vec<MonotonicDeleteEvent> {
         delete_range_tombstones.sort();
@@ -491,12 +457,12 @@ pub mod delete_range {
 
     #[derive(Clone)]
     #[cfg(any(test, feature = "test"))]
-    pub(crate) struct TombstoneEnterExitEvent {
+    pub struct TombstoneEnterExitEvent {
         pub(crate) tombstone_epoch: HummockEpoch,
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub(crate) type CompactionDeleteRangeEvent = (
+    pub type CompactionDeleteRangeEvent = (
         // event key
         PointRange<Vec<u8>>,
         // Old tombstones which exits at the event key
@@ -530,10 +496,7 @@ pub mod delete_range {
     /// therefore the current range delete epoch set is `{epoch2}`.
     /// When user key 11 comes, events `<7, -epoch2>` and `<10, +epoch3>`
     /// both happen, one after another. The set changes to `{epoch3}` from `{epoch2}`.
-    pub(crate) fn apply_event(
-        epochs: &mut BTreeSet<HummockEpoch>,
-        event: &CompactionDeleteRangeEvent,
-    ) {
+    pub fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &CompactionDeleteRangeEvent) {
         let (_, exit, enter) = event;
         // Correct because ranges in an epoch won't intersect.
         for TombstoneEnterExitEvent { tombstone_epoch } in exit {

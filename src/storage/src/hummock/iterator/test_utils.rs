@@ -35,8 +35,8 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    DeleteRangeTombstone, FileCache, HummockValue, SstableBuilderOptions, SstableIterator,
-    SstableIteratorType, SstableStoreConfig, SstableStoreRef, TableHolder,
+    FileCache, HummockValue, SstableBuilderOptions, SstableIterator, SstableIteratorType,
+    SstableStoreConfig, SstableStoreRef, TableHolder,
 };
 use crate::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
@@ -205,29 +205,14 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
 pub async fn gen_iterator_test_sstable_with_range_tombstones(
     object_id: HummockSstableObjectId,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
-    delete_ranges: Vec<(usize, usize, u64)>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
-    let range_tombstones = delete_ranges
-        .into_iter()
-        .map(|(start, end, epoch)| {
-            DeleteRangeTombstone::new(
-                TableId::default(),
-                iterator_test_table_key_of(start),
-                false,
-                iterator_test_table_key_of(end),
-                false,
-                test_epoch(epoch),
-            )
-        })
-        .collect_vec();
     gen_test_sstable_with_range_tombstone(
         default_builder_opt_for_test(),
         object_id,
         kv_pairs
             .into_iter()
             .map(|kv| (iterator_test_key_of_epoch(kv.0, test_epoch(kv.1)), kv.2)),
-        range_tombstones,
         sstable_store,
     )
     .await

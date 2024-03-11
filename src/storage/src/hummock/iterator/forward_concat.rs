@@ -226,20 +226,21 @@ mod tests {
         );
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_concat_seek_empty_sst() {
         let sstable_store = mock_sstable_store();
         let table1 = gen_iterator_test_sstable_with_range_tombstones(
             1,
             vec![],
-            vec![(1, 2, 1), (3, 4, 1)],
+            // vec![(1, 2, 1), (3, 4, 1)],
             sstable_store.clone(),
         )
         .await;
         let table2 = gen_iterator_test_sstable_with_range_tombstones(
             1,
             vec![],
-            vec![(4, 5, 1), (6, 7, 1)],
+            // vec![(4, 5, 1), (6, 7, 1)],
             sstable_store.clone(),
         )
         .await;

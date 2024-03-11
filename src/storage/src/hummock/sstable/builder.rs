@@ -17,16 +17,16 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use risingwave_common::util::epoch::{is_compatibility_max_epoch, is_max_epoch};
+use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
 
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, MonotonicDeleteEvent, SstableMeta, SstableWriter,
-    DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
+    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::sstable::{utils, FilterBuilder};
@@ -102,20 +102,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
-    /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
-    /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
-    /// can be transformed into events below:
-    /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
-    /// -epoch3> }`
-    /// Then we can get monotonic events (they are in order by user key) as below:
-    /// `{ <0, epoch1>, <wmk1, epoch2>, <wmk2, epoch3>, <wmk3, +inf> }`
-    /// which means that delete range of [0, wmk1) is epoch1, delete range of [wmk1, wmk2) if
-    /// epoch2, etc. In this example, at the event key wmk1 (5), delete range changes from
-    /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
-    /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
-    /// If there is no range deletes between current event key and next event key, `new_epoch` will
-    /// be `HummockEpoch::MAX`.
-    monotonic_deletes: Vec<MonotonicDeleteEvent>,
+
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     last_full_key: Vec<u8>,
@@ -130,7 +117,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
-    range_tombstone_size: usize,
 
     filter_builder: F,
 
@@ -175,60 +161,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
-            monotonic_deletes: vec![],
             sstable_id,
             filter_key_extractor,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
-            range_tombstone_size: 0,
             epoch_set: BTreeSet::default(),
             memory_limiter,
         }
-    }
-
-    pub fn add_monotonic_deletes(&mut self, events: Vec<MonotonicDeleteEvent>) {
-        for event in events {
-            self.add_monotonic_delete(event);
-        }
-    }
-
-    /// Add kv pair to sstable.
-    pub fn add_monotonic_delete(&mut self, mut event: MonotonicDeleteEvent) {
-        let table_id = event.event_key.left_user_key.table_id.table_id();
-        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
-            self.table_ids.insert(table_id);
-        }
-        if is_max_epoch(event.new_epoch)
-            && self.monotonic_deletes.last().map_or(true, |last| {
-                last.event_key.left_user_key.table_id != event.event_key.left_user_key.table_id
-                    || is_max_epoch(last.new_epoch)
-            })
-        {
-            // There are two case we shall skip the right end of delete-range.
-            //   1, it belongs the same table-id with the last event, and the last event is also right-end of some delete-range so we can merge them into one point.
-            //   2, this point does not belong the same table-id with the last event. It means that the left end of this delete-range may be dropped, so we can not add it.
-            return;
-        }
-        if !is_max_epoch(event.new_epoch) {
-            self.epoch_set.insert(event.new_epoch);
-        }
-        if is_compatibility_max_epoch(event.new_epoch) {
-            // It is dangerous to mix two different max value in data, so rewrite it to keep same format with main branch.
-            // See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
-            event.new_epoch = HummockEpoch::MAX;
-        }
-        self.range_tombstone_size += event.encoded_size();
-        self.monotonic_deletes.push(event);
-    }
-
-    pub fn last_range_tombstone_epoch(&self) -> HummockEpoch {
-        self.monotonic_deletes
-            .last()
-            .map_or(HummockEpoch::MAX, |delete| delete.new_epoch)
-    }
-
-    pub fn last_range_tombstone(&self) -> Option<&MonotonicDeleteEvent> {
-        self.monotonic_deletes.last()
     }
 
     /// Add kv pair to sstable.
@@ -420,87 +359,18 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
     pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
-        let mut smallest_key = if self.block_metas.is_empty() {
+        let smallest_key = if self.block_metas.is_empty() {
             vec![]
         } else {
             self.block_metas[0].smallest_key.clone()
         };
-        let mut largest_key = self.last_full_key.clone();
+        let largest_key = self.last_full_key.clone();
         self.finalize_last_table_stats();
 
         self.build_block().await?;
-        let mut right_exclusive = false;
+        let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        // Each DeleteRange generates at least two Events to indicate the left and right boundaries
-        assert_ne!(
-            1,
-            self.monotonic_deletes.len(),
-            "delete_event {:?} table_id {:?} table_ids {:?}",
-            self.monotonic_deletes.first().unwrap(),
-            self.last_table_id,
-            self.table_ids,
-        );
-
-        if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            assert!(
-                is_max_epoch(monotonic_delete.new_epoch),
-                "delete_event {:?} table_id {:?} table_ids {:?}",
-                monotonic_delete,
-                self.last_table_id,
-                self.table_ids
-            );
-            if monotonic_delete.event_key.is_exclude_left_key {
-                if largest_key.is_empty()
-                    || !KeyComparator::encoded_greater_than_unencoded(
-                        user_key(&largest_key),
-                        &monotonic_delete.event_key.left_user_key,
-                    )
-                {
-                    largest_key = FullKey::from_user_key(
-                        monotonic_delete.event_key.left_user_key.clone(),
-                        HummockEpoch::MIN,
-                    )
-                    .encode();
-                }
-            } else if largest_key.is_empty()
-                || KeyComparator::encoded_less_than_unencoded(
-                    user_key(&largest_key),
-                    &monotonic_delete.event_key.left_user_key,
-                )
-            {
-                // use MAX as epoch because the last monotonic delete must be
-                // `HummockEpoch::MAX`, so we can not include any version of
-                // this key.
-                largest_key = FullKey::from_user_key(
-                    monotonic_delete.event_key.left_user_key.clone(),
-                    HummockEpoch::MAX,
-                )
-                .encode();
-                right_exclusive = true;
-            }
-        }
-        if let Some(monotonic_delete) = self.monotonic_deletes.first() {
-            assert!(
-                !is_max_epoch(monotonic_delete.new_epoch),
-                "delete_event {:?} table_ids {:?} table_ids {:?}",
-                monotonic_delete,
-                self.last_table_id,
-                self.table_ids
-            );
-            if smallest_key.is_empty()
-                || !KeyComparator::encoded_less_than_unencoded(
-                    user_key(&smallest_key),
-                    &monotonic_delete.event_key.left_user_key,
-                )
-            {
-                smallest_key = FullKey::from_user_key(
-                    monotonic_delete.event_key.left_user_key.clone(),
-                    HummockEpoch::MAX,
-                )
-                .encode();
-            }
-        }
         let bloom_filter_kind = if self.filter_builder.support_blocked_raw_data() {
             BloomFilterType::Blocked
         } else {
@@ -516,8 +386,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .block_metas
             .iter()
             .map(|block_meta| block_meta.total_key_count as u64)
-            .sum::<u64>()
-            + self.monotonic_deletes.len() as u64;
+            .sum::<u64>();
         let stale_key_count = self
             .block_metas
             .iter()
@@ -543,7 +412,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             largest_key,
             version: VERSION,
             meta_offset,
-            monotonic_tombstone_events: self.monotonic_deletes,
+            monotonic_tombstone_events: vec![],
         };
 
         let meta_encode_size = meta.encoded_size();
@@ -671,7 +540,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.writer.data_len()
             + self.block_builder.approximate_len()
             + self.filter_builder.approximate_len()
-            + self.range_tombstone_size
     }
 
     pub async fn build_block(&mut self) -> HummockResult<()> {
@@ -721,7 +589,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.range_tombstone_size > 0 || self.writer.data_len() > 0
+        self.writer.data_len() > 0
     }
 
     /// Returns true if we roughly reached capacity
@@ -778,6 +646,7 @@ pub(super) mod tests {
         b.finish().await.unwrap();
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_empty_with_delete_range() {
         let opt = SstableBuilderOptions {
@@ -787,12 +656,11 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             ..Default::default()
         };
-        let table_id = TableId::default();
-        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
-        b.add_monotonic_deletes(vec![
-            MonotonicDeleteEvent::new(table_id, b"abcd".to_vec(), 0),
-            MonotonicDeleteEvent::new(table_id, b"eeee".to_vec(), HummockEpoch::MAX),
-        ]);
+        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
+        // b.add_monotonic_deletes(vec![
+        //     MonotonicDeleteEvent::new(table_id, b"abcd".to_vec(), 0),
+        //     MonotonicDeleteEvent::new(table_id, b"eeee".to_vec(), HummockEpoch::MAX),
+        // ]);
         let s = b.finish().await.unwrap().sst_info;
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(
@@ -854,7 +722,6 @@ pub(super) mod tests {
             opts,
             0,
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
-            vec![],
             sstable_store.clone(),
             CachePolicy::NotFill,
         )
