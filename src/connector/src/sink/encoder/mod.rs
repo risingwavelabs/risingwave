@@ -142,6 +142,10 @@ pub enum CustomJsonType {
     Doris(HashMap<String, (u8, u8)>),
     // Es's json need jsonb is struct
     Es,
+    // starrocks' need jsonb is struct
+    StarRocks(HashMap<String, (u8, u8)>),
+    // bigquery need null array -> []
+    BigQuery,
     None,
 }
 
