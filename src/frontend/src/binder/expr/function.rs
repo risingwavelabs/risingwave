@@ -1458,6 +1458,7 @@ impl Binder {
                 | Clause::Filter
                 | Clause::GeneratedColumn
                 | Clause::From
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -1510,6 +1511,7 @@ impl Binder {
                 | Clause::Values
                 | Clause::From
                 | Clause::GeneratedColumn
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
@@ -1531,6 +1533,7 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::Values
+                | Clause::Insert
                 | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",

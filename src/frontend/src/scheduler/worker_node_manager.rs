@@ -359,7 +359,7 @@ impl WorkerNodeSelector {
                     if !matches!(e, SchedulerError::ServingVnodeMappingNotFound(_)) {
                         return Err(e);
                     }
-                    let max_parallelism = 100;
+                    let max_parallelism = 1;
                     tracing::warn!(
                         fragment_id,
                         max_parallelism,

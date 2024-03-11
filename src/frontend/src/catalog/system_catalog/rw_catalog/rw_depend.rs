@@ -29,29 +29,13 @@ struct RwDepend {
 }
 
 #[system_catalog(table, "rw_catalog.rw_depend")]
-fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
-    let catalog_reader = reader.catalog_reader.read_guard();
-
-    let mut depends = vec![];
-    for schema in catalog_reader.iter_schemas(&reader.auth_context.database)? {
-        for table in schema.iter_table().chain(schema.iter_mv()) {
-            for referenced in &table.dependent_relations {
-                let depend = RwDepend {
-                    objid: table.id.table_id as i32,
-                    refobjid: referenced.table_id as i32,
-                };
-                depends.push(depend);
-            }
-        }
-        for sink in schema.iter_sink() {
-            for referenced in &sink.dependent_relations {
-                let depend = RwDepend {
-                    objid: sink.id.sink_id as i32,
-                    refobjid: referenced.table_id as i32,
-                };
-                depends.push(depend);
-            }
-        }
-    }
-    Ok(depends)
+async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> {
+    let dependencies = reader.meta_client.list_object_dependencies().await?;
+    Ok(dependencies
+        .into_iter()
+        .map(|depend| RwDepend {
+            objid: depend.object_id as i32,
+            refobjid: depend.referenced_object_id as i32,
+        })
+        .collect())
 }

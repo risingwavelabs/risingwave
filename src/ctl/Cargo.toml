@@ -57,7 +57,7 @@ uuid = { version = "1", features = ["v4"] }
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

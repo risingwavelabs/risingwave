@@ -39,7 +39,7 @@ use crate::executor::*;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -85,7 +85,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
-    async fn build_stream_source_reader(
+    pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
@@ -95,14 +95,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
@@ -117,6 +116,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
+    /// `source_id | source_name | actor_id | fragment_id`
     #[inline]
     fn get_metric_labels(&self) -> [String; 4] {
         [
@@ -267,12 +267,11 @@ impl<S: StateStore> SourceExecutor<S> {
             source_id = %core.source_id,
             "stream source reader error",
         );
-        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
-            "SourceReaderError".to_owned(),
-            e.to_report_string(),
-            "SourceExecutor".to_owned(),
-            self.actor_ctx.id.to_string(),
+        GLOBAL_ERROR_METRICS.user_source_error.report([
+            e.variant_name().to_owned(),
             core.source_id.to_string(),
+            core.source_name.to_owned(),
+            self.actor_ctx.fragment_id.to_string(),
         ]);
 
         self.rebuild_stream_reader(source_desc, stream).await
@@ -424,6 +423,7 @@ impl<S: StateStore> SourceExecutor<S> {
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
+        // TODO: for backfill-able source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 
@@ -629,6 +629,7 @@ mod tests {
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -694,20 +695,21 @@ mod tests {
         );
         let mut executor = executor.boxed().execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 1,
-                        start_offset: None,
-                    }),
-                ],
-            },
-            pause: false,
-        }));
+        let init_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::new(),
+                added_actors: HashSet::new(),
+                splits: hashmap! {
+                    ActorId::default() => vec![
+                        SplitImpl::Datagen(DatagenSplit {
+                            split_index: 0,
+                            split_num: 1,
+                            start_offset: None,
+                        }),
+                    ],
+                },
+                pause: false,
+            }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -782,20 +784,21 @@ mod tests {
         );
         let mut handler = executor.boxed().execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 3,
-                        start_offset: None,
-                    }),
-                ],
-            },
-            pause: false,
-        }));
+        let init_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::new(),
+                added_actors: HashSet::new(),
+                splits: hashmap! {
+                    ActorId::default() => vec![
+                        SplitImpl::Datagen(DatagenSplit {
+                            split_index: 0,
+                            split_num: 3,
+                            start_offset: None,
+                        }),
+                    ],
+                },
+                pause: false,
+            }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -829,10 +832,11 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation =
-            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let change_split_mutation = Barrier::new_test_barrier(test_epoch(2)).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(change_split_mutation).unwrap();
 
@@ -844,7 +848,7 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -855,10 +859,10 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap();
 
-        let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
+        let barrier = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
+        let barrier = Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
 
         // receive all
@@ -867,10 +871,11 @@ mod tests {
         let prev_assignment = new_assignment;
         let new_assignment = vec![prev_assignment[2].clone()];
 
-        let drop_split_mutation =
-            Barrier::new_test_barrier(5).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let drop_split_mutation = Barrier::new_test_barrier(test_epoch(5)).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(drop_split_mutation).unwrap();
 
@@ -882,7 +887,7 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])
