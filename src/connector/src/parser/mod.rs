@@ -837,7 +837,7 @@ pub enum ByteStreamSourceParserImpl {
 pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
-    /// Converts this parser into a stream of [`StreamChunk`].
+    /// Converts this `SourceMessage` stream into a stream of [`StreamChunk`].
     pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {

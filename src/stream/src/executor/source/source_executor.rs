@@ -39,7 +39,7 @@ use crate::executor::*;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -85,7 +85,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
-    async fn build_stream_source_reader(
+    pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
@@ -116,6 +116,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
+    /// `source_id | source_name | actor_id | fragment_id`
     #[inline]
     fn get_metric_labels(&self) -> [String; 4] {
         [
@@ -422,6 +423,7 @@ impl<S: StateStore> SourceExecutor<S> {
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
+        // TODO: for backfill-able source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 
