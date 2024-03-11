@@ -46,8 +46,6 @@ struct Claims {
 pub struct SnowflakeHttpClient {
     url: String,
     rsa_public_key_fp: String,
-    s3_bucket: String,
-    s3_file: String,
     account: String,
     user: String,
     private_key: String,
@@ -61,8 +59,6 @@ impl SnowflakeHttpClient {
         db: String,
         schema: String,
         pipe: String,
-        s3_bucket: String,
-        s3_file: String,
         rsa_public_key_fp: String,
         private_key: String,
         header: HashMap<String, String>,
@@ -81,8 +77,6 @@ impl SnowflakeHttpClient {
         Self {
             url,
             rsa_public_key_fp,
-            s3_bucket,
-            s3_file,
             account,
             user,
             private_key,
@@ -150,18 +144,19 @@ impl SnowflakeHttpClient {
         (builder, client)
     }
 
-    /// NOTE: this function should ONLY be called after
-    /// uploading files to remote external staged storage, e.g., AWS S3
+    /// NOTE: this function should ONLY be called *after*
+    /// uploading files to remote external staged storage, i.e., AWS S3
     pub async fn send_request(&self) -> Result<()> {
         let (builder, client) = self.build_request_and_client();
 
         // Generate the jwt_token
         let jwt_token = self.generate_jwt_token()?;
-        builder
+        let builder = builder
             .header("Authorization", format!("Bearer {}", jwt_token))
             .header("X-Snowflake-Authorization-Token-Type".to_string(), "KEYPAIR_JWT");
 
         let request = builder
+            // TODO: ensure this
             .body(Body::from(self.s3_file.clone()))
             .map_err(|err| SinkError::Snowflake(err.to_string()))?;
 
@@ -177,5 +172,24 @@ impl SnowflakeHttpClient {
             )));
         }
         Ok(())
+    }
+}
+
+/// TODO(Zihao): refactor this part after s3 sink is available
+pub struct SnowflakeS3Client {
+    s3_bucket: String,
+    s3_file: String,
+}
+
+impl SnowflakeS3Client {
+    pub fn new(s3_bucket: String, s3_file: String) -> Self {
+        Self {
+            s3_bucket,
+            s3_file,
+        }
+    }
+
+    pub fn sink_to_s3() -> Result<()> {
+        todo!()
     }
 }

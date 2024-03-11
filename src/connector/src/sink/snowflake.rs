@@ -27,6 +27,7 @@ use serde_with::serde_as;
 use with_options::WithOptions;
 
 use super::encoder::JsonEncoder;
+use super::snowflake_connector::{SnowflakeHttpClient, SnowflakeS3Client};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
@@ -105,7 +106,7 @@ impl Sink for SnowflakeSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        todo!()
+        Ok(())
     }
 }
 
@@ -114,7 +115,10 @@ pub struct SnowflakeSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    client: Option<SnowflakeClient>,
+    /// the client used to send `insertFiles` post request
+    http_client: SnowflakeHttpClient,
+    /// the client to insert file to external storage (i.e., s3)
+    s3_client: SnowflakeS3Client,
     row_encoder: JsonEncoder,
 }
 
@@ -155,7 +159,3 @@ impl SinkWriter for SnowflakeSinkWriter {
         Ok(())
     }
 }
-
-pub struct SnowflakeClient {}
-
-impl SnowflakeClient {}
