@@ -35,5 +35,6 @@ public abstract class DatabaseValidator {
     /** Validate the properties of the source table */
     abstract void validateTable();
 
+    /** Check if the validation is for CDC source job */
     abstract boolean isCdcSourceJob();
 }

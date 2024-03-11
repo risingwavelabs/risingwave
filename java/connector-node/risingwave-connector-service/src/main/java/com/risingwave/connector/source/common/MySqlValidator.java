@@ -32,7 +32,9 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private final Connection jdbcConnection;
 
+    // validation is for cdc source job
     private final boolean isCdcSourceJob;
+    // validation is for backfill table
     private final boolean isBackfillTable;
 
     public MySqlValidator(
@@ -104,9 +106,45 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     @Override
     public void validateUserPrivilege() {
         try {
-            validatePrivileges();
+            String[] privilegesRequired = getRequiredPrivileges();
+            var hashSet = new HashSet<>(List.of(privilegesRequired));
+            try (var stmt = jdbcConnection.createStatement()) {
+                var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
+                while (res.next()) {
+                    String granted = res.getString(1).toUpperCase();
+                    // mysql 5.7 root user has all privileges
+                    if (granted.contains("ALL")) {
+                        // all privileges granted, check passed
+                        return;
+                    }
+
+                    // remove granted privilege from the set
+                    hashSet.removeIf(granted::contains);
+                    if (hashSet.isEmpty()) {
+                        break;
+                    }
+                }
+                if (!hashSet.isEmpty()) {
+                    throw ValidatorUtils.invalidArgument(
+                            "MySQL user doesn't have enough privileges: " + hashSet);
+                }
+            }
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private String[] getRequiredPrivileges() {
+        if (isCdcSourceJob) {
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else if (isBackfillTable) {
+            // check privilege again to ensure the user has the privilege to backfill
+            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+        } else {
+            // dedicated source needs more privileges to acquire global lock
+            return new String[] {
+                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT"
+            };
         }
     }
 
@@ -182,45 +220,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
-        }
-    }
-
-    private void validatePrivileges() throws SQLException {
-        String[] privilegesRequired = getRequiredPrivileges();
-        var hashSet = new HashSet<>(List.of(privilegesRequired));
-        try (var stmt = jdbcConnection.createStatement()) {
-            var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
-            while (res.next()) {
-                String granted = res.getString(1).toUpperCase();
-                // all privileges granted, check passed
-                if (granted.contains("ALL")) {
-                    break;
-                }
-
-                // remove granted privilege from the set
-                hashSet.removeIf(granted::contains);
-                if (hashSet.isEmpty()) {
-                    break;
-                }
-            }
-            if (!hashSet.isEmpty()) {
-                throw ValidatorUtils.invalidArgument(
-                        "MySQL user doesn't have enough privileges: " + hashSet);
-            }
-        }
-    }
-
-    private String[] getRequiredPrivileges() {
-        if (isCdcSourceJob) {
-            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
-        } else if (isBackfillTable) {
-            // check privilege again to ensure the user has the privilege for backfill
-            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
-        } else {
-            // dedicated source needs more privileges to acquire global lock
-            return new String[] {
-                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT"
-            };
         }
     }
 
