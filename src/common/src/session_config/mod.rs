@@ -51,7 +51,7 @@ pub enum SessionConfigError {
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
 /// This is the Session Config of RisingWave.
-#[derive(SessionConfig,Serialize, Deserialize)]
+#[derive(SessionConfig)]
 pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
