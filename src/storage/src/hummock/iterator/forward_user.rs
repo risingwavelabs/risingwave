@@ -14,8 +14,9 @@
 
 use std::ops::Bound::*;
 
+use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
-use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, SetSlice, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
 use super::DeleteRangeIterator;
@@ -32,9 +33,6 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
 
     // Track the last seen full key
     full_key_tracker: FullKeyTracker<Vec<u8>, true>,
-
-    /// Last user value
-    latest_val: Vec<u8>,
 
     /// Start and end bounds of user key.
     key_range: UserKeyRange,
@@ -70,7 +68,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         Self {
             iterator,
             key_range,
-            latest_val: Vec::new(),
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
@@ -128,7 +125,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
-        &self.latest_val
+        must_match!(self.iterator.value(), HummockValue::Put(val) => val)
     }
 
     /// Resets the iterating position to the beginning.
@@ -264,12 +261,11 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
             // Handle delete operation
             match self.iterator.value() {
-                HummockValue::Put(val) => {
+                HummockValue::Put(_val) => {
                     self.delete_range_iter.next_until(full_key.user_key).await?;
                     if self.delete_range_iter.current_epoch() >= epoch {
                         self.stats.skip_delete_key_count += 1;
                     } else {
-                        self.latest_val.set(val);
                         self.stats.processed_key_count += 1;
                         self.is_current_pos_valid = true;
                         return Ok(());
