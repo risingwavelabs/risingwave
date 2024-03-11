@@ -24,9 +24,7 @@ use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
-use risingwave_pb::connector_service::{
-    GetEventStreamRequest, GetEventStreamResponse, SourceCommonParam,
-};
+use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
@@ -106,9 +104,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             start_offset: split.start_offset().clone().unwrap_or_default(),
             properties,
             snapshot_done: split.snapshot_done(),
-            common_param: Some(SourceCommonParam {
-                is_multi_table_shared: conn_props.is_multi_table_shared,
-            }),
+            is_source_job: conn_props.is_cdc_source_job,
         };
 
         std::thread::spawn(move || {
