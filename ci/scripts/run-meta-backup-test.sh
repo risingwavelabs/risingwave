@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.sh
+
 while getopts 'p:m:' opt; do
     case ${opt} in
         p )
