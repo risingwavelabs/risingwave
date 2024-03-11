@@ -151,6 +151,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             offset += len;
             batch_size += len;
             batch.push(msg);
+
             if batch.len() >= max_chunk_size {
                 source_ctx
                     .metrics

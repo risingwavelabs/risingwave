@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
 use futures::{pin_mut, StreamExt, TryStreamExt};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
@@ -58,7 +59,10 @@ async fn test_empty_read_v2() {
         .is_none());
     let stream = hummock_storage
         .iter(
-            (Unbounded, Unbounded),
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::ZERO,
+            ),
             u64::MAX,
             ReadOptions {
                 table_id: TableId { table_id: 2333 },
@@ -124,7 +128,9 @@ async fn test_basic_inner(
     // Make sure the batch is sorted.
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
-    let mut local = hummock_storage.new_local(Default::default()).await;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(TableId::default()))
+        .await;
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
@@ -277,9 +283,12 @@ async fn test_basic_inner(
     // Write aa bb
     let iter = hummock_storage
         .iter(
-            (
-                Bound::Unbounded,
-                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            prefixed_range_with_vnode(
+                (
+                    Bound::<Bytes>::Unbounded,
+                    Bound::Included(Bytes::from("ee")),
+                ),
+                VirtualNode::ZERO,
             ),
             epoch1,
             ReadOptions {
@@ -324,9 +333,12 @@ async fn test_basic_inner(
     // Update aa, write cc
     let iter = hummock_storage
         .iter(
-            (
-                Bound::Unbounded,
-                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            prefixed_range_with_vnode(
+                (
+                    Bound::<Bytes>::Unbounded,
+                    Bound::Included(Bytes::from("ee")),
+                ),
+                VirtualNode::ZERO,
             ),
             epoch2,
             ReadOptions {
@@ -343,9 +355,12 @@ async fn test_basic_inner(
     // Delete aa, write dd,ee
     let iter = hummock_storage
         .iter(
-            (
-                Bound::Unbounded,
-                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            prefixed_range_with_vnode(
+                (
+                    Bound::<Bytes>::Unbounded,
+                    Bound::Included(Bytes::from("ee")),
+                ),
+                VirtualNode::ZERO,
             ),
             epoch3,
             ReadOptions {
@@ -638,9 +653,12 @@ async fn test_reload_storage() {
     // Write aa bb
     let iter = hummock_storage
         .iter(
-            (
-                Bound::Unbounded,
-                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            prefixed_range_with_vnode(
+                (
+                    Bound::<Bytes>::Unbounded,
+                    Bound::Included(Bytes::from("ee")),
+                ),
+                VirtualNode::ZERO,
             ),
             epoch1,
             ReadOptions {
@@ -686,9 +704,12 @@ async fn test_reload_storage() {
     // Update aa, write cc
     let iter = hummock_storage
         .iter(
-            (
-                Bound::Unbounded,
-                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            prefixed_range_with_vnode(
+                (
+                    Bound::<Bytes>::Unbounded,
+                    Bound::Included(Bytes::from("ee")),
+                ),
+                VirtualNode::ZERO,
             ),
             epoch2,
             ReadOptions {
@@ -1025,7 +1046,9 @@ async fn test_delete_get_inner(
             StorageValue::new_put("222"),
         ),
     ];
-    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
     local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
@@ -1108,7 +1131,9 @@ async fn test_multiple_epoch_sync_inner(
         ),
     ];
 
-    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(TableId::default()))
+        .await;
     local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
@@ -1364,6 +1389,7 @@ async fn test_replicated_local_hummock_storage() {
             TableOption {
                 retention_seconds: None,
             },
+            Arc::new(Bitmap::ones(VirtualNode::COUNT)),
         ))
         .await;
 
@@ -1406,7 +1432,10 @@ async fn test_replicated_local_hummock_storage() {
 
         let actual = risingwave_storage::store::LocalStateStore::iter(
             &local_hummock_storage,
-            (Unbounded, Unbounded),
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::ZERO,
+            ),
             read_options.clone(),
         )
         .await
@@ -1468,7 +1497,14 @@ async fn test_replicated_local_hummock_storage() {
     // Test Global State Store iter, epoch2
     {
         let actual = hummock_storage
-            .iter((Unbounded, Unbounded), epoch2, read_options.clone())
+            .iter(
+                prefixed_range_with_vnode(
+                    (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                    VirtualNode::ZERO,
+                ),
+                epoch2,
+                read_options.clone(),
+            )
             .await
             .unwrap()
             .collect::<Vec<_>>()
@@ -1496,7 +1532,14 @@ async fn test_replicated_local_hummock_storage() {
     // Test Global State Store iter, epoch1
     {
         let actual = hummock_storage
-            .iter((Unbounded, Unbounded), epoch1, read_options)
+            .iter(
+                prefixed_range_with_vnode(
+                    (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                    VirtualNode::ZERO,
+                ),
+                epoch1,
+                read_options,
+            )
             .await
             .unwrap()
             .collect::<Vec<_>>()

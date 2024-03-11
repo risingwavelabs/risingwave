@@ -95,14 +95,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             None,
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
@@ -361,7 +360,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
-        let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -394,16 +392,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             }
                         }
                         self.take_snapshot_and_clear_cache(epoch).await?;
-
-                        self.metrics
-                            .source_row_per_barrier
-                            .with_label_values(&[
-                                self.actor_ctx.id.to_string().as_str(),
-                                self.stream_source_core.source_id.to_string().as_ref(),
-                                self.actor_ctx.fragment_id.to_string().as_str(),
-                            ])
-                            .inc_by(metric_row_per_barrier);
-                        metric_row_per_barrier = 0;
 
                         yield msg;
                     }

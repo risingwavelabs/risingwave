@@ -64,7 +64,6 @@ pub struct StreamingMetrics {
 
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
     pub source_backfill_row_count: LabelGuardedIntCounterVec<4>,
 
@@ -215,14 +214,6 @@ impl StreamingMetrics {
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
             &["source_id", "source_name", "actor_id", "fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let source_row_per_barrier = register_int_counter_vec_with_registry!(
-            "stream_source_rows_per_barrier_counts",
-            "Total number of rows that have been output from source per barrier",
-            &["actor_id", "executor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -1086,7 +1077,6 @@ impl StreamingMetrics {
             actor_in_record_cnt,
             actor_out_record_cnt,
             source_output_row_count,
-            source_row_per_barrier,
             source_split_change_count,
             source_backfill_row_count,
             sink_input_row_count,

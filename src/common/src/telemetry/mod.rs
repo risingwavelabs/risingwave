@@ -13,15 +13,11 @@
 // limitations under the License.
 
 pub mod manager;
+pub mod pb_compatible;
 pub mod report;
 
 use std::time::SystemTime;
 
-use risingwave_pb::telemetry::{
-    ReportBase as PbTelemetryReportBase, SystemCpu as PbSystemCpu, SystemData as PbSystemData,
-    SystemMemory as PbSystemMemory, SystemOs as PbSystemOs,
-    TelemetryNodeType as PbTelemetryNodeType,
-};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use thiserror_ext::AsReport;
@@ -31,7 +27,7 @@ use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
 
 /// Url of telemetry backend
-pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
+pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
 /// Telemetry reporting interval in seconds, 6 hours
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
@@ -68,19 +64,6 @@ pub struct TelemetryReportBase {
     pub time_stamp: u64,
     /// node_type is the node that creates the report
     pub node_type: TelemetryNodeType,
-}
-
-impl From<TelemetryReportBase> for PbTelemetryReportBase {
-    fn from(val: TelemetryReportBase) -> Self {
-        PbTelemetryReportBase {
-            tracking_id: val.tracking_id,
-            session_id: val.session_id,
-            system_data: Some(val.system_data.into()),
-            up_time: val.up_time,
-            report_time: val.time_stamp,
-            node_type: from_telemetry_node_type(val.node_type) as i32,
-        }
-    }
 }
 
 pub trait TelemetryReport: Serialize {}
@@ -140,11 +123,11 @@ impl Default for SystemData {
 }
 
 /// Sends a `POST` request of the telemetry reporting to a URL.
-async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
+async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::CONTENT_TYPE, "application/x-protobuf")
         .body(report_body)
         .send()
         .await
@@ -171,63 +154,6 @@ pub fn current_timestamp() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("Clock might go backward")
         .as_secs()
-}
-
-fn from_telemetry_node_type(t: TelemetryNodeType) -> PbTelemetryNodeType {
-    match t {
-        TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
-        TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
-        TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
-        TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
-    }
-}
-
-impl From<TelemetryNodeType> for PbTelemetryNodeType {
-    fn from(val: TelemetryNodeType) -> Self {
-        match val {
-            TelemetryNodeType::Meta => PbTelemetryNodeType::Meta,
-            TelemetryNodeType::Compute => PbTelemetryNodeType::Compute,
-            TelemetryNodeType::Frontend => PbTelemetryNodeType::Frontend,
-            TelemetryNodeType::Compactor => PbTelemetryNodeType::Compactor,
-        }
-    }
-}
-
-impl From<Cpu> for PbSystemCpu {
-    fn from(val: Cpu) -> Self {
-        PbSystemCpu {
-            available: val.available,
-        }
-    }
-}
-
-impl From<Memory> for PbSystemMemory {
-    fn from(val: Memory) -> Self {
-        PbSystemMemory {
-            used: val.used as u64,
-            total: val.total as u64,
-        }
-    }
-}
-
-impl From<Os> for PbSystemOs {
-    fn from(val: Os) -> Self {
-        PbSystemOs {
-            name: val.name,
-            kernel_version: val.kernel_version,
-            version: val.version,
-        }
-    }
-}
-
-impl From<SystemData> for PbSystemData {
-    fn from(val: SystemData) -> Self {
-        PbSystemData {
-            memory: Some(val.memory.into()),
-            os: Some(val.os.into()),
-            cpu: Some(val.cpu.into()),
-        }
-    }
 }
 
 #[cfg(test)]

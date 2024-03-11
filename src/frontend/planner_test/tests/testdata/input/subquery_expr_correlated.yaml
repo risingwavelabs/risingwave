@@ -483,3 +483,21 @@
     FROM array_types AS t0;
   expected_outputs:
     - batch_plan
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a case could be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
