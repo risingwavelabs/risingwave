@@ -110,18 +110,6 @@ impl Sink for SnowflakeSink {
     }
 }
 
-pub struct SnowflakeSinkWriter {
-    pub config: SnowflakeSink,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-    /// the client used to send `insertFiles` post request
-    http_client: SnowflakeHttpClient,
-    /// the client to insert file to external storage (i.e., s3)
-    s3_client: SnowflakeS3Client,
-    row_encoder: JsonEncoder,
-}
-
 impl TryFrom<SinkParam> for SnowflakeSink {
     type Error = SinkError;
 
@@ -134,6 +122,28 @@ impl TryFrom<SinkParam> for SnowflakeSink {
             pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
         })
+    }
+}
+
+pub struct SnowflakeSinkWriter {
+    config: SnowflakeConfig,
+    schema: Schema,
+    pk_indices: Vec<usize>,
+    is_append_only: bool,
+    /// the client used to send `insertFiles` post request
+    http_client: SnowflakeHttpClient,
+    /// the client to insert file to external storage (i.e., s3)
+    s3_client: SnowflakeS3Client,
+}
+
+impl SnowflakeSinkWriter {
+    pub fn new(
+        config: SnowflakeConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Self {
+        todo!()
     }
 }
 
