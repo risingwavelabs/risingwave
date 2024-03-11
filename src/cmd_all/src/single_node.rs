@@ -98,7 +98,7 @@ pub struct NodeSpecificOpts {
     pub compaction_worker_threads_number: Option<usize>,
 }
 
-pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedStandaloneOpts {
+pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedStandaloneOpts {
     // Parse from empty strings to get the default values.
     // Note that environment variables will be used if they are set.
     let empty_args = vec![] as Vec<String>;
@@ -120,20 +120,20 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
         compactor_opts.config_path = config_path.clone();
     }
 
-    let store_directory = if let Some(store_directory) = &opts.store_directory {
-        store_directory.clone()
-    } else {
+    let store_directory = opts.store_directory.unwrap_or_else(|| {
         let mut home_path = home_dir().unwrap();
         home_path.push(".risingwave");
         home_path.to_str().unwrap().to_string()
-    };
+    });
 
+    // Set state store for meta (if not set)
     if meta_opts.state_store.is_none() {
         let state_store_url = format!("hummock+fs://{}/state_store", &store_directory);
         std::fs::create_dir_all(&state_store_url).unwrap();
         meta_opts.state_store = Some(state_store_url);
     }
 
+    // Set meta store for meta (if not set)
     let meta_backend_is_set = match meta_opts.backend {
         Some(MetaBackend::Etcd) => !meta_opts.etcd_endpoints.is_empty(),
         Some(MetaBackend::Sql) => meta_opts.sql_endpoint.is_some(),
@@ -164,6 +164,26 @@ pub fn map_single_node_opts_to_standalone_opts(opts: &SingleNodeOpts) -> ParsedS
     compute_opts.meta_address = meta_addr.parse().unwrap();
     frontend_opts.meta_addr = meta_addr.parse().unwrap();
     compactor_opts.meta_address = meta_addr.parse().unwrap();
+
+    // Apply node-specific options
+    if let Some(total_memory_bytes) = opts.node_opts.total_memory_bytes {
+        compute_opts.total_memory_bytes = total_memory_bytes;
+    }
+    if let Some(parallelism) = opts.node_opts.parallelism {
+        compute_opts.parallelism = parallelism;
+    }
+    if let Some(listen_addr) = opts.node_opts.listen_addr {
+        frontend_opts.listen_addr = listen_addr;
+    }
+    if let Some(prometheus_endpoint) = opts.node_opts.prometheus_endpoint {
+        meta_opts.prometheus_endpoint = Some(prometheus_endpoint);
+    }
+    if let Some(prometheus_selector) = opts.node_opts.prometheus_selector {
+        meta_opts.prometheus_selector = Some(prometheus_selector);
+    }
+    if let Some(n) = opts.node_opts.compaction_worker_threads_number {
+        compactor_opts.compaction_worker_threads_number = Some(n);
+    }
 
     ParsedStandaloneOpts {
         meta_opts: Some(meta_opts),
