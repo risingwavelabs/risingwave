@@ -212,14 +212,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
