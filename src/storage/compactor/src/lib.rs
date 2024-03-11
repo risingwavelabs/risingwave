@@ -89,7 +89,7 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
     pub compactor_mode: Option<CompactorMode>,
 
-    #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
+    #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
 }
 
