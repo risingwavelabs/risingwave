@@ -218,10 +218,12 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                     yield msgs;
                 }
                 Err(e) => {
-                    GLOBAL_ERROR_METRICS.cdc_source_error.report([
-                        source_type.as_str_name().into(),
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        // TODO(eric): output ConnectorError's variant as label
+                        "cdc_source".to_owned(),
                         source_id.clone(),
-                        e.to_report_string(),
+                        self.source_ctx.source_info.source_name.clone(),
+                        self.source_ctx.source_info.fragment_id.to_string(),
                     ]);
                     Err(e)?;
                 }

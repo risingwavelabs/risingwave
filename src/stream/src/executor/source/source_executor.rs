@@ -95,14 +95,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
@@ -267,12 +266,11 @@ impl<S: StateStore> SourceExecutor<S> {
             source_id = %core.source_id,
             "stream source reader error",
         );
-        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
+        GLOBAL_ERROR_METRICS.user_source_error.report([
             "SourceReaderError".to_owned(),
-            e.to_report_string(),
-            "SourceExecutor".to_owned(),
-            self.actor_ctx.id.to_string(),
             core.source_id.to_string(),
+            core.source_name.to_owned(),
+            self.actor_ctx.fragment_id.to_string(),
         ]);
 
         self.rebuild_stream_reader(source_desc, stream).await

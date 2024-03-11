@@ -172,9 +172,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             sink,
                             log_reader,
                             self.input_columns,
+                            self.sink_param,
                             self.sink_writer_param,
                             self.actor_context,
-                            self.info,
                         );
                         // TODO: may try to remove the boxed
                         select(consume_log_stream.into_stream(), write_log_stream).boxed()
@@ -350,9 +350,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
+        sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-        info: ExecutorInfo,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
 
@@ -381,21 +381,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
             .await
         {
-            let mut err_str = e.to_report_string();
-            if actor_context
-                .error_suppressor
-                .lock()
-                .suppress_error(&err_str)
-            {
-                err_str = format!(
-                    "error msg suppressed (due to per-actor error limit: {})",
-                    actor_context.error_suppressor.lock().max()
-                );
-            }
             GLOBAL_ERROR_METRICS.user_sink_error.report([
-                S::SINK_NAME.to_owned(),
-                info.identity.clone(),
-                err_str,
+                "sink_executor_error".to_owned(),
+                sink_param.sink_id.to_string(),
+                sink_param.sink_name.clone(),
+                actor_context.fragment_id.to_string(),
             ]);
 
             match log_reader.rewind().await {
@@ -495,6 +485,7 @@ mod test {
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -619,6 +610,7 @@ mod test {
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -740,6 +732,7 @@ mod test {
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
