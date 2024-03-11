@@ -16,7 +16,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::Binder;
+use crate::binder::{Binder, Clause};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 impl Binder {
@@ -103,6 +103,9 @@ impl Binder {
         for (i, lateral_context) in self.lateral_contexts.iter().rev().enumerate() {
             if lateral_context.is_visible {
                 let context = &lateral_context.context;
+                if matches!(context.clause, Some(Clause::Insert)) {
+                    continue;
+                }
                 // input ref from lateral context `depth` starts from 1.
                 let depth = i + 1;
                 match context.get_column_binding_index(&table_name, &column_name) {
@@ -125,6 +128,9 @@ impl Binder {
         for (i, (context, lateral_contexts)) in
             self.upper_subquery_contexts.iter().rev().enumerate()
         {
+            if matches!(context.clause, Some(Clause::Insert)) {
+                continue;
+            }
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
@@ -145,6 +151,9 @@ impl Binder {
             for (i, lateral_context) in lateral_contexts.iter().rev().enumerate() {
                 if lateral_context.is_visible {
                     let context = &lateral_context.context;
+                    if matches!(context.clause, Some(Clause::Insert)) {
+                        continue;
+                    }
                     // correlated input ref from lateral context `depth` starts from 1.
                     let depth = i + 1;
                     match context.get_column_binding_index(&table_name, &column_name) {
