@@ -18,11 +18,13 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::VnodeBitmapExt;
@@ -434,6 +436,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     table_id: TableId,
     op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
+    vnodes: Arc<Bitmap>,
 }
 
 impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
@@ -445,6 +448,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             table_id: option.table_id,
             op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
+            vnodes: option.vnodes,
         }
     }
 
@@ -594,9 +598,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert!(
             self.epoch.replace(options.epoch.curr).is_none(),
-            "local state store of table id {:?} is init for more than once",
+            "epoch in local state store of table id {:?} is init for more than once",
             self.table_id
         );
+
         Ok(())
     }
 
@@ -653,6 +658,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     async fn try_flush(&mut self) -> StorageResult<()> {
         Ok(())
     }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        std::mem::replace(&mut self.vnodes, vnodes)
+    }
 }
 
 #[cfg(test)]
@@ -663,6 +672,7 @@ mod tests {
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -884,7 +894,7 @@ mod tests {
         }
 
         const TEST_TABLE_ID: TableId = TableId::new(233);
-        const TEST_EPOCH: u64 = 10;
+        const TEST_EPOCH: u64 = test_epoch(10);
 
         async fn check_data(
             iter: &mut MemTableHummockIterator<'_>,
@@ -925,7 +935,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a later epoch, the first key is not skipped
-        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH + 1);
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {
@@ -939,7 +949,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data[seek_idx..]).await;
 
         // Test seek with a earlier epoch, the first key is skipped
-        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH - 1);
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {

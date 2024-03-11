@@ -1,0 +1,2 @@
+[batch]
+max_batch_queries_per_frontend_node = 2

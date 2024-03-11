@@ -23,19 +23,15 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::Stream;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorSuppressor;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
-use thiserror_ext::AsReport;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -165,16 +161,20 @@ pub struct SourceEnumeratorInfo {
 #[derive(Debug, Default)]
 pub struct SourceContext {
     pub connector_client: Option<ConnectorClient>,
-    pub source_info: SourceInfo,
+    pub actor_id: u32,
+    pub source_id: TableId,
+    // There should be a 1-1 mapping between `source_id` & `fragment_id`
+    pub fragment_id: u32,
+    pub source_name: String,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
-    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
+
 impl SourceContext {
     pub fn new(
         actor_id: u32,
-        table_id: TableId,
+        source_id: TableId,
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
@@ -184,76 +184,15 @@ impl SourceContext {
     ) -> Self {
         Self {
             connector_client,
-            source_info: SourceInfo {
-                actor_id,
-                source_id: table_id,
-                fragment_id,
-                source_name,
-            },
-            metrics,
-            source_ctrl_opts,
-            error_suppressor: None,
-            connector_props,
-        }
-    }
-
-    pub fn new_with_suppressor(
-        actor_id: u32,
-        table_id: TableId,
-        fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
-        source_ctrl_opts: SourceCtrlOpts,
-        connector_client: Option<ConnectorClient>,
-        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
-        connector_props: ConnectorProperties,
-        source_name: String,
-    ) -> Self {
-        let mut ctx = Self::new(
             actor_id,
-            table_id,
+            source_id,
             fragment_id,
+            source_name,
             metrics,
             source_ctrl_opts,
-            connector_client,
             connector_props,
-            source_name,
-        );
-        ctx.error_suppressor = Some(error_suppressor);
-        ctx
-    }
-
-    pub(crate) fn report_user_source_error(&self, e: &(impl AsReport + ?Sized)) {
-        if self.source_info.fragment_id == u32::MAX {
-            return;
         }
-        let mut err_str = e.to_report_string();
-        if let Some(suppressor) = &self.error_suppressor
-            && suppressor.lock().suppress_error(&err_str)
-        {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                suppressor.lock().max()
-            );
-        }
-        GLOBAL_ERROR_METRICS.user_source_error.report([
-            "SourceError".to_owned(),
-            // TODO(jon-chuang): add the error msg truncator to truncate these
-            err_str,
-            // Let's be a bit more specific for SourceExecutor
-            "SourceExecutor".to_owned(),
-            self.source_info.fragment_id.to_string(),
-            self.source_info.source_id.table_id.to_string(),
-        ]);
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct SourceInfo {
-    pub actor_id: u32,
-    pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
-    pub fragment_id: u32,
-    pub source_name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -261,6 +200,7 @@ pub enum SourceFormat {
     #[default]
     Invalid,
     Native,
+    None,
     Debezium,
     DebeziumMongo,
     Maxwell,
@@ -274,6 +214,7 @@ pub enum SourceEncode {
     #[default]
     Invalid,
     Native,
+    None,
     Avro,
     Csv,
     Protobuf,
@@ -334,6 +275,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
+        (PbFormatType::None, PbEncodeType::None) => (SourceFormat::None, SourceEncode::None),
         (PbFormatType::Debezium, PbEncodeType::Avro) => {
             (SourceFormat::Debezium, SourceEncode::Avro)
         }
@@ -450,6 +392,8 @@ impl ConnectorProperties {
 
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
+            || matches!(self, ConnectorProperties::OpendalS3(_))
+            || matches!(self, ConnectorProperties::Gcs(_))
     }
 }
 
@@ -652,7 +596,7 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
-    use crate::source::cdc::{DebeziumCdcSplit, MySqlCdcSplit};
+    use crate::source::cdc::{DebeziumCdcSplit, Mysql};
     use crate::source::kafka::KafkaSplit;
 
     #[test]
@@ -670,8 +614,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
-        let split = DebeziumCdcSplit::new(Some(mysql_split), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;

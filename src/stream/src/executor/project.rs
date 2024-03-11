@@ -14,27 +14,30 @@
 
 use std::fmt::{Debug, Formatter};
 
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
-use super::*;
+use super::{
+    ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError,
+    StreamExecutorResult, Watermark,
+};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Expressions of the current projection.
     exprs: Vec<NonStrictExpression>,
@@ -55,8 +58,7 @@ impl ProjectExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: Box<dyn Executor>,
+        input: Executor,
         exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -67,7 +69,6 @@ impl ProjectExecutor {
             input,
             inner: Inner {
                 _ctx: ctx,
-                info,
                 exprs,
                 watermark_derivations,
                 nondecreasing_expr_indices,
@@ -86,19 +87,7 @@ impl Debug for ProjectExecutor {
     }
 }
 
-impl Executor for ProjectExecutor {
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
-    }
-
+impl Execute for ProjectExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
     }
@@ -142,8 +131,8 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, out_col_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    out_col_idx
                 );
             }
         }
@@ -151,7 +140,7 @@ impl Inner {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(mut self, input: BoxedExecutor) {
+    async fn execute(mut self, input: Executor) {
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
@@ -213,6 +202,7 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{self, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
@@ -241,30 +231,22 @@ mod tests {
             ],
         };
         let pk_indices = vec![0];
-        let (mut tx, source) = MockSource::channel(schema, pk_indices);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, pk_indices);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
-        let info = ExecutorInfo {
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            pk_indices: vec![],
-            identity: "ProjectExecutor".to_string(),
-        };
-
-        let project = Box::new(ProjectExecutor::new(
+        let project = ProjectExecutor::new(
             ActorContext::for_test(123),
-            info,
-            Box::new(source),
+            source,
             vec![test_expr],
             MultiMap::new(),
             vec![],
             0.0,
-        ));
-        let mut project = project.execute();
+        );
+        let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         let barrier = project.next().await.unwrap().unwrap();
         barrier.as_barrier().unwrap();
 
@@ -292,7 +274,7 @@ mod tests {
             )
         );
 
-        tx.push_barrier(2, true);
+        tx.push_barrier(test_epoch(2), true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 
@@ -329,36 +311,24 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, PkIndices::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
         let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
-        let info = ExecutorInfo {
-            schema: Schema {
-                fields: vec![
-                    Field::unnamed(DataType::Int64),
-                    Field::unnamed(DataType::Int64),
-                    Field::unnamed(DataType::Int64),
-                ],
-            },
-            pk_indices: vec![],
-            identity: "ProjectExecutor".to_string(),
-        };
-
-        let project = Box::new(ProjectExecutor::new(
+        let project = ProjectExecutor::new(
             ActorContext::for_test(123),
-            info,
-            Box::new(source),
+            source,
             vec![a_expr, b_expr, c_expr],
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,
-        ));
-        let mut project = project.execute();
+        );
+        let mut project = project.boxed().execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_int64_watermark(0, 100);
 
         project.expect_barrier().await;
@@ -402,7 +372,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         let w3 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -414,7 +384,7 @@ mod tests {
         ));
         project.expect_chunk().await;
 
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
         let w4 = project.expect_watermark().await;
         project.expect_barrier().await;
 
@@ -422,7 +392,7 @@ mod tests {
         assert!(w3.val.default_cmp(&w4.val).is_le());
 
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(4, true);
+        tx.push_barrier(test_epoch(4), true);
 
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }

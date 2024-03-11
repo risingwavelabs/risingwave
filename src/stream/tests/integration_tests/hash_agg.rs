@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 
@@ -38,10 +39,11 @@ async fn test_hash_agg_count_sum() {
         AggCall::from_pretty("(sum:int8 $2:int8)"),
     ];
 
-    let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, PkIndices::new());
     let hash_agg = new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         false,
         agg_calls,
         0,
@@ -54,14 +56,14 @@ async fn test_hash_agg_count_sum() {
     .await;
     let mut hash_agg = hash_agg.execute();
 
-    tx.push_barrier(1, false);
+    tx.push_barrier(test_epoch(1), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I I
         + 1 1 1
         + 2 2 2
         + 2 2 2",
     ));
-    tx.push_barrier(2, false);
+    tx.push_barrier(test_epoch(2), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I I
         - 1 1 1
@@ -69,7 +71,7 @@ async fn test_hash_agg_count_sum() {
         - 2 2 2
         + 3 3 3",
     ));
-    tx.push_barrier(3, false);
+    tx.push_barrier(test_epoch(3), false);
 
     check_until_pending(
         &mut hash_agg,
@@ -116,10 +118,11 @@ async fn test_hash_agg_min() {
         AggCall::from_pretty("(min:int8 $1:int8)"),
     ];
 
-    let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, vec![2]);
     let hash_agg = new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         false,
         agg_calls,
         0,
@@ -132,21 +135,21 @@ async fn test_hash_agg_min() {
     .await;
     let mut hash_agg = hash_agg.execute();
 
-    tx.push_barrier(1, false);
+    tx.push_barrier(test_epoch(1), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I     I    I
         + 1   233 1001
         + 1 23333 1002
         + 2  2333 1003",
     ));
-    tx.push_barrier(2, false);
+    tx.push_barrier(test_epoch(2), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I     I    I
         - 1   233 1001
         - 1 23333 1002 D
         - 2  2333 1003",
     ));
-    tx.push_barrier(3, false);
+    tx.push_barrier(test_epoch(3), false);
 
     check_until_pending(
         &mut hash_agg,
@@ -191,10 +194,11 @@ async fn test_hash_agg_min_append_only() {
         AggCall::from_pretty("(min:int8 $1:int8)"),
     ];
 
-    let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, vec![2]);
     let hash_agg = new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         true, // is append only
         agg_calls,
         0,
@@ -207,7 +211,7 @@ async fn test_hash_agg_min_append_only() {
     .await;
     let mut hash_agg = hash_agg.execute();
 
-    tx.push_barrier(1, false);
+    tx.push_barrier(test_epoch(1), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I  I  I
             + 2 5  1000
@@ -217,7 +221,7 @@ async fn test_hash_agg_min_append_only() {
             + 2 10 1004
             ",
     ));
-    tx.push_barrier(2, false);
+    tx.push_barrier(test_epoch(2), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I  I  I
             + 1 20 1005
@@ -226,7 +230,7 @@ async fn test_hash_agg_min_append_only() {
             + 2 20 1008
             ",
     ));
-    tx.push_barrier(3, false);
+    tx.push_barrier(test_epoch(3), false);
 
     check_until_pending(
         &mut hash_agg,
@@ -266,10 +270,11 @@ async fn test_hash_agg_emit_on_window_close() {
     let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
 
     let create_executor = || async {
-        let (tx, source) = MockSource::channel(input_schema.clone(), PkIndices::new());
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(input_schema.clone(), PkIndices::new());
         let hash_agg = new_boxed_hash_agg_executor(
             store.clone(),
-            Box::new(source),
+            source,
             false,
             agg_calls.clone(),
             0,

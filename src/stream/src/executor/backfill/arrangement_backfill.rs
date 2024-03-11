@@ -22,7 +22,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -35,13 +34,13 @@ use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
     compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
-    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillState,
+    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_backfill_metrics,
+    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    HashMap, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, HashMap, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -57,7 +56,7 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     upstream_table: ReplicatedStateTable<S, SD>,
 
     /// Upstream with the same schema with the upstream table.
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// Internal state table for persisting state of backfill state.
     state_table: StateTable<S>,
@@ -68,8 +67,6 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
-
-    info: ExecutorInfo,
 
     metrics: Arc<StreamingMetrics>,
 
@@ -86,9 +83,8 @@ where
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn new(
-        info: ExecutorInfo,
         upstream_table: ReplicatedStateTable<S, SD>,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
@@ -97,7 +93,6 @@ where
         rate_limit: Option<usize>,
     ) -> Self {
         Self {
-            info,
             upstream_table,
             upstream,
             state_table,
@@ -305,7 +300,13 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-
+                                        update_backfill_metrics(
+                                            &self.metrics,
+                                            self.actor_id,
+                                            upstream_table_id,
+                                            cur_barrier_snapshot_processed_rows,
+                                            cur_barrier_upstream_processed_rows,
+                                        );
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, row)) => {
@@ -452,21 +453,13 @@ where
 
                 upstream_table.commit(barrier.epoch).await?;
 
-                self.metrics
-                    .arrangement_backfill_snapshot_read_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_snapshot_processed_rows);
-
-                self.metrics
-                    .arrangement_backfill_upstream_output_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_upstream_processed_rows);
+                update_backfill_metrics(
+                    &self.metrics,
+                    self.actor_id,
+                    upstream_table_id,
+                    cur_barrier_snapshot_processed_rows,
+                    cur_barrier_upstream_processed_rows,
+                );
 
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
@@ -710,24 +703,12 @@ where
     }
 }
 
-impl<S, SD> Executor for ArrangementBackfillExecutor<S, SD>
+impl<S, SD> Execute for ArrangementBackfillExecutor<S, SD>
 where
     S: StateStore,
     SD: ValueRowSerde,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }

@@ -27,6 +27,7 @@ use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -393,6 +394,12 @@ impl Binder {
             if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
                 return Ok(expr.clone());
             }
+            // Same as `bind_column`, the error message here
+            // help with hint display when invalid definition occurs
+            return Err(ErrorCode::BindError(format!(
+                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
+            ))
+            .into());
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
@@ -525,6 +532,127 @@ impl Binder {
         true
     }
 
+    /// Helper function to compare or set column identifier
+    /// used in `check_convert_simple_form`
+    fn compare_or_set(col_expr: &mut Option<Expr>, test_expr: Expr) -> bool {
+        let Expr::Identifier(test_ident) = test_expr else {
+            return false;
+        };
+        if let Some(expr) = col_expr {
+            let Expr::Identifier(ident) = expr else {
+                return false;
+            };
+            if ident.real_value() != test_ident.real_value() {
+                return false;
+            }
+        } else {
+            *col_expr = Some(Expr::Identifier(test_ident));
+        }
+        true
+    }
+
+    /// left expression and right expression must be either:
+    /// `<constant> <Eq> <identifier>` or `<identifier> <Eq> <constant>`
+    /// used in `check_convert_simple_form`
+    fn check_invariant(left: Expr, op: BinaryOperator, right: Expr) -> bool {
+        if op != BinaryOperator::Eq {
+            return false;
+        }
+        if let Expr::Identifier(_) = left {
+            // <identifier> <Eq> <constant>
+            let Expr::Value(_) = right else {
+                return false;
+            };
+        } else {
+            // <constant> <Eq> <identifier>
+            let Expr::Value(_) = left else {
+                return false;
+            };
+            let Expr::Identifier(_) = right else {
+                return false;
+            };
+        }
+        true
+    }
+
+    /// Helper function to extract expression out and insert
+    /// the corresponding bound version to `inputs`
+    /// used in `check_convert_simple_form`
+    /// Note: this function will be invoked per arm
+    fn try_extract_simple_form(
+        &mut self,
+        ident_expr: Expr,
+        constant_expr: Expr,
+        column_expr: &mut Option<Expr>,
+        inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        if !Self::compare_or_set(column_expr, ident_expr) {
+            return false;
+        }
+        let Ok(bound_expr) = self.bind_expr_inner(constant_expr) else {
+            return false;
+        };
+        inputs.push(bound_expr);
+        true
+    }
+
+    /// See if the case when expression in form
+    /// `select case when <expr_1 = constant> (...with same pattern...) else <constant> end;`
+    /// If so, this expression could also be converted to constant lookup
+    fn check_convert_simple_form(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        fallback: Option<ExprImpl>,
+        constant_lookup_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        let mut column_expr = None;
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::BinaryOp { left, op, right } = condition {
+                if !Self::check_invariant(*(left.clone()), op.clone(), *(right.clone())) {
+                    return false;
+                }
+                if let Expr::Identifier(_) = *(left.clone()) {
+                    if !self.try_extract_simple_form(
+                        *left,
+                        *right,
+                        &mut column_expr,
+                        constant_lookup_inputs,
+                    ) {
+                        return false;
+                    }
+                } else if !self.try_extract_simple_form(
+                    *right,
+                    *left,
+                    &mut column_expr,
+                    constant_lookup_inputs,
+                ) {
+                    return false;
+                }
+                constant_lookup_inputs.push(result);
+            } else {
+                return false;
+            }
+        }
+
+        // Insert operand first
+        let Some(operand) = column_expr else {
+            return false;
+        };
+        let Ok(bound_operand) = self.bind_expr_inner(operand) else {
+            return false;
+        };
+        constant_lookup_inputs.insert(0, bound_operand);
+
+        // fallback insertion
+        if let Some(expr) = fallback {
+            constant_lookup_inputs.push(expr);
+        }
+
+        true
+    }
+
     /// The helper function to check if the current case-when
     /// expression in `bind_case` could be optimized
     /// into `ConstantLookupExpression`
@@ -540,9 +668,6 @@ impl Binder {
             return false;
         }
 
-        // TODO(Zihao): we could possibly optimize some simple cases when
-        // `operand` is None in the future, the current choice is not conducting the optimization.
-        // e.g., select case when c1 = 1 then (...) when (same pattern) then (... ) [else (...)] end from t1;
         if let Some(operand) = operand {
             let Ok(operand) = self.bind_expr_inner(*operand) else {
                 return false;
@@ -555,7 +680,14 @@ impl Binder {
             }
             constant_lookup_inputs.push(operand);
         } else {
-            return false;
+            // Try converting to simple form
+            // see the example as illustrated in `check_convert_simple_form`
+            return self.check_convert_simple_form(
+                conditions,
+                results_expr,
+                fallback,
+                constant_lookup_inputs,
+            );
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {

@@ -287,7 +287,7 @@ impl BarrierScheduler {
                 .context("failed to collect barrier")??;
 
             // Wait for this command to be finished.
-            finish_rx.await.ok().context("failed to finish command")?;
+            finish_rx.await.ok().context("failed to finish command")??;
         }
 
         Ok(infos)

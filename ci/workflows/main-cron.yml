@@ -13,7 +13,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)build(,|$$)/
     key: "build"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -31,7 +31,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -48,7 +48,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)build-simulation(,|$$)/
     key: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -63,7 +63,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)docslt(,|$$)/
     key: "docslt"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -82,12 +82,12 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
+    timeout_in_minutes: 65
     retry: *auto-retry
 
   - label: "end-to-end test (parallel) (release)"
@@ -104,7 +104,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -126,7 +126,7 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -145,7 +145,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -164,7 +164,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -184,7 +184,7 @@ steps:
       - "build-simulation"
     plugins:
       - ./ci/plugins/swapfile
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -206,7 +206,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           environment:
@@ -222,7 +222,7 @@ steps:
       || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
       || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -238,7 +238,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -255,7 +255,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -272,7 +272,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -289,7 +289,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -306,7 +306,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -326,7 +326,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -345,7 +345,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -364,7 +364,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -383,7 +383,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
     depends_on: "build-simulation"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -404,12 +404,12 @@ steps:
       - "build-other"
 
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 7
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test (release)"
@@ -423,12 +423,12 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 11
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
@@ -442,7 +442,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -464,7 +464,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -486,7 +486,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -508,7 +508,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -530,7 +530,29 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "S3_v2 source batch read on AWS (json parser)"
+    key: "s3-v2-source-batch-read-check-aws-json-parser"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_batch.py json'"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-s3-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -552,7 +574,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -571,7 +593,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
     depends_on: build
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -591,7 +613,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -614,7 +636,7 @@ steps:
   #     - seek-oss/aws-sm#v2.3.1:
   #         env:
   #           S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
-  #     - docker-compose#v4.9.0:
+  #     - docker-compose#v5.1.0:
   #         run: rw-build-env
   #         config: ci/docker-compose.yml
   #         mount-buildkite-agent: true
@@ -639,7 +661,7 @@ steps:
           env:
             ASTRA_STREAMING_TEST_TOKEN: astra_streaming_test_token
             STREAMNATIVE_CLOUD_TEST_CONF: streamnative_cloud_test_conf
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -657,7 +679,7 @@ steps:
       || build.pull_request.labels includes "ci/run-micro-benchmarks"
       || build.env("CI_STEPS") =~ /(^|,)micro-benchmarks?(,|$$)/
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -679,7 +701,7 @@ steps:
           env:
             BUILDKITE_TOKEN: buildkite_token
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -699,7 +721,7 @@ steps:
     depends_on:
       - "build"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -733,7 +755,7 @@ steps:
     depends_on:
       - "build"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -749,12 +771,12 @@ steps:
     depends_on:
       - "build"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 22
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -764,6 +786,26 @@ steps:
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-standalone-tests"
       || build.env("CI_STEPS") =~ /(^|,)e2e-standalone-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "e2e single-node binary test"
+    key: "e2e-single-node-binary-tests"
+    command: "ci/scripts/e2e-test.sh -p ci-release -m single-node"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-single-node-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
@@ -788,7 +830,7 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -807,7 +849,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -826,7 +868,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -834,36 +876,37 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "set vm_max_map_count_2000000"
-    key: "set-vm_max_map_count"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
-    command: "sudo sysctl -w vm.max_map_count=2000000"
-    depends_on:
-      - "build"
-      - "build-other"
+  # Causes ci error, close it first, fix it later
+  # - label: "set vm_max_map_count_2000000"
+  #   key: "set-vm_max_map_count"
+  #   if: |
+  #     !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+  #     || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
+  #     || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
+  #   command: "sudo sysctl -w vm.max_map_count=2000000"
+  #   depends_on:
+  #     - "build"
+  #     - "build-other"
 
-  - label: "end-to-end doris sink test"
-    key: "e2e-doris-sink-tests"
-    command: "ci/scripts/e2e-doris-sink-test.sh -p ci-release"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-      - "set-vm_max_map_count"
-    plugins:
-      - docker-compose#v4.9.0:
-          run: sink-doris-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
+  # - label: "end-to-end doris sink test"
+  #   key: "e2e-doris-sink-tests"
+  #   command: "ci/scripts/e2e-doris-sink-test.sh -p ci-release"
+  #   if: |
+  #     !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
+  #     || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests"
+  #     || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
+  #   depends_on:
+  #     - "build"
+  #     - "build-other"
+  #     - "set-vm_max_map_count"
+  #   plugins:
+  #     - docker-compose#v5.1.0:
+  #         run: sink-doris-env
+  #         config: ci/docker-compose.yml
+  #         mount-buildkite-agent: true
+  #     - ./ci/plugins/upload-failure-logs
+  #   timeout_in_minutes: 10
+  #   retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
     key: "e2e-starrocks-sink-tests"
@@ -876,7 +919,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -895,7 +938,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -914,7 +957,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -933,7 +976,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -952,7 +995,7 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -972,7 +1015,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: release-env-x86
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -990,7 +1033,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: release-env-arm
           config: ci/docker-compose.yml
           mount-buildkite-agent: true

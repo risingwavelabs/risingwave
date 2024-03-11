@@ -20,7 +20,6 @@ use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
@@ -37,9 +36,6 @@ use crate::task::{FragmentId, SharedContext};
 pub struct MergeExecutor {
     /// The context of the actor.
     actor_context: ActorContextRef,
-
-    /// Logical Operator Info
-    info: ExecutorInfo,
 
     /// Upstream channels.
     upstreams: Vec<BoxedInput>,
@@ -61,7 +57,6 @@ impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
@@ -71,7 +66,6 @@ impl MergeExecutor {
     ) -> Self {
         Self {
             actor_context: ctx,
-            info,
             upstreams: inputs,
             fragment_id,
             upstream_fragment_id,
@@ -81,17 +75,12 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
         Self::new(
             ActorContext::for_test(114),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "MergeExecutor".to_string(),
-            },
             514,
             1919,
             inputs
@@ -245,21 +234,9 @@ impl MergeExecutor {
     }
 }
 
-impl Executor for MergeExecutor {
+impl Execute for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -449,6 +426,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -464,7 +442,7 @@ mod tests {
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{Barrier, Executor, Mutation};
+    use crate::executor::{Barrier, Execute, Mutation};
     use crate::task::test_utils::helper_make_local_actor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
@@ -483,7 +461,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs, Schema::default());
+        let merger = MergeExecutor::for_test(rxs);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
@@ -505,13 +483,15 @@ mod tests {
                         .await
                         .unwrap();
                     }
-                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
-                        .await
-                        .unwrap();
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(test_epoch(
+                        epoch,
+                    ))))
+                    .await
+                    .unwrap();
                     sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new_test_barrier(1000)
+                    Barrier::new_test_barrier(test_epoch(1000))
                         .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
@@ -538,7 +518,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-                assert_eq!(barrier_epoch.curr, epoch);
+                assert_eq!(barrier_epoch.curr, test_epoch(epoch));
             });
         }
         assert_matches!(
@@ -556,8 +536,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let schema = Schema { fields: vec![] };
-
         let actor_id = 233;
         let (untouched, old, new) = (234, 235, 238); // upstream actors
         let ctx = Arc::new(SharedContext::for_test());
@@ -592,13 +570,8 @@ mod tests {
             .try_collect()
             .unwrap();
 
-        let merge = MergeExecutor::new(
+        let mut merge = MergeExecutor::new(
             ActorContext::for_test(actor_id),
-            ExecutorInfo {
-                schema,
-                pk_indices: vec![],
-                identity: "MergeExecutor".to_string(),
-            },
             fragment_id,
             upstream_fragment_id,
             inputs,
@@ -608,8 +581,6 @@ mod tests {
         )
         .boxed()
         .execute();
-
-        pin_mut!(merge);
 
         // 2. Take downstream receivers.
         let txs = [untouched, old, new]
@@ -646,14 +617,16 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(UpdateMutation {
-            dispatchers: Default::default(),
-            merges: merge_updates,
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
-        }));
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: Default::default(),
+                merges: merge_updates,
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
@@ -704,7 +677,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier::new_test_barrier(12345);
+            let barrier = Barrier::new_test_barrier(test_epoch(1));
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -769,7 +742,7 @@ mod tests {
             assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-            assert_eq!(barrier_epoch.curr, 12345);
+            assert_eq!(barrier_epoch.curr, test_epoch(1));
         });
         assert!(rpc_called.load(Ordering::SeqCst));
 

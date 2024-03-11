@@ -9,15 +9,27 @@ Near "selet"
 
 
 statement error
-create function int_42() returns int as int_42 using link 'localhost:8815';
+create function int_42() returns int as int_42 using link '555.0.0.1:8815';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Flight service error: invalid address: 555.0.0.1:8815, err: failed to parse address: http://555.0.0.1:8815: invalid IPv4 address
+
+
+statement error
+create function int_42() returns int as int_42 using link '55.55.55.55:5555';
 ----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: failed to connect to UDF service
-  2: transport error
-  3: error trying to connect
-  4: invalid URL, scheme is missing
+  1: failed to check UDF signature
+  2: failed to send requests to UDF service
+  3: status: Unavailable, message: "error trying to connect: tcp connect error: deadline has elapsed", details: [], metadata: MetadataMap { headers: {} }
+  4: transport error
+  5: error trying to connect
+  6: tcp connect error
+  7: deadline has elapsed
 
 
 statement error
@@ -68,7 +80,7 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Failed to get/set session config
   2: Invalid value `maybe` for `rw_implicit_flush`
-  3: provided string was not `true` or `false`
+  3: Invalid bool
 
 
 statement error

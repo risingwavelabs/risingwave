@@ -38,7 +38,7 @@ aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
-base64 = "0.21"
+base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = [
@@ -57,7 +57,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = "0.18.0"
 glob = "0.3"
-google-cloud-pubsub = "0.22"
+google-cloud-pubsub = "0.23"
 http = "0.2"
 hyper = { version = "0.14", features = [
     "client",
@@ -106,7 +106,11 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.24.0", features = ["aio","tokio-comp","async-std-comp"] }
+redis = { version = "0.24.0", features = [
+    "aio",
+    "tokio-comp",
+    "async-std-comp",
+] }
 regex = "1.4"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
@@ -120,7 +124,7 @@ serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
 simd-json = "0.13.3"
-strum = "0.25"
+strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"

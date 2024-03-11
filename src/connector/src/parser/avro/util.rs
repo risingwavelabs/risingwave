@@ -64,6 +64,7 @@ fn avro_field_to_column_desc(
                 type_name: schema_name.to_string(),
                 generated_or_default_column: None,
                 description: None,
+                additional_column_type: 0, // deprecated
                 additional_column: Some(AdditionalColumn { column_type: None }),
                 version: ColumnDescVersion::Pr13707 as i32,
             })
@@ -96,11 +97,11 @@ fn avro_type_mapping(schema: &Schema) -> ConnectorResult<DataType> {
                     LazyLock::new(LogSuppresser::default);
                 if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::warn!(
-                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate. ({} suppressed)",
-                    Decimal::MAX_PRECISION,
-                    suppressed_count,
-                    precision
-                );
+                        suppressed_count,
+                        "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                        Decimal::MAX_PRECISION,
+                        precision
+                    );
                 }
             }
             DataType::Decimal

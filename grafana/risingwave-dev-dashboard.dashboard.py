@@ -720,19 +720,6 @@ def section_streaming(outer_panels):
                         )
                     ],
                 ),
-                panels.timeseries_rowsps(
-                    "Source Throughput(rows) per barrier",
-                    "RisingWave ingests barriers periodically to trigger computation and checkpoints. The frequency of "
-                    "barrier can be set by barrier_interval_ms. This metric shows how many rows are ingested between two "
-                    "consecutive barriers.",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
-                            "actor={{actor_id}} source={{source_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        )
-                    ],
-                ),
                 panels.timeseries_count(
                     "Source Upstream Status",
                     "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
@@ -1250,7 +1237,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
                             "fragment {{fragment_id}}",
                         ),
                         panels.target_hidden(
@@ -1264,7 +1251,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id)",
+                            f"avg(rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id,side)",
                             "fragment {{fragment_id}} {{side}}",
                         ),
                         panels.target_hidden(
@@ -1689,53 +1676,31 @@ def section_streaming_errors(outer_panels):
             [
                 panels.timeseries_count(
                     "Compute Errors by Type",
-                    "",
+                    "Errors that happened during computation. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_compute_error')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                            f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                            "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
                     "Source Errors by Type",
-                    "",
+                    "Errors that happened during source data ingestion. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_source_error')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                            f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                            "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
-                    "Source Reader Errors by Type",
-                    "",
+                    "Sink Errors by Type",
+                    "Errors that happened during data sink out. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_source_reader_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_source_reader_error')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Sink by Connector",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('user_sink_error')}) by (connector_name, executor_id, error_msg)",
-                            "{{connector_name}}: {{error_msg}} ({{executor_id}})",
+                            f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                            "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
@@ -4082,12 +4047,20 @@ def section_udf(outer_panels):
                             "udf_failure_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name)",
-                            "udf_success_count - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name)",
-                            "udf_failure_count - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_success_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_success_count - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_failure_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_failure_count - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('udf_retry_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "udf_retry_count - {{%s}}" % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -4096,8 +4069,8 @@ def section_udf(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name)",
-                            "udf_input_chunk_rows_avg - {{link}} {{name}}",
+                            f"sum(irate({metric('udf_input_chunk_rows_sum')}[$__rate_interval])) by (link, name, fragment_id) / sum(irate({metric('udf_input_chunk_rows_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_input_chunk_rows_avg - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4118,8 +4091,16 @@ def section_udf(outer_panels):
                             "udf_latency_p99 - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "udf_latency_avg - {{%s}}" % NODE_LABEL,
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.99, sum(irate({metric('udf_latency_bucket')}[$__rate_interval])) by (le, link, name, fragment_id))",
+                            "udf_latency_p99_by_name - {{link}} {{name}} {{fragment_id}}",
+                        ),
+                        panels.target(
+                            f"sum(irate({metric('udf_latency_sum')}[$__rate_interval])) by (link, name, fragment_id) / sum(irate({metric('udf_latency_count')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_latency_avg_by_name - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4132,8 +4113,8 @@ def section_udf(outer_panels):
                             "udf_throughput_rows - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name)",
-                            "udf_throughput_rows - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_input_rows')}[$__rate_interval])) by (link, name, fragment_id)",
+                            "udf_throughput_rows - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -4146,8 +4127,8 @@ def section_udf(outer_panels):
                             "udf_throughput_bytes - {{%s}}" % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name) / (1024*1024)",
-                            "udf_throughput_bytes - {{link}} {{name}}",
+                            f"sum(rate({metric('udf_input_bytes')}[$__rate_interval])) by (link, name, fragment_id) / (1024*1024)",
+                            "udf_throughput_bytes - {{link}} {{name}} {{fragment_id}}",
                         ),
                     ],
                 ),

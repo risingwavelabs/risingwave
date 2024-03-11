@@ -186,7 +186,6 @@ pub async fn rpc_serve(
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
                 .max_connections(max_connection)
-                .sqlx_logging(false)
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
             let conn = sea_orm::Database::connect(options).await?;
@@ -478,20 +477,13 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-    let diagnose_command = match &metadata_manager {
-        MetadataManager::V1(mgr) => Some(Arc::new(
-            risingwave_meta::manager::diagnose::DiagnoseCommand::new(
-                mgr.cluster_manager.clone(),
-                mgr.catalog_manager.clone(),
-                mgr.fragment_manager.clone(),
-                hummock_manager.clone(),
-                env.event_log_manager_ref(),
-                prometheus_client.clone(),
-                prometheus_selector.clone(),
-            ),
-        )),
-        MetadataManager::V2(_) => None,
-    };
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        metadata_manager.clone(),
+        hummock_manager.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+    ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
         max_length: opts.cached_traces_num,

@@ -6,28 +6,37 @@ import psycopg2
 import time
 
 
-def case_dir(case_name):
-    return f"../docker/{case_name}"
+def read_config(filename):
+    config = configparser.ConfigParser()
+    config.read(filename)
+    print({section: dict(config[section]) for section in config.sections()})
+    return config
 
 
-def start_docker(case_name):
-    subprocess.run(["docker-compose", "up", "-d", "--wait"], cwd=case_dir(case_name), check=False)
+class DockerCompose(object):
+    def __init__(self, case_name: str):
+        self.case_name = case_name
+
+    def case_dir(self):
+        return f"../docker/{self.case_name}"
+
+    def get_ip(self, container_name):
+        return subprocess.check_output([
+            "docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+            container_name], cwd=self.case_dir()).decode("utf-8").rstrip()
+
+    def __enter__(self):
+        subprocess.run(["docker-compose", "up", "-d", "--wait"], cwd=self.case_dir(), check=False)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        subprocess.run(["docker", "compose", "down", "-v", "--remove-orphans"], cwd=self.case_dir(),
+                       capture_output=True,
+                       check=True)
 
 
-def stop_docker(case_name):
-    subprocess.run(["docker", "compose", "down", "-v", "--remove-orphans"], cwd=case_dir(case_name),
-                   capture_output=True,
-                   check=True)
-
-
-def get_ip(case_name, container_name):
-    return subprocess.check_output(["docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{"
-                                                               "end}}",
-                                    container_name], cwd=case_dir(case_name)).decode("utf-8").rstrip()
-
-
-def init_spark_table(case_name):
-    spark_ip = get_ip(case_dir(case_name), f"{case_name}-spark-1")
+def init_spark_table(docker):
+    spark_ip = docker.get_ip(f"{docker.case_name}-spark-1")
     url = f"sc://{spark_ip}:15002"
     print(f"Spark url is {url}")
     spark = SparkSession.builder.remote(url).getOrCreate()
@@ -52,10 +61,8 @@ def init_spark_table(case_name):
         spark.sql(sql)
 
 
-def init_risingwave_mv(config):
-    aws_key = config['default']['aws_key']
-    aws_secret = config['default']['aws_secret']
-
+def init_risingwave_mv(docker):
+    config = read_config(f"{docker.case_dir()}/config.ini")
     sink_config = config['sink']
     sink_param = ",\n".join([f"{k}='{v}'" for k, v in sink_config.items()])
     sqls = [
@@ -95,7 +102,6 @@ def init_risingwave_mv(config):
             );
         """
     ]
-
     rw_config = config['risingwave']
     with psycopg2.connect(database=rw_config['db'], user=rw_config['user'], host=rw_config['host'],
                           port=rw_config['port']) as conn:
@@ -105,8 +111,8 @@ def init_risingwave_mv(config):
                 cursor.execute(sql)
 
 
-def check_spark_table(case_name):
-    spark_ip = get_ip(case_dir(case_name), f"{case_name}-spark-1")
+def check_spark_table(docker):
+    spark_ip = docker.get_ip(f"{docker.case_name}-spark-1")
     url = f"sc://{spark_ip}:15002"
     print(f"Spark url is {url}")
     spark = SparkSession.builder.remote(url).getOrCreate()
@@ -118,19 +124,19 @@ def check_spark_table(case_name):
     for sql in sqls:
         print(f"Executing sql: {sql}")
         result = spark.sql(sql).collect()
-        print(f"Result is {result}")
+        assert result[0][0] > 100, f"Inserted result is too small: {result[0][0]}, test failed"
+
+def run_case(case):
+    with DockerCompose(case) as docker:
+        init_spark_table(docker)
+        init_risingwave_mv(docker)
+        print("Let risingwave to run")
+        time.sleep(5)
+        check_spark_table(docker)
 
 
 if __name__ == "__main__":
-    case_name = "rest"
-    config = configparser.ConfigParser()
-    config.read(f"{case_dir(case_name)}/config.ini")
-    print({section: dict(config[section]) for section in config.sections()})
-    start_docker(case_name)
-    print("Waiting for docker to be ready")
-    init_spark_table(case_name)
-    init_risingwave_mv(config)
-    print("Let risingwave to run")
-    time.sleep(3)
-    check_spark_table(case_name)
-    stop_docker(case_name)
+    case_names = ["rest", "storage", "jdbc", "hive"]
+    for case_name in case_names:
+        print(f"Running test case: {case_name}")
+        run_case(case_name)

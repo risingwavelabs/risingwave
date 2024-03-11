@@ -13,52 +13,37 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndices, PkIndicesRef, StreamExecutorError,
+    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Execute, Message,
+    StreamExecutorError,
 };
 
 /// The executor only for receiving barrier from the meta service. It always resides in the leaves
 /// of the streaming graph.
 pub struct BarrierRecvExecutor {
     _ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// The barrier receiver registered in the local barrier manager.
     barrier_receiver: UnboundedReceiver<Barrier>,
 }
 
 impl BarrierRecvExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        info: ExecutorInfo,
-        barrier_receiver: UnboundedReceiver<Barrier>,
-    ) -> Self {
+    pub fn new(ctx: ActorContextRef, barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
         Self {
             _ctx: ctx,
-            info,
             barrier_receiver,
         }
     }
 
     pub fn for_test(barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
-        Self::new(
-            ActorContext::for_test(0),
-            ExecutorInfo {
-                schema: Schema::empty().clone(),
-                pk_indices: PkIndices::new(),
-                identity: "BarrierRecvExecutor".to_string(),
-            },
-            barrier_receiver,
-        )
+        Self::new(ActorContext::for_test(0), barrier_receiver)
     }
 }
 
-impl Executor for BarrierRecvExecutor {
+impl Execute for BarrierRecvExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         UnboundedReceiverStream::new(self.barrier_receiver)
             .map(|barrier| Ok(Message::Barrier(barrier)))
@@ -69,23 +54,12 @@ impl Executor for BarrierRecvExecutor {
             }))
             .boxed()
     }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use futures::pin_mut;
+    use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -99,13 +73,17 @@ mod tests {
         let stream = barrier_recv.execute();
         pin_mut!(stream);
 
-        barrier_tx.send(Barrier::new_test_barrier(114)).unwrap();
-        barrier_tx.send(Barrier::new_test_barrier(514)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(1)))
+            .unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(2)))
+            .unwrap();
 
         let barrier_1 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_1.epoch.curr, 114);
+        assert_eq!(barrier_1.epoch.curr, test_epoch(1));
         let barrier_2 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_2.epoch.curr, 514);
+        assert_eq!(barrier_2.epoch.curr, test_epoch(2));
 
         stream.next_unwrap_pending();
 

@@ -15,8 +15,11 @@
 use crate::error::ConnectorError;
 
 pub mod avro;
+mod loader;
 pub mod protobuf;
 pub mod schema_registry;
+
+pub use loader::SchemaLoader;
 
 const MESSAGE_NAME_KEY: &str = "message";
 const KEY_MESSAGE_NAME_KEY: &str = "key.message";

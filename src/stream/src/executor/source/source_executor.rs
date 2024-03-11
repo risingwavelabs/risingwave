@@ -43,7 +43,6 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -68,7 +67,6 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
@@ -78,7 +76,6 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -98,14 +95,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
@@ -270,12 +266,11 @@ impl<S: StateStore> SourceExecutor<S> {
             source_id = %core.source_id,
             "stream source reader error",
         );
-        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
-            "SourceReaderError".to_owned(),
-            e.to_report_string(),
-            "SourceExecutor".to_owned(),
-            self.actor_ctx.id.to_string(),
+        GLOBAL_ERROR_METRICS.user_source_error.report([
+            e.variant_name().to_owned(),
             core.source_id.to_string(),
+            core.source_name.to_owned(),
+            self.actor_ctx.fragment_id.to_string(),
         ]);
 
         self.rebuild_stream_reader(source_desc, stream).await
@@ -436,7 +431,6 @@ impl<S: StateStore> SourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
-        let mut metric_row_per_barrier: u64 = 0;
 
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
@@ -493,21 +487,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.persist_state_and_clear_cache(epoch).await?;
 
-                    self.metrics
-                        .source_row_per_barrier
-                        .with_label_values(&[
-                            self.actor_ctx.id.to_string().as_str(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_id
-                                .to_string()
-                                .as_ref(),
-                            self.actor_ctx.fragment_id.to_string().as_str(),
-                        ])
-                        .inc_by(metric_row_per_barrier);
-                    metric_row_per_barrier = 0;
-
                     yield Message::Barrier(barrier);
                 }
                 Either::Left(_) => {
@@ -527,8 +506,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         // chunks.
                         self_paused = true;
                         tracing::warn!(
-                            "source {} paused, wait barrier for {:?}",
-                            self.info.identity,
+                            "source paused, wait barrier for {:?}",
                             last_barrier_time.elapsed()
                         );
                         stream.pause_stream();
@@ -566,7 +544,6 @@ impl<S: StateStore> SourceExecutor<S> {
                             .updated_splits_in_epoch
                             .extend(state);
                     }
-                    metric_row_per_barrier += chunk.cardinality() as u64;
 
                     self.metrics
                         .source_output_row_count
@@ -616,25 +593,13 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for SourceExecutor<S> {
+impl<S: StateStore> Execute for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         if self.stream_source_core.is_some() {
             self.execute_with_stream_source().boxed()
         } else {
             self.execute_without_stream_source().boxed()
         }
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }
 
@@ -644,7 +609,6 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
             f.debug_struct("SourceExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()
@@ -663,6 +627,7 @@ mod tests {
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -683,7 +648,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = None;
-        let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
@@ -720,11 +684,6 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "SourceExecutor".to_string(),
-            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
@@ -732,22 +691,23 @@ mod tests {
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
-        let mut executor = Box::new(executor).execute();
+        let mut executor = executor.boxed().execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 1,
-                        start_offset: None,
-                    }),
-                ],
-            },
-            pause: false,
-        }));
+        let init_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::new(),
+                added_actors: HashSet::new(),
+                splits: hashmap! {
+                    ActorId::default() => vec![
+                        SplitImpl::Datagen(DatagenSplit {
+                            split_index: 0,
+                            split_num: 1,
+                            start_offset: None,
+                        }),
+                    ],
+                },
+                pause: false,
+            }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -776,7 +736,6 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
         let row_id_index = None;
-        let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
@@ -814,11 +773,6 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::for_test(0),
-            ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "SourceExecutor".to_string(),
-            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
@@ -826,22 +780,23 @@ mod tests {
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
-        let mut handler = Box::new(executor).execute();
+        let mut handler = executor.boxed().execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 3,
-                        start_offset: None,
-                    }),
-                ],
-            },
-            pause: false,
-        }));
+        let init_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::new(),
+                added_actors: HashSet::new(),
+                splits: hashmap! {
+                    ActorId::default() => vec![
+                        SplitImpl::Datagen(DatagenSplit {
+                            split_index: 0,
+                            split_num: 3,
+                            start_offset: None,
+                        }),
+                    ],
+                },
+                pause: false,
+            }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -875,10 +830,11 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation =
-            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let change_split_mutation = Barrier::new_test_barrier(test_epoch(2)).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(change_split_mutation).unwrap();
 
@@ -890,7 +846,7 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -901,10 +857,10 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap();
 
-        let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
+        let barrier = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
+        let barrier = Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
 
         // receive all
@@ -913,10 +869,11 @@ mod tests {
         let prev_assignment = new_assignment;
         let new_assignment = vec![prev_assignment[2].clone()];
 
-        let drop_split_mutation =
-            Barrier::new_test_barrier(5).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let drop_split_mutation = Barrier::new_test_barrier(test_epoch(5)).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(drop_split_mutation).unwrap();
 
@@ -928,7 +885,7 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])
