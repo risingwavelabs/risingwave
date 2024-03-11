@@ -25,6 +25,7 @@ use risingwave_common::session_config::QueryMode;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use tokio::sync::OwnedSemaphorePermit;
 
 use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
@@ -131,7 +132,12 @@ pub struct QueryManager {
     catalog_reader: CatalogReader,
     query_execution_info: QueryExecutionInfoRef,
     pub query_metrics: Arc<DistributedQueryMetrics>,
+    /// Limit per session.
     disrtibuted_query_limit: Option<u64>,
+    /// Limits the number of concurrent distributed queries.
+    distributed_query_semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    /// Total permitted distributed query number.
+    pub total_distributed_query_limit: Option<u64>,
 }
 
 impl QueryManager {
@@ -141,7 +147,10 @@ impl QueryManager {
         catalog_reader: CatalogReader,
         query_metrics: Arc<DistributedQueryMetrics>,
         disrtibuted_query_limit: Option<u64>,
+        total_distributed_query_limit: Option<u64>,
     ) -> Self {
+        let distributed_query_semaphore = total_distributed_query_limit
+            .map(|limit| Arc::new(tokio::sync::Semaphore::new(limit as usize)));
         Self {
             worker_node_manager,
             compute_client_pool,
@@ -149,6 +158,28 @@ impl QueryManager {
             query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
             query_metrics,
             disrtibuted_query_limit,
+            distributed_query_semaphore,
+            total_distributed_query_limit,
+        }
+    }
+
+    async fn get_permit(&self) -> SchedulerResult<Option<OwnedSemaphorePermit>> {
+        match self.distributed_query_semaphore {
+            Some(ref semaphore) => {
+                let permit = semaphore.clone().acquire_owned().await;
+                match permit {
+                    Ok(permit) => Ok(Some(permit)),
+                    Err(_) => {
+                        self.query_metrics.rejected_query_counter.inc();
+                        Err(crate::scheduler::SchedulerError::QueryReachLimit(
+                            QueryMode::Distributed,
+                            self.total_distributed_query_limit
+                                .expect("should have distributed query limit"),
+                        ))
+                    }
+                }
+            }
+            None => Ok(None),
         }
     }
 
@@ -167,7 +198,8 @@ impl QueryManager {
             ));
         }
         let query_id = query.query_id.clone();
-        let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
+        let permit = self.get_permit().await?;
+        let query_execution = Arc::new(QueryExecution::new(query, context.session().id(), permit));
 
         // Add queries status when begin.
         context
