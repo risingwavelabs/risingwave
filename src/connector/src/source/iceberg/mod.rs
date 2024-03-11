@@ -56,6 +56,11 @@ pub struct IcebergProperties {
     pub database_name: Option<String>,
     #[serde(rename = "table.name")]
     pub table_name: String,
+    // For jdbc catalog
+    #[serde(rename = "catalog.jdbc.user")]
+    pub jdbc_user: Option<String>,
+    #[serde(rename = "catalog.jdbc.password")]
+    pub jdbc_password: Option<String>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -63,6 +68,13 @@ pub struct IcebergProperties {
 
 impl IcebergProperties {
     pub fn to_iceberg_config(&self) -> IcebergConfig {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+        }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+        }
         IcebergConfig {
             catalog_name: self.catalog_name.clone(),
             database_name: self.database_name.clone(),
@@ -74,6 +86,7 @@ impl IcebergProperties {
             access_key: self.s3_access.clone(),
             secret_key: self.s3_secret.clone(),
             region: self.region.clone(),
+            java_catalog_props,
             ..Default::default()
         }
     }

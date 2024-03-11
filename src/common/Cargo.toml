@@ -93,7 +93,7 @@ serde_with = "3"
 smallbitset = "0.7.1"
 speedate = "0.13.0"
 static_assertions = "1"
-strum = "0.25"
+strum = "0.26"
 strum_macros = "0.26"
 sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
