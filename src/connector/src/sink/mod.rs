@@ -29,6 +29,7 @@ pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
 pub mod nats;
+pub mod opendal;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -88,6 +89,7 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { S3, $crate::sink::opendal::s3::S3Sink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
@@ -525,6 +527,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("S3 error: {0}")]
+    S3(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
