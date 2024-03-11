@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -28,8 +29,11 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
 use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
+use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
@@ -294,7 +298,30 @@ impl SourceScanInfo {
                     .into_iter()
                     .map(SplitImpl::Kafka)
                     .collect_vec();
+
                 Ok(SourceScanInfo::Complete(split_info))
+            }
+            ConnectorProperties::OpendalS3(prop) => {
+                let lister: OpendalEnumerator<OpendalS3> =
+                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let stream = build_opendal_fs_list_for_batch(lister);
+
+                let batch_res: Vec<_> = stream.try_collect().await?;
+                let res = batch_res
+                    .into_iter()
+                    .map(SplitImpl::OpendalS3)
+                    .collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
+            }
+            ConnectorProperties::Gcs(prop) => {
+                let lister: OpendalEnumerator<OpendalGcs> =
+                    OpendalEnumerator::new_gcs_source(*prop)?;
+                let stream = build_opendal_fs_list_for_batch(lister);
+                let batch_res: Vec<_> = stream.try_collect().await?;
+                let res = batch_res.into_iter().map(SplitImpl::Gcs).collect_vec();
+
+                Ok(SourceScanInfo::Complete(res))
             }
             ConnectorProperties::Iceberg(prop) => {
                 let iceberg_enumerator =
@@ -376,7 +403,7 @@ pub struct TablePartitionInfo {
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum PartitionInfo {
     Table(TablePartitionInfo),
-    Source(SplitImpl),
+    Source(Vec<SplitImpl>),
 }
 
 /// Fragment part of `Query`.
@@ -437,6 +464,7 @@ impl QueryStage {
         &self,
         exchange_info: Option<ExchangeInfo>,
         source_info: SourceScanInfo,
+        task_parallelism: u32,
     ) -> Self {
         assert!(matches!(source_info, SourceScanInfo::Complete(_)));
         let exchange_info = if let Some(exchange_info) = exchange_info {
@@ -444,13 +472,12 @@ impl QueryStage {
         } else {
             self.exchange_info.clone()
         };
-
         Self {
             query_id: self.query_id.clone(),
             id: self.id,
             root: self.root.clone(),
             exchange_info,
-            parallelism: Some(source_info.split_info().unwrap().len() as u32),
+            parallelism: Some(task_parallelism),
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
@@ -652,6 +679,7 @@ impl StageGraph {
                 stage.source_info,
                 Some(SourceScanInfo::Incomplete(_))
             ));
+
             let complete_source_info = stage
                 .source_info
                 .as_ref()
@@ -660,9 +688,26 @@ impl StageGraph {
                 .complete(self.batch_parallelism)
                 .await?;
 
+            // For batch reading file source, the number of files involved is typically large.
+            // In order to avoid generating a task for each file, the parallelism of tasks is limited here.
+            // todo(wcy-fdu): Currently it will be divided into half of schedule_unit_count groups, and this will be changed to configurable later.
+            let task_parallelism = match &stage.source_info {
+                Some(SourceScanInfo::Incomplete(source_fetch_info)) => {
+                    match source_fetch_info.connector {
+                        ConnectorProperties::Gcs(_) | ConnectorProperties::OpendalS3(_) => {
+                            (self.batch_parallelism / 2) as u32
+                        }
+                        _ => complete_source_info.split_info().unwrap().len() as u32,
+                    }
+                }
+                _ => unreachable!(),
+            };
+            // For file source batch read, all the files  to be read are divide into several parts to prevent the task from taking up too many resources.
+            // todo(wcy-fdu): Currently it will be divided into half of batch_parallelism groups, and this will be changed to configurable later.
             let complete_stage = Arc::new(stage.clone_with_exchange_info_and_complete_source_info(
                 exchange_info,
                 complete_source_info,
+                task_parallelism,
             ));
             let parallelism = complete_stage.parallelism;
             complete_stages.insert(stage.id, complete_stage);

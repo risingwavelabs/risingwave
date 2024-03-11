@@ -544,7 +544,6 @@ impl StreamActorManager {
                 self.env.total_mem_usage(),
                 self.streaming_metrics.clone(),
                 self.env.config().unique_user_stream_errors,
-                actor.dispatcher.len(),
             );
             let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
             let expr_context = actor.expr_context.clone().unwrap();

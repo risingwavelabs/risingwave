@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 use risingwave_pb::hummock::PbTableWatermarks;
 
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -114,6 +114,10 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.inner.value_meta()
     }
 }
 pub struct SkipWatermarkState {
@@ -293,6 +297,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey, TableKey, UserKey};
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
     use risingwave_hummock_sdk::EpochWithGap;
@@ -301,7 +306,7 @@ mod tests {
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::value::HummockValue;
 
-    const EPOCH: u64 = 1;
+    const EPOCH: u64 = test_epoch(1);
     const TABLE_ID: TableId = TableId::new(233);
 
     async fn assert_iter_eq(

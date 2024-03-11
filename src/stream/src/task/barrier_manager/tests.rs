@@ -21,6 +21,7 @@ use assert_matches::assert_matches;
 use futures::future::join_all;
 use futures::FutureExt;
 use itertools::Itertools;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_pb::stream_service::{streaming_control_stream_request, InjectBarrierRequest};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -70,7 +71,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         .collect_vec();
 
     // Send a barrier to all actors
-    let curr_epoch = 114514;
+    let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
@@ -166,7 +167,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
         .collect_vec();
 
     // Prepare the barrier
-    let curr_epoch = 114514;
+    let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 

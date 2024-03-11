@@ -819,7 +819,7 @@ pub async fn build_remote_object_store(
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
                     .unwrap()
-                    .monitored(metrics),
+                    .monitored(metrics, config),
             )
         }
         gcs if gcs.starts_with("gcs://") => {

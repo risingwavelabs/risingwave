@@ -17,8 +17,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use itertools::Itertools;
 use prost_reflect::{
-    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
-    ReflectMessage, Value,
+    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, FileDescriptor, Kind,
+    MessageDescriptor, ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
@@ -27,7 +27,6 @@ use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion
 use thiserror::Error;
 use thiserror_ext::{AsReport, Macro};
 
-use super::schema_resolver::*;
 use crate::error::ConnectorResult;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::{
@@ -35,9 +34,8 @@ use crate::parser::unified::{
 };
 use crate::parser::util::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
-use crate::schema::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client, WireFormatError,
-};
+use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
+use crate::schema::SchemaLoader;
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
@@ -100,24 +98,26 @@ impl ProtobufParserConfig {
             // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
             bail!("protobuf key is not supported");
         }
-        let schema_bytes = if protobuf_config.use_schema_registry {
-            let schema_value = get_subject_by_strategy(
-                &protobuf_config.name_strategy,
-                protobuf_config.topic.as_str(),
-                Some(message_name.as_ref()),
-                false,
-            )?;
-            tracing::debug!("infer value subject {schema_value}");
-
+        let pool = if protobuf_config.use_schema_registry {
             let client = Client::new(url, &protobuf_config.client_config)?;
-            compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
+            let loader = SchemaLoader {
+                client,
+                name_strategy: protobuf_config.name_strategy,
+                topic: protobuf_config.topic,
+                key_record_name: None,
+                val_record_name: Some(message_name.clone()),
+            };
+            let (_schema_id, root_file_descriptor) = loader
+                .load_val_schema::<FileDescriptor>()
+                .await
+                .context("load schema failed")?;
+            root_file_descriptor.parent_pool().clone()
         } else {
             let url = url.first().unwrap();
-            bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?
+            let schema_bytes = bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?;
+            DescriptorPool::decode(schema_bytes.as_slice())
+                .with_context(|| format!("cannot build descriptor pool from schema `{location}`"))?
         };
-
-        let pool = DescriptorPool::decode(schema_bytes.as_slice())
-            .with_context(|| format!("cannot build descriptor pool from schema `{}`", location))?;
 
         let message_descriptor = pool.get_message_by_name(message_name).with_context(|| {
             format!(

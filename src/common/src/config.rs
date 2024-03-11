@@ -345,9 +345,12 @@ pub struct MetaConfig {
     #[serde(default, with = "meta_prefix")]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
+    /// Whether compactor should rewrite row to remove dropped column.
+    #[serde(default = "default::meta::enable_dropped_column_reclaim")]
+    pub enable_dropped_column_reclaim: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
@@ -475,8 +478,13 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub developer: BatchDeveloperConfig,
 
+    /// This is the max number of queries per sql session.
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    /// This is the max number of batch queries per frontend node.
+    #[serde(default)]
+    pub max_batch_queries_per_frontend_node: Option<u64>,
 
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
@@ -1144,6 +1152,9 @@ pub mod default {
 
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
+        }
+        pub fn enable_dropped_column_reclaim() -> bool {
+            false
         }
     }
 

@@ -51,6 +51,7 @@ compaction_task_max_progress_interval_secs = 600
 hybird_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
+enable_dropped_column_reclaim = false
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912

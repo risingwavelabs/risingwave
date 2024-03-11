@@ -15,6 +15,7 @@
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
+use easy_ext::ext;
 use parse_display::Display;
 
 use crate::types::{ScalarImpl, Timestamptz};
@@ -122,6 +123,11 @@ pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 const EPOCH_MASK: u64 = !EPOCH_SPILL_TIME_MASK;
 pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
 
+// EPOCH_INC_MIN_STEP_FOR_TEST is the minimum increment step for epoch in unit tests.
+// We need to keep the lower 16 bits of the epoch unchanged during each increment,
+// and only increase the upper 48 bits.
+const EPOCH_INC_MIN_STEP_FOR_TEST: u64 = test_epoch(1);
+
 pub fn is_max_epoch(epoch: u64) -> bool {
     // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version,
     // it means that there may be two value in our system which represent infinite. We must check
@@ -150,20 +156,43 @@ impl EpochPair {
         Self { curr, prev }
     }
 
-    pub fn inc(&mut self) {
-        self.curr += 1;
-        self.prev += 1;
-    }
-
-    pub fn inc_for_test(&mut self, inc_by: u64) {
+    pub fn inc_for_test(&mut self) {
         self.prev = self.curr;
-
-        self.curr += inc_by;
+        self.curr += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 0);
-        Self::new(curr, curr - 1)
+        if !is_max_epoch(curr) {
+            assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
+            assert!((curr & EPOCH_SPILL_TIME_MASK) == 0);
+        }
+        Self::new(curr, curr - EPOCH_INC_MIN_STEP_FOR_TEST)
+    }
+}
+/// As most unit tests initializ a new epoch from a random value (e.g. 1, 2, 233 etc.), but the correct epoch in the system is a u64 with the last `EPOCH_AVAILABLE_BITS` bits set to 0.
+/// This method is to turn a a random epoch into a well shifted value.
+pub const fn test_epoch(value: u64) -> u64 {
+    value << EPOCH_AVAILABLE_BITS
+}
+
+/// There are numerous operations in our system's unit tests that involve incrementing or decrementing the epoch.
+/// These extensions for u64 type are specifically used within the unit tests.
+#[ext(EpochExt)]
+pub impl u64 {
+    fn inc_epoch(&mut self) {
+        *self += EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn dec_epoch(&mut self) {
+        *self -= EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn next_epoch(self) -> u64 {
+        self + EPOCH_INC_MIN_STEP_FOR_TEST
+    }
+
+    fn prev_epoch(self) -> u64 {
+        self - EPOCH_INC_MIN_STEP_FOR_TEST
     }
 }
 

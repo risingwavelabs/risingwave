@@ -11,26 +11,27 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
 use futures::TryStreamExt;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{
-    gen_key_from_bytes, prefix_slice_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
+    gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
-use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
+use risingwave_storage::hummock::store::version::read_filter_for_version;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, LocalHummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -98,7 +99,7 @@ async fn test_storage_basic() {
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     // epoch 0 is reserved by storage service
-    let epoch1: u64 = 1;
+    let epoch1 = test_epoch(1);
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // Write the first batch.
@@ -162,7 +163,7 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(value, None);
 
-    let epoch2 = epoch1 + 1;
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
@@ -194,7 +195,7 @@ async fn test_storage_basic() {
     assert_eq!(value, Bytes::from("111111"));
 
     // Write the third batch.
-    let epoch3 = epoch2 + 1;
+    let epoch3 = epoch2.next_epoch();
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
@@ -450,7 +451,8 @@ async fn test_state_store_sync() {
 
     let read_version = hummock_storage.read_version();
 
-    let epoch1 = read_version.read().committed().max_committed_epoch() + 1;
+    let base_epoch = read_version.read().committed().max_committed_epoch();
+    let epoch1 = test_epoch(base_epoch.next_epoch());
     hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // ingest 16B batch
@@ -504,7 +506,7 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
-    let epoch2 = epoch1 + 1;
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
 
     // ingest more 8B then will trigger a sync behind the scene
@@ -628,19 +630,34 @@ async fn test_state_store_sync() {
             .unwrap();
         futures::pin_mut!(iter);
 
-        let kv_map = [
+        let kv_map_batch_1 = [
             (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222", epoch1),
+        ];
+        for (k, v, e) in kv_map_batch_1 {
+            let result = iter.try_next().await.unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::new_with_gap_epoch(TEST_TABLE_ID, k, EpochWithGap::new(e, 0)),
+                    Bytes::from(v)
+                ))
+            );
+        }
+        let kv_map_batch_2 = [
             (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444", epoch1),
             (gen_key_from_str(VirtualNode::ZERO, "eeee"), "5555", epoch1),
         ];
 
-        for (k, v, e) in kv_map {
+        for (k, v, e) in kv_map_batch_2 {
             let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
-                Some((FullKey::new(TEST_TABLE_ID, k, e), Bytes::from(v)))
+                Some((
+                    FullKey::new_with_gap_epoch(TEST_TABLE_ID, k, EpochWithGap::new(e, 1)),
+                    Bytes::from(v)
+                ))
             );
         }
 
@@ -667,20 +684,45 @@ async fn test_state_store_sync() {
 
         futures::pin_mut!(iter);
 
-        let kv_map = [
-            ("aaaa", "1111", epoch1),
-            ("bbbb", "2222", epoch1),
-            ("cccc", "3333", epoch1),
-            ("dddd", "4444", epoch1),
-            ("eeee", "6666", epoch2),
-        ];
+        let kv_map_batch_1 = [("aaaa", "1111", epoch1), ("bbbb", "2222", epoch1)];
 
-        for (k, v, e) in kv_map {
+        let kv_map_batch_2 = [("cccc", "3333", epoch1), ("dddd", "4444", epoch1)];
+        let kv_map_batch_3 = [("eeee", "6666", epoch2)];
+        for (k, v, e) in kv_map_batch_1 {
             let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
                 Some((
                     FullKey::new(TEST_TABLE_ID, gen_key_from_str(VirtualNode::ZERO, k), e),
+                    Bytes::from(v)
+                ))
+            );
+        }
+
+        for (k, v, e) in kv_map_batch_2 {
+            let result = iter.try_next().await.unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::new_with_gap_epoch(
+                        TEST_TABLE_ID,
+                        gen_key_from_str(VirtualNode::ZERO, k),
+                        EpochWithGap::new(e, 1)
+                    ),
+                    Bytes::from(v)
+                ))
+            );
+        }
+        for (k, v, e) in kv_map_batch_3 {
+            let result = iter.try_next().await.unwrap();
+            assert_eq!(
+                result,
+                Some((
+                    FullKey::new_with_gap_epoch(
+                        TEST_TABLE_ID,
+                        gen_key_from_str(VirtualNode::ZERO, k),
+                        EpochWithGap::new(e, 0)
+                    ),
                     Bytes::from(v)
                 ))
             );
@@ -704,7 +746,7 @@ async fn test_delete_get() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = initial_epoch + 1;
+    let epoch1 = initial_epoch.next_epoch();
 
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
@@ -734,7 +776,7 @@ async fn test_delete_get() {
         .commit_epoch(epoch1, res.uncommitted_ssts)
         .await
         .unwrap();
-    let epoch2 = initial_epoch + 2;
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -789,7 +831,7 @@ async fn test_multiple_epoch_sync() {
         .committed()
         .max_committed_epoch();
 
-    let epoch1 = initial_epoch + 1;
+    let epoch1 = initial_epoch.next_epoch();
     hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
         (
@@ -812,7 +854,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
 
-    let epoch2 = initial_epoch + 2;
+    let epoch2 = epoch1.next_epoch();
     hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -829,7 +871,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
 
-    let epoch3 = initial_epoch + 3;
+    let epoch3 = epoch2.next_epoch();
     hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     let batch3 = vec![
         (
@@ -984,7 +1026,10 @@ async fn test_iter_with_min_epoch() {
             let iter = test_env
                 .storage
                 .iter(
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -1006,7 +1051,10 @@ async fn test_iter_with_min_epoch() {
             let iter = test_env
                 .storage
                 .iter(
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -1026,7 +1074,10 @@ async fn test_iter_with_min_epoch() {
             let iter = test_env
                 .storage
                 .iter(
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -1067,7 +1118,10 @@ async fn test_iter_with_min_epoch() {
             let iter = test_env
                 .storage
                 .iter(
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -1089,7 +1143,10 @@ async fn test_iter_with_min_epoch() {
             let iter = test_env
                 .storage
                 .iter(
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -1111,7 +1168,10 @@ async fn test_iter_with_min_epoch() {
             let iter = test_env
                 .storage
                 .iter(
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -1207,17 +1267,23 @@ async fn test_hummock_version_reader() {
         {
             // test before sync
             {
-                let (_, read_snapshot) = read_filter_for_local(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch1,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1235,17 +1301,23 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let (_, read_snapshot) = read_filter_for_local(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch2,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch2,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1263,17 +1335,23 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let (_, read_snapshot) = read_filter_for_local(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch2,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
                     &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch2,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1293,9 +1371,6 @@ async fn test_hummock_version_reader() {
         }
 
         {
-            let basic_read_version =
-                Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
-
             let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
             test_env
                 .meta_client
@@ -1311,8 +1386,6 @@ async fn test_hummock_version_reader() {
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch2).await;
-            let read_version_2 =
-                Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
             test_env
@@ -1321,25 +1394,24 @@ async fn test_hummock_version_reader() {
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch3).await;
-            let read_version_3 =
-                Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
-
             {
-                let (_, read_snapshot) = read_filter_for_batch(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch1,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1357,26 +1429,32 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let (_, read_snapshot) = read_filter_for_batch(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch2,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 assert_eq!(
-                    read_version_3.read().committed().max_committed_epoch(),
+                    hummock_storage
+                        .read_version()
+                        .read()
+                        .committed()
+                        .max_committed_epoch(),
                     read_snapshot.2.max_committed_epoch()
                 );
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch2,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1394,21 +1472,23 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let (_, read_snapshot) = read_filter_for_batch(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch2,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch2,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1427,21 +1507,23 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let (_, read_snapshot) = read_filter_for_batch(
+                let (_, read_snapshot) = read_filter_for_version(
                     epoch2,
                     TEST_TABLE_ID,
-                    (Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
+                    prefixed_range_with_vnode(
+                        (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                        VirtualNode::ZERO,
+                    ),
+                    &hummock_storage.read_version(),
                 )
                 .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
-                        (Unbounded, Unbounded),
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
                         epoch3,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1465,15 +1547,14 @@ async fn test_hummock_version_reader() {
                 let key_range = (Included(start_key), Excluded(end_key));
 
                 {
-                    let (_, read_snapshot) = read_filter_for_batch(
+                    let (_, read_snapshot) = read_filter_for_version(
                         epoch2,
                         TEST_TABLE_ID,
-                        (Unbounded, Unbounded),
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
+                        &hummock_storage.read_version(),
                     )
                     .unwrap();
 
@@ -1497,15 +1578,14 @@ async fn test_hummock_version_reader() {
                 }
 
                 {
-                    let (_, read_snapshot) = read_filter_for_batch(
+                    let (_, read_snapshot) = read_filter_for_version(
                         epoch2,
                         TEST_TABLE_ID,
-                        (Unbounded, Unbounded),
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
+                        prefixed_range_with_vnode(
+                            (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                            VirtualNode::ZERO,
+                        ),
+                        &hummock_storage.read_version(),
                     )
                     .unwrap();
 
@@ -1787,21 +1867,23 @@ async fn test_table_watermark() {
         .await;
 
     let vnode1 = VirtualNode::from_index(1);
-    let vnode_bitmap1 = {
+    let vnode_bitmap1 = Arc::new({
         let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
         builder.set(1, true);
         builder.finish()
-    };
+    });
     let vnode2 = VirtualNode::from_index(2);
-    let vnode_bitmap2 = {
+    let vnode_bitmap2 = Arc::new({
         let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
         builder.set(2, true);
         builder.finish()
-    };
+    });
 
     let epoch1 = (31 * 1000) << 16;
     local1.init_for_test(epoch1).await.unwrap();
+    local1.update_vnode_bitmap(vnode_bitmap1.clone());
     local2.init_for_test(epoch1).await.unwrap();
+    local2.update_vnode_bitmap(vnode_bitmap2.clone());
 
     fn gen_inner_key(index: usize) -> Bytes {
         Bytes::copy_from_slice(format!("key_{:05}", index).as_bytes())
@@ -1895,10 +1977,7 @@ async fn test_table_watermark() {
             SealCurrentEpochOptions {
                 table_watermarks: Some((
                     WatermarkDirection::Ascending,
-                    vec![VnodeWatermark::new(
-                        Arc::new(vnode_bitmap),
-                        gen_inner_key(watermark1),
-                    )],
+                    vec![VnodeWatermark::new(vnode_bitmap, gen_inner_key(watermark1))],
                 )),
                 switch_op_consistency_level: None,
             },
@@ -2101,6 +2180,8 @@ async fn test_table_watermark() {
     test_env.commit_epoch(epoch1).await;
     test_env.storage.try_wait_epoch_for_test(epoch1).await;
 
+    let (local1, local2) = test_after_epoch2(local1, local2).await;
+
     let test_global_read = |storage: HummockStorage, epoch: u64| async move {
         // inner vnode read
         for vnode in [vnode1, vnode2] {
@@ -2119,6 +2200,7 @@ async fn test_table_watermark() {
                 if index < watermark1 {
                     assert!(value.is_none());
                 } else {
+                    println!("index {} vnode {}", index, vnode);
                     assert_eq!(value.unwrap(), gen_val(index));
                 }
             }
@@ -2174,47 +2256,6 @@ async fn test_table_watermark() {
                 assert!(result.is_empty());
             }
         }
-
-        // cross vnode read
-        let result = storage
-            .iter(
-                (
-                    Included(TableKey(prefix_slice_with_vnode(
-                        vnode1,
-                        &gen_inner_key(gen_range().start),
-                    ))),
-                    Included(TableKey(prefix_slice_with_vnode(
-                        vnode2,
-                        &gen_inner_key(gen_range().end),
-                    ))),
-                ),
-                epoch,
-                ReadOptions {
-                    table_id: TEST_TABLE_ID,
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap()
-            .map_ok(|(full_key, value)| (full_key.user_key, value))
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
-        let expected = [vnode1, vnode2]
-            .into_iter()
-            .flat_map(|vnode| {
-                gen_range()
-                    .filter(|index| index % 3 == 0 || index % 3 == 1)
-                    .filter(|index| index >= &watermark1)
-                    .map(move |index| {
-                        (
-                            UserKey::new(TEST_TABLE_ID, gen_key(vnode, index)),
-                            gen_val(index),
-                        )
-                    })
-            })
-            .collect_vec();
-        assert_eq!(expected, result);
     };
 
     test_global_read(test_env.storage.clone(), epoch2).await;
@@ -2244,10 +2285,7 @@ async fn test_table_watermark() {
             SealCurrentEpochOptions {
                 table_watermarks: Some((
                     WatermarkDirection::Ascending,
-                    vec![VnodeWatermark::new(
-                        Arc::new(vnode_bitmap),
-                        gen_inner_key(5),
-                    )],
+                    vec![VnodeWatermark::new(vnode_bitmap, gen_inner_key(5))],
                 )),
                 switch_op_consistency_level: None,
             },

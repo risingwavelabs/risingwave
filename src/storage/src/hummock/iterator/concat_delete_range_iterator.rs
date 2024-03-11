@@ -185,7 +185,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::is_max_epoch;
+    use risingwave_common::util::epoch::{is_max_epoch, test_epoch};
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -206,8 +206,8 @@ mod tests {
             Bound::Excluded(Bytes::copy_from_slice(b"eeee")),
         );
         let mut range_builder = CompactionDeleteRangesBuilder::default();
-        range_builder.add_delete_events(10, table_id, vec![tombstone1.clone()]);
-        range_builder.add_delete_events(12, table_id, vec![tombstone2.clone()]);
+        range_builder.add_delete_events_for_test(10, table_id, vec![tombstone1.clone()]);
+        range_builder.add_delete_events_for_test(12, table_id, vec![tombstone2.clone()]);
         let compaction_delete_range = range_builder.build_for_compaction();
         let ranges1 = compaction_delete_range
             .get_tombstone_between(
@@ -236,8 +236,8 @@ mod tests {
             opts.clone(),
         );
         let mut range_builder = CompactionDeleteRangesBuilder::default();
-        range_builder.add_delete_events(10, table_id, vec![tombstone1.clone()]);
-        range_builder.add_delete_events(12, table_id, vec![tombstone2.clone()]);
+        range_builder.add_delete_events_for_test(10, table_id, vec![tombstone1.clone()]);
+        range_builder.add_delete_events_for_test(12, table_id, vec![tombstone2.clone()]);
         let compaction_delete_range = range_builder.build_for_compaction();
         let ranges2 = compaction_delete_range
             .get_tombstone_between(test_user_key(b"bbbb").as_ref(), test_user_key(b"").as_ref())
@@ -258,19 +258,19 @@ mod tests {
             test_user_key(b"aaaa").as_ref()
         );
         concat_iterator.next().await.unwrap();
-        assert_eq!(concat_iterator.current_epoch(), 10);
+        assert_eq!(concat_iterator.current_epoch(), test_epoch(10));
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"bbbb").as_ref()
         );
         concat_iterator.next().await.unwrap();
-        assert_eq!(concat_iterator.current_epoch(), 10);
+        assert_eq!(concat_iterator.current_epoch(), test_epoch(10));
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"dddd").as_ref()
         );
         concat_iterator.next().await.unwrap();
-        assert_eq!(concat_iterator.current_epoch(), 12);
+        assert_eq!(concat_iterator.current_epoch(), test_epoch(12));
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"eeee").as_ref()
