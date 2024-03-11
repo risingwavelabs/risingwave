@@ -3,9 +3,14 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# RisingWave can't support list and struct now so we skip them.
-# include ../batch/types/array.slt.part
+# RisingWave only support single dimension array now.
+include ../batch/types/array_1d_ty.slt.part
+
+# RisingWave can't support struct now so we skip them.
 # include ../batch/types/struct.slt.part
+
+# copy from ../batch/types/list.slt.part:
+# Test cases for list don't work for now as the parser cannot recognize the cast expression.
 # include ../batch/types/list.slt.part
 
 # Sqllogitest can't support binary format bytea type so we skip it.
