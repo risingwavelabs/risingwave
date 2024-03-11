@@ -4110,7 +4110,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.5.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
+source = "git+https://github.com/mrcroxx/foyer?rev=fd86347#fd86347c56f32623ca1d5820e373ced89e85abfc"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -4122,7 +4122,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.3.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
+source = "git+https://github.com/mrcroxx/foyer?rev=fd86347#fd86347c56f32623ca1d5820e373ced89e85abfc"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4137,7 +4137,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
+source = "git+https://github.com/mrcroxx/foyer?rev=fd86347#fd86347c56f32623ca1d5820e373ced89e85abfc"
 dependencies = [
  "bytes",
  "cmsketch 0.1.5",
@@ -4154,7 +4154,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
+source = "git+https://github.com/mrcroxx/foyer?rev=fd86347#fd86347c56f32623ca1d5820e373ced89e85abfc"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.4.0",
@@ -4173,7 +4173,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.4.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
+source = "git+https://github.com/mrcroxx/foyer?rev=fd86347#fd86347c56f32623ca1d5820e373ced89e85abfc"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -4203,7 +4203,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.2.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=d5e42d5#d5e42d58cb178d3410b3752c7945127ebe75554d"
+source = "git+https://github.com/mrcroxx/foyer?rev=fd86347#fd86347c56f32623ca1d5820e373ced89e85abfc"
 dependencies = [
  "ahash 0.8.6",
  "cc",

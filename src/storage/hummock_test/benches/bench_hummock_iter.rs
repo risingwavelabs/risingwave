@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::{pin_mut, TryStreamExt};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockEpoch;

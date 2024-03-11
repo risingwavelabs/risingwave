@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;

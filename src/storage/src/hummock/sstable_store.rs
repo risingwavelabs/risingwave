@@ -22,10 +22,9 @@ use ahash::RandomState;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
-use foyer::memory::cache::{LruCache, LruCacheConfig, LruCacheEntry};
-use foyer::memory::event::CacheEventListener;
-use foyer::memory::eviction::lru::{LruConfig, LruContext};
-use foyer::memory::{Key, Value};
+use foyer::memory::{
+    CacheEventListener, Key, LruCache, LruCacheConfig, LruCacheEntry, LruConfig, LruContext, Value,
+};
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::config::StorageMemoryConfig;
@@ -117,16 +116,14 @@ impl BlockCacheEventListener {
     }
 }
 
-impl CacheEventListener for BlockCacheEventListener {
-    type Context = LruContext;
-    type Key = (HummockSstableObjectId, u64);
-    type Value = Box<Block>;
-
+impl CacheEventListener<(HummockSstableObjectId, u64), Box<Block>, LruContext>
+    for BlockCacheEventListener
+{
     fn on_release(
         &self,
-        key: Self::Key,
-        value: Self::Value,
-        _context: Self::Context,
+        key: (HummockSstableObjectId, u64),
+        value: Box<Block>,
+        _context: LruContext,
         _charges: usize,
     ) {
         let key = SstableBlockIndex {
@@ -153,16 +150,14 @@ impl From<FileCache<HummockSstableObjectId, CachedSstable>> for MetaCacheEventLi
     }
 }
 
-impl CacheEventListener for MetaCacheEventListener {
-    type Context = LruContext;
-    type Key = HummockSstableObjectId;
-    type Value = Box<Sstable>;
-
+impl CacheEventListener<HummockSstableObjectId, Box<Sstable>, LruContext>
+    for MetaCacheEventListener
+{
     fn on_release(
         &self,
-        key: Self::Key,
-        value: Self::Value,
-        _context: Self::Context,
+        key: HummockSstableObjectId,
+        value: Box<Sstable>,
+        _context: LruContext,
         _charges: usize,
     ) {
         // temporarily avoid spawn task while task drop with madsim
@@ -176,7 +171,7 @@ pub enum CachedOrShared<K, V, L>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<Key = K, Value = Box<V>, Context = LruContext>,
+    L: CacheEventListener<K, Box<V>, LruContext>,
 {
     Cached(LruCacheEntry<K, Box<V>, L>),
     Shared(Arc<V>),
@@ -186,7 +181,7 @@ impl<K, V, L> Deref for CachedOrShared<K, V, L>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<Key = K, Value = Box<V>, Context = LruContext>,
+    L: CacheEventListener<K, Box<V>, LruContext>,
 {
     type Target = V;
 
@@ -702,7 +697,7 @@ impl SstableStore {
         });
 
         match &entry {
-            foyer::memory::cache::Entry::Miss(_) | foyer::memory::cache::Entry::Wait(_) => {
+            foyer::memory::Entry::Miss(_) | foyer::memory::Entry::Wait(_) => {
                 stats.cache_meta_block_miss += 1;
             }
             _ => {}

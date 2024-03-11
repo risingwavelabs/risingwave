@@ -309,7 +309,7 @@ mod tests {
     use std::collections::Bound;
 
     use bytes::Bytes;
-    use foyer::memory::eviction::lru::LruContext;
+    use foyer::memory::LruContext;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;

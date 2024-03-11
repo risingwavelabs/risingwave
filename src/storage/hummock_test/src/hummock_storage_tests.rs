@@ -16,7 +16,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use parking_lot::RwLock;

@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};

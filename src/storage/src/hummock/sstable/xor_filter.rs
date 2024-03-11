@@ -442,7 +442,7 @@ impl Clone for XorFilterReader {
 
 #[cfg(test)]
 mod tests {
-    use foyer::memory::eviction::lru::LruContext;
+    use foyer::memory::LruContext;
     use rand::RngCore;
     use risingwave_hummock_sdk::EpochWithGap;
 

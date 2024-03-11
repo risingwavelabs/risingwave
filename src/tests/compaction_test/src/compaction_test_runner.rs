@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{

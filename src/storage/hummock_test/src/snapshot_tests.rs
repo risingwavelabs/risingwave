@@ -15,7 +15,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::TryStreamExt;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TableKey;

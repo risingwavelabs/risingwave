@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};

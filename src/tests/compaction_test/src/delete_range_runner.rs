@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};

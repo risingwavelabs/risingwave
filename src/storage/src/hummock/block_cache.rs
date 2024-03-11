@@ -17,8 +17,7 @@ use std::sync::Arc;
 
 use ahash::RandomState;
 use await_tree::InstrumentAwait;
-use foyer::memory::cache::{LruCache, LruCacheConfig, LruCacheEntry};
-use foyer::memory::eviction::lru::{LruConfig, LruContext};
+use foyer::memory::{LruCache, LruCacheConfig, LruCacheEntry, LruConfig, LruContext};
 use futures::Future;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
@@ -190,14 +189,12 @@ impl BlockCache {
         });
 
         match entry {
-            foyer::memory::cache::Entry::Hit(entry) => {
+            foyer::memory::Entry::Hit(entry) => {
                 BlockResponse::Block(BlockHolder::from_cached_block(entry))
             }
-            foyer::memory::cache::Entry::Wait(receiver) => {
-                BlockResponse::WaitPendingRequest(receiver)
-            }
-            foyer::memory::cache::Entry::Miss(join_handle) => BlockResponse::Miss(join_handle),
-            foyer::memory::cache::Entry::Invalid => unreachable!(),
+            foyer::memory::Entry::Wait(receiver) => BlockResponse::WaitPendingRequest(receiver),
+            foyer::memory::Entry::Miss(join_handle) => BlockResponse::Miss(join_handle),
+            foyer::memory::Entry::Invalid => unreachable!(),
         }
     }
 

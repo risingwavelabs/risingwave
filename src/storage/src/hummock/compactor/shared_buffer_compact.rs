@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;

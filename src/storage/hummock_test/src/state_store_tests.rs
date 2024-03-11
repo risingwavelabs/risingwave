@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;

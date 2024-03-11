@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;

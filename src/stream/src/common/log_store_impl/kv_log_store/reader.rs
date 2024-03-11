@@ -18,7 +18,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use futures::future::{try_join_all, BoxFuture};
 use futures::stream::select_all;
 use futures::{FutureExt, TryFutureExt};

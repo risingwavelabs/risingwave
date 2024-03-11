@@ -21,7 +21,7 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
-    use foyer::memory::eviction::lru::LruContext;
+    use foyer::memory::LruContext;
     use itertools::Itertools;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::catalog::TableId;

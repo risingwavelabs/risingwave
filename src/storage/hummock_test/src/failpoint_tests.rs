@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;

@@ -15,7 +15,7 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use foyer::memory::eviction::lru::LruContext;
+use foyer::memory::LruContext;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
