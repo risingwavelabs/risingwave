@@ -39,4 +39,4 @@ NULL
 query T
 select array(select n from generate_series(1, 5, 2) as t(n) where n > 10);
 ----
-NULL
+{}
