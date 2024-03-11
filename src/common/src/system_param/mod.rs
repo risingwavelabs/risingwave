@@ -40,25 +40,32 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 
 /// The trait for the value type of a system parameter.
 pub trait ParamValue: ToString + FromStr {
+    /// The borrowed type of the value. Used in [`reader::SystemParamsRead`].
     type Borrowed<'a>;
+    /// The Postgres representation of the value type.
+    /// See https://www.postgresql.org/docs/current/view-pg-settings.html.
+    fn vartype() -> &'static str;
 }
 
 macro_rules! impl_param_value {
-    ($type:ty) => {
-        impl_param_value!($type => $type);
+    ($vartype:literal, $type:ty) => {
+        impl_param_value!($vartype, $type => $type);
     };
-    ($type:ty => $borrowed:ty) => {
+    ($vartype:literal, $type:ty => $borrowed:ty) => {
         impl ParamValue for $type {
             type Borrowed<'a> = $borrowed;
+            fn vartype() -> &'static str {
+                $vartype
+            }
         }
     };
 }
 
-impl_param_value!(bool);
-impl_param_value!(u32);
-impl_param_value!(u64);
-impl_param_value!(f64);
-impl_param_value!(String => &'a str);
+impl_param_value!("bool", bool);
+impl_param_value!("integer", u32);
+impl_param_value!("integer", u64);
+impl_param_value!("real", f64);
+impl_param_value!("string", String => &'a str);
 
 /// Define all system parameters here.
 ///

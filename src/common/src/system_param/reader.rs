@@ -25,6 +25,7 @@ pub struct ParameterInfo {
     pub mutable: bool,
     pub value: String,
     pub description: &'static str,
+    pub vartype: &'static str,
 }
 
 macro_rules! define_system_params_read_trait {
@@ -50,6 +51,7 @@ macro_rules! define_system_params_read_trait {
                             mutable: $is_mutable,
                             value: self.$field().to_string(),
                             description: $doc,
+                            vartype: <$type as ParamValue>::vartype(),
                         },
                     )*
                 ]

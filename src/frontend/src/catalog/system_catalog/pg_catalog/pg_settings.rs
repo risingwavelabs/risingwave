@@ -27,6 +27,7 @@ struct PgSetting {
     setting: String,
     short_desc: String,
     context: Context,
+    vartype: &'static str, // TODO: make it an enum
 }
 
 /// Context required to set the parameter's value.
@@ -76,6 +77,7 @@ fn read_pg_settings(reader: &SysCatalogReaderImpl) -> Vec<PgSetting> {
             setting: info.setting,
             short_desc: info.description,
             context: Context::User,
+            vartype: "string", // TODO
         });
 
     let system_params = (reader.system_params.load().get_all())
@@ -89,6 +91,7 @@ fn read_pg_settings(reader: &SysCatalogReaderImpl) -> Vec<PgSetting> {
             } else {
                 Context::Internal
             },
+            vartype: info.vartype,
         });
 
     variables.chain(system_params).collect()
