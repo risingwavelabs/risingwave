@@ -71,6 +71,13 @@ impl MonitorService for MonitorServiceImpl {
             .map(|(k, v)| (k, v.to_string()))
             .collect();
 
+        let barrier_traces = self
+            .stream_mgr
+            .get_barrier_traces()
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect();
+
         let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
             m.lock()
                 .await
@@ -84,6 +91,7 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
+            inflight_barrier_traces: barrier_traces,
             compaction_task_traces: Default::default(),
         }))
     }

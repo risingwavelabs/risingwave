@@ -175,7 +175,7 @@ pub(crate) struct StreamActorManager {
     pub(super) watermark_epoch: AtomicU64Ref,
 
     /// Manages the await-trees of all actors.
-    pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    pub(super) actor_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
@@ -189,7 +189,7 @@ pub(super) struct LocalBarrierWorker {
     barrier_senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
     /// Current barrier collection state.
-    state: ManagedBarrierState,
+    pub(crate) state: ManagedBarrierState,
 
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
@@ -210,7 +210,10 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    ) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -227,6 +230,7 @@ impl LocalBarrierWorker {
             state: ManagedBarrierState::new(
                 actor_manager.env.state_store(),
                 actor_manager.streaming_metrics.clone(),
+                barrier_await_tree_reg,
             ),
             epoch_result_sender: HashMap::default(),
             actor_manager,
@@ -524,7 +528,10 @@ impl LocalBarrierWorker {
 
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+        *self = Self::new(
+            self.actor_manager.clone(),
+            self.state.barrier_await_tree_reg.clone(),
+        );
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -585,7 +592,8 @@ impl LocalBarrierWorker {
     pub fn spawn(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
-        await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+        actor_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
@@ -605,10 +613,10 @@ impl LocalBarrierWorker {
             env: env.clone(),
             streaming_metrics,
             watermark_epoch,
-            await_tree_reg,
+            actor_await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -733,6 +741,7 @@ impl LocalBarrierManager {
         let _join_handle = LocalBarrierWorker::spawn(
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
+            None,
             None,
             Arc::new(AtomicU64::new(0)),
             rx,

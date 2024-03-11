@@ -23,6 +23,7 @@ fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
     a.actor_traces.extend(b.actor_traces);
     a.rpc_traces.extend(b.rpc_traces);
     a.compaction_task_traces.extend(b.compaction_task_traces);
+    a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
 }
 
 pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
@@ -57,6 +58,7 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     if all.actor_traces.is_empty()
         && all.rpc_traces.is_empty()
         && all.compaction_task_traces.is_empty()
+        && all.inflight_barrier_traces.is_empty()
     {
         println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
     } else {
@@ -76,6 +78,12 @@ pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
             println!("\n\n--- Compactor Traces ---");
             for (key, trace) in all.compaction_task_traces {
                 println!(">> Compaction Task {key}\n{trace}");
+            }
+        }
+        if !all.inflight_barrier_traces.is_empty() {
+            println!("\n\n--- Inflight Barrier Traces ---");
+            for (name, trace) in &all.inflight_barrier_traces {
+                println!(">> Barrier {name}\n{trace}");
             }
         }
     }

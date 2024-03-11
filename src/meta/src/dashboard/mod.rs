@@ -211,6 +211,7 @@ pub(super) mod handlers {
             a.actor_traces.extend(b.actor_traces);
             a.rpc_traces.extend(b.rpc_traces);
             a.compaction_task_traces.extend(b.compaction_task_traces);
+            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
         }
 
         for worker_node in worker_nodes {
