@@ -706,8 +706,6 @@ mod test {
         // Barrier message.
         executor.next().await.unwrap().unwrap();
 
-
-
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
