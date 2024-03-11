@@ -1766,7 +1766,6 @@ impl DdlController {
         dummy_table_id: TableId,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
-        let default_parallelism = fragment_graph.default_parallelism();
         let expr_context = stream_ctx.to_expr_context();
 
         let old_table_fragments = self
@@ -1814,7 +1813,9 @@ impl DdlController {
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+        let parallelism = NonZeroUsize::new(original_table_fragment.get_actors().len())
+            .expect("The number of actors in the original table fragment should be greater than 0");
+
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
@@ -1829,11 +1830,6 @@ impl DdlController {
             .await?;
         assert!(dispatchers.is_empty());
 
-        let table_parallelism = match default_parallelism {
-            None => TableParallelism::Adaptive,
-            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
-        };
-
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
@@ -1842,8 +1838,7 @@ impl DdlController {
             graph,
             &building_locations.actor_locations,
             stream_ctx,
-            // todo: shall we use the old table fragments' parallelism
-            table_parallelism,
+            old_table_fragments.assigned_parallelism,
         );
 
         let ctx = ReplaceTableContext {
