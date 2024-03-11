@@ -69,14 +69,14 @@ public class SourceValidateHandler {
         }
     }
 
-    static void ensureRequiredProps(Map<String, String> props, boolean isMultiTableShared) {
+    static void ensureRequiredProps(Map<String, String> props, boolean isCdcSourceJob) {
         ensurePropNotBlank(props, DbzConnectorConfig.HOST);
         ensurePropNotBlank(props, DbzConnectorConfig.PORT);
         ensurePropNotBlank(props, DbzConnectorConfig.DB_NAME);
         ensurePropNotBlank(props, DbzConnectorConfig.USER);
         ensurePropNotBlank(props, DbzConnectorConfig.PASSWORD);
         // ensure table name is passed by user in non-sharing mode
-        if (!isMultiTableShared) {
+        if (!isCdcSourceJob) {
             ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
         }
     }
@@ -86,6 +86,7 @@ public class SourceValidateHandler {
         var props = request.getPropertiesMap();
 
         boolean isCdcSourceJob = request.getIsSourceJob();
+        boolean isBackfillTable = request.getIsBackfillTable();
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
@@ -132,7 +133,8 @@ public class SourceValidateHandler {
             case MYSQL:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
-                try (var validator = new MySqlValidator(props, tableSchema, isCdcSourceJob)) {
+                try (var validator =
+                        new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
                 }
                 break;

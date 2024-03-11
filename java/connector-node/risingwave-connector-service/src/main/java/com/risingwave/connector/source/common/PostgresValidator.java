@@ -48,13 +48,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     // Whether the properties to validate is shared by multiple tables.
     // If true, we will skip validation check for table
     private final boolean isCdcSourceJob;
-    private final boolean isBackfillTable;
 
     public PostgresValidator(
-            Map<String, String> userProps,
-            TableSchema tableSchema,
-            boolean isCdcSourceJob,
-            boolean isBackfillTable)
+            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -79,7 +75,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         this.pubAutoCreate =
                 userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
         this.isCdcSourceJob = isCdcSourceJob;
-        this.isBackfillTable = isBackfillTable;
     }
 
     @Override
