@@ -717,8 +717,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         // report to error metrics
                         let context = parser.source_ctx();
                         GLOBAL_ERROR_METRICS.user_source_error.report([
-                            // TODO(eric): output ConnectorError's variant as label
-                            "source_parser".to_owned(),
+                            error.variant_name().to_string(),
                             context.source_info.source_id.to_string(),
                             context.source_info.source_name.clone(),
                             context.source_info.fragment_id.to_string(),

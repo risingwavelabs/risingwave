@@ -186,7 +186,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snap",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
  "thiserror",
  "typed-builder 0.16.2",
@@ -211,7 +211,7 @@ dependencies = [
  "regex-lite",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
  "thiserror",
  "typed-builder 0.18.0",
@@ -2206,7 +2206,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c64043d6c7b7a4c58e39e7efccfdea7b93d885a795d0c054a69dbbf4dd52686"
 dependencies = [
  "crossterm 0.27.0",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
  "unicode-width",
 ]
@@ -3051,7 +3051,7 @@ dependencies = [
  "arrow-array 48.0.1",
  "datafusion-common",
  "sqlparser",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
 ]
 
@@ -8831,7 +8831,7 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_rt",
  "shell-words",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.26.1",
  "task_stats_alloc",
  "tempfile",
@@ -8931,7 +8931,7 @@ dependencies = [
  "smallbitset",
  "speedate",
  "static_assertions",
- "strum",
+ "strum 0.26.1",
  "strum_macros 0.26.1",
  "sysinfo",
  "tempfile",
@@ -9180,7 +9180,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "simd-json",
- "strum",
+ "strum 0.26.1",
  "strum_macros 0.26.1",
  "syn 1.0.109",
  "tempfile",
@@ -9671,7 +9671,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "sync-point",
  "thiserror",
  "thiserror-ext",
@@ -9814,7 +9814,7 @@ dependencies = [
  "prost-helpers",
  "risingwave_error",
  "serde",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "walkdir",
  "workspace-hack",
@@ -10164,6 +10164,8 @@ dependencies = [
  "serde_yaml",
  "smallvec",
  "static_assertions",
+ "strum 0.26.1",
+ "strum_macros 0.26.1",
  "task_stats_alloc",
  "thiserror",
  "thiserror-ext",
@@ -10652,7 +10654,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "time",
  "tracing",
@@ -11377,7 +11379,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "242f76c50fd18cbf098607090ade73a08d39cfd84ea835f3796a2c855223b19b"
 dependencies = [
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.3",
 ]
 
@@ -11778,6 +11780,12 @@ checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
  "strum_macros 0.25.3",
 ]
+
+[[package]]
+name = "strum"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
 
 [[package]]
 name = "strum_macros"
@@ -14094,7 +14102,7 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
- "strum",
+ "strum 0.25.0",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.48",

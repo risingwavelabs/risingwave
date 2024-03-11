@@ -215,7 +215,6 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                 }
                 Err(e) => {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
-                        // TODO(eric): output ConnectorError's variant as label
                         "cdc_source".to_owned(),
                         source_id.clone(),
                         self.source_ctx.source_info.source_name.clone(),
