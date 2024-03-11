@@ -647,7 +647,8 @@ mod test {
             ))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
-                    - 1 1 10",
+                    - 1 1 10
+                    + 1 1 40",
             ))),
             Message::Barrier(Barrier::new_test_barrier(3)),
         ])
@@ -694,9 +695,6 @@ mod test {
         executor.next().await.unwrap().unwrap();
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
@@ -708,35 +706,18 @@ mod test {
         // Barrier message.
         executor.next().await.unwrap().unwrap();
 
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
+
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I I I
-                - 1 1 10",
+                U- 1 1 10
+                U+ 1 1 40
+                +  1 3 30",
             )
         );
-
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 1 3 30",
-            )
-        );
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-        let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
-
-        // Should not receive the third stream chunk message because the force-append-only sink
-        // executor will drop all DELETE messages.
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
