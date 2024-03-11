@@ -51,7 +51,7 @@ impl TelemetryReportCreator for FrontendTelemetryCreator {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct FrontendTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
@@ -103,8 +103,8 @@ mod tests {
     #[tokio::test]
     async fn test_frontend_telemetry_report() {
         let mut report = super::FrontendTelemetryReport::new(
-            "tracking_id".to_string(),
-            "session_id".to_string(),
+            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
+            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
             100,
         );
         report.base.is_test = true;
