@@ -627,6 +627,7 @@ mod tests {
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -692,20 +693,21 @@ mod tests {
         );
         let mut executor = executor.boxed().execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 1,
-                        start_offset: None,
-                    }),
-                ],
-            },
-            pause: false,
-        }));
+        let init_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::new(),
+                added_actors: HashSet::new(),
+                splits: hashmap! {
+                    ActorId::default() => vec![
+                        SplitImpl::Datagen(DatagenSplit {
+                            split_index: 0,
+                            split_num: 1,
+                            start_offset: None,
+                        }),
+                    ],
+                },
+                pause: false,
+            }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -780,20 +782,21 @@ mod tests {
         );
         let mut handler = executor.boxed().execute();
 
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add(AddMutation {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 3,
-                        start_offset: None,
-                    }),
-                ],
-            },
-            pause: false,
-        }));
+        let init_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::new(),
+                added_actors: HashSet::new(),
+                splits: hashmap! {
+                    ActorId::default() => vec![
+                        SplitImpl::Datagen(DatagenSplit {
+                            split_index: 0,
+                            split_num: 3,
+                            start_offset: None,
+                        }),
+                    ],
+                },
+                pause: false,
+            }));
         barrier_tx.send(init_barrier).unwrap();
 
         // Consume barrier.
@@ -827,10 +830,11 @@ mod tests {
             }),
         ];
 
-        let change_split_mutation =
-            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let change_split_mutation = Barrier::new_test_barrier(test_epoch(2)).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(change_split_mutation).unwrap();
 
@@ -842,7 +846,7 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -853,10 +857,10 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap();
 
-        let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
+        let barrier = Barrier::new_test_barrier(test_epoch(3)).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
-        let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
+        let barrier = Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
 
         // receive all
@@ -865,10 +869,11 @@ mod tests {
         let prev_assignment = new_assignment;
         let new_assignment = vec![prev_assignment[2].clone()];
 
-        let drop_split_mutation =
-            Barrier::new_test_barrier(5).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+        let drop_split_mutation = Barrier::new_test_barrier(test_epoch(5)).with_mutation(
+            Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => new_assignment.clone()
-            }));
+            }),
+        );
 
         barrier_tx.send(drop_split_mutation).unwrap();
 
@@ -880,7 +885,7 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])
