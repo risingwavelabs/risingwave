@@ -150,15 +150,7 @@ impl SnowflakeSinkWriter {
 #[async_trait]
 impl SinkWriter for SnowflakeSinkWriter {
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        todo!()
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        todo!()
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        todo!()
+        Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
@@ -167,5 +159,13 @@ impl SinkWriter for SnowflakeSinkWriter {
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        todo!()
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
+        todo!()
     }
 }
