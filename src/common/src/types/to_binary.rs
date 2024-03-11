@@ -106,7 +106,6 @@ impl<'a> ToBinary for ListRef<'a> {
             DataType::Int16 => Type::INT2_ARRAY,
             DataType::Int32 => Type::INT4_ARRAY,
             DataType::Int64 => Type::INT8_ARRAY,
-            DataType::Int256 => Type::NUMERIC_ARRAY, // HACK: NOT SURE
             DataType::Float32 => Type::FLOAT4_ARRAY,
             DataType::Float64 => Type::FLOAT8_ARRAY,
             DataType::Decimal => Type::NUMERIC_ARRAY,
@@ -119,6 +118,9 @@ impl<'a> ToBinary for ListRef<'a> {
             DataType::Bytea => Type::BYTEA_ARRAY,
             DataType::Jsonb => Type::JSONB_ARRAY,
             DataType::Serial => Type::INT4_ARRAY,
+            // INFO: `Int256` not support in `ScalarRefImpl::to_sql`
+            // Just let `Array[Int256]` continue `to_sql`, and the `ScalarRefImpl::to_sql` will handle the error.
+            DataType::Int256 => Type::NUMERIC_ARRAY,
             DataType::Struct(_) | DataType::List(_)  => bail_not_implemented!(
                 issue = 7949,
                 "the pgwire extended-mode encoding for lists with more than one dimension ({ty}) is unsupported"
