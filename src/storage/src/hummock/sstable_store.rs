@@ -1068,9 +1068,9 @@ impl SstableWriter for StreamingUploadWriter {
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
-        let meta_data = Bytes::from(meta.encode_to_bytes());
+        let metadata = Bytes::from(meta.encode_to_bytes());
 
-        self.object_uploader.write_bytes(meta_data).await?;
+        self.object_uploader.write_bytes(metadata).await?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {

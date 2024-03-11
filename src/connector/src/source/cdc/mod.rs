@@ -85,8 +85,11 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Schema of the source specified by users
     pub table_schema: TableSchema,
 
-    /// Whether the properties is shared by multiple tables
-    pub is_multi_table_shared: bool,
+    /// Whether it is created by a cdc source job
+    pub is_cdc_source_job: bool,
+
+    /// For validation purpose, mark if the table is a backfill cdc table
+    pub is_backfill_table: bool,
 
     pub _phantom: PhantomData<T>,
 }
@@ -96,14 +99,15 @@ impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
         properties: HashMap<String, String>,
         _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
-        let is_multi_table_shared = properties
+        let is_share_source = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
         Ok(CdcProperties {
             properties,
             table_schema: Default::default(),
             // TODO(siyuan): use serde to deserialize input hashmap
-            is_multi_table_shared,
+            is_cdc_source_job: is_share_source,
+            is_backfill_table: false,
             _phantom: PhantomData,
         })
     }
@@ -144,7 +148,7 @@ where
         };
         self.table_schema = table_schema;
         if let Some(info) = source.info.as_ref() {
-            self.is_multi_table_shared = info.cdc_source_job;
+            self.is_cdc_source_job = info.cdc_source_job;
         }
     }
 
@@ -159,8 +163,8 @@ where
 
         self.properties = properties;
         self.table_schema = table_schema;
-        // properties are not shared, so mark it as false
-        self.is_multi_table_shared = false;
+        self.is_cdc_source_job = false;
+        self.is_backfill_table = true;
     }
 }
 

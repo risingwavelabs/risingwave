@@ -95,14 +95,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             self.connector_params.connector_client.clone(),
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
@@ -267,12 +266,11 @@ impl<S: StateStore> SourceExecutor<S> {
             source_id = %core.source_id,
             "stream source reader error",
         );
-        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
-            "SourceReaderError".to_owned(),
-            e.to_report_string(),
-            "SourceExecutor".to_owned(),
-            self.actor_ctx.id.to_string(),
+        GLOBAL_ERROR_METRICS.user_source_error.report([
+            e.variant_name().to_owned(),
             core.source_id.to_string(),
+            core.source_name.to_owned(),
+            self.actor_ctx.fragment_id.to_string(),
         ]);
 
         self.rebuild_stream_reader(source_desc, stream).await
@@ -433,7 +431,6 @@ impl<S: StateStore> SourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
-        let mut metric_row_per_barrier: u64 = 0;
 
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
@@ -489,21 +486,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     self.persist_state_and_clear_cache(epoch).await?;
-
-                    self.metrics
-                        .source_row_per_barrier
-                        .with_label_values(&[
-                            self.actor_ctx.id.to_string().as_str(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_id
-                                .to_string()
-                                .as_ref(),
-                            self.actor_ctx.fragment_id.to_string().as_str(),
-                        ])
-                        .inc_by(metric_row_per_barrier);
-                    metric_row_per_barrier = 0;
 
                     yield Message::Barrier(barrier);
                 }
@@ -562,7 +544,6 @@ impl<S: StateStore> SourceExecutor<S> {
                             .updated_splits_in_epoch
                             .extend(state);
                     }
-                    metric_row_per_barrier += chunk.cardinality() as u64;
 
                     self.metrics
                         .source_output_row_count

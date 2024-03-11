@@ -30,7 +30,7 @@ aws-sigv4 = { version = "1", features = ["http0-compat", "sign-eventstream", "si
 aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
 aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
 axum = { version = "0.6" }
-base64 = { version = "0.21", features = ["alloc"] }
+base64 = { version = "0.21" }
 bigdecimal = { version = "0.4" }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
@@ -48,7 +48,6 @@ deranged = { version = "0.3", default-features = false, features = ["powerfmt", 
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
-fixedbitset = { version = "0.4" }
 flate2 = { version = "1", features = ["zlib"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
@@ -170,7 +169,6 @@ cc = { version = "1", default-features = false, features = ["parallel"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.4" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }

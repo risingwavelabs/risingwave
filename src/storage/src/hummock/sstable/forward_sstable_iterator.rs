@@ -22,7 +22,7 @@ use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::block_stream::BlockStream;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -291,6 +291,13 @@ impl HummockIterator for SstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats);
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta {
+            object_id: Some(self.sst.id),
+            block_id: Some(self.cur_idx as _),
+        }
     }
 }
 

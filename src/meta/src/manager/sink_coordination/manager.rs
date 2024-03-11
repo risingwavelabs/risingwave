@@ -399,9 +399,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_basic() {
-        let sink_id = SinkId::from(1);
         let param = SinkParam {
-            sink_id,
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
             downstream_pk: vec![],
@@ -569,9 +569,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_writer() {
-        let sink_id = SinkId::from(1);
         let param = SinkParam {
-            sink_id,
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
             downstream_pk: vec![],
@@ -691,6 +691,7 @@ mod tests {
         let sink_id = SinkId::from(1);
         let param = SinkParam {
             sink_id,
+            sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
             downstream_pk: vec![],
@@ -727,9 +728,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_partial_commit() {
-        let sink_id = SinkId::from(1);
         let param = SinkParam {
-            sink_id,
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
             downstream_pk: vec![],
@@ -806,9 +807,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_fail_commit() {
-        let sink_id = SinkId::from(1);
         let param = SinkParam {
-            sink_id,
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
             downstream_pk: vec![],
