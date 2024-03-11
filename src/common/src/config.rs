@@ -942,7 +942,7 @@ pub struct ObjectStoreConfig {
     pub s3: S3ObjectStoreConfig,
 }
 
-impl ObjectStoreConfig{
+impl ObjectStoreConfig {
     pub fn set_atomic_write_dir(&mut self) {
         self.object_store_set_atomic_write_dir = true;
     }
