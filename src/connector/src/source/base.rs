@@ -161,7 +161,11 @@ pub struct SourceEnumeratorInfo {
 #[derive(Debug, Default)]
 pub struct SourceContext {
     pub connector_client: Option<ConnectorClient>,
-    pub source_info: SourceInfo,
+    pub actor_id: u32,
+    pub source_id: TableId,
+    // There should be a 1-1 mapping between `source_id` & `fragment_id`
+    pub fragment_id: u32,
+    pub source_name: String,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
@@ -170,7 +174,7 @@ pub struct SourceContext {
 impl SourceContext {
     pub fn new(
         actor_id: u32,
-        table_id: TableId,
+        source_id: TableId,
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
@@ -180,26 +184,15 @@ impl SourceContext {
     ) -> Self {
         Self {
             connector_client,
-            source_info: SourceInfo {
-                actor_id,
-                source_id: table_id,
-                fragment_id,
-                source_name,
-            },
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
             metrics,
             source_ctrl_opts,
             connector_props,
         }
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct SourceInfo {
-    pub actor_id: u32,
-    pub source_id: TableId,
-    // There should be a 1-1 mapping between `source_id` & `fragment_id`
-    pub fragment_id: u32,
-    pub source_name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]

@@ -589,7 +589,8 @@ impl<P: ByteStreamSourceParser> P {
     ///
     /// A [`ChunkSourceStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
-        let source_info = self.source_ctx().source_info.clone();
+        let actor_id = self.source_ctx().actor_id;
+        let source_id = self.source_ctx().source_id.table_id();
 
         // Ensure chunk size is smaller than rate limit
         let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
@@ -600,13 +601,8 @@ impl<P: ByteStreamSourceParser> P {
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream(self, data_stream).instrument_with(move || {
-            tracing::info_span!(
-                "source_parse_chunk",
-                actor_id = source_info.actor_id,
-                source_id = source_info.source_id.table_id()
-            )
-        })
+        into_chunk_stream(self, data_stream)
+            .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
 
@@ -718,9 +714,9 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         let context = parser.source_ctx();
                         GLOBAL_ERROR_METRICS.user_source_error.report([
                             error.variant_name().to_string(),
-                            context.source_info.source_id.to_string(),
-                            context.source_info.source_name.clone(),
-                            context.source_info.fragment_id.to_string(),
+                            context.source_id.to_string(),
+                            context.source_name.clone(),
+                            context.fragment_id.to_string(),
                         ]);
                     }
                 }
