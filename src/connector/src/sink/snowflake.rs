@@ -30,6 +30,7 @@ use super::encoder::JsonEncoder;
 use super::snowflake_connector::{SnowflakeHttpClient, SnowflakeS3Client};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
+use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
@@ -102,7 +103,12 @@ impl Sink for SnowflakeSink {
     const SINK_NAME: &'static str = SNOWFLAKE_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        todo!()
+        Ok(SnowflakeSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.is_append_only,
+        ).into_log_sink(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {
