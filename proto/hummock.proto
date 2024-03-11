@@ -687,6 +687,7 @@ message PinVersionResponse {
 message SplitCompactionGroupRequest {
   uint64 group_id = 1;
   repeated uint32 table_ids = 2;
+  uint32 partition_vnode_count = 3;
 }
 
 message SplitCompactionGroupResponse {
