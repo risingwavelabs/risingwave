@@ -31,7 +31,7 @@ use std::cmp::Ordering;
 pub use key_cmp::*;
 use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use version::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
@@ -354,4 +354,26 @@ impl EpochWithGap {
     pub fn offset(&self) -> u64 {
         self.0 & EPOCH_SPILL_TIME_MASK
     }
+}
+
+pub trait ProtoSerializeSizeEstimatedExt {
+    fn estimated_encode_len(&self) -> usize;
+}
+
+// Define methods for converting Proto struct and rust struct to and from each other
+pub trait ProtoSerializeExt {
+    type PB: Clone + PartialEq + ::prost::Message;
+
+    fn from_protobuf(pb: &Self::PB) -> Self;
+
+    fn to_protobuf(&self) -> Self::PB;
+}
+
+// Similar to `ProtoSerializeExt``, we allow `ProtoSerializeOwnExt to provide a method to obtain ownership. Therefore, copying behavior in memory can be reduced
+pub trait ProtoSerializeOwnExt {
+    type PB: Clone + PartialEq + ::prost::Message;
+
+    fn from_protobuf_own(pb: Self::PB) -> Self;
+
+    fn to_protobuf_own(self) -> Self::PB;
 }

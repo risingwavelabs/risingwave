@@ -22,20 +22,21 @@ use async_trait::async_trait;
 use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{CompactTask, HummockVersion, SstableInfo};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange,
+    ProtoSerializeOwnExt, SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, HummockSnapshot, SubscribeCompactionEventRequest,
+    compact_task, HummockSnapshot, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -291,7 +292,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .unwrap()
                 {
                     let resp = SubscribeCompactionEventResponse {
-                        event: Some(ResponseEvent::CompactTask(task)),
+                        event: Some(ResponseEvent::CompactTask(task.to_protobuf_own())),
                         create_at: SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .expect("Clock may have gone backwards")
@@ -321,7 +322,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                             .report_compact_task(
                                 task_id,
                                 TaskStatus::try_from(task_status).unwrap(),
-                                sorted_output_ssts,
+                                sorted_output_ssts
+                                    .into_iter()
+                                    .map(SstableInfo::from_protobuf_own)
+                                    .collect_vec(),
                                 Some(table_stats_change),
                             )
                             .await

@@ -14,8 +14,7 @@
 
 use std::collections::HashSet;
 
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, SstableInfo};
+use risingwave_hummock_sdk::version::{InputLevel, Levels, SstableInfo};
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -172,8 +171,9 @@ mod test {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::version::Level;
     use risingwave_pb::hummock::compact_task;
-    pub use risingwave_pb::hummock::{Level, LevelType};
+    pub use risingwave_pb::hummock::LevelType;
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -210,7 +210,7 @@ mod test {
             ),
             Level {
                 level_idx: 4,
-                level_type: LevelType::Nonoverlapping as i32,
+                level_type: LevelType::Nonoverlapping,
                 table_infos: vec![
                     generate_table_with_ids_and_epochs(2, 1, 0, 100, 1, vec![2], 0, 0),
                     generate_table_with_ids_and_epochs(3, 1, 101, 200, 1, vec![3], 0, 0),

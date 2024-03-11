@@ -21,9 +21,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::version::Levels;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{TtlPickerState, TtlReclaimCompactionPicker};

@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::{HummockVersionId, ProtoSerializeExt};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{PbHummockVersionArchive, PbHummockVersionCheckpoint};
 use thiserror_ext::AsReport;

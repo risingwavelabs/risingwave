@@ -17,6 +17,7 @@
 pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::version::{CompactTask, Levels};
 use risingwave_pb::hummock::compact_task::{self, TaskType};
 
 mod picker;
@@ -28,8 +29,7 @@ use std::sync::Arc;
 use picker::{LevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, LevelType};
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 pub use selector::CompactionSelector;
 
 use self::selector::LocalSelectorStatistic;

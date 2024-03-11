@@ -23,8 +23,9 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
@@ -107,8 +108,8 @@ pub fn gen_dummy_sst_info(
         object_id: id,
         sst_id: id,
         key_range: Some(KeyRange {
-            left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
-            right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
+            left: Bytes::from(FullKey::for_test(table_id, min_table_key, epoch).encode()),
+            right: Bytes::from(FullKey::for_test(table_id, max_table_key, epoch).encode()),
             right_exclusive: false,
         }),
         file_size,
@@ -184,8 +185,8 @@ pub async fn put_sst(
         object_id: sst_object_id,
         sst_id: sst_object_id,
         key_range: Some(KeyRange {
-            left: meta.smallest_key.clone(),
-            right: meta.largest_key.clone(),
+            left: Bytes::from(meta.smallest_key.clone()),
+            right: Bytes::from(meta.largest_key.clone()),
             right_exclusive: false,
         }),
         file_size: meta.estimated_size as u64,

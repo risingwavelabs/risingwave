@@ -20,10 +20,8 @@ use std::time::{Duration, Instant};
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, Level, Levels};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::PbLevel;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -143,7 +141,7 @@ impl PinnedVersion {
         self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &PbLevel> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
         #[auto_enum(Iterator)]
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => {

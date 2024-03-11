@@ -26,9 +26,8 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::version::{HummockVersion, SstableInfo};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::watch::Sender;
 use tokio::sync::Notify;
 
@@ -91,7 +90,7 @@ pub fn validate_table_key_range(version: &HummockVersion) {
             assert!(
                 t.key_range.is_some(),
                 "key_range in table [{}] is none",
-                t.get_object_id()
+                t.object_id
             );
         }
     }
@@ -103,8 +102,8 @@ where
     B: AsRef<[u8]> + EmptySliceRef,
 {
     let table_range = info.key_range.as_ref().unwrap();
-    let table_start = FullKey::decode(table_range.left.as_slice()).user_key;
-    let table_end = FullKey::decode(table_range.right.as_slice()).user_key;
+    let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
+    let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
@@ -116,10 +115,7 @@ where
         } else {
             Bound::Included(&table_end)
         },
-    ) && info
-        .get_table_ids()
-        .binary_search(&table_id.table_id())
-        .is_ok()
+    ) && info.table_ids.binary_search(&table_id.table_id()).is_ok()
 }
 
 /// Search the SST containing the specified key within a level, using binary search.

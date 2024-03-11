@@ -34,9 +34,9 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
-use risingwave_hummock_sdk::version::HummockVersionDelta;
+use risingwave_hummock_sdk::version::{HummockVersionDelta, SstableInfo};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{LevelType, SstableInfo};
+use risingwave_pb::hummock::LevelType;
 use sync_point::sync_point;
 use tracing::Instrument;
 
@@ -857,7 +857,7 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+            if level.level_type == LevelType::Nonoverlapping {
                 let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
                 let sstables = table_infos
                     .filter(|sstable_info| {
@@ -874,7 +874,7 @@ impl HummockVersionReader {
                 if sstables.len() > 1 {
                     let ssts_which_have_delete_range = sstables
                         .iter()
-                        .filter(|sst| sst.get_range_tombstone_count() > 0)
+                        .filter(|sst| sst.range_tombstone_count > 0)
                         .cloned()
                         .collect_vec();
                     if !ssts_which_have_delete_range.is_empty() {
@@ -940,7 +940,7 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
-                    assert_eq!(sstable_info.get_object_id(), sstable.id);
+                    assert_eq!(sstable_info.object_id, sstable.id);
                     if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {

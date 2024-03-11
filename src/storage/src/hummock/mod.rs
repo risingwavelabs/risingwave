@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::version::SstableInfo;
 use risingwave_hummock_sdk::{HummockEpoch, *};
-use risingwave_pb::hummock::SstableInfo;
 
 mod block_cache;
 pub use block_cache::*;

@@ -33,7 +33,10 @@ use risingwave_common::{bail, must_match};
 use risingwave_hummock_sdk::table_watermark::{
     merge_multiple_new_table_watermarks, TableWatermarks,
 };
-use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
+use risingwave_hummock_sdk::version::SstableInfo;
+use risingwave_hummock_sdk::{
+    ExtendedSstableInfo, HummockSstableObjectId, ProtoSerializeExt, ProtoSerializeOwnExt,
+};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -1092,7 +1095,7 @@ fn collect_commit_epoch_info(
             sst_to_worker.insert(sst_info.get_object_id(), resp.worker_id);
             ExtendedSstableInfo::new(
                 grouped.compaction_group_id,
-                sst_info,
+                SstableInfo::from_protobuf_own(sst_info),
                 grouped.table_stats_map,
             )
         });

@@ -9494,6 +9494,7 @@ dependencies = [
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_pb",
+ "serde",
  "tracing",
  "workspace-hack",
 ]
@@ -9745,6 +9746,7 @@ version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "either",
  "futures",
  "itertools 0.12.0",
