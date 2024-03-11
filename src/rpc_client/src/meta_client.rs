@@ -1094,10 +1094,12 @@ impl MetaClient {
         &self,
         group_id: CompactionGroupId,
         table_ids_to_new_group: &[StateTableId],
+        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let req = SplitCompactionGroupRequest {
             group_id,
             table_ids: table_ids_to_new_group.to_vec(),
+            partition_vnode_count,
         };
         let resp = self.inner.split_compaction_group(req).await?;
         Ok(resp.new_group_id)

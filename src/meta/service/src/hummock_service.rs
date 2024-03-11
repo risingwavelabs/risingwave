@@ -437,7 +437,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids)
+            .split_compaction_group(req.group_id, &req.table_ids, req.partition_vnode_count)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
