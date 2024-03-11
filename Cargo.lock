@@ -4058,6 +4058,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "flume"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "nanorand",
+ "spin 0.9.8",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10340,7 +10352,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2433b134712bc17a6f85a35e06b901e6e8d0bb20b5367e1121e6fedc140c0ac"
 dependencies = [
  "bytes",
- "flume",
+ "flume 0.10.14",
  "futures",
  "log",
  "rustls-native-certs",
@@ -11734,7 +11746,7 @@ checksum = "be4c21bf34c7cae5b283efb3ac1bcc7670df7561124dc2f8bdc0b59be40f79a2"
 dependencies = [
  "atoi",
  "chrono",
- "flume",
+ "flume 0.10.14",
  "futures-channel",
  "futures-core",
  "futures-executor",
@@ -14065,7 +14077,7 @@ dependencies = [
  "either",
  "fail",
  "flate2",
- "flume",
+ "flume 0.11.0",
  "frunk_core",
  "futures",
  "futures-channel",
