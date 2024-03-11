@@ -544,6 +544,7 @@ mod tests {
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, TableKey};
 
     use crate::hummock::compactor::shared_buffer_compact::generate_splits;
@@ -561,7 +562,7 @@ mod tests {
     #[tokio::test]
     async fn test_generate_splits_in_order() {
         let imm1 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("dddd"),
@@ -571,7 +572,7 @@ mod tests {
             TableId::new(1),
         );
         let imm2 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("abb"),
@@ -582,7 +583,7 @@ mod tests {
         );
 
         let imm3 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            2,
+            test_epoch(2),
             0,
             vec![(
                 generate_key("abc"),
@@ -592,7 +593,7 @@ mod tests {
             TableId::new(1),
         );
         let imm4 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("aaa"),
@@ -603,7 +604,7 @@ mod tests {
         );
 
         let imm5 = ImmutableMemtable::build_shared_buffer_batch_for_test(
-            3,
+            test_epoch(3),
             0,
             vec![(
                 generate_key("aaa"),

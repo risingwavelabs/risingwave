@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -342,7 +343,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(233),
+        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
     }
 }
 
@@ -396,7 +397,7 @@ pub mod delete_range {
     }
 
     impl CompactionDeleteRangesBuilder {
-        pub fn add_delete_events(
+        pub fn add_delete_events_for_test(
             &mut self,
             epoch: HummockEpoch,
             table_id: TableId,
@@ -404,7 +405,7 @@ pub mod delete_range {
         ) {
             self.iter
                 .add_batch_iter(SharedBufferDeleteRangeIterator::new(
-                    epoch,
+                    test_epoch(epoch),
                     table_id,
                     delete_ranges,
                 ));

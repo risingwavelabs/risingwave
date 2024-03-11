@@ -28,6 +28,7 @@ use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -300,7 +301,8 @@ async fn run_compare_result(
     test_count: u64,
     test_delete_ratio: u32,
 ) -> Result<(), String> {
-    let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 1;
+    let init_epoch = test_epoch(hummock.get_pinned_version().max_committed_epoch() + 1);
+
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
     const RANGE_BASE: u64 = 4000;
@@ -314,7 +316,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = init_epoch + epoch_idx;
+        let epoch = test_epoch(init_epoch / test_epoch(1) + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -363,7 +365,7 @@ async fn run_compare_result(
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
-        let next_epoch = epoch + 1;
+        let next_epoch = epoch.next_epoch();
         normal.commit(next_epoch).await?;
         delete_range.commit(next_epoch).await?;
         // let checkpoint = epoch % 10 == 0;
@@ -372,7 +374,7 @@ async fn run_compare_result(
             .commit_epoch(epoch, ret.uncommitted_ssts)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if epoch % 200 == 0 {
+        if (epoch / test_epoch(1)) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }

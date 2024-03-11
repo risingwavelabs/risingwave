@@ -68,6 +68,12 @@ IcebergProperties:
   - name: table.name
     field_type: String
     required: true
+  - name: catalog.jdbc.user
+    field_type: String
+    required: false
+  - name: catalog.jdbc.password
+    field_type: String
+    required: false
 KafkaProperties:
   fields:
   - name: bytes.per.second

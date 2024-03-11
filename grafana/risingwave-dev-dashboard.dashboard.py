@@ -720,6 +720,16 @@ def section_streaming(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_rowsps(
+                    "Source Backfill Throughput(rows/s)",
+                    "The figure shows the number of rows read by each source per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_source_backfill_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Source Upstream Status",
                     "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
@@ -1676,53 +1686,31 @@ def section_streaming_errors(outer_panels):
             [
                 panels.timeseries_count(
                     "Compute Errors by Type",
-                    "",
+                    "Errors that happened during computation. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_compute_error')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                            f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                            "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
                     "Source Errors by Type",
-                    "",
+                    "Errors that happened during source data ingestion. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_source_error')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                            f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                            "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
-                    "Source Reader Errors by Type",
-                    "",
+                    "Sink Errors by Type",
+                    "Errors that happened during data sink out. Check the logs for detailed error message.",
                     [
                         panels.target(
-                            f"sum({metric('user_source_reader_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
-                        ),
-                        panels.target(
-                            f"sum({metric('user_source_reader_error')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
-                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Sink by Connector",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('user_sink_error')}) by (connector_name, executor_id, error_msg)",
-                            "{{connector_name}}: {{error_msg}} ({{executor_id}})",
+                            f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                            "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),

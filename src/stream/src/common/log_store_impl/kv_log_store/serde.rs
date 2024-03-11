@@ -774,6 +774,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{
@@ -794,9 +795,9 @@ mod tests {
         KvLogStorePkInfo, KvLogStoreReadMetrics, SeqIdType, KV_LOG_STORE_V2_INFO,
     };
 
-    const EPOCH0: u64 = 233;
-    const EPOCH1: u64 = EPOCH0 + 1;
-    const EPOCH2: u64 = EPOCH1 + 1;
+    const EPOCH0: u64 = test_epoch(1);
+    const EPOCH1: u64 = test_epoch(2);
+    const EPOCH2: u64 = test_epoch(3);
 
     #[test]
     fn test_serde_v1() {
@@ -827,7 +828,7 @@ mod tests {
         let data_chunk = builder.consume_all().unwrap();
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
 
-        let mut epoch = 233u64;
+        let mut epoch = test_epoch(233);
 
         let mut serialized_keys = vec![];
         let mut seq_id = 1;
@@ -870,7 +871,7 @@ mod tests {
         serialized_keys.push(key);
 
         seq_id = 1;
-        epoch += 1;
+        epoch.inc_epoch();
 
         let delete_range_right2 = serde.serialize_truncation_offset_watermark((epoch, None));
 

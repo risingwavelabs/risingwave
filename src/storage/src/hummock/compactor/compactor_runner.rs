@@ -998,6 +998,7 @@ mod tests {
     use std::collections::{HashSet, VecDeque};
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_pb::hummock::{InputLevel, PbKeyRange};
@@ -1017,7 +1018,6 @@ mod tests {
     async fn test_delete_range_aggregator_with_filter() {
         let sstable_store = mock_sstable_store();
         let kv_pairs = vec![];
-
         let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             1,
@@ -1027,13 +1027,13 @@ mod tests {
                     TableId::new(1),
                     b"abc".to_vec(),
                     b"ccc".to_vec(),
-                    2,
+                    test_epoch(2),
                 ),
                 DeleteRangeTombstone::new_for_test(
                     TableId::new(1),
                     b"ddd".to_vec(),
                     b"eee".to_vec(),
-                    2,
+                    test_epoch(2),
                 ),
             ],
             sstable_store.clone(),
@@ -1045,7 +1045,7 @@ mod tests {
             TableId::new(2),
             b"abc".to_vec(),
             b"def".to_vec(),
-            1,
+            test_epoch(1),
         );
         let mut sstable_info_2 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
@@ -1053,7 +1053,7 @@ mod tests {
             vec![(
                 FullKey::from_user_key(
                     UserKey::new(TableId::new(1), TableKey(Bytes::copy_from_slice(b"bbb"))),
-                    1,
+                    test_epoch(1),
                 ),
                 HummockValue::put(Bytes::copy_from_slice(b"value")),
             )]

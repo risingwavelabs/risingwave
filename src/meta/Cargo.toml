@@ -92,14 +92,19 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.6"
-tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+tower-http = { version = "0.4", features = [
+    "add-extension",
+    "cors",
+    "fs",
+    "compression-gzip",
+] }
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1.4"
 rand = "0.8"
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 
 [features]
