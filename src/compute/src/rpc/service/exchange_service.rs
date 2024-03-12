@@ -173,7 +173,7 @@ impl ExchangeServiceImpl {
                     mut message,
                     permits,
                 }) => {
-                    // Erase the mutation of the barrier mutation to avoid decoding in remote side.
+                    // Erase the mutation of the barrier to avoid decoding in remote side.
                     if let Message::Barrier(barrier) = &mut message {
                         barrier.mutation = None;
                     }
