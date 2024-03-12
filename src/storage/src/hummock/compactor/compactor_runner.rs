@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -28,7 +28,9 @@ use risingwave_hummock_sdk::compact::{
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch, HummockSstableObjectId, KeyComparator};
+use risingwave_hummock_sdk::{
+    can_concat, EpochWithGap, HummockEpoch, HummockSstableObjectId, KeyComparator,
+};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
@@ -273,28 +275,49 @@ impl CompactorRunner {
 pub fn partition_overlapping_sstable_infos(
     mut origin_infos: Vec<SstableInfo>,
 ) -> Vec<Vec<SstableInfo>> {
-    let mut ret: Vec<Vec<SstableInfo>> = Vec::new();
+    pub struct SstableGroup {
+        ssts: Vec<SstableInfo>,
+        max_right_bound: Vec<u8>,
+    }
+
+    impl PartialEq for SstableGroup {
+        fn eq(&self, other: &SstableGroup) -> bool {
+            self.max_right_bound == other.max_right_bound
+        }
+    }
+    impl PartialOrd for SstableGroup {
+        fn partial_cmp(&self, other: &SstableGroup) -> Option<std::cmp::Ordering> {
+            Some(KeyComparator::compare_encoded_full_key(&self.max_right_bound, &other.max_right_bound))
+        }
+    }
+    impl Eq for SstableGroup {}
+    impl Ord for SstableGroup {
+        fn cmp(&self, other: &SstableGroup) -> std::cmp::Ordering {
+            KeyComparator::compare_encoded_full_key(&self.max_right_bound, &other.max_right_bound)
+        }
+    }
+    let mut groups: BinaryHeap<SstableGroup> = BinaryHeap::default();
     origin_infos.sort_by(|a, b| {
         let x = a.key_range.as_ref().unwrap();
         let y = b.key_range.as_ref().unwrap();
         KeyComparator::compare_encoded_full_key(&x.left, &y.left)
     });
-    'outside: for sst in origin_infos {
-        for prev_group in &mut ret {
-            let last = prev_group.last().unwrap();
-            if !last
-                .key_range
-                .as_ref()
-                .unwrap()
-                .full_key_overlap(sst.key_range.as_ref().unwrap())
-            {
-                prev_group.push(sst);
-                continue 'outside;
+    for sst in origin_infos {
+        if let Some(mut prev_group) = groups.peek_mut() {
+            if KeyComparator::encoded_full_key_less_than(&prev_group.max_right_bound,
+                    &sst.key_range.as_ref().unwrap().left) {
+                prev_group.max_right_bound = sst.key_range.as_ref().unwrap().right.clone();
+                prev_group.ssts.push(sst);
+                continue;
             }
         }
-        ret.push(vec![sst]);
+        groups.push(SstableGroup {
+            max_right_bound: sst.key_range.as_ref().unwrap().right.clone(),
+            ssts: vec![sst],
+        });
     }
-    ret
+    assert!(!groups.is_empty());
+    groups.into_iter().map(|group| group.ssts).collect_vec()
 }
 
 /// Handles a compaction task and reports its status to hummock manager.
