@@ -437,7 +437,7 @@ pub async fn handle_create_sink(
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
-        check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
+        // check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
