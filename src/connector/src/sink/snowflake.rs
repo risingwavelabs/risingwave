@@ -68,7 +68,7 @@ pub struct SnowflakeCommon {
     #[serde(rename = "snowflake.rsa_public_key_fp")]
     pub rsa_public_key_fp: String,
 
-    /// The rsa pem key *without* encrption
+    /// The rsa pem key *without* encryption
     #[serde(rename = "snowflake.private_key")]
     pub private_key: String,
 
