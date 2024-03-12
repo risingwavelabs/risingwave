@@ -57,6 +57,7 @@ pub enum Clause {
     Filter,
     From,
     GeneratedColumn,
+    Insert,
 }
 
 /// A `BindContext` that is only visible if the `LATERAL` keyword

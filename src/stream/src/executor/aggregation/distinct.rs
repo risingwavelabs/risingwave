@@ -301,7 +301,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::epoch::{test_epoch, EpochPair};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -382,7 +382,7 @@ mod tests {
         ];
 
         let store = MemoryStateStore::new();
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &[], store).await;
         dedup_tables
             .values_mut()
@@ -430,7 +430,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -471,7 +471,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -537,7 +537,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -562,7 +562,7 @@ mod tests {
         let group_key = GroupKey::new(OwnedRow::new(vec![Some(100.into())]), None);
 
         let store = MemoryStateStore::new();
-        let mut epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
         let mut dedup_tables = infer_dedup_tables(&agg_calls, &group_key_types, store).await;
         dedup_tables
             .values_mut()
@@ -613,7 +613,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }
@@ -664,7 +664,7 @@ mod tests {
 
         deduplicater.flush(&mut dedup_tables).unwrap();
 
-        epoch.inc();
+        epoch.inc_for_test();
         for table in dedup_tables.values_mut() {
             table.commit(epoch).await.unwrap();
         }

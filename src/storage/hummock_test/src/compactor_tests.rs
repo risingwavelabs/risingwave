@@ -28,7 +28,7 @@ pub(crate) mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::Epoch;
+    use risingwave_common::util::epoch::{test_epoch, Epoch, EpochExt};
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -163,9 +163,11 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
         local.init_for_test(epochs[0]).await.unwrap();
-        for (i, &epoch) in epochs.iter().enumerate() {
+        for (i, &e) in epochs.iter().enumerate() {
+            let epoch = e;
+            let val_str = e / test_epoch(1);
             let mut new_val = val.clone();
-            new_val.extend_from_slice(&epoch.to_be_bytes());
+            new_val.extend_from_slice(&val_str.to_be_bytes());
             local
                 .ingest_batch(
                     vec![(
@@ -287,7 +289,9 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 10,
-            (1..SST_COUNT + 1).map(|v| (v * 1000) << 16).collect_vec(),
+            (1..SST_COUNT + 1)
+                .map(|v| test_epoch(v * 1000))
+                .collect_vec(),
         )
         .await;
         // 2. get compact task
@@ -333,7 +337,7 @@ pub(crate) mod tests {
         }
 
         let mut val = b"0"[..].repeat(1 << 10);
-        val.extend_from_slice(&((TEST_WATERMARK * 1000) << 16).to_be_bytes());
+        val.extend_from_slice(&(TEST_WATERMARK * 1000).to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         let _recv = compactor_manager.add_compactor(worker_node.id);
@@ -450,7 +454,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 20,
-            (1..SST_COUNT + 1).collect_vec(),
+            (1..SST_COUNT + 1).map(test_epoch).collect_vec(),
         )
         .await;
 
@@ -511,10 +515,11 @@ pub(crate) mod tests {
         }
         // 5. storage get back the correct kv after compaction
         storage.wait_version(version).await;
+        let get_epoch = test_epoch(SST_COUNT + 1);
         let get_val = storage
             .get(
                 TableKey(key.clone()),
-                SST_COUNT + 1,
+                get_epoch,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
@@ -547,8 +552,7 @@ pub(crate) mod tests {
         keys_per_epoch: usize,
     ) {
         let kv_count: u16 = 128;
-        let mut epoch: u64 = 1;
-
+        let mut epoch = test_epoch(1);
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
@@ -556,7 +560,7 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
-            epoch += 1;
+            epoch.inc_epoch();
 
             if idx == 0 {
                 local.init_for_test(epoch).await.unwrap();
@@ -571,7 +575,8 @@ pub(crate) mod tests {
                     .unwrap();
             }
             local.flush().await.unwrap();
-            local.seal_current_epoch(epoch + 1, SealCurrentEpochOptions::for_test());
+            let next_epoch = epoch.next_epoch();
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
@@ -726,7 +731,7 @@ pub(crate) mod tests {
         let drop_table_id = 1;
         let existing_table_ids = 2;
         let kv_count: usize = 128;
-        let mut epoch: u64 = 1;
+        let mut epoch = test_epoch(1);
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[drop_table_id, existing_table_ids],
@@ -736,8 +741,8 @@ pub(crate) mod tests {
 
         let vnode = VirtualNode::from_index(1);
         for index in 0..kv_count {
-            epoch += 1;
-            let next_epoch = epoch + 1;
+            epoch.inc_epoch();
+            let next_epoch = epoch.next_epoch();
             if index == 0 {
                 storage_1.init_for_test(epoch).await.unwrap();
                 storage_2.init_for_test(epoch).await.unwrap();
@@ -850,7 +855,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 1;
+        epoch.inc_epoch();
         // to update version for hummock_storage
         global_storage.wait_version(version).await;
 
@@ -1049,7 +1054,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 1;
+        epoch.inc_epoch();
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1241,7 +1246,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        epoch += 1;
+        epoch.inc_epoch();
         // to update version for hummock_storage
         storage.wait_version(version).await;
 
@@ -1313,7 +1318,8 @@ pub(crate) mod tests {
         let mut local = storage
             .new_local(NewLocalOptions::for_test(existing_table_id.into()))
             .await;
-        local.init_for_test(130).await.unwrap();
+        let epoch = test_epoch(130);
+        local.init_for_test(epoch).await.unwrap();
 
         local.flush().await.unwrap();
         // TODO: seal with table watermark like the following code
@@ -1330,7 +1336,7 @@ pub(crate) mod tests {
         //     .unwrap();
         local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
-        flush_and_commit(&hummock_meta_client, &storage, 130).await;
+        flush_and_commit(&hummock_meta_client, &storage, epoch).await;
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
@@ -1585,15 +1591,15 @@ pub(crate) mod tests {
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let mut data = Vec::with_capacity(KEY_COUNT);
-        let mut last_epoch = 400;
+        let mut last_epoch = test_epoch(400);
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 2000, 400)
+                (last_k + 2000, test_epoch(400))
             } else if rand_v < 5 {
-                (last_k, last_epoch - 1)
+                (last_k, last_epoch - test_epoch(1))
             } else {
-                (last_k + 1, 400)
+                (last_k + 1, test_epoch(400))
             };
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
@@ -1614,7 +1620,7 @@ pub(crate) mod tests {
         let mut data3 = Vec::with_capacity(KEY_COUNT);
         let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
-        let max_epoch = std::cmp::min(300, last_epoch - 1);
+        let max_epoch = std::cmp::min(test_epoch(300), last_epoch - test_epoch(1));
         last_epoch = max_epoch;
 
         for _ in 0..KEY_COUNT * 4 {
@@ -1622,7 +1628,7 @@ pub(crate) mod tests {
             let (k, epoch) = if rand_v == 0 {
                 (last_k + 1000, max_epoch)
             } else if rand_v < 5 {
-                (last_k, last_epoch - 1)
+                (last_k, last_epoch - test_epoch(1))
             } else {
                 (last_k + 1, max_epoch)
             };
@@ -1650,11 +1656,12 @@ pub(crate) mod tests {
                 .as_secs(),
         );
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
+        let epoch1 = test_epoch(400);
         for start_idx in 0..3 {
             let base = start_idx * KEY_COUNT;
             for k in 0..KEY_COUNT / 3 {
                 let key = (k + base).to_be_bytes().to_vec();
-                let key = FullKey::new(TableId::new(1), TableKey(key), 400);
+                let key = FullKey::new(TableId::new(1), TableKey(key), epoch1);
                 let rand_v = rng.next_u32() % 10;
                 let v = if rand_v == 1 {
                     HummockValue::delete()
@@ -1666,9 +1673,10 @@ pub(crate) mod tests {
         }
 
         let mut data2 = Vec::with_capacity(KEY_COUNT);
+        let epoch2 = test_epoch(300);
         for k in 0..KEY_COUNT * 4 {
             let key = k.to_be_bytes().to_vec();
-            let key = FullKey::new(TableId::new(1), TableKey(key), 300);
+            let key = FullKey::new(TableId::new(1), TableKey(key), epoch2);
             let v = HummockValue::put(format!("sst2-{}", 300).into_bytes());
             data2.push((key, v));
         }
@@ -1727,14 +1735,15 @@ pub(crate) mod tests {
                 None,
             );
             let mut last_k: u64 = 1;
-            let init_epoch = 100 * object_id;
+            let init_epoch = test_epoch(100 * object_id);
             let mut last_epoch = init_epoch;
+
             for idx in 0..KEY_COUNT {
                 let rand_v = rng.next_u32() % 10;
                 let (k, epoch) = if rand_v == 0 {
                     (last_k + 1000 * object_id, init_epoch)
                 } else if rand_v < 5 {
-                    (last_k, last_epoch - 1)
+                    (last_k, last_epoch.prev_epoch())
                 } else {
                     (last_k + 1, init_epoch)
                 };
@@ -1846,14 +1855,14 @@ pub(crate) mod tests {
             let key_count = KEY_COUNT / VirtualNode::COUNT * 2;
             for vnode_id in 0..VirtualNode::COUNT / 2 {
                 let mut last_k: u64 = 1;
-                let init_epoch = 100 * object_id;
+                let init_epoch = test_epoch(100 * object_id);
                 let mut last_epoch = init_epoch;
                 for idx in 0..key_count {
                     let rand_v = rng.next_u32() % 10;
                     let (k, epoch) = if rand_v == 0 {
                         (last_k + 1000 * object_id, init_epoch)
                     } else if rand_v < 5 {
-                        (last_k, last_epoch - 1)
+                        (last_k, last_epoch.prev_epoch())
                     } else {
                         (last_k + 1, init_epoch)
                     };
@@ -1910,7 +1919,7 @@ pub(crate) mod tests {
                     watermarks: vec![
                         VnodeWatermark::new(bitmap.clone(), watermark_key.clone()).to_protobuf()
                     ],
-                    epoch: 500,
+                    epoch: test_epoch(500),
                 }],
                 is_ascending: true,
             },

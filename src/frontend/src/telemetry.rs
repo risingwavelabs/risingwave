@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use prost::Message;
+use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
-    TelemetryResult,
+    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +55,14 @@ pub(crate) struct FrontendTelemetryReport {
     base: TelemetryReportBase,
 }
 
-impl TelemetryReport for FrontendTelemetryReport {}
+impl TelemetryToProtobuf for FrontendTelemetryReport {
+    fn to_pb_bytes(self) -> Vec<u8> {
+        let pb_report = risingwave_pb::telemetry::FrontendReport {
+            base: Some(self.base.into()),
+        };
+        pb_report.encode_to_vec()
+    }
+}
 
 impl FrontendTelemetryReport {
     pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {

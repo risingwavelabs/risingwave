@@ -27,6 +27,7 @@ itertools = "0.12"
 maplit = "1.0.2"
 pprof = { version = "0.13", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
+prost = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
@@ -63,7 +64,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 futures-async-stream = { workspace = true }
 rand = "0.8"
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 
 [lints]

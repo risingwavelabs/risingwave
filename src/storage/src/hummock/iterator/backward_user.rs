@@ -300,8 +300,8 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::prev_key;
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -884,7 +884,7 @@ mod tests {
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
-                let time: HummockEpoch = rng.gen_range(prev_time..=(prev_time + 1000));
+                let time: HummockEpoch = test_epoch(rng.gen_range(prev_time..=(prev_time + 1000)));
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
@@ -906,7 +906,7 @@ mod tests {
                             .insert(Reverse(time), HummockValue::put(Bytes::from(value)));
                     }
                 }
-                prev_time = time + 1;
+                prev_time = time.next_epoch();
             }
         }
         let sstable_store = mock_sstable_store();
@@ -1070,7 +1070,8 @@ mod tests {
 
         let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
 
-        let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
+        let min_count = (TEST_KEYS_COUNT / 5) as u64;
+        let min_epoch = test_epoch(min_count);
         let mi = MergeIterator::new(backward_iters);
         let mut ui = BackwardUserIterator::with_min_epoch(mi, (Unbounded, Unbounded), min_epoch);
         ui.rewind().await.unwrap();
@@ -1085,7 +1086,7 @@ mod tests {
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
+        let expect_count = TEST_KEYS_COUNT - min_count as usize;
         assert_eq!(i, expect_count);
     }
 }
