@@ -16,8 +16,7 @@ use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
-    TelemetryResult,
+    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,22 +60,12 @@ impl TelemetryToProtobuf for CompactorTelemetryReport {
     }
 }
 
-impl TelemetryToProtobuf for CompactorTelemetryReport {
-    fn to_pb_bytes(self) -> Vec<u8> {
-        let pb_report = risingwave_pb::telemetry::CompactorReport {
-            base: Some(self.base.into()),
-        };
-        pb_report.encode_to_vec()
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub(crate) struct CompactorTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
 }
 
-impl TelemetryReport for CompactorTelemetryReport {}
 impl CompactorTelemetryReport {
     pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {
         Self {
