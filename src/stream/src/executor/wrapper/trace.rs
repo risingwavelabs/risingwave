@@ -21,7 +21,6 @@ use tracing::{Instrument, Span};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{ActorContextRef, ExecutorInfo, Message, MessageStream};
-use crate::task::ActorId;
 
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -34,12 +33,10 @@ pub async fn trace(
     let actor_id_str = actor_ctx.id.to_string();
     let fragment_id_str = actor_ctx.fragment_id.to_string();
 
-    let span_name = pretty_identity(&info.identity, actor_ctx.id);
-
     let new_span = || {
         tracing::info_span!(
             "executor",
-            "otel.name" = span_name,
+            "otel.name" = info.identity,
             "message" = tracing::field::Empty,    // record later
             "chunk_size" = tracing::field::Empty, // record later
         )
@@ -104,21 +101,13 @@ pub async fn trace(
     }
 }
 
-fn pretty_identity(identity: &str, actor_id: ActorId) -> String {
-    format!("{} (actor {})", identity, actor_id)
-}
-
 /// Streams wrapped by `instrument_await_tree` will be able to print the spans of the
 /// executors in the stack trace through `await-tree`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn instrument_await_tree(
-    info: Arc<ExecutorInfo>,
-    actor_id: ActorId,
-    input: impl MessageStream,
-) {
+pub async fn instrument_await_tree(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     pin_mut!(input);
 
-    let span: await_tree::Span = pretty_identity(&info.identity, actor_id).into();
+    let span: await_tree::Span = info.identity.clone().into();
 
     while let Some(message) = input
         .next()

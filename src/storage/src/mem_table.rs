@@ -21,7 +21,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
@@ -350,7 +350,7 @@ impl KeyOp {
 #[try_stream(ok = StateStoreIterItem, error = StorageError)]
 pub(crate) async fn merge_stream<'a>(
     mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
-    inner_stream: impl StateStoreReadIterStream,
+    inner_stream: impl Stream<Item = StorageResult<StateStoreIterItem>> + 'static,
     table_id: TableId,
     epoch: u64,
 ) {
@@ -458,7 +458,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 }
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -488,18 +488,18 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         async move {
-            let stream = self
+            let iter = self
                 .inner
                 .iter(key_range.clone(), self.epoch(), read_options)
                 .await?;
-            Ok(merge_stream(
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
                 self.mem_table.iter(key_range),
-                stream,
+                iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
-            ))
+            ))))
         }
     }
 

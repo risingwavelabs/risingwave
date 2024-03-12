@@ -756,6 +756,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
+    use futures::{Stream, TryStreamExt};
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::system_param::reader::SystemParamsRead;
@@ -768,16 +769,20 @@ mod tests {
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
+    use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
     use risingwave_pb::stream_service::{
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
+        DropActorsResponse, UpdateActorsResponse, *,
     };
+    use tokio::spawn;
+    use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot::Sender;
     #[cfg(feature = "failpoints")]
     use tokio::sync::Notify;
     use tokio::task::JoinHandle;
     use tokio::time::sleep;
-    use tonic::{Request, Response, Status};
+    use tokio_stream::wrappers::UnboundedReceiverStream;
+    use tonic::{Request, Response, Status, Streaming};
 
     use super::*;
     use crate::barrier::{GlobalBarrierManager, StreamRpcManager};
@@ -805,6 +810,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl StreamService for FakeStreamService {
+        type StreamingControlStreamStream =
+            impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
+
         async fn update_actors(
             &self,
             request: Request<risingwave_pb::stream_service::UpdateActorsRequest>,
@@ -856,29 +864,46 @@ mod tests {
             Ok(Response::new(DropActorsResponse::default()))
         }
 
-        async fn force_stop_actors(
+        async fn streaming_control_stream(
             &self,
-            _request: Request<ForceStopActorsRequest>,
-        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
-            self.inner.actor_streams.lock().unwrap().clear();
-            self.inner.actor_ids.lock().unwrap().clear();
-            self.inner.actor_infos.lock().unwrap().clear();
-
-            Ok(Response::new(ForceStopActorsResponse::default()))
-        }
-
-        async fn inject_barrier(
-            &self,
-            _request: Request<InjectBarrierRequest>,
-        ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
-            Ok(Response::new(InjectBarrierResponse::default()))
-        }
-
-        async fn barrier_complete(
-            &self,
-            _request: Request<BarrierCompleteRequest>,
-        ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
-            Ok(Response::new(BarrierCompleteResponse::default()))
+            request: Request<Streaming<StreamingControlStreamRequest>>,
+        ) -> Result<Response<Self::StreamingControlStreamStream>, Status> {
+            let (tx, rx) = unbounded_channel();
+            let mut request_stream = request.into_inner();
+            let inner = self.inner.clone();
+            let _join_handle = spawn(async move {
+                while let Ok(Some(request)) = request_stream.try_next().await {
+                    match request.request.unwrap() {
+                        streaming_control_stream_request::Request::Init(_) => {
+                            inner.actor_streams.lock().unwrap().clear();
+                            inner.actor_ids.lock().unwrap().clear();
+                            inner.actor_infos.lock().unwrap().clear();
+                            let _ = tx.send(Ok(StreamingControlStreamResponse {
+                                response: Some(streaming_control_stream_response::Response::Init(
+                                    InitResponse {},
+                                )),
+                            }));
+                        }
+                        streaming_control_stream_request::Request::InjectBarrier(_) => {
+                            let _ = tx.send(Ok(StreamingControlStreamResponse {
+                                response: Some(
+                                    streaming_control_stream_response::Response::CompleteBarrier(
+                                        BarrierCompleteResponse {
+                                            request_id: "".to_string(),
+                                            status: None,
+                                            create_mview_progress: vec![],
+                                            synced_sstables: vec![],
+                                            worker_id: 0,
+                                            table_watermarks: Default::default(),
+                                        },
+                                    ),
+                                ),
+                            }));
+                        }
+                    }
+                }
+            });
+            Ok(Response::new(UnboundedReceiverStream::new(rx)))
         }
 
         async fn wait_epoch_commit(

@@ -757,11 +757,7 @@ def section_streaming(outer_panels):
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
                     [
                         panels.target(
-                            f"{metric('source_kafka_high_watermark')}",
-                            "source={{source_id}} partition={{partition}}",
-                        ),
-                        panels.target(
-                            f"{metric('source_latest_message_id')}",
+                            f"clamp_min({metric('source_kafka_high_watermark')} - on(source_id, partition) group_right() {metric('source_latest_message_id')}, 0)",
                             "source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
                         ),
                     ],
@@ -3258,12 +3254,26 @@ def section_grpc_hummock_meta_client(outer_panels):
     ]
 
 
-def section_kafka_native_metrics(outer_panels):
+def section_kafka_metrics(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Kafka Native Metrics",
+            "Kafka Metrics",
             [
+                panels.timeseries_count(
+                    "Kafka high watermark and source latest message",
+                    "Kafka high watermark by source and partition and source latest message by partition, source and actor",
+                    [
+                        panels.target(
+                            f"{metric('source_kafka_high_watermark')}",
+                            "high watermark: source={{source_id}} partition={{partition}}",
+                        ),
+                        panels.target(
+                            f"{metric('source_latest_message_id')}",
+                            "latest msg: source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Message Count in Producer Queue",
                     "Current number of messages in producer queues",
@@ -4323,7 +4333,7 @@ dashboard = Dashboard(
         *section_memory_manager(panels),
         *section_connector_node(panels),
         *section_sink_metrics(panels),
-        *section_kafka_native_metrics(panels),
+        *section_kafka_metrics(panels),
         *section_network_connection(panels),
         *section_iceberg_metrics(panels),
         *section_udf(panels),

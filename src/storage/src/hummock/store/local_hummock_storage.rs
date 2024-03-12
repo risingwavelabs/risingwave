@@ -135,7 +135,7 @@ impl LocalHummockStorage {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
@@ -163,7 +163,7 @@ impl LocalHummockStorage {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
+    ) -> StorageResult<LocalHummockStorageIterator<'_>> {
         let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
@@ -205,7 +205,7 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type Iter = HummockStorageIterator;
 
     fn get(
         &self,
@@ -222,7 +222,7 @@ impl StateStoreRead for LocalHummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         assert!(epoch <= self.epoch());
         self.iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
@@ -230,7 +230,7 @@ impl StateStoreRead for LocalHummockStorage {
 }
 
 impl LocalStateStore for LocalHummockStorage {
-    type IterStream<'a> = StreamTypeOfIter<LocalHummockStorageIterator<'a>>;
+    type Iter<'a> = LocalHummockStorageIterator<'a>;
 
     fn may_exist(
         &self,
@@ -258,7 +258,7 @@ impl LocalStateStore for LocalHummockStorage {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream<'_>> {
+    ) -> StorageResult<Self::Iter<'_>> {
         let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
         assert_eq!(
             r_vnode_exclusive - l_vnode_inclusive,
@@ -593,19 +593,21 @@ pub type LocalHummockStorageIterator<'a> = HummockStorageIteratorInner<'a>;
 
 pub struct HummockStorageIteratorInner<'a> {
     inner: UserIterator<HummockStorageIteratorPayloadInner<'a>>,
+    initial_read: bool,
     stats_guard: IterLocalMetricsGuard,
 }
 
 impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
-    type Item = StateStoreIterItem;
-
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
         let iter = &mut self.inner;
+        if !self.initial_read {
+            self.initial_read = true;
+        } else {
+            iter.next().await?;
+        }
 
         if iter.is_valid() {
-            let kv = (iter.key().clone(), iter.value().clone());
-            iter.next().await?;
-            Ok(Some(kv))
+            Ok(Some((iter.key(), iter.value())))
         } else {
             Ok(None)
         }
@@ -621,6 +623,7 @@ impl<'a> HummockStorageIteratorInner<'a> {
     ) -> Self {
         Self {
             inner,
+            initial_read: false,
             stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
     }
