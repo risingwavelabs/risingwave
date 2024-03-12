@@ -17,7 +17,6 @@ package com.risingwave.connector.source.common;
 import com.mongodb.ConnectionString;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.bson.BsonDocument;
@@ -35,11 +34,10 @@ public class MongoDbValidator extends DatabaseValidator {
 
     ConnectionString connStr;
     MongoClient client;
-    final static String USERs = "users";
-    final static String ROLES = "roles";
-    final static String INHERITED_ROLES = "inheritedRoles";
-    final static String INHERITED_PRIVILEGES = "inheritedPrivileges";
-
+    static final String USERs = "users";
+    static final String ROLES = "roles";
+    static final String INHERITED_ROLES = "inheritedRoles";
+    static final String INHERITED_PRIVILEGES = "inheritedPrivileges";
 
     public MongoDbValidator(Map<String, String> userProps) {
         this.mongodbUrl = userProps.get("mongodb.url");
@@ -111,7 +109,8 @@ public class MongoDbValidator extends DatabaseValidator {
                 hasReadForAdmin = checkReadRoleForAdminDb(roles);
                 if (!hasReadForAdmin) {
                     // check inherited roles
-                    List<Document> inheriRoles = user.getEmbedded(List.of(INHERITED_ROLES), List.class);
+                    List<Document> inheriRoles =
+                            user.getEmbedded(List.of(INHERITED_ROLES), List.class);
                     if (!inheriRoles.isEmpty()) {
                         hasReadForAdmin = checkReadRoleForAdminDb(inheriRoles);
                     }
@@ -124,7 +123,8 @@ public class MongoDbValidator extends DatabaseValidator {
 
             // When change streams are used (the default) the user also
             // must have cluster-wide privilege actions find and changeStream.
-            List<Document> inheriPrivis = user.getEmbedded(List.of(INHERITED_PRIVILEGES), List.class);
+            List<Document> inheriPrivis =
+                    user.getEmbedded(List.of(INHERITED_PRIVILEGES), List.class);
             if (!inheriPrivis.isEmpty()) {
                 for (Document privi : inheriPrivis) {
                     // TODO:
@@ -134,7 +134,8 @@ public class MongoDbValidator extends DatabaseValidator {
 
         if (isShardedCluster) {
             // TODO: user must able to read the config database
-            // the user must also be able to read the config database in the configuration server of a sharded cluster
+            // the user must also be able to read the config database in the configuration server of
+            // a sharded cluster
             // and must have listDatabases privilege action.
         }
     }

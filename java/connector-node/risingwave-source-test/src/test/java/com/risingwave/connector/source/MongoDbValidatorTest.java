@@ -14,8 +14,8 @@
 
 package com.risingwave.connector.source;
 
-import java.util.HashMap;
 import com.risingwave.connector.source.common.MongoDbValidator;
+import java.util.HashMap;
 import org.junit.Ignore;
 import org.junit.Test;
 

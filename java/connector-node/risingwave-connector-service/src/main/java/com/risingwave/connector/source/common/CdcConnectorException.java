@@ -17,8 +17,7 @@ package com.risingwave.connector.source.common;
 public class CdcConnectorException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 
-    public CdcConnectorException() {
-    }
+    public CdcConnectorException() {}
 
     public CdcConnectorException(String message) {
         super(message);
@@ -32,7 +31,11 @@ public class CdcConnectorException extends RuntimeException {
         super(cause);
     }
 
-    public CdcConnectorException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
+    public CdcConnectorException(
+            String message,
+            Throwable cause,
+            boolean enableSuppression,
+            boolean writableStackTrace) {
         super(message, cause, enableSuppression, writableStackTrace);
     }
 }
