@@ -34,7 +34,7 @@ public class MongoDbValidator extends DatabaseValidator {
 
     ConnectionString connStr;
     MongoClient client;
-    static final String USERs = "users";
+    static final String USERS = "users";
     static final String ROLES = "roles";
     static final String INHERITED_ROLES = "inheritedRoles";
     static final String INHERITED_PRIVILEGES = "inheritedPrivileges";
@@ -94,14 +94,16 @@ public class MongoDbValidator extends DatabaseValidator {
             Document ret = authDb.runCommand(command);
             LOG.info("userInfo: {}", ret.toJson());
 
-            List<Document> users = ret.getEmbedded(List.of(USERs), List.class);
+            List<Document> users = ret.getEmbedded(List.of(USERS), List.class);
             LOG.info("mongodb users => {}", users);
             if (users.isEmpty()) {
                 throw new CdcConnectorException("user not found in the database");
             }
 
+            // https://debezium.io/documentation/reference/stable/connectors/mongodb.html#setting-up-mongodb
+            // You must also have a MongoDB user that has the appropriate roles to read the admin
+            // database where the oplog can be read.   boolean hasReadForAdmin = false;
             Document user = users.get(0);
-            // check roles
             List<Document> roles = user.getEmbedded(List.of(ROLES), List.class);
             boolean hasReadForAdmin = false;
             if (!roles.isEmpty()) {
@@ -135,8 +137,7 @@ public class MongoDbValidator extends DatabaseValidator {
         if (isShardedCluster) {
             // TODO: user must able to read the config database
             // the user must also be able to read the config database in the configuration server of
-            // a sharded cluster
-            // and must have listDatabases privilege action.
+            // a sharded cluster and must have listDatabases privilege action.
         }
     }
 

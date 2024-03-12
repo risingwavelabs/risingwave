@@ -27,6 +27,6 @@ public class MongoDbValidatorTest {
         var userProps = new HashMap<String, String>();
         userProps.put("mongodb.url", "mongodb://rwcdc:123456@localhost:27017/?authSource=admin");
         MongoDbValidator validator = new MongoDbValidator(userProps);
-        validator.validateAll(false);
+        validator.validateAll();
     }
 }
