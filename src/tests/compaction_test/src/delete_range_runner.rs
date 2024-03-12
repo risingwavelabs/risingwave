@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
@@ -438,7 +438,7 @@ impl NormalState {
                 ReadOptions {
                     ignore_range_tombstone,
                     table_id: self.table_id,
-                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -464,7 +464,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -495,7 +495,7 @@ impl CheckState for NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )

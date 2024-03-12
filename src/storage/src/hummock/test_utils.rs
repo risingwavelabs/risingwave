@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -322,7 +322,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         kv_iter,
         range_tombstones,
         sstable_store.clone(),
-        CachePolicy::Fill(LruContext::HighPriority),
+        CachePolicy::Fill(CacheContext::Default),
     )
     .await
 }

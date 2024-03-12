@@ -23,7 +23,8 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::memory::{
-    CacheEventListener, Key, LruCache, LruCacheConfig, LruCacheEntry, LruConfig, LruContext, Value,
+    Cache, CacheContext, CacheEntry, CacheEventListener, EntryState, Key, LruCacheConfig,
+    LruConfig, Value,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
@@ -56,7 +57,7 @@ const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
-pub type TableHolder = LruCacheEntry<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>;
+pub type TableHolder = CacheEntry<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -64,7 +65,7 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(LruContext),
+    Fill(CacheContext),
     /// Fill file cache only.
     FillFileCache,
     /// Read the cache but not fill the cache afterwards.
@@ -73,7 +74,7 @@ pub enum CachePolicy {
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(LruContext::HighPriority)
+        CachePolicy::Fill(CacheContext::Default)
     }
 }
 
@@ -116,14 +117,12 @@ impl BlockCacheEventListener {
     }
 }
 
-impl CacheEventListener<(HummockSstableObjectId, u64), Box<Block>, LruContext>
-    for BlockCacheEventListener
-{
+impl CacheEventListener<(HummockSstableObjectId, u64), Box<Block>> for BlockCacheEventListener {
     fn on_release(
         &self,
         key: (HummockSstableObjectId, u64),
         value: Box<Block>,
-        _context: LruContext,
+        _context: CacheContext,
         _charges: usize,
     ) {
         let key = SstableBlockIndex {
@@ -150,14 +149,12 @@ impl From<FileCache<HummockSstableObjectId, CachedSstable>> for MetaCacheEventLi
     }
 }
 
-impl CacheEventListener<HummockSstableObjectId, Box<Sstable>, LruContext>
-    for MetaCacheEventListener
-{
+impl CacheEventListener<HummockSstableObjectId, Box<Sstable>> for MetaCacheEventListener {
     fn on_release(
         &self,
         key: HummockSstableObjectId,
         value: Box<Sstable>,
-        _context: LruContext,
+        _context: CacheContext,
         _charges: usize,
     ) {
         // temporarily avoid spawn task while task drop with madsim
@@ -171,9 +168,9 @@ pub enum CachedOrShared<K, V, L>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, Box<V>, LruContext>,
+    L: CacheEventListener<K, Box<V>>,
 {
-    Cached(LruCacheEntry<K, Box<V>, L>),
+    Cached(CacheEntry<K, Box<V>, L>),
     Shared(Arc<V>),
 }
 
@@ -181,7 +178,7 @@ impl<K, V, L> Deref for CachedOrShared<K, V, L>
 where
     K: Key,
     V: Value,
-    L: CacheEventListener<K, Box<V>, LruContext>,
+    L: CacheEventListener<K, Box<V>>,
 {
     type Target = V;
 
@@ -212,7 +209,7 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     // TODO(MrCroxx): use no hash random state
-    meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>>,
+    meta_cache: Arc<Cache<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>>,
 
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
@@ -245,7 +242,8 @@ impl SstableStore {
                 config.state_store_metrics.clone(),
             ),
         );
-        let meta_cache = Arc::new(LruCache::new(LruCacheConfig {
+        // TODO(MrCroxx): support other cache algorithm
+        let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: config.meta_cache_capacity,
             shards: 1 << meta_cache_shard_bits,
             eviction_config: LruConfig {
@@ -279,7 +277,8 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache = Arc::new(LruCache::new(LruCacheConfig {
+        // TODO(MrCroxx): support other cache algorithm
+        let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: meta_cache_capacity,
             shards: 1,
             eviction_config: LruConfig {
@@ -460,7 +459,7 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    LruContext::LowPriority
+                    CacheContext::LruPriorityLow
                 };
                 self.block_cache
                     .insert(object_id, idx as u64, Box::new(block), cache_priority)
@@ -681,7 +680,7 @@ impl SstableStore {
                     // TODO(MrCroxx): Make meta cache receives Arc<Sstable> to reduce copy?
                     let sst: Box<Sstable> = sst.into();
                     let charge = sst.estimate_size();
-                    return Ok((sst, charge, Some(LruContext::HighPriority)));
+                    return Ok((sst, charge, CacheContext::Default));
                 }
 
                 let now = Instant::now();
@@ -692,15 +691,12 @@ impl SstableStore {
                 let charge = sst.estimate_size();
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                Ok((Box::new(sst), charge, Some(LruContext::HighPriority)))
+                Ok((Box::new(sst), charge, CacheContext::Default))
             }
         });
 
-        match &entry {
-            foyer::memory::Entry::Miss(_) | foyer::memory::Entry::Wait(_) => {
-                stats.cache_meta_block_miss += 1;
-            }
-            _ => {}
+        if matches! { entry.state(), EntryState::Wait | EntryState::Miss } {
+            stats.cache_meta_block_miss += 1;
         }
 
         stats.cache_meta_block_total += 1;
@@ -733,7 +729,7 @@ impl SstableStore {
             object_id,
             Box::new(sst),
             charge,
-            LruContext::HighPriority,
+            CacheContext::Default,
         );
     }
 
@@ -747,7 +743,7 @@ impl SstableStore {
             filter.extend([(object_id, usize::MAX), (object_id, block_index as usize)]);
         }
         self.block_cache
-            .insert(object_id, block_index, block, LruContext::HighPriority);
+            .insert(object_id, block_index, block, CacheContext::Default);
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {

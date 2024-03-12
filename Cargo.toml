@@ -73,7 +73,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "960dddd" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "d227652" }
 await-tree = "0.1.1"
 aws-config = { version = "1", default-features = false, features = [
   "behavior-version-latest",

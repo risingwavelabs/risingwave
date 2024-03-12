@@ -442,7 +442,7 @@ impl Clone for XorFilterReader {
 
 #[cfg(test)]
 mod tests {
-    use foyer::memory::LruContext;
+    use foyer::memory::CacheContext;
     use rand::RngCore;
     use risingwave_hummock_sdk::EpochWithGap;
 
@@ -461,7 +461,7 @@ mod tests {
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(LruContext::HighPriority),
+            policy: CachePolicy::Fill(CacheContext::Default),
         };
         let opts = SstableBuilderOptions {
             capacity: 0,
@@ -509,7 +509,7 @@ mod tests {
                     .get_block_response(
                         &sstable,
                         idx,
-                        CachePolicy::Fill(LruContext::HighPriority),
+                        CachePolicy::Fill(CacheContext::Default),
                         &mut stat,
                     )
                     .await

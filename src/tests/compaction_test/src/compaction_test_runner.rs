@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
@@ -633,7 +633,7 @@ async fn open_hummock_iters(
                 epoch,
                 ReadOptions {
                     table_id: TableId { table_id },
-                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )

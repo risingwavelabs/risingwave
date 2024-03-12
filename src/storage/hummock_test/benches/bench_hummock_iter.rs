@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::{pin_mut, TryStreamExt};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockEpoch;
@@ -109,7 +109,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     ReadOptions {
                         ignore_range_tombstone: true,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 ))

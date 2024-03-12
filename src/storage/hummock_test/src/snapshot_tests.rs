@@ -15,7 +15,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::TryStreamExt;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
@@ -50,7 +50,7 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-                    cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )

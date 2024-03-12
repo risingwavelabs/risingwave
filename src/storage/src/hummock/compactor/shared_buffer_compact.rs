@@ -17,7 +17,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -497,7 +497,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,

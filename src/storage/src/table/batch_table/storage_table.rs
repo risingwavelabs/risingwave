@@ -20,7 +20,7 @@ use std::sync::Arc;
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -359,7 +359,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
@@ -446,8 +446,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ) {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(LruContext::LowPriority),
-            _ => CachePolicy::Fill(LruContext::HighPriority),
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheContext::LruPriorityLow),
+            _ => CachePolicy::Fill(CacheContext::Default),
         };
 
         let table_key_ranges = {

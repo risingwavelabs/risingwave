@@ -17,17 +17,17 @@ use std::sync::Arc;
 
 use ahash::RandomState;
 use await_tree::InstrumentAwait;
-use foyer::memory::{LruCache, LruCacheConfig, LruCacheEntry, LruConfig, LruContext};
+use foyer::memory::{
+    Cache, CacheContext, CacheEntry, Entry, EntryState, LruCacheConfig, LruConfig,
+};
 use futures::Future;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use tokio::sync::oneshot::Receiver;
-use tokio::task::JoinHandle;
 
 use super::{Block, BlockCacheEventListener, HummockResult};
 use crate::hummock::HummockError;
 
 type CachedBlockEntry =
-    LruCacheEntry<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>;
+    CacheEntry<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
 
@@ -60,7 +60,7 @@ impl BlockHolder {
     }
 
     pub fn from_cached_block(entry: CachedBlockEntry) -> Self {
-        let ptr = entry.as_ref() as *const _;
+        let ptr = entry.deref().as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
             block: ptr,
@@ -81,34 +81,36 @@ unsafe impl Sync for BlockHolder {}
 
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>>,
+    inner: Cache<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>,
 }
 
 pub enum BlockResponse {
     Block(BlockHolder),
-    WaitPendingRequest(Receiver<CachedBlockEntry>),
-    Miss(JoinHandle<Result<CachedBlockEntry, HummockError>>),
+    Entry(Entry<(HummockSstableObjectId, u64), Box<Block>, HummockError, BlockCacheEventListener>),
 }
 
 impl BlockResponse {
     pub async fn wait(self) -> HummockResult<BlockHolder> {
-        match self {
-            BlockResponse::Block(block_holder) => Ok(block_holder),
-            BlockResponse::WaitPendingRequest(receiver) => receiver
+        let entry = match self {
+            BlockResponse::Block(block) => return Ok(block),
+            BlockResponse::Entry(entry) => entry,
+        };
+        match entry.state() {
+            EntryState::Hit => entry.await.map(BlockHolder::from_cached_block),
+            EntryState::Wait => entry
                 .verbose_instrument_await("wait_pending_fetch_block")
                 .await
-                .map_err(|recv_error| recv_error.into())
                 .map(BlockHolder::from_cached_block),
-            BlockResponse::Miss(join_handle) => join_handle
+            EntryState::Miss => entry
                 .verbose_instrument_await("fetch_block")
                 .await
-                .unwrap()
                 .map(BlockHolder::from_cached_block),
         }
     }
 }
 
 impl BlockCache {
+    // TODO(MrCroxx): support other cache algorithm
     pub fn new(
         capacity: usize,
         mut max_shard_bits: usize,
@@ -123,7 +125,7 @@ impl BlockCache {
         }
         let shards = 1 << max_shard_bits;
 
-        let cache = LruCache::new(LruCacheConfig {
+        let cache = Cache::lru(LruCacheConfig {
             capacity,
             shards,
             eviction_config: LruConfig {
@@ -134,9 +136,7 @@ impl BlockCache {
             event_listener,
         });
 
-        Self {
-            inner: Arc::new(cache),
-        }
+        Self { inner: cache }
     }
 
     pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
@@ -155,14 +155,14 @@ impl BlockCache {
         object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Box<Block>,
-        priority: LruContext,
+        context: CacheContext,
     ) -> BlockHolder {
         let charge = block.capacity();
         BlockHolder::from_cached_block(self.inner.insert_with_context(
             (object_id, block_idx),
             block,
             charge,
-            priority,
+            context,
         ))
     }
 
@@ -170,7 +170,7 @@ impl BlockCache {
         &self,
         object_id: HummockSstableObjectId,
         block_idx: u64,
-        priority: LruContext,
+        context: CacheContext,
         mut fetch_block: F,
     ) -> BlockResponse
     where
@@ -184,18 +184,11 @@ impl BlockCache {
             async move {
                 let block = f.await?;
                 let len = block.capacity();
-                Ok::<_, HummockError>((block, len, Some(priority)))
+                Ok::<_, HummockError>((block, len, context))
             }
         });
 
-        match entry {
-            foyer::memory::Entry::Hit(entry) => {
-                BlockResponse::Block(BlockHolder::from_cached_block(entry))
-            }
-            foyer::memory::Entry::Wait(receiver) => BlockResponse::WaitPendingRequest(receiver),
-            foyer::memory::Entry::Miss(join_handle) => BlockResponse::Miss(join_handle),
-            foyer::memory::Entry::Invalid => unreachable!(),
-        }
+        BlockResponse::Entry(entry)
     }
 
     pub fn size(&self) -> usize {

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use expect_test::expect;
-use foyer::memory::LruContext;
+use foyer::memory::CacheContext;
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -50,7 +50,7 @@ async fn test_empty_read_v2() {
             u64::MAX,
             ReadOptions {
                 table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -66,7 +66,7 @@ async fn test_empty_read_v2() {
             u64::MAX,
             ReadOptions {
                 table_id: TableId { table_id: 2333 },
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -171,7 +171,7 @@ async fn test_basic_inner(
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -184,7 +184,7 @@ async fn test_basic_inner(
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -199,7 +199,7 @@ async fn test_basic_inner(
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -228,7 +228,7 @@ async fn test_basic_inner(
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -258,7 +258,7 @@ async fn test_basic_inner(
             anchor.clone(),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -272,7 +272,7 @@ async fn test_basic_inner(
             gen_key_from_str(VirtualNode::ZERO, "ff"),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -292,7 +292,7 @@ async fn test_basic_inner(
             ),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -307,7 +307,7 @@ async fn test_basic_inner(
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -322,7 +322,7 @@ async fn test_basic_inner(
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -343,7 +343,7 @@ async fn test_basic_inner(
             epoch2,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -365,7 +365,7 @@ async fn test_basic_inner(
             epoch3,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -388,7 +388,7 @@ async fn test_basic_inner(
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -401,7 +401,7 @@ async fn test_basic_inner(
             gen_key_from_str(VirtualNode::ZERO, "dd"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -598,7 +598,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -613,7 +613,7 @@ async fn test_reload_storage() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -641,7 +641,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -663,7 +663,7 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -678,7 +678,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -693,7 +693,7 @@ async fn test_reload_storage() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -714,7 +714,7 @@ async fn test_reload_storage() {
             epoch2,
             ReadOptions {
                 prefetch_options: PrefetchOptions::default(),
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -750,7 +750,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "aa"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -765,7 +765,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "bb"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -780,7 +780,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "cc"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -797,7 +797,7 @@ async fn test_reload_storage() {
 //                     ),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                         cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                         ..Default::default()
 //                     },
 //                 )
@@ -882,7 +882,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "aa"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -896,7 +896,7 @@ async fn test_reload_storage() {
 //                     gen_key_from_str(VirtualNode::ZERO, "bb"),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                         cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                         ..Default::default()
 //                     }
 //                 )
@@ -910,7 +910,7 @@ async fn test_reload_storage() {
 //                         gen_key_from_str(VirtualNode::ZERO, "cc"),
 //                         epoch,
 //                         ReadOptions {
-//                             cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                             cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                             ..Default::default()
 //                         }
 //                     )
@@ -926,7 +926,7 @@ async fn test_reload_storage() {
 //                     ),
 //                     epoch,
 //                     ReadOptions {
-//                         cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+//                         cache_policy: CachePolicy::Fill(CacheContext::Default),
 //                         ..Default::default()
 //                     },
 //                 )
@@ -1099,7 +1099,7 @@ async fn test_delete_get_inner(
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             }
         )
@@ -1195,7 +1195,7 @@ async fn test_multiple_epoch_sync_inner(
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch1,
                         ReadOptions {
-                            cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         }
                     )
@@ -1209,7 +1209,7 @@ async fn test_multiple_epoch_sync_inner(
                     gen_key_from_str(VirtualNode::ZERO, "bb"),
                     epoch2,
                     ReadOptions {
-                        cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     }
                 )
@@ -1222,7 +1222,7 @@ async fn test_multiple_epoch_sync_inner(
                         gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch3,
                         ReadOptions {
-                            cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         }
                     )
@@ -1378,7 +1378,7 @@ async fn test_replicated_local_hummock_storage() {
         table_id: TableId {
             table_id: TEST_TABLE_ID.table_id,
         },
-        cache_policy: CachePolicy::Fill(LruContext::HighPriority),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         ..Default::default()
     };
 
