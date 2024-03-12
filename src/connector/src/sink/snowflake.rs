@@ -183,7 +183,12 @@ impl SnowflakeSinkWriter {
             HashMap::new(),
         );
 
-        let s3_client = SnowflakeS3Client::new(config.common.s3_bucket.clone()).await;
+        let s3_client = SnowflakeS3Client::new(
+            config.common.s3_bucket.clone(),
+            config.common.aws_access_key_id.clone(),
+            config.common.aws_secret_access_key.clone(),
+            config.common.aws_region.clone(),
+        ).await;
 
         Self {
             config,
@@ -216,8 +221,8 @@ impl SnowflakeSinkWriter {
         // sink it from external stage (i.e., s3)
     }
 
-    fn at_sink_threshold(&self) {
-        self.counter >= MAX_BATCH_ROW_NUM
+    fn at_sink_threshold(&self) -> bool {
+        self.row_counter >= MAX_BATCH_ROW_NUM
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -265,5 +270,7 @@ impl SinkWriter for SnowflakeSinkWriter {
             // to ensure s3 sink file unique
             self.sink_file_suffix += 1;
         }
+
+        Ok(())
     }
 }
