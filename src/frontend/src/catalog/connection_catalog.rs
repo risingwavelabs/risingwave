@@ -71,7 +71,7 @@ pub(crate) fn resolve_private_link_connection(
 ) -> Result<()> {
     #[allow(irrefutable_let_patterns)]
     if let connection::Info::PrivateLinkService(svc) = &connection.info {
-        if properties.is_kafka_connector() {
+        if !properties.is_kafka_connector() {
             return Err(RwError::from(anyhow!(
                 "Private link is only supported for Kafka connector"
             )));
