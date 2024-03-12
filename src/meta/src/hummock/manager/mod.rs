@@ -1089,7 +1089,8 @@ impl HummockManager {
                             compact_task
                                 .table_vnode_partition
                                 .insert(*table_id, hybrid_vnode_count);
-                        } else if write_throughput > self.env.opts.min_table_split_write_throughput {
+                        } else if write_throughput > self.env.opts.min_table_split_write_throughput
+                        {
                             compact_task.table_vnode_partition.insert(*table_id, 1);
                         }
                     }
