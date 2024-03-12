@@ -1052,21 +1052,26 @@ impl HummockManager {
                 .into_iter()
                 .collect_vec();
 
+                let mut is_large_task = false;
+
+                let hybrid_vnode_count = self.env.opts.hybird_partition_vnode_count;
                 if existing_table_ids.len() == 1 {
-                    let hybrid_vnode_count = self.env.opts.hybird_partition_vnode_count;
                     let default_partition_count = self.env.opts.partition_vnode_count;
                     if compact_task_size > group_config.compaction_config.max_compaction_bytes / 2 {
                         compact_task
                             .table_vnode_partition
                             .insert(existing_table_ids[0], default_partition_count);
+                        is_large_task = true;
                     } else if compact_task_size
                         > group_config.compaction_config.max_bytes_for_level_base / 2
                     {
                         compact_task
                             .table_vnode_partition
                             .insert(existing_table_ids[0], hybrid_vnode_count);
+                        is_large_task = true;
                     }
-                } else {
+                }
+                if !is_large_task {
                     let params = self.env.system_params_reader().await;
                     let barrier_interval_ms = params.barrier_interval_ms() as u64;
                     let checkpoint_secs = std::cmp::max(
@@ -1078,10 +1083,13 @@ impl HummockManager {
                         let write_throughput = history_table_throughput
                             .get(table_id)
                             .map(|que| que.back().cloned().unwrap_or(0))
-                            .unwrap_or(0);
-                        if write_throughput
-                            > checkpoint_secs * self.env.opts.min_table_split_write_throughput
-                        {
+                            .unwrap_or(0)
+                            / checkpoint_secs;
+                        if write_throughput > self.env.opts.table_write_throughput_threshold {
+                            compact_task
+                                .table_vnode_partition
+                                .insert(*table_id, hybrid_vnode_count);
+                        } else if write_throughput > self.env.opts.min_table_split_write_throughput {
                             compact_task.table_vnode_partition.insert(*table_id, 1);
                         }
                     }

@@ -314,14 +314,8 @@ impl DynamicLevelSelectorCore {
             if level_idx < ctx.base_level || level_idx >= self.config.max_level as usize {
                 continue;
             }
-            let upper_level = if level_idx == ctx.base_level {
-                0
-            } else {
-                level_idx - 1
-            };
-            let total_size = level.total_file_size
-                + handlers[upper_level].get_pending_output_file_size(level.level_idx)
-                - handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+            let output_file_size = handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+            let total_size = level.total_file_size.saturating_sub(output_file_size);
             if total_size == 0 {
                 continue;
             }
