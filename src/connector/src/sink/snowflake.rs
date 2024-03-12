@@ -244,7 +244,7 @@ impl SinkWriter for SnowflakeSinkWriter {
 
         if self.at_sink_threshold() {
             self.s3_client.sink_to_s3(self.payload.clone().into(), self.sink_file_suffix).await?;
-            self.http_client.send_request().await?;
+            self.http_client.send_request(self.sink_file_suffix).await?;
             self.reset();
             self.sink_file_suffix += 1;
         }
