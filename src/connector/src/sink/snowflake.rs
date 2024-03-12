@@ -17,16 +17,17 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
-use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use super::encoder::JsonEncoder;
+use super::encoder::{
+    JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+};
 use super::snowflake_connector::{SnowflakeHttpClient, SnowflakeS3Client};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam};
@@ -34,6 +35,7 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
+const MAX_BATCH_NUM: u32 = 1000000;
 
 // TODO: add comments
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -108,7 +110,9 @@ impl Sink for SnowflakeSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-        ).into_log_sink(writer_param.sink_metrics))
+        )
+        .await
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -140,22 +144,74 @@ pub struct SnowflakeSinkWriter {
     http_client: SnowflakeHttpClient,
     /// the client to insert file to external storage (i.e., s3)
     s3_client: SnowflakeS3Client,
+    row_encoder: JsonEncoder,
+    counter: u32,
+    payload: String,
 }
 
 impl SnowflakeSinkWriter {
-    pub fn new(
+    pub async fn new(
         config: SnowflakeConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Self {
-        todo!()
+        let http_client = SnowflakeHttpClient::new(
+            config.common.account_identifier.clone(),
+            config.common.user.clone(),
+            config.common.database.clone(),
+            config.common.schema.clone(),
+            config.common.pipe.clone(),
+            config.common.rsa_public_key_fp.clone(),
+            config.common.private_key.clone(),
+            HashMap::new(),
+        );
+
+        let s3_client = SnowflakeS3Client::new(config.common.s3_bucket.clone()).await;
+
+        Self {
+            config,
+            schema: schema.clone(),
+            pk_indices,
+            is_append_only,
+            http_client,
+            s3_client,
+            row_encoder: JsonEncoder::new(
+                schema,
+                None,
+                super::encoder::DateHandlingMode::String,
+                TimestampHandlingMode::String,
+                TimestamptzHandlingMode::UtcString,
+                TimeHandlingMode::String,
+            ),
+            counter: 0,
+            payload: String::new(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.payload.clear();
+        self.counter = 0;
+    }
+
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        for (op, row) in chunk.rows() {
+            if op != Op::Insert {
+                continue;
+            }
+            let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
+            self.payload.push_str(&row_json_string);
+        }
+        self.s3_client.sink_to_s3(self.payload.clone().into()).await?;
+        self.http_client.send_request().await?;
+        self.reset();
+        Ok(())
     }
 }
 
 #[async_trait]
 impl SinkWriter for SnowflakeSinkWriter {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         Ok(())
     }
 
@@ -167,11 +223,11 @@ impl SinkWriter for SnowflakeSinkWriter {
         Ok(())
     }
 
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        todo!()
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<Self::CommitMetadata> {
+        Ok(())
     }
 
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        todo!()
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.append_only(chunk).await
     }
 }

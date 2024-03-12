@@ -16,8 +16,11 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_config;
-use aws_sdk_s3::{Client as S3Client, Error as S3Error};
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::Client as S3Client;
+use bytes::Bytes;
 use http::request::Builder;
+use http::header;
 use hyper::body::Body;
 use hyper::client::HttpConnector;
 use hyper::{Client, Request, StatusCode};
@@ -30,6 +33,7 @@ use super::{Result, SinkError};
 
 const SNOWFLAKE_HOST_ADDR: &str = "snowflakecomputing.com";
 const SNOWFLAKE_REQUEST_ID: &str = "RW_SNOWFLAKE_SINK";
+const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
 /// Claims is used when constructing `jwt_token`
 /// with payload specified.
@@ -65,7 +69,7 @@ impl SnowflakeHttpClient {
     ) -> Self {
         // TODO: ensure if we need user to *explicitly* provide the `request_id`
         let url = format!(
-            "https://{}.{}/v1/data/pipes/{}.{}.{}/insertFiles?request_id={}",
+            "https://{}.{}/v1/data/pipes/{}.{}.{}/insertFiles?requestId={}",
             account.clone(),
             SNOWFLAKE_HOST_ADDR,
             db,
@@ -73,6 +77,8 @@ impl SnowflakeHttpClient {
             pipe,
             SNOWFLAKE_REQUEST_ID
         );
+
+        println!("url: {}", url);
 
         Self {
             url,
@@ -132,9 +138,6 @@ impl SnowflakeHttpClient {
 
     fn build_request_and_client(&self) -> (Builder, Client<HttpsConnector<HttpConnector>>) {
         let mut builder = Request::post(self.url.clone());
-        for (k, v) in &self.header {
-            builder = builder.header(k, v);
-        }
 
         let connector = HttpsConnector::new();
         let client = Client::builder()
@@ -152,12 +155,16 @@ impl SnowflakeHttpClient {
         // Generate the jwt_token
         let jwt_token = self.generate_jwt_token()?;
         let builder = builder
+            .header(header::CONTENT_TYPE, "text/plain")
             .header("Authorization", format!("Bearer {}", jwt_token))
-            .header("X-Snowflake-Authorization-Token-Type".to_string(), "KEYPAIR_JWT");
+            .header(
+                "X-Snowflake-Authorization-Token-Type".to_string(),
+                "KEYPAIR_JWT",
+            );
 
         let request = builder
             // TODO: ensure this
-            .body(Body::from(self.s3_file.clone()))
+            .body(Body::from(S3_INTERMEDIATE_FILE_NAME))
             .map_err(|err| SinkError::Snowflake(err.to_string()))?;
 
         let response = client
@@ -171,6 +178,9 @@ impl SnowflakeHttpClient {
                 response.status()
             )));
         }
+
+        println!("resp: {:#?}", response);
+
         Ok(())
     }
 }
@@ -178,18 +188,35 @@ impl SnowflakeHttpClient {
 /// TODO(Zihao): refactor this part after s3 sink is available
 pub struct SnowflakeS3Client {
     s3_bucket: String,
-    s3_file: String,
+    s3_client: S3Client,
 }
 
 impl SnowflakeS3Client {
-    pub fn new(s3_bucket: String, s3_file: String) -> Self {
+    pub async fn new(s3_bucket: String) -> Self {
+        let config = aws_config::load_from_env().await;
+        let s3_client = S3Client::new(&config);
+
         Self {
             s3_bucket,
-            s3_file,
+            s3_client,
         }
     }
 
-    pub fn sink_to_s3() -> Result<()> {
-        todo!()
+    pub async fn sink_to_s3(&self, data: Bytes) -> Result<()> {
+        self.s3_client
+            .put_object()
+            .bucket(self.s3_bucket.clone())
+            .key(S3_INTERMEDIATE_FILE_NAME)
+            .body(ByteStream::from(data))
+            .send()
+            .await
+            .map_err(|err| {
+                SinkError::Snowflake(format!(
+                    "failed to sink data to S3, error: {}",
+                    err.to_string()
+                ))
+            })?;
+
+        Ok(())
     }
 }
