@@ -165,7 +165,9 @@ impl TelemetryReportCreator for MetaReportCreator {
 #[cfg(test)]
 mod test {
     use risingwave_common::config::MetaBackend;
-    use risingwave_common::telemetry::{SystemData, TelemetryNodeType, TelemetryReportBase};
+    use risingwave_common::telemetry::{
+        current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase,
+    };
 
     use crate::telemetry::{MetaTelemetryReport, NodeCount, RwVersion};
 
@@ -178,13 +180,13 @@ mod test {
 
         let report = MetaTelemetryReport {
             base: TelemetryReportBase {
-                tracking_id: "tracking_id".to_owned(),
-                session_id: "session_id".to_owned(),
+                tracking_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
+                session_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
                 system_data: SystemData::new(),
-                up_time: 0,
-                time_stamp: 0,
+                up_time: 100,
+                time_stamp: current_timestamp(),
                 node_type: TelemetryNodeType::Meta,
-                is_test: false,
+                is_test: true,
             },
             node_count: NodeCount {
                 meta_count: 1,
