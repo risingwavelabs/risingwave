@@ -296,18 +296,12 @@ impl CatalogController {
             } else {
                 on_conflict.do_nothing();
             }
-            let res = UserPrivilege::insert(privilege)
+
+            UserPrivilege::insert(privilege)
                 .on_conflict(on_conflict)
+                .do_nothing()
                 .exec(&txn)
-                .await;
-            if let Err(err) = res {
-                if !matches!(
-                    err,
-                    sea_orm::DbErr::RecordNotInserted | sea_orm::DbErr::RecordNotUpdated
-                ) {
-                    return Err(err.into());
-                }
-            }
+                .await?;
         }
 
         let user_infos = list_user_info_by_ids(user_ids, &txn).await?;
