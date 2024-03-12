@@ -22,7 +22,6 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use crate::sink::encoder::RowEncoder;
 use crate::sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
@@ -48,7 +47,6 @@ pub struct S3Common {
     pub endpoint_url: Option<String>,
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
-
 }
 
 #[serde_as]
@@ -103,7 +101,7 @@ impl S3Sink {
 }
 
 impl S3Sink {
-    pub async fn new_s3_sink(config: S3Config) -> Result<Operator> {
+    pub fn new_s3_sink(config: S3Config) -> Result<Operator> {
         // Create s3 builder.
         let mut builder = S3::default();
         builder.bucket(&config.common.bucket_name);
@@ -153,7 +151,7 @@ impl Sink for S3Sink {
     const SINK_NAME: &'static str = S3_SINK;
 
     async fn validate(&self) -> Result<()> {
-        let op = Self::new_s3_sink(self.config.clone()).await?;
+        let _op = Self::new_s3_sink(self.config.clone())?;
         Ok(())
     }
 
@@ -161,10 +159,10 @@ impl Sink for S3Sink {
         &self,
         writer_param: crate::sink::SinkWriterParam,
     ) -> Result<Self::LogSinker> {
-        let op = Self::new_s3_sink(self.config.clone()).await?;
+        let op = Self::new_s3_sink(self.config.clone())?;
         let path = self.config.common.path.as_ref();
         let writer = op
-            .writer_with(&path)
+            .writer_with(path)
             .concurrent(8)
             .buffer(S3_WRITE_BUFFER_SIZE)
             .await?;

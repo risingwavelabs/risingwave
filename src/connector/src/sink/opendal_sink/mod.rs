@@ -19,14 +19,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use opendal::{Operator, Writer};
+use opendal::Writer;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use serde_json::Value;
 
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
-use crate::sink::{Result, SinkError, SinkWriter};
+use crate::sink::{Result, SinkWriter};
 
 pub const GCS_SINK: &str = "gcs";
 

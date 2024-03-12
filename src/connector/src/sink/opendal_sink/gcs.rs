@@ -22,7 +22,6 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use crate::sink::encoder::RowEncoder;
 use crate::sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
@@ -103,7 +102,7 @@ impl GcsSink {
 }
 
 impl GcsSink {
-    pub async fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
+    pub fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
         // Create gcs builder.
         let mut builder = Gcs::default();
 
@@ -137,7 +136,7 @@ impl Sink for GcsSink {
     const SINK_NAME: &'static str = GCS_SINK;
 
     async fn validate(&self) -> Result<()> {
-        let op = Self::new_gcs_sink(self.config.clone()).await?;
+        let _op = Self::new_gcs_sink(self.config.clone())?;
         Ok(())
     }
 
@@ -145,10 +144,10 @@ impl Sink for GcsSink {
         &self,
         writer_param: crate::sink::SinkWriterParam,
     ) -> Result<Self::LogSinker> {
-        let op = Self::new_gcs_sink(self.config.clone()).await?;
+        let op = Self::new_gcs_sink(self.config.clone())?;
         let path = self.config.common.path.as_ref();
         let writer = op
-            .writer_with(&path)
+            .writer_with(path)
             .concurrent(8)
             .buffer(GCS_WRITE_BUFFER_SIZE)
             .await?;

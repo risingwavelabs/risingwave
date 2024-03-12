@@ -91,7 +91,7 @@ macro_rules! for_all_sinks {
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::opendal_sink::s3::S3Sink },
-                { GCS, $crate::sink::opendal_sink::gcs::GcsSink },
+                { Gcs, $crate::sink::opendal_sink::gcs::GcsSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
