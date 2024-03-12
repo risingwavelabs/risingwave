@@ -218,10 +218,10 @@ impl InserterInnerBuilder {
         let request = builder
             .body(body)
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
-        let feature = client.request(request);
+        let future = client.request(request);
 
         let handle: JoinHandle<Result<Vec<u8>>> = tokio::spawn(async move {
-            let response = feature
+            let response = future
                 .await
                 .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
             let status = response.status();

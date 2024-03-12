@@ -61,6 +61,15 @@ impl TelemetryToProtobuf for CompactorTelemetryReport {
     }
 }
 
+impl TelemetryToProtobuf for CompactorTelemetryReport {
+    fn to_pb_bytes(self) -> Vec<u8> {
+        let pb_report = risingwave_pb::telemetry::CompactorReport {
+            base: Some(self.base.into()),
+        };
+        pb_report.encode_to_vec()
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct CompactorTelemetryReport {
     #[serde(flatten)]

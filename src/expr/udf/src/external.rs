@@ -144,40 +144,8 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function.
-    pub async fn call(
-        &self,
-        id: &str,
-        input: RecordBatch,
-        fragment_id: u32,
-    ) -> Result<RecordBatch> {
-        let metrics = &*GLOBAL_METRICS;
-        let fragment_id_str = fragment_id.to_string();
-        let labels = &[self.addr.as_str(), id, fragment_id_str.as_str()];
-        metrics
-            .udf_input_chunk_rows
-            .with_label_values(labels)
-            .observe(input.num_rows() as f64);
-        metrics
-            .udf_input_rows
-            .with_label_values(labels)
-            .inc_by(input.num_rows() as u64);
-        metrics
-            .udf_input_bytes
-            .with_label_values(labels)
-            .inc_by(input.get_array_memory_size() as u64);
-        let timer = metrics.udf_latency.with_label_values(labels).start_timer();
-
-        let result = self.call_internal(id, input).await;
-
-        timer.stop_and_record();
-        if result.is_ok() {
-            &metrics.udf_success_count
-        } else {
-            &metrics.udf_failure_count
-        }
-        .with_label_values(labels)
-        .inc();
-        result
+    pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+        self.call_internal(id, input).await
     }
 
     async fn call_internal(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
@@ -195,15 +163,10 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function, retry up to 5 times / 3s if connection is broken.
-    pub async fn call_with_retry(
-        &self,
-        id: &str,
-        input: RecordBatch,
-        fragment_id: u32,
-    ) -> Result<RecordBatch> {
+    pub async fn call_with_retry(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
-            match self.call(id, input.clone(), fragment_id).await {
+            match self.call(id, input.clone()).await {
                 Err(err) if err.is_connection_error() && i != 4 => {
                     tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
                 }
@@ -220,16 +183,24 @@ impl ArrowFlightUdfClient {
         &self,
         id: &str,
         input: RecordBatch,
-        fragment_id: u32,
+        fragment_id: &str,
     ) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
+        let metrics = &*GLOBAL_METRICS;
+        let labels: &[&str; 4] = &[&self.addr, "external", &id, &fragment_id];
         loop {
-            match self.call(id, input.clone(), fragment_id).await {
-                Err(err) if err.is_connection_error() => {
-                    tracing::error!(error = %err.as_report(), "UDF connection error. retry...");
+            match self.call(id, input.clone()).await {
+                Err(err) if err.is_tonic_error() => {
+                    tracing::error!(error = %err.as_report(), "UDF tonic error. retry...");
                 }
-                ret => return ret,
+                ret => {
+                    if ret.is_err() {
+                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    }
+                    return ret;
+                }
             }
+            metrics.udf_retry_count.with_label_values(labels).inc();
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         }
@@ -272,6 +243,10 @@ impl ArrowFlightUdfClient {
             // convert tonic::Status to FlightError
             stream.map_err(|e| e.into()),
         ))
+    }
+
+    pub fn get_addr(&self) -> &str {
+        &self.addr
     }
 }
 

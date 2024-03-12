@@ -219,8 +219,10 @@ mod tests {
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
-        let mut source_ctx = SourceContext::default();
-        source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::PostgresCdc(Box::default()),
+            ..Default::default()
+        };
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await
             .unwrap();
