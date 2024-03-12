@@ -89,25 +89,9 @@ mod test {
 
     use crate::telemetry::{ComputeTelemetryReport, TELEMETRY_COMPUTE_REPORT_TYPE};
 
-    #[tokio::test]
-    async fn test_compute_telemetry_report() {
-        let mut report = super::ComputeTelemetryReport::new(
-            "tracking_id".to_string(),
-            "session_id".to_string(),
-            100,
-        );
-        report.base.is_test = true;
-
-        let pb_report = report.to_pb_bytes();
-        let url =
-            (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_COMPUTE_REPORT_TYPE).to_owned();
-        let post_res = post_telemetry_report_pb(&url, pb_report).await;
-        assert!(post_res.is_ok());
-    }
-
     // It is ok to use `TELEMETRY_REPORT_URL` here because we mark it as test and will not write to the database.
     #[tokio::test]
-    async fn test_frontend_telemetry_report() {
+    async fn test_compute_telemetry_report() {
         let mut report = ComputeTelemetryReport::new(
             "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
             "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),

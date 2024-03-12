@@ -178,6 +178,7 @@ mod test {
 
         use crate::telemetry::TELEMETRY_META_REPORT_TYPE;
 
+        // we don't call `create_report` here because it rely on the metadata manager
         let report = MetaTelemetryReport {
             base: TelemetryReportBase {
                 tracking_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
