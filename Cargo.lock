@@ -8888,14 +8888,12 @@ dependencies = [
  "ethnum",
  "expect-test",
  "fixedbitset 0.5.0",
- "fs-err",
  "futures",
  "governor",
  "hex",
  "http 0.2.9",
  "http-body",
  "humantime",
- "hyper",
  "hytra",
  "itertools 0.12.0",
  "itoa",
@@ -8904,7 +8902,6 @@ dependencies = [
  "lru 0.7.6",
  "mach2",
  "madsim-tokio",
- "madsim-tonic",
  "memcomparable",
  "more-asserts",
  "num-integer",
@@ -8926,12 +8923,14 @@ dependencies = [
  "regex",
  "reqwest",
  "risingwave-fields-derive",
+ "risingwave_common_metrics",
  "risingwave_common_proc_macro",
  "risingwave_error",
  "risingwave_pb",
  "rust_decimal",
  "rusty-fork",
- "rw_futures_util",
+ "rw_iter_util",
+ "rw_resource_util",
  "ryu",
  "serde",
  "serde_bytes",
@@ -8974,6 +8973,38 @@ dependencies = [
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
+]
+
+[[package]]
+name = "risingwave_common_metrics"
+version = "1.7.0-alpha"
+dependencies = [
+ "bytes",
+ "clap",
+ "darwin-libproc",
+ "easy-ext",
+ "futures",
+ "http 0.2.9",
+ "http-body",
+ "hyper",
+ "hytra",
+ "itertools 0.12.0",
+ "libc",
+ "mach2",
+ "madsim-tokio",
+ "madsim-tonic",
+ "parking_lot 0.12.1",
+ "pin-project-lite",
+ "procfs 0.16.0",
+ "prometheus",
+ "rw_iter_util",
+ "rw_resource_util",
+ "serde",
+ "thiserror-ext",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -10580,6 +10611,24 @@ dependencies = [
  "futures",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "rw_iter_util"
+version = "0.0.0"
+dependencies = [
+ "itertools 0.12.0",
+]
+
+[[package]]
+name = "rw_resource_util"
+version = "0.0.0"
+dependencies = [
+ "fs-err",
+ "sysinfo",
+ "tempfile",
+ "thiserror-ext",
+ "tracing",
 ]
 
 [[package]]

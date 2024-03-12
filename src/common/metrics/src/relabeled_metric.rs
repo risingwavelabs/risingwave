@@ -15,9 +15,9 @@
 use prometheus::core::{MetricVec, MetricVecBuilder};
 use prometheus::{HistogramVec, IntCounterVec};
 
-use crate::config::MetricLevel;
-use crate::metrics::{
+use crate::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedMetric, LabelGuardedMetricVec,
+    MetricLevel,
 };
 
 /// For all `Relabeled*Vec` below,

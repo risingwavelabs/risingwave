@@ -17,7 +17,6 @@ use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
 #[cfg(target_os = "linux")]
 use super::{CLOCK_TICK, PAGESIZE};
-use crate::util::resource_util;
 
 /// Monitors current process.
 pub fn monitor_process(registry: &Registry) {
@@ -115,7 +114,7 @@ impl Collector for ProcessCollector {
         };
 
         self.cpu_core_num
-            .set(resource_util::cpu::total_cpu_available() as i64);
+            .set(rw_resource_util::cpu::total_cpu_available() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(4);
@@ -166,7 +165,7 @@ impl Collector for ProcessCollector {
         };
 
         self.cpu_core_num
-            .set(resource_util::cpu::total_cpu_available() as i64);
+            .set(rw_resource_util::cpu::total_cpu_available() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(4);
@@ -196,7 +195,7 @@ impl Collector for ProcessCollector {
         };
 
         self.cpu_core_num
-            .set(resource_util::cpu::total_cpu_available() as i64);
+            .set(rw_resource_util::cpu::total_cpu_available() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(4);
