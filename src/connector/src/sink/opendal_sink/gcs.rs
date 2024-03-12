@@ -12,35 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::anyhow;
-use async_trait::async_trait;
-use bytes::Bytes;
-use itertools::Itertools;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
-use crate::sink::opendal::OpenDalSinkWriter;
-use opendal::{Metakey, Operator};
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use opendal::Operator;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataType;
 use serde::Deserialize;
-use serde_derive::Serialize;
-use serde_json::Value;
 use serde_with::serde_as;
-use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
-use crate::error::ConnectorError;
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::RowEncoder;
+use crate::sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
+const GCS_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct GcsCommon {
     #[serde(rename = "gcs.bucket_name")]
@@ -54,8 +44,8 @@ pub struct GcsCommon {
     #[serde(rename = "gcs.service_account", default)]
     pub service_account: Option<String>,
 
-    #[serde(rename = "match_pattern", default)]
-    pub match_pattern: Option<String>,
+    #[serde(rename = "gcs.path", default)]
+    pub path: String,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -112,40 +102,7 @@ impl GcsSink {
     }
 }
 
-impl Sink for GcsSink {
-    type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
-
-    const SINK_NAME: &'static str = GCS_SINK;
-
-    async fn validate(&self) -> Result<()> {
-        todo!()
-    }
-
-    async fn new_log_sinker(
-        &self,
-        writer_param: crate::sink::SinkWriterParam,
-    ) -> Result<Self::LogSinker> {
-        todo!()
-    }
-}
-
-impl TryFrom<SinkParam> for GcsSink {
-    type Error = SinkError;
-
-    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let schema = param.schema();
-        let config = GcsConfig::from_hashmap(param.properties)?;
-        GcsSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
-    }
-}
-
-impl OpenDalSinkWriter {
+impl GcsSink {
     pub async fn new_gcs_sink(config: GcsConfig) -> Result<Operator> {
         // Create gcs builder.
         let mut builder = Gcs::default();
@@ -165,11 +122,57 @@ impl OpenDalSinkWriter {
         if let Some(service_account) = config.common.service_account {
             builder.service_account(&service_account);
         }
-        let operator: Operator = Operator::new(builder)
-            .map_err(|e| SinkError::Connector(e.into()))?
+        let operator: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
         Ok(operator)
+    }
+}
+
+impl Sink for GcsSink {
+    type Coordinator = DummySinkCommitCoordinator;
+    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
+
+    const SINK_NAME: &'static str = GCS_SINK;
+
+    async fn validate(&self) -> Result<()> {
+        let op = Self::new_gcs_sink(self.config.clone()).await?;
+        Ok(())
+    }
+
+    async fn new_log_sinker(
+        &self,
+        writer_param: crate::sink::SinkWriterParam,
+    ) -> Result<Self::LogSinker> {
+        let op = Self::new_gcs_sink(self.config.clone()).await?;
+        let path = self.config.common.path.as_ref();
+        let writer = op
+            .writer_with(&path)
+            .concurrent(8)
+            .buffer(GCS_WRITE_BUFFER_SIZE)
+            .await?;
+        Ok(OpenDalSinkWriter::new(
+            writer,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.is_append_only,
+        )?
+        .into_log_sinker(writer_param.sink_metrics))
+    }
+}
+
+impl TryFrom<SinkParam> for GcsSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = GcsConfig::from_hashmap(param.properties)?;
+        GcsSink::new(
+            config,
+            schema,
+            param.downstream_pk,
+            param.sink_type.is_append_only(),
+        )
     }
 }

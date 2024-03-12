@@ -117,7 +117,7 @@ impl JsonEncoder {
     pub fn new_with_s3(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        map: HashMap<String, (u8, u8)>,
+        _map: HashMap<String, (u8, u8)>,
     ) -> Self {
         Self {
             schema,

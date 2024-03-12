@@ -18,48 +18,31 @@ pub mod s3;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use async_trait::async_trait;
-use bytes::Bytes;
-use itertools::Itertools;
-use opendal::{Metakey, Operator};
+use opendal::{Operator, Writer};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataType;
-use serde::Deserialize;
-use serde_derive::Serialize;
 use serde_json::Value;
-use serde_with::serde_as;
-use thiserror_ext::AsReport;
-use with_options::WithOptions;
 
-use crate::error::ConnectorError;
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use crate::sink::encoder::{JsonEncoder, RowEncoder};
+use crate::sink::{Result, SinkError, SinkWriter};
 
 pub const GCS_SINK: &str = "gcs";
 
-
 pub struct OpenDalSinkWriter {
     schema: Schema,
-    op: Operator,
+    writer: Writer,
     pk_indices: Vec<usize>,
     is_append_only: bool,
     row_encoder: JsonEncoder,
-    path: String,
 }
 
 #[async_trait]
 impl SinkWriter for OpenDalSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let path = &self.path.clone();
         if self.is_append_only {
-            self.append_only(chunk, path).await
+            self.append_only(chunk).await
         } else {
             unimplemented!()
         }
@@ -70,11 +53,22 @@ impl SinkWriter for OpenDalSinkWriter {
     }
 
     async fn abort(&mut self) -> Result<()> {
+        self.writer.abort().await?;
         Ok(())
     }
 
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        todo!()
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            match self.writer.close().await {
+                Ok(_) => (),
+                Err(err) => {
+                    self.writer.abort().await?;
+                    return Err(err.into());
+                }
+            };
+        }
+
+        Ok(())
     }
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
@@ -83,34 +77,29 @@ impl SinkWriter for OpenDalSinkWriter {
 }
 
 impl OpenDalSinkWriter {
-    pub async fn new(
-        op: Operator,
+    pub fn new(
+        writer: Writer,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        path: &str,
     ) -> Result<Self> {
-        let mut decimal_map = HashMap::default();
+        let decimal_map = HashMap::default();
         Ok(Self {
             schema: schema.clone(),
             pk_indices,
-            op,
+            writer,
             is_append_only,
             row_encoder: JsonEncoder::new_with_s3(schema, None, decimal_map),
-            path: path.to_string(),
         })
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk, path: &str) -> Result<()> {
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 continue;
             }
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.op
-                .write(path, row_json_string)
-                .await
-                .map_err(|e| SinkError::Connector(e.into()))?;
+            self.writer.write(row_json_string).await?;
         }
         Ok(())
     }
