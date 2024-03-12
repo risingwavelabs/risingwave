@@ -213,13 +213,13 @@ impl SnowflakeSinkWriter {
         }
     }
 
+    /// Note that we shall NOT reset the `sink_file_suffix`
+    /// since we need to incrementally keep the sink
+    /// file *unique*, otherwise snowflake will not
+    /// sink it from external stage (i.e., s3)
     fn reset(&mut self) {
         self.payload.clear();
         self.row_counter = 0;
-        // Note that we shall NOT reset the `sink_file_suffix`
-        // since we need to incrementally keep the sink
-        // file *unique*, otherwise snowflake will not
-        // sink it from external stage (i.e., s3)
     }
 
     fn at_sink_threshold(&self) -> bool {
