@@ -132,6 +132,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         std::fs::create_dir_all(&state_store_dir).unwrap();
         let state_store_url = format!("hummock+fs://{}", &state_store_dir);
         meta_opts.state_store = Some(state_store_url);
+
+        // FIXME: otherwise it reports: missing system param "data_directory", but I think it should be set by this way...
+        meta_opts.data_directory = Some("hummock_001".to_string());
     }
 
     // Set meta store for meta (if not set)
@@ -151,6 +154,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
 
     // Set listen addresses (force to override)
     meta_opts.listen_addr = "0.0.0.0:5690".to_string();
+    meta_opts.advertise_addr = "127.0.0.1:5690".to_string();
     compute_opts.listen_addr = "0.0.0.0:5688".to_string();
     compactor_opts.listen_addr = "0.0.0.0:6660".to_string();
     if let Some(frontend_addr) = &opts.node_opts.listen_addr {
@@ -158,8 +162,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     }
 
     // Set Meta addresses for all nodes (force to override)
-    let meta_addr = "127.0.0.1:5690".to_string();
-    meta_opts.advertise_addr = meta_addr.clone();
+    let meta_addr = "http://127.0.0.1:5690".to_string();
     compute_opts.meta_address = meta_addr.parse().unwrap();
     frontend_opts.meta_addr = meta_addr.parse().unwrap();
     compactor_opts.meta_address = meta_addr.parse().unwrap();
