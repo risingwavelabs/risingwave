@@ -52,6 +52,7 @@ impl WithOptions for i32 {}
 impl WithOptions for i64 {}
 impl WithOptions for f64 {}
 impl WithOptions for std::time::Duration {}
+impl WithOptions for crate::mqtt_common::QualityOfService {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}

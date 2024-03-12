@@ -48,6 +48,7 @@ digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 flate2 = { version = "1", features = ["zlib"] }
+flume = { version = "0.10" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
@@ -58,6 +59,7 @@ futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["js", "rdrand", "std"] }
 governor = { version = "0.6", default-features = false, features = ["dashmap", "jitter", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["raw"] }
@@ -170,6 +172,7 @@ digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
 itertools = { version = "0.11" }

@@ -9,6 +9,7 @@ steam = "stream"        # You played with Steam games too much.
 # Some weird short variable names
 ot = "ot"
 bui = "bui"
+mosquitto = "mosquitto" # This is a MQTT broker.
 
 [default.extend-identifiers]
 
