@@ -75,6 +75,18 @@ pub struct SnowflakeCommon {
     /// The s3 bucket where intermediate sink files will be stored
     #[serde(rename = "snowflake.s3_bucket")]
     pub s3_bucket: String,
+
+    /// s3 credentials
+    #[serde(rename = "snowflake.aws_access_key_id")]
+    pub aws_access_key_id: String,
+
+    /// s3 credentials
+    #[serde(rename = "snowflake.aws_secret_access_key")]
+    pub aws_secret_access_key: String,
+
+    /// The s3 region, e.g., us-east-2
+    #[serde(rename = "snowflake.aws_region")]
+    pub aws_region: String,
 }
 
 #[serde_as]
@@ -242,10 +254,15 @@ impl SinkWriter for SnowflakeSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         self.append_only(chunk).await?;
 
+        // When the number of row exceeds `MAX_BATCH_ROW_NUM`
         if self.at_sink_threshold() {
+            // first sink to the external stage provided by user (i.e., s3)
             self.s3_client.sink_to_s3(self.payload.clone().into(), self.sink_file_suffix).await?;
+            // then trigger `insertFiles` post request to snowflake
             self.http_client.send_request(self.sink_file_suffix).await?;
+            // reset `payload` & `row_counter`
             self.reset();
+            // to ensure s3 sink file unique
             self.sink_file_suffix += 1;
         }
     }
