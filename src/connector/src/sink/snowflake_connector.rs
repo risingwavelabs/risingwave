@@ -235,10 +235,7 @@ impl SnowflakeS3Client {
             .send()
             .await
             .map_err(|err| {
-                SinkError::Snowflake(format!(
-                    "failed to sink data to S3, error: {}",
-                    err
-                ))
+                SinkError::Snowflake(format!("failed to sink data to S3, error: {}", err))
             })?;
 
         Ok(())
