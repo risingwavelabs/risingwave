@@ -355,9 +355,9 @@ impl LogStoreRowSerde {
         Ok((epoch, op))
     }
 
-    pub(crate) async fn deserialize_stream_chunk(
+    pub(crate) async fn deserialize_stream_chunk<I: StateStoreReadIter>(
         &self,
-        iters: Vec<impl StateStoreReadIter>,
+        iters: impl IntoIterator<Item = I>,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         expected_epoch: u64,
@@ -759,6 +759,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
 mod tests {
     use std::cmp::min;
     use std::future::poll_fn;
+    use std::iter::once;
     use std::sync::Arc;
     use std::task::Poll;
 
@@ -977,7 +978,7 @@ mod tests {
         tx.send(()).unwrap();
         let chunk = serde
             .deserialize_stream_chunk(
-                vec![FromStreamStateStoreIter::new(stream.boxed())],
+                once(FromStreamStateStoreIter::new(stream.boxed())),
                 start_seq_id,
                 end_seq_id,
                 EPOCH1,

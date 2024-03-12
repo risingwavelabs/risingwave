@@ -340,7 +340,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     let table_id = self.table_id;
                     let read_metrics = self.metrics.flushed_buffer_read_metrics.clone();
                     async move {
-                        let streams = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+                        let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                             let range_start =
                                 serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
                             let range_end =
@@ -371,7 +371,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
 
                         let chunk = serde
                             .deserialize_stream_chunk(
-                                streams,
+                                iters,
                                 start_seq_id,
                                 end_seq_id,
                                 item_epoch,

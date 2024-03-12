@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
@@ -45,34 +46,43 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: Send {
+pub trait IterItem: Send + 'static {
+    type ItemRef<'a>: Send + 'a;
+}
+
+impl IterItem for StateStoreIterItem {
+    type ItemRef<'a> = StateStoreIterItemRef<'a>;
+}
+
+pub trait StateStoreIter<T: IterItem = StateStoreIterItem>: Send {
     fn try_next(
         &mut self,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreIterItemRef<'_>>>> + Send + '_;
+    ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_;
 }
 
 pub fn to_owned_item((key, value): StateStoreIterItemRef<'_>) -> StorageResult<StateStoreIterItem> {
     Ok((key.copy_into(), Bytes::copy_from_slice(value)))
 }
 
-pub trait StateStoreIterExt: StateStoreIter + Sized {
+pub trait StateStoreIterExt<T: IterItem = StateStoreIterItem>: StateStoreIter<T> + Sized {
     type ItemStream<O: Send, F: Send>: Stream<Item = StorageResult<O>> + Send;
 
-    fn into_stream<O: Send, F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send>(
+    fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
         f: F,
     ) -> Self::ItemStream<O, F>;
 
-    fn fused(self) -> FusedStateStoreIter<Self> {
+    fn fused(self) -> FusedStateStoreIter<Self, T> {
         FusedStateStoreIter::new(self)
     }
 }
 
 #[try_stream(ok = O, error = StorageError)]
 async fn into_stream_inner<
-    I: StateStoreIter,
+    T: IterItem,
+    I: StateStoreIter<T>,
     O: Send,
-    F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send,
+    F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send,
 >(
     iter: I,
     f: F,
@@ -109,22 +119,24 @@ impl<S: Stream<Item = StorageResult<StateStoreIterItem>> + Unpin + Send> StateSt
     }
 }
 
-pub struct FusedStateStoreIter<I> {
+pub struct FusedStateStoreIter<I, T> {
     inner: I,
     finished: bool,
+    _phantom: PhantomData<T>,
 }
 
-impl<I> FusedStateStoreIter<I> {
+impl<I, T> FusedStateStoreIter<I, T> {
     fn new(inner: I) -> Self {
         Self {
             inner,
             finished: false,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<I: StateStoreIter> FusedStateStoreIter<I> {
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+impl<T: IterItem, I: StateStoreIter<T>> FusedStateStoreIter<I, T> {
+    async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
         assert!(!self.finished, "call try_next after finish");
         let result = self.inner.try_next().await;
         match &result {
@@ -137,10 +149,10 @@ impl<I: StateStoreIter> FusedStateStoreIter<I> {
     }
 }
 
-impl<I: StateStoreIter> StateStoreIterExt for I {
+impl<T: IterItem, I: StateStoreIter<T>> StateStoreIterExt<T> for I {
     type ItemStream<O: Send, F: Send> = impl Stream<Item = StorageResult<O>> + Send;
 
-    fn into_stream<O: Send, F: for<'a> Fn(StateStoreIterItemRef<'a>) -> StorageResult<O> + Send>(
+    fn into_stream<O: Send, F: for<'a> Fn(T::ItemRef<'a>) -> StorageResult<O> + Send>(
         self,
         f: F,
     ) -> Self::ItemStream<O, F> {
