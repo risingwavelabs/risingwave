@@ -13,14 +13,16 @@
 // limitations under the License.
 use std::collections::HashMap;
 use std::sync::Arc;
-use opendal::{Metakey, Operator};
+
 use anyhow::anyhow;
-use crate::sink::encoder::{JsonEncoder, RowEncoder};
-use crate::sink::writer::LogSinkerOf;
-use crate::sink::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use async_trait::async_trait;
 use bytes::Bytes;
+use deltalake::storage::s3;
+use crate::sink::opendal::OpenDalSinkWriter;
 use itertools::Itertools;
+use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::services::S3;
+use opendal::{Metakey, Operator};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -32,8 +34,13 @@ use serde_with::serde_as;
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
-use crate::sink::writer::SinkWriterExt;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
+use crate::error::ConnectorError;
+use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct S3Common {
@@ -66,9 +73,8 @@ pub const S3_SINK: &str = "s3";
 
 impl S3Config {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<S3Config>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let config = serde_json::from_value::<S3Config>(serde_json::to_value(properties).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
                 "`{}` must be {}, or {}",
@@ -105,12 +111,10 @@ impl S3Sink {
     }
 }
 
-
 impl Sink for S3Sink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<S3SinkWriter>;
+    type LogSinker = LogSinkerOf<OpenDalSinkWriter>;
 
-    
     const SINK_NAME: &'static str = S3_SINK;
 
     async fn validate(&self) -> Result<()> {
@@ -140,35 +144,47 @@ impl TryFrom<SinkParam> for S3Sink {
     }
 }
 
+impl OpenDalSinkWriter {
+    pub async fn new_s3_sink(config: S3Config) -> Result<Operator> {
+        // Create s3 builder.
+        let mut builder = S3::default();
+        builder.bucket(&config.common.bucket_name);
+        builder.region(&config.common.region_name);
 
-pub struct S3SinkWriter {
-    pub config: S3Config,
-    schema: Schema,
-    op: Operator,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-    row_encoder: JsonEncoder,
-}
+        if let Some(endpoint_url) = config.common.endpoint_url {
+            builder.endpoint(&endpoint_url);
+        }
 
-#[async_trait]
-impl SinkWriter for S3SinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        todo!()
-    }
+        if let Some(access) = config.common.access {
+            builder.access_key_id(&access);
+        } else {
+            tracing::error!(
+                "access key id of aws s3 is not set, bucket {}",
+                config.common.bucket_name
+            );
+        }
 
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        todo!()
-    }
+        if let Some(secret) = config.common.secret {
+            builder.secret_access_key(&secret);
+        } else {
+            tracing::error!(
+                "secret access key of aws s3 is not set, bucket {}",
+                config.common.bucket_name
+            );
+        }
 
-    async fn abort(&mut self) -> Result<()> {
-        todo!()
-    }
+        builder.enable_virtual_host_style();
 
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        todo!()
-    }
+        if let Some(assume_role) = config.common.assume_role {
+            builder.role_arn(&assume_role);
+        }
 
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        todo!()
+        let operator: Operator = Operator::new(builder)
+            .map_err(|e| SinkError::Connector(e.into()))?
+            .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
+            .finish();
+
+        Ok(operator)
     }
 }

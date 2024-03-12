@@ -90,6 +90,7 @@ macro_rules! for_all_sinks {
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { S3, $crate::sink::opendal::s3::S3Sink },
+                { GCS, $crate::sink::opendal::gcs::GcsSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
@@ -529,6 +530,8 @@ pub enum SinkError {
     Starrocks(String),
     #[error("S3 error: {0}")]
     S3(String),
+    #[error("Gcs error: {0}")]
+    GCS(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
