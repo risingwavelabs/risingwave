@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use prost::Message;
 use risingwave_common::config::MetaBackend;
+use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
-    TelemetryResult,
+    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
@@ -51,7 +52,30 @@ pub struct MetaTelemetryReport {
     rw_version: RwVersion,
 }
 
-impl TelemetryReport for MetaTelemetryReport {}
+impl TelemetryToProtobuf for MetaTelemetryReport {
+    fn to_pb_bytes(self) -> Vec<u8> {
+        let pb_report = risingwave_pb::telemetry::MetaReport {
+            base: Some(self.base.into()),
+            meta_backend: match self.meta_backend {
+                MetaBackend::Etcd => risingwave_pb::telemetry::MetaBackend::Etcd as i32,
+                MetaBackend::Mem => risingwave_pb::telemetry::MetaBackend::Memory as i32,
+                MetaBackend::Sql => risingwave_pb::telemetry::MetaBackend::Rdb as i32,
+            },
+            node_count: Some(risingwave_pb::telemetry::NodeCount {
+                meta: self.node_count.meta_count as u32,
+                compute: self.node_count.compute_count as u32,
+                frontend: self.node_count.frontend_count as u32,
+                compactor: self.node_count.compactor_count as u32,
+            }),
+            rw_version: Some(risingwave_pb::telemetry::RwVersion {
+                rw_version: self.rw_version.version,
+                git_sha: self.rw_version.git_sha,
+            }),
+            stream_job_count: self.streaming_job_count as u32,
+        };
+        pb_report.encode_to_vec()
+    }
+}
 
 pub struct MetaTelemetryInfoFetcher {
     tracking_id: ClusterId,

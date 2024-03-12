@@ -46,6 +46,13 @@
   expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
+- name: 'Like `count(*)`, SimpleAgg also need to rewrite `array_agg` for the extra null row due to outer join #14735'
+  sql: |
+    create table t1(a int, b int);
+    select a, (select array_agg(t1.a) filter (where t1.a is distinct from 1) from t1 where t1.a <> t.b) from t1 as t order by 1;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -483,3 +490,21 @@
     FROM array_types AS t0;
   expected_outputs:
     - batch_plan
+- name: a case can't be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT COUNT(*) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: a case could be optimized by PullUpCorrelatedPredicateAggRule
+  sql: |
+    CREATE TABLE T (A INT, B INT);
+    CREATE TABLE T2 (C INT, D INT);
+    SELECT * FROM T
+    WHERE T.A > (SELECT avg(c) FROM T2 WHERE B = D);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

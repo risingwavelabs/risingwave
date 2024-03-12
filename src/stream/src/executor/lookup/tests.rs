@@ -22,6 +22,7 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -99,11 +100,11 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
     );
 
     let source = MockSource::with_messages(vec![
-        Message::Barrier(Barrier::new_test_barrier(2)),
+        Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         Message::Chunk(chunk1),
-        Message::Barrier(Barrier::new_test_barrier(3)),
+        Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         Message::Chunk(chunk2),
-        Message::Barrier(Barrier::new_test_barrier(4)),
+        Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
     ])
     .into_executor(schema, vec![0]);
 
@@ -163,11 +164,11 @@ fn create_source() -> Executor {
     );
 
     MockSource::with_messages(vec![
-        Message::Barrier(Barrier::new_test_barrier(2)),
+        Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         Message::Chunk(chunk1),
-        Message::Barrier(Barrier::new_test_barrier(3)),
+        Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         Message::Chunk(chunk2),
-        Message::Barrier(Barrier::new_test_barrier(4)),
+        Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
     ])
     .into_executor(schema, PkIndices::new())
 }

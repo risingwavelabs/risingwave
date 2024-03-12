@@ -28,15 +28,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_json::Value;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
 use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
-use super::encoder::{
-    DateHandlingMode, JsonEncoder, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
-    TimestamptzHandlingMode,
-};
+use super::encoder::{JsonEncoder, RowEncoder};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -47,8 +44,8 @@ use crate::sink::{
 };
 
 pub const BIGQUERY_SINK: &str = "bigquery";
-const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
@@ -61,6 +58,13 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
+    #[serde(rename = "bigquery.max_batch_rows", default = "default_max_batch_rows")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub max_batch_rows: usize,
+}
+
+fn default_max_batch_rows() -> usize {
+    1024
 }
 
 impl BigQueryCommon {
@@ -312,14 +316,7 @@ impl BigQuerySinkWriter {
             client,
             is_append_only,
             insert_request: TableDataInsertAllRequest::new(),
-            row_encoder: JsonEncoder::new(
-                schema,
-                None,
-                DateHandlingMode::String,
-                TimestampHandlingMode::String,
-                TimestamptzHandlingMode::UtcString,
-                TimeHandlingMode::Milli,
-            ),
+            row_encoder: JsonEncoder::new_with_bigquery(schema, None),
         })
     }
 
@@ -339,7 +336,11 @@ impl BigQuerySinkWriter {
         self.insert_request
             .add_rows(insert_vec)
             .map_err(|e| SinkError::BigQuery(e.into()))?;
-        if self.insert_request.len().ge(&BIGQUERY_INSERT_MAX_NUMS) {
+        if self
+            .insert_request
+            .len()
+            .ge(&self.config.common.max_batch_rows)
+        {
             self.insert_data().await?;
         }
         Ok(())
@@ -349,7 +350,8 @@ impl BigQuerySinkWriter {
         if !self.insert_request.is_empty() {
             let insert_request =
                 mem::replace(&mut self.insert_request, TableDataInsertAllRequest::new());
-            self.client
+            let request = self
+                .client
                 .tabledata()
                 .insert_all(
                     &self.config.common.project,
@@ -359,6 +361,12 @@ impl BigQuerySinkWriter {
                 )
                 .await
                 .map_err(|e| SinkError::BigQuery(e.into()))?;
+            if let Some(error) = request.insert_errors {
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "Insert error: {:?}",
+                    error
+                )));
+            }
         }
         Ok(())
     }
