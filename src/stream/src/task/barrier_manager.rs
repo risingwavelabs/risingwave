@@ -61,7 +61,7 @@ use risingwave_storage::store::SyncResult;
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor};
+use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -156,6 +156,10 @@ pub(super) enum LocalBarrierEvent {
         current_epoch: u64,
         actor: ActorId,
         state: BackfillState,
+    },
+    ReadBarrierMutation {
+        barrier: Barrier,
+        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -402,6 +406,12 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(current_epoch, actor, state);
             }
+            LocalBarrierEvent::ReadBarrierMutation {
+                barrier,
+                mutation_sender,
+            } => {
+                self.read_barrier_mutation(barrier, mutation_sender);
+            }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
         }
@@ -498,6 +508,15 @@ impl LocalBarrierWorker {
 
         self.control_stream_handle.send_response(result);
         Ok(())
+    }
+
+    /// Read mutation from barrier state.
+    fn read_barrier_mutation(
+        &mut self,
+        barrier: Barrier,
+        sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    ) {
+        self.state.read_barrier_mutation(&barrier, sender);
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -749,6 +768,20 @@ impl LocalBarrierManager {
     /// will notice actor's exit while collecting.
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
         let _ = self.actor_failure_sender.send((actor_id, err));
+    }
+
+    /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
+    pub async fn read_barrier_mutation(
+        &self,
+        barrier: &Barrier,
+    ) -> StreamResult<Option<Arc<Mutation>>> {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
+            barrier: barrier.clone(),
+            mutation_sender: tx,
+        });
+        rx.await
+            .map_err(|_| anyhow!("barrier manager maybe reset").into())
     }
 }
 

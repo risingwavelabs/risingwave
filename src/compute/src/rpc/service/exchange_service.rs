@@ -169,7 +169,14 @@ impl ExchangeServiceImpl {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
-                Either::Right(MessageWithPermits { message, permits }) => {
+                Either::Right(MessageWithPermits {
+                    mut message,
+                    permits,
+                }) => {
+                    // Erase the mutation of the barrier mutation to avoid decoding in remote side.
+                    if let Message::Barrier(barrier) = &mut message {
+                        barrier.mutation = None;
+                    }
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
