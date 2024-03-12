@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
@@ -72,6 +73,9 @@ pub struct MetaSrvEnv {
 
     /// system param controller.
     system_params_controller: Option<SystemParamsControllerRef>,
+
+    /// Session param
+    session_param: SessionConfig,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,

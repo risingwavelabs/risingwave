@@ -34,6 +34,7 @@ use serde_json::Value;
 
 use crate::for_all_params;
 use crate::hash::VirtualNode;
+use crate::session_config::SessionConfig;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -160,6 +161,10 @@ pub struct RwConfig {
     #[educe(Debug(ignore))]
     #[config_doc(nested)]
     pub system: SystemConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub session: SessionConfig, 
 
     #[serde(flatten)]
     #[config_doc(omitted)]

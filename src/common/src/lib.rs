@@ -90,7 +90,7 @@ pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Placeholder for unknown git sha.
 pub const UNKNOWN_GIT_SHA: &str = "unknown";
 
-// The single source of truth of the pg parameters, Used in ConfigMap and current_cluster_version.
+// The single source of truth of the pg parameters, Used in SessionConfig and current_cluster_version.
 // The version of PostgreSQL that Risingwave claims to be.
 pub const PG_VERSION: &str = "13.14.0";
 /// The version of PostgreSQL that Risingwave claims to be.

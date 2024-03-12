@@ -23,8 +23,10 @@ mod visibility_mode;
 use chrono_tz::Tz;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
-use risingwave_common_proc_macro::SessionConfig;
+use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -50,12 +52,14 @@ pub enum SessionConfigError {
 
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
+#[serde_as]
 /// This is the Session Config of RisingWave.
-#[derive(SessionConfig)]
-pub struct ConfigMap {
+#[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc)]
+pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
+    #[serde(rename = "rw_implicit_flush")]
     #[parameter(default = false, rename = "rw_implicit_flush")]
     implicit_flush: bool,
 
@@ -67,6 +71,7 @@ pub struct ConfigMap {
     /// A temporary config variable to force query running in either local or distributed mode.
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
 
@@ -82,20 +87,24 @@ pub struct ConfigMap {
 
     /// It is typically set by an application upon connection to the server.
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
+    #[serde(rename = "datestyle")]
     #[parameter(default = "", rename = "datestyle")]
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
+    #[serde(rename = "rw_batch_enable_lookup_join")]
     #[parameter(default = true, rename = "rw_batch_enable_lookup_join")]
     batch_enable_lookup_join: bool,
 
     /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
     /// execution
+    #[serde(rename = "rw_batch_enable_sort_agg")]
     #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
     /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
     /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
+    #[serde(rename = "batch_enable_distributed_dml")]
     #[parameter(default = false, rename = "batch_enable_distributed_dml")]
     batch_enable_distributed_dml: bool,
 
@@ -106,19 +115,23 @@ pub struct ConfigMap {
     /// Sets the order in which schemas are searched when an object (table, data type, function, etc.)
     /// is referenced by a simple name with no schema specified.
     /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SearchPath::default())]
     search_path: SearchPath,
 
     /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = VisibilityMode::default())]
     visibility_mode: VisibilityMode,
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = IsolationLevel::default())]
     transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     query_epoch: ConfigNonZeroU64,
 
@@ -128,14 +141,17 @@ pub struct ConfigMap {
 
     /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
     /// streaming parallelism.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_parallelism: ConfigNonZeroU64,
 
     /// Enable delta join for streaming queries. Defaults to false.
+    #[serde(rename = "rw_streaming_enable_delta_join")]
     #[parameter(default = false, rename = "rw_streaming_enable_delta_join")]
     streaming_enable_delta_join: bool,
 
     /// Enable bushy join for streaming queries. Defaults to true.
+    #[serde(rename = "rw_streaming_enable_bushy_join")]
     #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
@@ -144,39 +160,47 @@ pub struct ConfigMap {
     streaming_enable_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
+    #[serde(rename = "rw_streaming_allow_jsonb_in_stream_key")]
     #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
+    #[serde(rename = "rw_enable_join_ordering")]
     #[parameter(default = true, rename = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
+    #[serde(rename = "rw_enable_two_phase_agg")]
     #[parameter(default = true, flags = "SETTER", rename = "rw_enable_two_phase_agg")]
     enable_two_phase_agg: bool,
 
     /// Force two phase agg optimization whenever there's a choice between
     /// optimizations. Defaults to false.
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
+    #[serde(rename = "rw_force_two_phase_agg")]
     #[parameter(default = false, flags = "SETTER", rename = "rw_force_two_phase_agg")]
     force_two_phase_agg: bool,
 
     /// Enable sharing of common sub-plans.
     /// This means that DAG structured query plans can be constructed,
+    #[serde(rename = "rw_enable_share_plan")]
     #[parameter(default = true, rename = "rw_enable_share_plan")]
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
     /// Enable split distinct agg
+    #[serde(rename = "rw_force_split_distinct_agg")]
     #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
+    #[serde(rename = "intervalstyle")]
     #[parameter(default = "", rename = "intervalstyle")]
     interval_style: String,
 
     /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     batch_parallelism: ConfigNonZeroU64,
 
@@ -197,6 +221,7 @@ pub struct ConfigMap {
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SinkDecouple::default())]
     sink_decouple: SinkDecouple,
 
@@ -231,11 +256,14 @@ pub struct ConfigMap {
     standard_conforming_strings: String,
 
     /// Set streaming rate limit (rows per second) for each parallelism for mv backfilling
+    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_rate_limit: ConfigNonZeroU64,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(rename = "rw_streaming_over_window_cache_policy")]
     #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
@@ -275,7 +303,7 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
     }
 }
 
-impl ConfigMap {
+impl SessionConfig {
     pub fn set_force_two_phase_agg(
         &mut self,
         val: bool,

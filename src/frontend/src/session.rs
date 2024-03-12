@@ -42,7 +42,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
-use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
+use risingwave_common::session_config::{SessionConfig, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
 };
@@ -542,7 +542,7 @@ pub struct SessionImpl {
     /// Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: Arc<RwLock<ConfigMap>>,
+    config_map: Arc<RwLock<SessionConfig>>,
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
@@ -655,11 +655,11 @@ impl SessionImpl {
         self.auth_context.user_id
     }
 
-    pub fn shared_config(&self) -> Arc<RwLock<ConfigMap>> {
+    pub fn shared_config(&self) -> Arc<RwLock<SessionConfig>> {
         Arc::clone(&self.config_map)
     }
 
-    pub fn config(&self) -> RwLockReadGuard<'_, ConfigMap> {
+    pub fn config(&self) -> RwLockReadGuard<'_, SessionConfig> {
         self.config_map.read()
     }
 
