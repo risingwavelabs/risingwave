@@ -3055,7 +3055,12 @@ impl HummockManager {
                 rewrite_cg_ids.push(*cg_id);
             }
 
-            if let Some(levels) = current_version.levels.get(cg_id) {
+            if let Some(levels) = current_version.levels.get(cg_id)
+                && compaction_group_config
+                    .compaction_config
+                    .split_weight_by_vnode
+                    > 0
+            {
                 restore_cg_to_partition_vnode.insert(
                     *cg_id,
                     levels
