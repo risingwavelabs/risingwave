@@ -71,6 +71,7 @@ use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
@@ -647,12 +648,11 @@ impl MetaClient {
         &self,
         user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<u32>,
+        granted_by: u32,
         revoke_by: u32,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
-        let granted_by = granted_by.unwrap_or_default();
         let request = RevokePrivilegeRequest {
             user_ids,
             privileges,
@@ -810,6 +810,14 @@ impl MetaClient {
             .list_actor_states(ListActorStatesRequest {})
             .await?;
         Ok(resp.states)
+    }
+
+    pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
+        let resp = self
+            .inner
+            .list_object_dependencies(ListObjectDependenciesRequest {})
+            .await?;
+        Ok(resp.dependencies)
     }
 
     pub async fn pause(&self) -> Result<PauseResponse> {
@@ -1848,6 +1856,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
+            ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

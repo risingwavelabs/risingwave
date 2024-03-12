@@ -36,7 +36,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -275,7 +275,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let mut curr_epoch = 1919;
+    let mut curr_epoch = test_epoch(1919);
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -289,7 +289,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         }) if epoch.curr == curr_epoch
     ));
 
-    curr_epoch += 1;
+    curr_epoch.inc_epoch();
     let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = insert.execute();
@@ -371,7 +371,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         0,
     ));
 
-    curr_epoch += 1;
+    curr_epoch.inc_epoch();
     let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = delete.execute();
@@ -464,7 +464,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         vec![0, 1, 2],
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -477,7 +477,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         Some(8_i64.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(

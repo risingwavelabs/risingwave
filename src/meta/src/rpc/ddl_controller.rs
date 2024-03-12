@@ -69,7 +69,7 @@ use crate::manager::{
     CatalogManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId, IdCategory,
     IdCategoryType, IndexId, LocalNotification, MetaSrvEnv, MetadataManager, MetadataManagerV1,
     NotificationVersion, RelationIdEnum, SchemaId, SinkId, SourceId, StreamingClusterInfo,
-    StreamingJob, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
+    StreamingJob, SubscriptionId, TableId, UserId, ViewId, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -101,6 +101,7 @@ pub enum StreamingJobId {
     Sink(SinkId),
     Table(Option<SourceId>, TableId),
     Index(IndexId),
+    Subscription(SubscriptionId),
 }
 
 impl StreamingJobId {
@@ -109,6 +110,7 @@ impl StreamingJobId {
         match self {
             StreamingJobId::MaterializedView(id)
             | StreamingJobId::Sink(id)
+            | StreamingJobId::Subscription(id)
             | StreamingJobId::Table(_, id)
             | StreamingJobId::Index(id) => *id,
         }
@@ -356,6 +358,16 @@ impl DdlController {
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> MetaResult<()> {
+        if !deferred
+            && !self
+                .metadata_manager
+                .list_background_creating_jobs()
+                .await?
+                .is_empty()
+        {
+            bail!("There are background creating jobs, please try again later")
+        }
+
         self.stream_manager
             .alter_table_parallelism(table_id, parallelism.into(), deferred)
             .await
@@ -1136,6 +1148,7 @@ impl DdlController {
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
+                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Sink),
                 };
 
                 let version = self
@@ -1188,6 +1201,15 @@ impl DdlController {
                 mgr.catalog_manager
                     .drop_relation(
                         RelationIdEnum::Index(index_id),
+                        mgr.fragment_manager.clone(),
+                        drop_mode,
+                    )
+                    .await?
+            }
+            StreamingJobId::Subscription(subscription_id) => {
+                mgr.catalog_manager
+                    .drop_relation(
+                        RelationIdEnum::Subscription(subscription_id),
                         mgr.fragment_manager.clone(),
                         drop_mode,
                     )
@@ -1377,9 +1399,11 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        let table_parallelism = match default_parallelism {
-            None => TableParallelism::Adaptive,
-            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
+        // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
+        // Otherwise, it defaults to FIXED based on deduction.
+        let table_parallelism = match (default_parallelism, &self.env.opts.default_parallelism) {
+            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
+            _ => TableParallelism::Fixed(parallelism.get()),
         };
 
         let table_fragments = TableFragments::new(
@@ -1510,6 +1534,11 @@ impl DdlController {
                     .cancel_create_sink_procedure(sink, target_table)
                     .await;
             }
+            StreamingJob::Subscription(subscription) => {
+                mgr.catalog_manager
+                    .cancel_create_subscription_procedure(subscription)
+                    .await;
+            }
             StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     mgr.catalog_manager
@@ -1595,6 +1624,11 @@ impl DdlController {
                 }
 
                 version
+            }
+            StreamingJob::Subscription(subscription) => {
+                mgr.catalog_manager
+                    .finish_create_subscription_procedure(internal_tables, subscription)
+                    .await?
             }
             StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
@@ -1766,7 +1800,6 @@ impl DdlController {
         dummy_table_id: TableId,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
-        let default_parallelism = fragment_graph.default_parallelism();
         let expr_context = stream_ctx.to_expr_context();
 
         let old_table_fragments = self
@@ -1814,7 +1847,9 @@ impl DdlController {
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let parallelism = self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+        let parallelism = NonZeroUsize::new(original_table_fragment.get_actors().len())
+            .expect("The number of actors in the original table fragment should be greater than 0");
+
         let actor_graph_builder =
             ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
 
@@ -1829,11 +1864,6 @@ impl DdlController {
             .await?;
         assert!(dispatchers.is_empty());
 
-        let table_parallelism = match default_parallelism {
-            None => TableParallelism::Adaptive,
-            Some(parallelism) => TableParallelism::Fixed(parallelism.get()),
-        };
-
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
@@ -1842,8 +1872,7 @@ impl DdlController {
             graph,
             &building_locations.actor_locations,
             stream_ctx,
-            // todo: shall we use the old table fragments' parallelism
-            table_parallelism,
+            old_table_fragments.assigned_parallelism,
         );
 
         let ctx = ReplaceTableContext {
@@ -1928,6 +1957,11 @@ impl DdlController {
                         .alter_database_name(database_id, new_name)
                         .await
                 }
+                alter_name_request::Object::SubscriptionId(sink_id) => {
+                    mgr.catalog_manager
+                        .alter_subscription_name(sink_id, new_name)
+                        .await
+                }
             },
             MetadataManager::V2(mgr) => {
                 let (obj_type, id) = match relation {
@@ -1943,6 +1977,9 @@ impl DdlController {
                     }
                     alter_name_request::Object::DatabaseId(id) => {
                         (ObjectType::Database, id as ObjectId)
+                    }
+                    alter_name_request::Object::SubscriptionId(id) => {
+                        (ObjectType::Subscription, id as ObjectId)
                     }
                 };
                 mgr.catalog_controller
@@ -1971,6 +2008,7 @@ impl DdlController {
                     Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
                     Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
                     Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
+                    Object::SubscriptionId(id) => (ObjectType::Subscription, id as ObjectId),
                 };
                 mgr.catalog_controller
                     .alter_owner(obj_type, id, owner_id as _)
@@ -2009,6 +2047,9 @@ impl DdlController {
                     }
                     alter_set_schema_request::Object::ConnectionId(id) => {
                         (ObjectType::Connection, id as ObjectId)
+                    }
+                    alter_set_schema_request::Object::SubscriptionId(id) => {
+                        (ObjectType::Subscription, id as ObjectId)
                     }
                 };
                 mgr.catalog_controller

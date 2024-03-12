@@ -32,7 +32,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     iterator: I,
 
     // Track the last seen full key
-    full_key_tracker: FullKeyTracker<Bytes>,
+    full_key_tracker: FullKeyTracker<Bytes, true>,
 
     /// Last user value
     latest_val: Bytes,
@@ -78,7 +78,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             delete_range_iter,
             _version: version,
             is_current_pos_valid: false,
-            full_key_tracker: FullKeyTracker::with_config(FullKey::default(), true),
+            full_key_tracker: FullKeyTracker::new(FullKey::default()),
         }
     }
 
@@ -136,7 +136,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Reset
         self.is_current_pos_valid = false;
-        self.full_key_tracker = FullKeyTracker::with_config(FullKey::default(), true);
+        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan
         match &self.key_range.0 {
@@ -180,7 +180,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Reset
         self.is_current_pos_valid = false;
-        self.full_key_tracker = FullKeyTracker::with_config(FullKey::default(), true);
+        self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
@@ -324,6 +324,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
+
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -832,7 +834,8 @@ mod tests {
             read_options.clone(),
         )];
 
-        let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
+        let min_count = (TEST_KEYS_COUNT / 5) as u64;
+        let min_epoch = test_epoch(min_count);
         let mi = MergeIterator::new(iters);
         let mut ui =
             UserIterator::for_test_with_epoch(mi, (Unbounded, Unbounded), u64::MAX, min_epoch);
@@ -848,7 +851,7 @@ mod tests {
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - min_epoch as usize + 1;
+        let expect_count = TEST_KEYS_COUNT - (min_epoch / test_epoch(1)) as usize + 1;
         assert_eq!(i, expect_count);
     }
 
@@ -871,8 +874,14 @@ mod tests {
 
         let mut del_iter = ForwardMergeRangeIterator::new(150);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
-        let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_iter);
+        let mut ui: UserIterator<_> = UserIterator::new(
+            mi,
+            (Unbounded, Unbounded),
+            test_epoch(150),
+            0,
+            None,
+            del_iter,
+        );
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -900,8 +909,14 @@ mod tests {
         let mut del_iter = ForwardMergeRangeIterator::new(300);
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
         let mi = MergeIterator::new(iters);
-        let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter);
+        let mut ui: UserIterator<_> = UserIterator::new(
+            mi,
+            (Unbounded, Unbounded),
+            test_epoch(300),
+            0,
+            None,
+            del_iter,
+        );
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
         assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(2));

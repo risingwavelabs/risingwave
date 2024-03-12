@@ -198,5 +198,6 @@ async fn restore_metadata<S: MetaStore>(
     restore_metadata_model(&meta_store, &snapshot.metadata.connection).await?;
     restore_system_param_model(&meta_store, &[snapshot.metadata.system_param]).await?;
     restore_cluster_id(&meta_store, snapshot.metadata.cluster_id.into()).await?;
+    restore_metadata_model(&meta_store, &snapshot.metadata.subscription).await?;
     Ok(())
 }

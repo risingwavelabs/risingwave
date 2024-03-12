@@ -64,8 +64,8 @@ pub struct StreamingMetrics {
 
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
+    pub source_backfill_row_count: LabelGuardedIntCounterVec<4>,
 
     // Sink & materialized view
     pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
@@ -218,17 +218,17 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let source_row_per_barrier = register_int_counter_vec_with_registry!(
-            "stream_source_rows_per_barrier_counts",
-            "Total number of rows that have been output from source per barrier",
-            &["actor_id", "executor_id", "fragment_id"],
+        let source_split_change_count = register_int_counter_vec_with_registry!(
+            "stream_source_split_change_event_count",
+            "Total number of split change events that have been operated by source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
 
-        let source_split_change_count = register_int_counter_vec_with_registry!(
-            "stream_source_split_change_event_count",
-            "Total number of split change events that have been operated by source",
+        let source_backfill_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_source_backfill_rows_counts",
+            "Total number of rows that have been backfilled for source",
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
@@ -1077,8 +1077,8 @@ impl StreamingMetrics {
             actor_in_record_cnt,
             actor_out_record_cnt,
             source_output_row_count,
-            source_row_per_barrier,
             source_split_change_count,
+            source_backfill_row_count,
             sink_input_row_count,
             mview_input_row_count,
             exchange_frag_recv_size,

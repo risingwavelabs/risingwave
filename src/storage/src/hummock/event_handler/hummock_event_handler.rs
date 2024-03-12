@@ -741,6 +741,7 @@ impl HummockEventHandler {
                 table_id,
                 new_read_version_sender,
                 is_replicated,
+                vnodes,
             } => {
                 let pinned_version = self.pinned_version.load();
                 let basic_read_version = Arc::new(RwLock::new(
@@ -748,6 +749,7 @@ impl HummockEventHandler {
                         table_id,
                         (**pinned_version).clone(),
                         is_replicated,
+                        vnodes,
                     ),
                 ));
 
@@ -875,7 +877,10 @@ mod tests {
     use bytes::Bytes;
     use futures::FutureExt;
     use itertools::Itertools;
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_hummock_sdk::key::TableKey;
     use risingwave_hummock_sdk::version::HummockVersion;
@@ -899,7 +904,7 @@ mod tests {
     #[tokio::test]
     async fn test_event_handler_merging_task() {
         let table_id = TableId::new(123);
-        let epoch0 = 233;
+        let epoch0 = test_epoch(233);
         let pinned_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1,
@@ -955,6 +960,7 @@ mod tests {
             table_id,
             new_read_version_sender: read_version_tx,
             is_replicated: false,
+            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
         })
         .unwrap();
         let (read_version, guard) = read_version_rx.await.unwrap();
@@ -972,7 +978,7 @@ mod tests {
             )
         };
 
-        let epoch1 = epoch0 + 1;
+        let epoch1 = epoch0.next_epoch();
         let imm1 = build_batch(epoch1, 0);
         read_version
             .write()
@@ -995,7 +1001,7 @@ mod tests {
             .await
             .is_pending());
 
-        let epoch2 = epoch1 + 1;
+        let epoch2 = epoch1.next_epoch();
         let mut imm_ids = Vec::new();
         for i in 0..10 {
             let imm = build_batch(epoch2, i);

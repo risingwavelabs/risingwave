@@ -50,6 +50,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
@@ -802,7 +803,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserId>,
+        _granted_by: UserId,
         _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,
@@ -890,6 +891,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
+        Ok(vec![])
+    }
+
     async fn unpin_snapshot(&self) -> RpcResult<()> {
         Ok(())
     }
@@ -931,7 +936,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
-        unimplemented!()
+        Ok(HummockVersion::default())
     }
 
     async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {

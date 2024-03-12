@@ -1,5 +1,20 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::assert_matches::assert_matches;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -168,21 +183,22 @@ impl PlanRoot {
     pub fn into_array_agg(self) -> Result<PlanRef> {
         use generic::Agg;
         use plan_node::PlanAggCall;
-        use risingwave_common::types::DataType;
+        use risingwave_common::types::{DataType, ListValue};
         use risingwave_expr::aggregate::AggKind;
 
-        use crate::expr::InputRef;
+        use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
         let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
-        Ok(Agg::new(
+        let return_type = DataType::List(input_column_type.clone().into());
+        let agg = Agg::new(
             vec![PlanAggCall {
                 agg_kind: AggKind::ArrayAgg,
-                return_type: DataType::List(input_column_type.clone().into()),
-                inputs: vec![InputRef::new(select_idx, input_column_type)],
+                return_type: return_type.clone(),
+                inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
                 order_by: self.required_order.column_orders,
                 filter: Condition::true_cond(),
@@ -190,8 +206,19 @@ impl PlanRoot {
             }],
             IndexSet::empty(),
             self.plan,
-        )
-        .into())
+        );
+        Ok(LogicalProject::create(
+            agg.into(),
+            vec![FunctionCall::new(
+                ExprType::Coalesce,
+                vec![
+                    InputRef::new(0, return_type).into(),
+                    ExprImpl::literal_list(ListValue::empty(&input_column_type), input_column_type),
+                ],
+            )
+            .unwrap()
+            .into()],
+        ))
     }
 
     /// Apply logical optimization to the plan for stream.
@@ -524,6 +551,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -725,6 +753,7 @@ impl PlanRoot {
             pk_column_indices,
             row_id_index,
             version,
+            retention_seconds,
         )
     }
 
@@ -748,6 +777,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            None,
         )
     }
 
@@ -756,6 +786,7 @@ impl PlanRoot {
         &mut self,
         index_name: String,
         definition: String,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
@@ -770,6 +801,7 @@ impl PlanRoot {
             definition,
             TableType::Index,
             cardinality,
+            retention_seconds,
         )
     }
 

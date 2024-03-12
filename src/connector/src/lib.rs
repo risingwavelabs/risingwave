@@ -33,6 +33,7 @@
 #![feature(error_generic_member_access)]
 #![feature(register_tool)]
 #![register_tool(rw)]
+#![recursion_limit = "256"]
 
 use std::time::Duration;
 
@@ -51,6 +52,7 @@ pub mod sink;
 pub mod source;
 
 pub mod common;
+pub mod mqtt_common;
 
 pub use paste::paste;
 

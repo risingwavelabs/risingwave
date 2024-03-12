@@ -14,6 +14,7 @@ anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false }
+fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.12"
 jni = "0.21.1"
@@ -43,7 +44,7 @@ tracing = "0.1"
 [dev-dependencies]
 expect-test = "1"
 risingwave_expr = { workspace = true }
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

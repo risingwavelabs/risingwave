@@ -925,6 +925,18 @@ profile:
       - use: prometheus
       - use: grafana
 
+  full-with-batch-query-limit:
+    config-path: src/config/full-with-batch-query-limit.toml
+    steps:
+        - use: minio
+        - use: etcd
+        - use: meta-node
+        - use: compute-node
+        - use: frontend
+        - use: compactor
+        - use: prometheus
+        - use: grafana
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -1142,6 +1154,9 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
+    # How frequently Prometheus scrape targets (collect metrics)
+    scrape-interval: 15s
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -1232,6 +1247,8 @@ template:
 
     # gRPC listen port of the OTLP collector
     otlp-port: 4317
+
+    max-bytes-per-trace: 5000000
 
   opendal:
     id: opendal

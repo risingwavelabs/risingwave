@@ -71,10 +71,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
     #[try_stream(boxed, ok = StreamChunk, error = crate::error::ConnectorError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
-            let actor_id = self.source_ctx.source_info.actor_id.to_string();
-            let fragment_id = self.source_ctx.source_info.fragment_id.to_string();
-            let source_id = self.source_ctx.source_info.source_id.to_string();
-            let source_name = self.source_ctx.source_info.source_name.to_string();
+            let actor_id = self.source_ctx.actor_id.to_string();
+            let fragment_id = self.source_ctx.fragment_id.to_string();
+            let source_id = self.source_ctx.source_id.to_string();
+            let source_name = self.source_ctx.source_name.to_string();
             let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
@@ -114,10 +114,10 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
     ) {
-        let actor_id = source_ctx.source_info.actor_id.to_string();
-        let fragment_id = source_ctx.source_info.fragment_id.to_string();
-        let source_id = source_ctx.source_info.source_id.to_string();
-        let source_name = source_ctx.source_info.source_name.to_string();
+        let actor_id = source_ctx.actor_id.to_string();
+        let fragment_id = source_ctx.fragment_id.to_string();
+        let source_id = source_ctx.source_id.to_string();
+        let source_name = source_ctx.source_name.to_string();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
@@ -151,6 +151,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             offset += len;
             batch_size += len;
             batch.push(msg);
+
             if batch.len() >= max_chunk_size {
                 source_ctx
                     .metrics

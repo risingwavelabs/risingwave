@@ -60,9 +60,7 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
         epoch: risingwave_common::util::epoch::EpochPair,
         _pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
-        self.state_store
-            .init(InitOptions::new(epoch, self.serde.vnodes().clone()))
-            .await?;
+        self.state_store.init(InitOptions::new(epoch)).await?;
         self.seq_id = FIRST_SEQ_ID;
         Ok(())
     }
