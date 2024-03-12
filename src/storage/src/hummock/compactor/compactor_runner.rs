@@ -28,8 +28,9 @@ use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockSstableObjectId};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch, KeyComparator};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
+use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -63,6 +64,8 @@ pub struct CompactorRunner {
     key_range: KeyRange,
     split_index: usize,
 }
+
+const MAX_OVERLAPPING_SST: usize = 64;
 
 impl CompactorRunner {
     pub fn new(
@@ -165,24 +168,23 @@ impl CompactorRunner {
                 continue;
             }
 
+            let tables = level
+                .table_infos
+                .iter()
+                .filter(|table_info| {
+                    let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                    let table_ids = &table_info.table_ids;
+                    let exist_table = table_ids
+                        .iter()
+                        .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
+
+                    self.key_range.full_key_overlap(&key_range) && exist_table
+                })
+                .cloned()
+                .collect_vec();
             // Do not need to filter the table because manager has done it.
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos));
-                let tables = level
-                    .table_infos
-                    .iter()
-                    .filter(|table_info| {
-                        let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
-                        let table_ids = &table_info.table_ids;
-                        let exist_table = table_ids.iter().any(|table_id| {
-                            self.compact_task.existing_table_ids.contains(table_id)
-                        });
-
-                        self.key_range.full_key_overlap(&key_range) && exist_table
-                    })
-                    .cloned()
-                    .collect_vec();
-
                 table_iters.push(ConcatSstableIterator::new(
                     self.compact_task.existing_table_ids.clone(),
                     tables,
@@ -191,21 +193,28 @@ impl CompactorRunner {
                     task_progress.clone(),
                     compact_io_retry_time,
                 ));
-            } else {
-                for table_info in &level.table_infos {
-                    let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
-                    let table_ids = &table_info.table_ids;
-                    let exist_table = table_ids
-                        .iter()
-                        .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
-
-                    if !self.key_range.full_key_overlap(&key_range) || !exist_table {
-                        continue;
-                    }
-
+            } else if level.table_infos.len() > MAX_OVERLAPPING_SST {
+                let sst_groups = partition_overlapping_sstable_infos(tables);
+                tracing::warn!(
+                    "COMPACT A LARGE OVERLAPPING LEVEL: try to partition {} ssts with {} groups",
+                    level.table_infos.len(),
+                    sst_groups.len()
+                );
+                for table_infos in sst_groups {
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
-                        vec![table_info.clone()],
+                        table_infos,
+                        self.compactor.task_config.key_range.clone(),
+                        self.sstable_store.clone(),
+                        task_progress.clone(),
+                        compact_io_retry_time,
+                    ));
+                }
+            } else {
+                for table_info in tables {
+                    table_iters.push(ConcatSstableIterator::new(
+                        self.compact_task.existing_table_ids.clone(),
+                        vec![table_info],
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
@@ -225,6 +234,33 @@ impl CompactorRunner {
             &self.compact_task.table_watermarks,
         ))
     }
+}
+
+pub fn partition_overlapping_sstable_infos(
+    mut origin_infos: Vec<SstableInfo>,
+) -> Vec<Vec<SstableInfo>> {
+    let mut ret: Vec<Vec<SstableInfo>> = Vec::new();
+    origin_infos.sort_by(|a, b| {
+        let x = a.key_range.as_ref().unwrap();
+        let y = b.key_range.as_ref().unwrap();
+        KeyComparator::compare_encoded_full_key(&x.left, &y.left)
+    });
+    'outside: for sst in origin_infos {
+        for prev_group in &mut ret {
+            let last = prev_group.last().unwrap();
+            if !last
+                .key_range
+                .as_ref()
+                .unwrap()
+                .full_key_overlap(sst.key_range.as_ref().unwrap())
+            {
+                prev_group.push(sst);
+                continue 'outside;
+            }
+        }
+        ret.push(vec![sst]);
+    }
+    ret
 }
 
 /// Handles a compaction task and reports its status to hummock manager.
