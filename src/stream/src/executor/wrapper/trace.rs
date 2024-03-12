@@ -21,7 +21,6 @@ use tracing::{Instrument, Span};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{ActorContextRef, ExecutorInfo, Message, MessageStream};
-use crate::task::ActorId;
 
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -105,14 +104,10 @@ pub async fn trace(
 /// Streams wrapped by `instrument_await_tree` will be able to print the spans of the
 /// executors in the stack trace through `await-tree`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn instrument_await_tree(
-    info: Arc<ExecutorInfo>,
-    actor_id: ActorId,
-    input: impl MessageStream,
-) {
+pub async fn instrument_await_tree(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     pin_mut!(input);
 
-    let span: await_tree::Span = info.identity.into();
+    let span: await_tree::Span = info.identity.clone().into();
 
     while let Some(message) = input
         .next()
