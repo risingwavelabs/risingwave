@@ -124,15 +124,12 @@ impl SnowflakeHttpClient {
             &EncodingKey::from_rsa_pem(self.private_key.as_ref()).map_err(|err| {
                 SinkError::Snowflake(format!(
                     "failed to encode from provided rsa pem key, error: {}",
-                    err.to_string()
+                    err
                 ))
             })?,
         )
         .map_err(|err| {
-            SinkError::Snowflake(format!(
-                "failed to encode jwt_token, error: {}",
-                err.to_string()
-            ))
+            SinkError::Snowflake(format!("failed to encode jwt_token, error: {}", err))
         })?;
         Ok(jwt_token)
     }
