@@ -49,8 +49,8 @@ use risingwave_connector::source::nexmark::source::{get_event_data_types_with_na
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
     ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
-    PULSAR_CONNECTOR, S3_CONNECTOR,
+    KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -117,6 +117,8 @@ async fn extract_json_table_schema(
     }
 }
 
+/// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
+/// May also look for the usage of `SourceColumnType`.
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
     let columns = vec![
         ColumnCatalog {
@@ -1008,6 +1010,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                ),
+                MQTT_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Json, Encode::Bytes],
                 ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],

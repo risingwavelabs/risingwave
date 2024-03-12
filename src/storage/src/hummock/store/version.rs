@@ -18,8 +18,8 @@ use std::collections::HashSet;
 use std::iter::once;
 use std::ops::Bound::Included;
 use std::sync::Arc;
+use std::time::Instant;
 
-use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -38,7 +38,6 @@ use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
-use tracing::Instrument;
 
 use super::StagingDataIterator;
 use crate::error::StorageResult;
@@ -777,8 +776,6 @@ impl HummockVersionReader {
         read_version_tuple: ReadVersionTuple,
         mem_table: Option<MemTableHummockIterator<'b>>,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
-        let table_id_string = read_options.table_id.to_string();
-        let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();
@@ -814,7 +811,6 @@ impl HummockVersionReader {
             let table_holder = self
                 .sstable_store
                 .sstable(sstable_info, &mut local_stats)
-                .instrument(tracing::trace_span!("get_sstable"))
                 .await?;
 
             if !table_holder.meta.monotonic_tombstone_events.is_empty()
@@ -846,11 +842,7 @@ impl HummockVersionReader {
 
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
-        let timer = self
-            .state_store_metrics
-            .iter_fetch_meta_duration
-            .with_label_values(&[table_id_label])
-            .start_timer();
+        let timer = Instant::now();
 
         for level in committed.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -893,7 +885,6 @@ impl HummockVersionReader {
                     let sstable = self
                         .sstable_store
                         .sstable(&sstables[0], &mut local_stats)
-                        .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
                     if !sstable.meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -938,7 +929,6 @@ impl HummockVersionReader {
                     let sstable = self
                         .sstable_store
                         .sstable(sstable_info, &mut local_stats)
-                        .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
                     assert_eq!(sstable_info.get_object_id(), sstable.id);
                     if !sstable.meta.monotonic_tombstone_events.is_empty()
@@ -966,8 +956,9 @@ impl HummockVersionReader {
                 }
             }
         }
-        let fetch_meta_duration_sec = timer.stop_and_record();
+        let fetch_meta_duration_sec = timer.elapsed().as_secs_f64();
         if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
+            let table_id_string = read_options.table_id.to_string();
             tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.",
                 table_id_string, epoch, fetch_meta_duration_sec, local_stats.cache_meta_block_miss);
             self.state_store_metrics
@@ -1006,10 +997,7 @@ impl HummockVersionReader {
             Some(committed),
             delete_range_iter,
         );
-        user_iter
-            .rewind()
-            .verbose_instrument_await("rewind")
-            .await?;
+        user_iter.rewind().await?;
         local_stats.found_key = user_iter.is_valid();
         local_stats.sub_iter_count = local_stats.staging_imm_iter_count
             + local_stats.staging_sst_iter_count

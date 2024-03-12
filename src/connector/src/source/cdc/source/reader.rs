@@ -217,8 +217,8 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         "cdc_source".to_owned(),
                         source_id.clone(),
-                        self.source_ctx.source_info.source_name.clone(),
-                        self.source_ctx.source_info.fragment_id.to_string(),
+                        self.source_ctx.source_name.clone(),
+                        self.source_ctx.fragment_id.to_string(),
                     ]);
                     Err(e)?;
                 }

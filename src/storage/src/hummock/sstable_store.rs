@@ -700,7 +700,8 @@ impl SstableStore {
         }
 
         stats.cache_meta_block_total += 1;
-        entry.verbose_instrument_await("sstable")
+
+        entry
     }
 
     pub async fn list_object_metadata_from_object_store(

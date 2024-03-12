@@ -684,3 +684,37 @@ impl NatsCommon {
         Ok(creds)
     }
 }
+
+pub(crate) fn load_certs(
+    certificates: &str,
+) -> ConnectorResult<Vec<tokio_rustls::rustls::Certificate>> {
+    let cert_bytes = if let Some(path) = certificates.strip_prefix("fs://") {
+        std::fs::read_to_string(path).map(|cert| cert.as_bytes().to_owned())?
+    } else {
+        certificates.as_bytes().to_owned()
+    };
+
+    let certs = rustls_pemfile::certs(&mut cert_bytes.as_slice())?;
+
+    Ok(certs
+        .into_iter()
+        .map(tokio_rustls::rustls::Certificate)
+        .collect())
+}
+
+pub(crate) fn load_private_key(
+    certificate: &str,
+) -> ConnectorResult<tokio_rustls::rustls::PrivateKey> {
+    let cert_bytes = if let Some(path) = certificate.strip_prefix("fs://") {
+        std::fs::read_to_string(path).map(|cert| cert.as_bytes().to_owned())?
+    } else {
+        certificate.as_bytes().to_owned()
+    };
+
+    let certs = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())?;
+    let cert = certs
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("No private key found"))?;
+    Ok(tokio_rustls::rustls::PrivateKey(cert))
+}
