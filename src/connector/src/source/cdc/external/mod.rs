@@ -16,6 +16,7 @@ pub mod mock_external_table;
 mod postgres;
 
 use std::collections::HashMap;
+use std::fmt;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -245,6 +246,32 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
+    #[serde(rename = "ssl.name", default = "Default::default")]
+    pub sslmode: SslMode,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SslMode {
+    Disable,
+    Prefer,
+    Require,
+}
+
+impl Default for SslMode {
+    fn default() -> Self {
+        Self::Disable
+    }
+}
+
+impl fmt::Display for SslMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            SslMode::Disable => "disable",
+            SslMode::Prefer => "prefer",
+            SslMode::Require => "require",
+        })
+    }
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {

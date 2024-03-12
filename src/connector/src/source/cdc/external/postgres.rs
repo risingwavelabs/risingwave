@@ -129,8 +129,13 @@ impl PostgresExternalTableReader {
         .context("failed to extract postgres connector properties")?;
 
         let database_url = format!(
-            "postgresql://{}:{}@{}:{}/{}",
-            config.username, config.password, config.host, config.port, config.database
+            "postgresql://{}:{}@{}:{}/{}?sslmode={}",
+            config.username,
+            config.password,
+            config.host,
+            config.port,
+            config.database,
+            dbg!(&config.sslmode)
         );
 
         let (client, connection) = tokio_postgres::connect(&database_url, NoTls).await?;
