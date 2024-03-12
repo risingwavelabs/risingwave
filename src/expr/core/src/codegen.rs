@@ -15,5 +15,5 @@
 pub use async_trait::async_trait;
 pub use futures_async_stream::try_stream;
 pub use futures_util::stream::BoxStream;
+pub use inventory;
 pub use itertools::multizip;
-pub use linkme;

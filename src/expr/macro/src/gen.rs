@@ -162,7 +162,6 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
             fn #ctor_name() -> risingwave_expr::sig::FuncSign {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
@@ -176,6 +175,9 @@ impl FunctionAttr {
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
                 }
+            }
+            risingwave_expr::codegen::inventory::submit! {
+                risingwave_expr::sig::FuncSignBuilder(#ctor_name)
             }
         })
     }
@@ -652,7 +654,6 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
             fn #ctor_name() -> risingwave_expr::sig::FuncSign {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
@@ -671,6 +672,9 @@ impl FunctionAttr {
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
                 }
+            }
+            risingwave_expr::codegen::inventory::submit! {
+                risingwave_expr::sig::FuncSignBuilder(#ctor_name)
             }
         })
     }
@@ -984,7 +988,6 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
             fn #ctor_name() -> risingwave_expr::sig::FuncSign {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
@@ -998,6 +1001,9 @@ impl FunctionAttr {
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
                 }
+            }
+            risingwave_expr::codegen::inventory::submit! {
+                risingwave_expr::sig::FuncSignBuilder(#ctor_name)
             }
         })
     }

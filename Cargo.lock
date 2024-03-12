@@ -5266,6 +5266,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
+name = "inventory"
+version = "0.3.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f958d3d68f4167080a18141e10381e7634563984a537f2a49a30fd8e53ac5767"
+
+[[package]]
 name = "io-extras"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5711,26 +5717,6 @@ name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-
-[[package]]
-name = "linkme"
-version = "0.3.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b53ad6a33de58864705954edb5ad5d571a010f9e296865ed43dc72a5621b430"
-dependencies = [
- "linkme-impl",
-]
-
-[[package]]
-name = "linkme-impl"
-version = "0.3.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04e542a18c94a9b6fcc7adb090fa3ba6b79ee220a16404f325672729f32a66ff"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.48",
-]
 
 [[package]]
 name = "linux-raw-sys"
@@ -9332,8 +9318,8 @@ dependencies = [
  "expect-test",
  "futures-async-stream",
  "futures-util",
+ "inventory",
  "itertools 0.12.0",
- "linkme",
  "madsim-tokio",
  "md5",
  "moka",
@@ -9374,7 +9360,6 @@ dependencies = [
  "icelake",
  "itertools 0.12.0",
  "jsonbb",
- "linkme",
  "madsim-tokio",
  "md5",
  "num-traits",
@@ -9435,8 +9420,8 @@ dependencies = [
  "futures-async-stream",
  "iana-time-zone",
  "icelake",
+ "inventory",
  "itertools 0.12.0",
- "linkme",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",

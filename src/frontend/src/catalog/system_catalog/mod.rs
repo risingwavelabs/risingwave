@@ -325,20 +325,22 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<Arc<ViewCatalog>> {
         .collect()
 }
 
+/// A new type around a function that returns a [`BuiltinCatalog`]. Used for registering
+/// builtin catalogs from `#[system_catalog]` attributes in the `frontend` crate.
+pub(crate) struct BuiltinCatalogBuilder(pub fn() -> BuiltinCatalog);
+inventory::collect!(BuiltinCatalogBuilder);
+
 /// The global registry of all builtin catalogs.
 pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
-    tracing::info!("found {} catalogs", SYS_CATALOGS_SLICE.len());
-    assert!(SYS_CATALOGS_SLICE.len() <= MAX_SYS_CATALOG_NUM as usize);
-    let catalogs = SYS_CATALOGS_SLICE
-        .iter()
-        .map(|f| f())
+    let catalogs = inventory::iter::<BuiltinCatalogBuilder>
+        .into_iter()
+        .map(|b| (b.0)())
         .sorted_by_key(|c| c.full_name())
-        .collect();
+        .collect_vec();
+    assert!(catalogs.len() <= MAX_SYS_CATALOG_NUM as usize);
+    tracing::info!("found {} catalogs", catalogs.len());
     SystemCatalog { catalogs }
 });
-
-#[linkme::distributed_slice]
-pub static SYS_CATALOGS_SLICE: [fn() -> BuiltinCatalog];
 
 #[async_trait]
 impl SysCatalogReader for SysCatalogReaderImpl {

@@ -114,7 +114,6 @@ fn gen_sys_table(attr: Attr, item_fn: ItemFn) -> Result<TokenStream2> {
     let handle_error = return_result.then(|| quote!(?));
 
     Ok(quote! {
-        #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
         #[no_mangle]    // to prevent duplicate schema.table name
         fn #gen_fn_name() -> crate::catalog::system_catalog::BuiltinCatalog {
             const _: () = {
@@ -136,6 +135,9 @@ fn gen_sys_table(attr: Attr, item_fn: ItemFn) -> Result<TokenStream2> {
                 }),
             })
         }
+        ::inventory::submit! {
+            crate::catalog::system_catalog::BuiltinCatalogBuilder(#gen_fn_name)
+        }
     })
 }
 
@@ -155,7 +157,6 @@ fn gen_sys_view(attr: Attr, item_struct: ItemStruct) -> Result<TokenStream2> {
     };
 
     Ok(quote! {
-        #[linkme::distributed_slice(crate::catalog::system_catalog::SYS_CATALOGS_SLICE)]
         #[no_mangle]    // to prevent duplicate schema.table name
         fn #gen_fn_name() -> crate::catalog::system_catalog::BuiltinCatalog {
             let fields = #struct_type::fields();
@@ -165,6 +166,9 @@ fn gen_sys_view(attr: Attr, item_struct: ItemStruct) -> Result<TokenStream2> {
                 sql: #sql,
                 columns: fields,
             })
+        }
+        ::inventory::submit! {
+            crate::catalog::system_catalog::BuiltinCatalogBuilder(#gen_fn_name)
         }
     })
 }

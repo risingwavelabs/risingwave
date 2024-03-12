@@ -33,10 +33,10 @@ use crate::ExprError;
 /// The global registry of all function signatures.
 pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| {
     let mut map = FunctionRegistry::default();
-    tracing::info!("found {} functions", FUNCTIONS.len());
-    for f in FUNCTIONS {
-        map.insert(f());
+    for f in inventory::iter::<FuncSignBuilder> {
+        map.insert((f.0)());
     }
+    tracing::info!("found {} functions", map.len());
     map
 });
 
@@ -144,6 +144,11 @@ impl FunctionRegistry {
         (sig.type_infer)(args)
     }
 
+    /// Returns the number of function signatures in the registry.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     /// Returns an iterator of all function signatures.
     pub fn iter(&self) -> impl Iterator<Item = &FuncSign> {
         self.0.values().flatten()
@@ -185,6 +190,11 @@ pub struct FuncSign {
     /// For backward compatibility, it is still available in the backend.
     pub deprecated: bool,
 }
+
+/// A new type around a function that returns a [`FuncSign`]. Used for registering
+/// function signatures from `#[function]` attributes in the entire codebase.
+pub struct FuncSignBuilder(pub fn() -> FuncSign);
+inventory::collect!(FuncSignBuilder);
 
 impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -457,7 +467,3 @@ pub enum FuncBuilder {
     },
     Udf,
 }
-
-/// A static distributed slice of functions defined by `#[function]`.
-#[linkme::distributed_slice]
-pub static FUNCTIONS: [fn() -> FuncSign];
