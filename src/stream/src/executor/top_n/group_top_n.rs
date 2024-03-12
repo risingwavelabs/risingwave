@@ -164,7 +164,7 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
-        let keys = K::build(&self.group_by, chunk.data_chunk())?;
+        let keys = K::build_many(&self.group_by, chunk.data_chunk());
         let table_id_str = self.managed_state.table().table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
@@ -279,6 +279,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -355,15 +356,15 @@ mod tests {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
         MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut chunks[0])),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut chunks[1])),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Chunk(std::mem::take(&mut chunks[2])),
-            Message::Barrier(Barrier::new_test_barrier(4)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
             Message::Chunk(std::mem::take(&mut chunks[3])),
-            Message::Barrier(Barrier::new_test_barrier(5)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
         ])
         .into_executor(schema, pk_indices())
     }

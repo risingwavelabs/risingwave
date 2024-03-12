@@ -344,5 +344,37 @@ LL |     let _ = anyhow!("some error occurred: {:?}", anyhow_err);
    |
    = help: consider using `.context(..)` to attach additional message to the error and make it an error source instead
 
-error: aborting due to 43 previous errors
+error: should not format error directly
+  --> $DIR/format_error.rs:79:27
+   |
+LL |     let _ = anyhow!("{}", err.as_report());
+   |                           ^^^^^^^^^^^^^^^
+   |
+   = help: consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting its report
+
+error: should not format error directly
+  --> $DIR/format_error.rs:80:48
+   |
+LL |     let _ = anyhow!("some error occurred: {}", err.as_report());
+   |                                                ^^^^^^^^^^^^^^^
+   |
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+
+error: should not format error directly
+  --> $DIR/format_error.rs:81:29
+   |
+LL |     let _ = anyhow!("{:?}", anyhow_err.as_report());
+   |                             ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider directly wrapping the error with `anyhow::anyhow!(..)` instead of formatting its report
+
+error: should not format error directly
+  --> $DIR/format_error.rs:82:50
+   |
+LL |     let _ = anyhow!("some error occurred: {:?}", anyhow_err.as_report());
+   |                                                  ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: consider using `anyhow::Context::(with_)context` to attach additional message to the error and make it an error source instead
+
+error: aborting due to 47 previous errors
 

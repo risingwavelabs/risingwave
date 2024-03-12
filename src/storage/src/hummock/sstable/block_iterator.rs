@@ -331,6 +331,7 @@ impl BlockIterator {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
@@ -338,10 +339,10 @@ mod tests {
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k01", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k02", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k04", 4), b"v04");
-        builder.add_for_test(construct_full_key_struct(0, b"k05", 5), b"v05");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k01", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k02", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k04", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k05", 5), b"v05");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(
@@ -354,7 +355,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
     }
 
@@ -363,49 +364,49 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
     #[test]
     fn test_seek_none_front() {
         let mut it = build_iterator_for_test();
-        it.seek(construct_full_key_struct(0, b"k00", 0));
+        it.seek(construct_full_key_struct_for_test(0, b"k00", 0));
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         let mut it = build_iterator_for_test();
 
-        it.seek_le(construct_full_key_struct(0, b"k00", 0));
+        it.seek_le(construct_full_key_struct_for_test(0, b"k00", 0));
         assert!(!it.is_valid());
     }
 
     #[test]
     fn test_seek_none_back() {
         let mut it = build_iterator_for_test();
-        it.seek(construct_full_key_struct(0, b"k06", 6));
+        it.seek(construct_full_key_struct_for_test(0, b"k06", 6));
         assert!(!it.is_valid());
 
         let mut it = build_iterator_for_test();
-        it.seek_le(construct_full_key_struct(0, b"k06", 6));
+        it.seek_le(construct_full_key_struct_for_test(0, b"k06", 6));
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
     #[test]
     fn bi_direction_seek() {
         let mut it = build_iterator_for_test();
-        it.seek(construct_full_key_struct(0, b"k03", 3));
+        it.seek(construct_full_key_struct_for_test(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
 
-        it.seek_le(construct_full_key_struct(0, b"k03", 3));
+        it.seek_le(construct_full_key_struct_for_test(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 2).as_bytes(), 2),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 2).as_bytes(), 2),
             it.key()
         );
     }
@@ -416,22 +417,22 @@ mod tests {
 
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k02", 2), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k04", 4), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.next();
@@ -444,22 +445,22 @@ mod tests {
 
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k04", 4), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k02", 2), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.prev();
@@ -470,30 +471,30 @@ mod tests {
     fn test_seek_forward_backward_iterate() {
         let mut it = build_iterator_for_test();
 
-        it.seek(construct_full_key_struct(0, b"k03", 3));
+        it.seek(construct_full_key_struct_for_test(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
 
         it.prev();
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 2).as_bytes(), 2),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 2).as_bytes(), 2),
             it.key()
         );
 
         it.next();
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
     }
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
     ) -> FullKey<&[u8]> {
-        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(epoch))
     }
 }

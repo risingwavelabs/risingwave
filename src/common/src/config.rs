@@ -237,6 +237,18 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
 
+    /// The number of streaming jobs per scaling operation.
+    #[serde(default = "default::meta::parallelism_control_batch_size")]
+    pub parallelism_control_batch_size: usize,
+
+    /// The period of parallelism control trigger.
+    #[serde(default = "default::meta::parallelism_control_trigger_period_sec")]
+    pub parallelism_control_trigger_period_sec: u64,
+
+    /// The first delay of parallelism control.
+    #[serde(default = "default::meta::parallelism_control_trigger_first_delay_sec")]
+    pub parallelism_control_trigger_first_delay_sec: u64,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
@@ -333,9 +345,12 @@ pub struct MetaConfig {
     #[serde(default, with = "meta_prefix")]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
+    /// Whether compactor should rewrite row to remove dropped column.
+    #[serde(default = "default::meta::enable_dropped_column_reclaim")]
+    pub enable_dropped_column_reclaim: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
@@ -463,8 +478,13 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub developer: BatchDeveloperConfig,
 
+    /// This is the max number of queries per sql session.
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    /// This is the max number of batch queries per frontend node.
+    #[serde(default)]
+    pub max_batch_queries_per_frontend_node: Option<u64>,
 
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
@@ -1120,6 +1140,21 @@ pub mod default {
 
         pub fn event_log_channel_max_size() -> u32 {
             10
+        }
+
+        pub fn parallelism_control_batch_size() -> usize {
+            10
+        }
+
+        pub fn parallelism_control_trigger_period_sec() -> u64 {
+            10
+        }
+
+        pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
+            30
+        }
+        pub fn enable_dropped_column_reclaim() -> bool {
+            false
         }
     }
 

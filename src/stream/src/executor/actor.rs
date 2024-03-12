@@ -19,12 +19,10 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
-use parking_lot::Mutex;
-use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_expr::expr_context::expr_context_scope;
+use risingwave_expr::expr_context::{expr_context_scope, FRAGMENT_ID};
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::PbStreamActor;
@@ -50,7 +48,6 @@ pub struct ActorContext {
     total_mem_val: Arc<TrAdder<i64>>,
 
     pub streaming_metrics: Arc<StreamingMetrics>,
-    pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 
     pub dispatch_num: usize,
 }
@@ -67,7 +64,6 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
             // Set 1 for test to enable sanity check on table
             dispatch_num: 1,
         })
@@ -77,7 +73,6 @@ impl ActorContext {
         stream_actor: &PbStreamActor,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        unique_user_errors: usize,
         dispatch_num: usize,
     ) -> ActorContextRef {
         Arc::new(Self {
@@ -88,7 +83,6 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
             dispatch_num,
         })
     }
@@ -100,17 +94,8 @@ impl ActorContext {
         }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let mut err_str = err.to_report_string();
-
-        if self.error_suppressor.lock().suppress_error(&err_str) {
-            err_str = format!(
-                "error msg suppressed (due to per-actor error limit: {})",
-                self.error_suppressor.lock().max()
-            );
-        }
         GLOBAL_ERROR_METRICS.user_compute_error.report([
             "ExprError".to_owned(),
-            err_str,
             executor_name.to_owned(),
             self.fragment_id.to_string(),
         ]);
@@ -171,14 +156,17 @@ where
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        expr_context_scope(self.expr_context.clone(), async move {
-            tokio::join!(
-                // Drive the subtasks concurrently.
-                join_all(std::mem::take(&mut self.subtasks)),
-                self.run_consumer(),
-            )
-            .1
-        })
+        FRAGMENT_ID::scope(
+            self.actor_context.fragment_id,
+            expr_context_scope(self.expr_context.clone(), async move {
+                tokio::join!(
+                    // Drive the subtasks concurrently.
+                    join_all(std::mem::take(&mut self.subtasks)),
+                    self.run_consumer(),
+                )
+                .1
+            }),
+        )
         .await
     }
 

@@ -724,6 +724,8 @@ macro_rules! impl_convert {
 
             paste! {
                 impl ScalarImpl {
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<as_ $suffix_name>](&self) -> &$scalar {
                         match self {
                             Self::$variant_name(ref scalar) => scalar,
@@ -731,6 +733,8 @@ macro_rules! impl_convert {
                         }
                     }
 
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<into_ $suffix_name>](self) -> $scalar {
                         match self {
                             Self::$variant_name(scalar) => scalar,
@@ -740,7 +744,8 @@ macro_rules! impl_convert {
                 }
 
                 impl <'scalar> ScalarRefImpl<'scalar> {
-                    // Note that this conversion consume self.
+                    /// # Panics
+                    /// If the scalar is not of the expected type.
                     pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
                         match self {
                             Self::$variant_name(inner) => inner,

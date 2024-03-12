@@ -90,7 +90,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 moka = { version = "0.12", features = ["future"] }
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
@@ -137,6 +137,10 @@ harness = false
 
 [[bench]]
 name = "bench_row"
+harness = false
+
+[[bench]]
+name = "bench_imm_compact"
 harness = false
 
 [lints]
