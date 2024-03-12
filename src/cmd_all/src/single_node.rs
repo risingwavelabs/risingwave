@@ -128,8 +128,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
 
     // Set state store for meta (if not set)
     if meta_opts.state_store.is_none() {
-        let state_store_url = format!("hummock+fs://{}/state_store", &store_directory);
-        std::fs::create_dir_all(&state_store_url).unwrap();
+        let state_store_dir = format!("{}/state_store", &store_directory);
+        std::fs::create_dir_all(&state_store_dir).unwrap();
+        let state_store_url = format!("hummock+fs://{}", &state_store_dir);
         meta_opts.state_store = Some(state_store_url);
     }
 
@@ -142,11 +143,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     };
     if !meta_backend_is_set {
         meta_opts.backend = Some(MetaBackend::Sql);
-        let meta_store_endpoint = format!(
-            "sqlite://{}/meta_store/single_node.db?mode=rwc",
-            &store_directory
-        );
-        std::fs::create_dir_all(&meta_store_endpoint).unwrap();
+        let meta_store_dir = format!("{}/meta_store", &store_directory);
+        std::fs::create_dir_all(&meta_store_dir).unwrap();
+        let meta_store_endpoint = format!("sqlite://{}/single_node.db?mode=rwc", &meta_store_dir);
         meta_opts.sql_endpoint = Some(meta_store_endpoint);
     }
 
