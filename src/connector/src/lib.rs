@@ -57,6 +57,7 @@ pub mod mqtt_common;
 pub use paste::paste;
 
 mod with_options;
+pub use with_options::WithPropertiesExt;
 
 #[cfg(test)]
 mod with_options_test;
