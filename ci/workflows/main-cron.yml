@@ -87,7 +87,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "meta backup test (release)"
@@ -107,7 +107,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 50
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "end-to-end test (parallel) (release)"
