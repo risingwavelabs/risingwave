@@ -40,7 +40,7 @@ const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
 /// Claims is used when constructing `jwt_token`
 /// with payload specified.
-/// reference: https://docs.snowflake.com/en/developer-guide/sql-api/authenticating
+/// reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     iss: String,
@@ -237,7 +237,7 @@ impl SnowflakeS3Client {
             .map_err(|err| {
                 SinkError::Snowflake(format!(
                     "failed to sink data to S3, error: {}",
-                    err.to_string()
+                    err
                 ))
             })?;
 

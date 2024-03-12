@@ -53,18 +53,18 @@ pub struct SnowflakeCommon {
 
     /// The unique, snowflake provided `account_identifier`
     /// NOTE: please use the form `<orgname>-<account_name>`
-    /// For detailed guidance, reference: https://docs.snowflake.com/en/user-guide/admin-account-identifier
+    /// For detailed guidance, reference: <https://docs.snowflake.com/en/user-guide/admin-account-identifier>
     #[serde(rename = "snowflake.account_identifier")]
     pub account_identifier: String,
 
     /// The user that owns the table to be sinked
     /// NOTE: the user should've been granted corresponding *role*
-    /// reference: https://docs.snowflake.com/en/sql-reference/sql/grant-role
+    /// reference: <https://docs.snowflake.com/en/sql-reference/sql/grant-role>
     #[serde(rename = "snowflake.user")]
     pub user: String,
 
     /// The public key fingerprint used when generating custom `jwt_token`
-    /// reference: https://docs.snowflake.com/en/developer-guide/sql-api/authenticating
+    /// reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>
     #[serde(rename = "snowflake.rsa_public_key_fp")]
     pub rsa_public_key_fp: String,
 
@@ -226,7 +226,7 @@ impl SnowflakeSinkWriter {
         self.row_counter >= MAX_BATCH_ROW_NUM
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+    fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 continue;
@@ -258,7 +258,7 @@ impl SinkWriter for SnowflakeSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.append_only(chunk).await?;
+        self.append_only(chunk)?;
 
         // When the number of row exceeds `MAX_BATCH_ROW_NUM`
         if self.at_sink_threshold() {
