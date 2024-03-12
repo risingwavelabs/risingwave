@@ -47,7 +47,7 @@ pub struct MetaNodeOpts {
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    #[clap(long, env = "RW_ADVERTISE_ADDR")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR", default_value = "127.0.0.1:5690")]
     pub advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
