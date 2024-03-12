@@ -701,7 +701,10 @@ steps:
 
   - label: "e2e single-node binary test"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m single-node"
-    if: build.pull_request.labels includes "ci/run-e2e-single-node-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
+    if: |
+      !(build.pull_request.labels includes "ci/skip-ci") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-single-node-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-single-node-tests?(,|$$)/
     depends_on:
       - "build"
       - "build-other"
