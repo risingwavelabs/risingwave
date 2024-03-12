@@ -35,43 +35,46 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
-const MAX_BATCH_NUM: u32 = 1000000;
+const MAX_BATCH_ROW_NUM: u32 = 1000;
 
-// TODO: add comments
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
+    /// The snowflake database used for sinking
     #[serde(rename = "snowflake.database")]
     pub database: String,
 
-    #[serde(rename = "snowflake.database.schema")]
+    /// The corresponding schema where sink table exists
+    #[serde(rename = "snowflake.schema")]
     pub schema: String,
 
-    #[serde(rename = "snowflake.database.schema.pipe")]
+    /// The created pipe object, will be used as `insertFiles` target
+    #[serde(rename = "snowflake.pipe")]
     pub pipe: String,
 
+    /// The unique, snowflake provided `account_identifier`
+    /// NOTE: please use the form `<orgname>-<account_name>`
+    /// For detailed guidance, reference: https://docs.snowflake.com/en/user-guide/admin-account-identifier
     #[serde(rename = "snowflake.account_identifier")]
     pub account_identifier: String,
 
+    /// The user that owns the table to be sinked
+    /// NOTE: the user should've been granted corresponding *role*
+    /// reference: https://docs.snowflake.com/en/sql-reference/sql/grant-role
     #[serde(rename = "snowflake.user")]
     pub user: String,
 
+    /// The public key fingerprint used when generating custom `jwt_token`
+    /// reference: https://docs.snowflake.com/en/developer-guide/sql-api/authenticating
     #[serde(rename = "snowflake.rsa_public_key_fp")]
     pub rsa_public_key_fp: String,
 
-    #[serde(rename = "snowflake.private.key")]
+    /// The rsa pem key *without* encrption
+    #[serde(rename = "snowflake.private_key")]
     pub private_key: String,
 
-    #[serde(rename = "snowflake.private.key.passphrase")]
-    pub private_key_passphrase: Option<String>,
-
-    #[serde(rename = "snowflake.role")]
-    pub role: String,
-
+    /// The s3 bucket where intermediate sink files will be stored
     #[serde(rename = "snowflake.s3_bucket")]
     pub s3_bucket: String,
-
-    #[serde(rename = "snowflake.s3_file")]
-    pub s3_file: Option<String>,
 }
 
 #[serde_as]
@@ -145,8 +148,9 @@ pub struct SnowflakeSinkWriter {
     /// the client to insert file to external storage (i.e., s3)
     s3_client: SnowflakeS3Client,
     row_encoder: JsonEncoder,
-    counter: u32,
+    row_counter: u32,
     payload: String,
+    sink_file_suffix: u32,
 }
 
 impl SnowflakeSinkWriter {
@@ -184,14 +188,24 @@ impl SnowflakeSinkWriter {
                 TimestamptzHandlingMode::UtcString,
                 TimeHandlingMode::String,
             ),
-            counter: 0,
+            row_counter: 0,
             payload: String::new(),
+            // Start from 0, i.e., `RW_SNOWFLAKE_S3_SINK_FILE_0`
+            sink_file_suffix: 0,
         }
     }
 
     fn reset(&mut self) {
         self.payload.clear();
-        self.counter = 0;
+        self.row_counter = 0;
+        // Note that we shall NOT reset the `sink_file_suffix`
+        // since we need to incrementally keep the sink
+        // file *unique*, otherwise snowflake will not
+        // sink it from external stage (i.e., s3)
+    }
+
+    fn at_sink_threshold(&self) {
+        self.counter >= MAX_BATCH_ROW_NUM
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -201,10 +215,8 @@ impl SnowflakeSinkWriter {
             }
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
             self.payload.push_str(&row_json_string);
+            self.row_counter += 1;
         }
-        self.s3_client.sink_to_s3(self.payload.clone().into()).await?;
-        self.http_client.send_request().await?;
-        self.reset();
         Ok(())
     }
 }
@@ -228,6 +240,13 @@ impl SinkWriter for SnowflakeSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.append_only(chunk).await
+        self.append_only(chunk).await?;
+
+        if self.at_sink_threshold() {
+            self.s3_client.sink_to_s3(self.payload.clone().into(), self.sink_file_suffix).await?;
+            self.http_client.send_request().await?;
+            self.reset();
+            self.sink_file_suffix += 1;
+        }
     }
 }

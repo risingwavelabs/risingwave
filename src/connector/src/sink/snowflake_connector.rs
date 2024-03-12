@@ -174,12 +174,11 @@ impl SnowflakeHttpClient {
 
         if response.status() != StatusCode::OK {
             return Err(SinkError::Snowflake(format!(
-                "failed to make http request, error code: {}",
-                response.status()
+                "failed to make http request, error code: {}\ndetailed response: {:#?}",
+                response.status(),
+                response,
             )));
         }
-
-        println!("resp: {:#?}", response);
 
         Ok(())
     }
@@ -202,11 +201,11 @@ impl SnowflakeS3Client {
         }
     }
 
-    pub async fn sink_to_s3(&self, data: Bytes) -> Result<()> {
+    pub async fn sink_to_s3(&self, data: Bytes, file_num: u32) -> Result<()> {
         self.s3_client
             .put_object()
             .bucket(self.s3_bucket.clone())
-            .key(S3_INTERMEDIATE_FILE_NAME)
+            .key(format!("{}{}", S3_INTERMEDIATE_FILE_NAME, file_num))
             .body(ByteStream::from(data))
             .send()
             .await
