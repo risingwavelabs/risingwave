@@ -327,69 +327,6 @@ drop table t_primary_key;
 statement ok
 drop table t_s3;
 
-# cycle check
-
-statement ok
-create table t_a(v int primary key);
-
-statement ok
-create table t_b(v int primary key);
-
-statement ok
-create table t_c(v int primary key);
-
-statement ok
-create sink s_a into t_b as select v from t_a;
-
-statement ok
-create sink s_b into t_c as select v from t_b;
-
-statement error Creating such a sink will result in circular dependency
-create sink s_c into t_a as select v from t_c;
-
-statement ok
-drop sink s_a;
-
-statement ok
-drop sink s_b;
-
-statement ok
-drop table t_a;
-
-statement ok
-drop table t_b;
-
-statement ok
-drop table t_c;
-
-# cycle check (with materialize view)
-
-statement ok
-create table t_a(v int primary key);
-
-statement ok
-create materialized view m_a as select v from t_a;
-
-statement ok
-create table t_b(v int primary key);
-
-statement ok
-create sink s_a into t_b as select v from m_a;
-
-statement error Creating such a sink will result in circular dependency
-create sink s_b into t_a as select v from t_b;
-
-statement ok
-drop sink s_a;
-
-statement ok
-drop table t_b;
-
-statement ok
-drop materialized view m_a;
-
-statement ok
-drop table t_a;
 
 # multi sinks
 

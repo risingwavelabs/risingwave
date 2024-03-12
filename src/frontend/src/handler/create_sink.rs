@@ -501,24 +501,12 @@ fn check_cycle_for_sink(
     }
 
     struct Context<'a> {
-        session: &'a SessionImpl,
         reader: &'a CatalogReadGuard,
         sink_index: &'a HashMap<u32, &'a SinkCatalog>,
         source_index: &'a HashMap<u32, &'a SourceCatalog>,
     }
 
     impl Context<'_> {
-        fn visit_sink(
-            &self,
-            sink: &SinkCatalog,
-            target_table_id: catalog::TableId,
-            path: &mut Vec<String>,
-        ) -> Result<()> {
-            self.visit_table_depend(&sink.dependent_relations, target_table_id, path)?;
-
-            Ok(())
-        }
-
         fn visit_table(
             &self,
             table: &TableCatalog,
@@ -540,25 +528,25 @@ fn check_cycle_for_sink(
             for sink_id in &table.incoming_sinks {
                 if let Some(sink) = self.sink_index.get(sink_id) {
                     path.push(sink.name.clone());
-                    self.visit_sink(sink, target_table_id, path)?;
+                    self.visit_dependent_jobs(&sink.dependent_relations, target_table_id, path)?;
                     path.pop();
                 } else {
                     bail!("sink not found: {:?}", sink_id);
                 }
             }
 
-            self.visit_table_depend(&table.dependent_relations, target_table_id, path)?;
+            self.visit_dependent_jobs(&table.dependent_relations, target_table_id, path)?;
 
             Ok(())
         }
 
-        fn visit_table_depend(
+        fn visit_dependent_jobs(
             &self,
-            depend: &[TableId],
+            dependent_jobs: &[TableId],
             target_table_id: TableId,
             path: &mut Vec<String>,
         ) -> Result<()> {
-            for table_id in depend {
+            for table_id in dependent_jobs {
                 if let Ok(table) = self.reader.get_table_by_id(table_id) {
                     path.push(table.name.clone());
                     self.visit_table(table.as_ref(), target_table_id, path)?;
@@ -579,13 +567,14 @@ fn check_cycle_for_sink(
     path.push(sink_catalog.name.clone());
 
     let ctx = Context {
-        session,
         reader: &reader,
         sink_index: &sinks,
         source_index: &sources,
     };
 
-    ctx.visit_sink(&sink_catalog, table_id, &mut path)
+    ctx.visit_dependent_jobs(&sink_catalog.dependent_relations, table_id, &mut path)?;
+
+    Ok(())
 }
 
 pub(crate) async fn reparse_table_for_sink(
