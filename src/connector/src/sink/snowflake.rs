@@ -188,7 +188,8 @@ impl SnowflakeSinkWriter {
             config.common.aws_access_key_id.clone(),
             config.common.aws_secret_access_key.clone(),
             config.common.aws_region.clone(),
-        ).await;
+        )
+        .await;
 
         Self {
             config,
@@ -262,7 +263,9 @@ impl SinkWriter for SnowflakeSinkWriter {
         // When the number of row exceeds `MAX_BATCH_ROW_NUM`
         if self.at_sink_threshold() {
             // first sink to the external stage provided by user (i.e., s3)
-            self.s3_client.sink_to_s3(self.payload.clone().into(), self.sink_file_suffix).await?;
+            self.s3_client
+                .sink_to_s3(self.payload.clone().into(), self.sink_file_suffix)
+                .await?;
             // then trigger `insertFiles` post request to snowflake
             self.http_client.send_request(self.sink_file_suffix).await?;
             // reset `payload` & `row_counter`

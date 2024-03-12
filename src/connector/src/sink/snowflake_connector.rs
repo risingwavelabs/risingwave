@@ -16,14 +16,14 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_config;
+use aws_config::meta::region::RegionProviderChain;
+use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client as S3Client;
-use aws_sdk_s3::config::Credentials;
 use aws_types::region::Region;
-use aws_config::meta::region::RegionProviderChain;
 use bytes::Bytes;
-use http::request::Builder;
 use http::header;
+use http::request::Builder;
 use hyper::body::Body;
 use hyper::client::HttpConnector;
 use hyper::{Client, Request, StatusCode};
@@ -164,8 +164,10 @@ impl SnowflakeHttpClient {
             );
 
         let request = builder
-            // TODO: ensure this
-            .body(Body::from(format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, file_num)))
+            .body(Body::from(format!(
+                "{}_{}",
+                S3_INTERMEDIATE_FILE_NAME, file_num
+            )))
             .map_err(|err| SinkError::Snowflake(err.to_string()))?;
 
         let response = client
@@ -207,8 +209,7 @@ impl SnowflakeS3Client {
             "rw_sink_to_s3_credentials",
         );
 
-        let region = RegionProviderChain::first_try(Region::new(aws_region))
-            .or_default_provider();
+        let region = RegionProviderChain::first_try(Region::new(aws_region)).or_default_provider();
 
         let config = aws_config::from_env()
             .credentials_provider(credentials)
