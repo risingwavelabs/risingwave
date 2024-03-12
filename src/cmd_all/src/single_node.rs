@@ -49,18 +49,20 @@ pub struct SingleNodeOpts {
 ///
 /// ## Which node-specific options should be here?
 ///
-/// 1. An option doesn't make sense for single-node deployment should not be here.
+/// This only includes the options displayed in the CLI parameters.
+///
+/// 1. An option that will be forced to override by single-node deployment should not be here.
 ///    - e.g. `meta_addr` will be automatically set to localhost.
-/// 2. An option that is hidden from help message and can be set from config file
+/// 2. An option defined in the config file and hidden in the command-line help should not be here.
 ///    - e.g. `etcd_endpoints` is encouraged to be set from config file or environment variables.
 /// 3. An option that is only for cloud deployment should not be here.
-///    - e.g. `proxy_rpc_endpoint` is used in cloud deployment.
+///    - e.g. `proxy_rpc_endpoint` is used in cloud deployment only, and should not be used by open-source users.
 ///
 /// ## How to add an new option here?
 ///
 /// Options for the other nodes are defined with following convention:
 ///
-/// 1. The option name is either the same as the node name or with a prefix to indicate the node type.
+/// 1. The option name is the same as the definition in node's `Opts` struct. May add a prefix to avoid conflicts when necessary.
 /// 2. The option doesn't have a default value and must be `Option<T>`, so that the default value in the node's `Opts` struct can be used.
 /// 3. The option doesn't need to read from environment variables, which will be done in the node's `Opts` struct.
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
