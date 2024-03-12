@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{is_system_schema, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
@@ -50,6 +51,12 @@ pub struct BoundSystemTable {
 #[derive(Debug, Clone)]
 pub struct BoundSource {
     pub catalog: SourceCatalog,
+}
+
+impl BoundSource {
+    pub fn is_shared_cdc_source(&self) -> bool {
+        self.catalog.with_properties.is_shared_cdc_source()
+    }
 }
 
 impl From<&SourceCatalog> for BoundSource {
