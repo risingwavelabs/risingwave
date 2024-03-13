@@ -14,6 +14,7 @@
 
 use std::fmt::Write;
 
+use chrono::LocalResult;
 use num_traits::CheckedNeg;
 use risingwave_common::types::{
     write_date_time_tz, CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64,
@@ -46,22 +47,24 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
     // * invalid time during daylight forward
-    //   * PostgreSQL uses UTC offset before the transition
-    //   * We report an error (FIXME)
+    //   * use UTC offset before the transition
     // * ambiguous time during daylight backward
-    //   * We follow PostgreSQL to use UTC offset after the transition
-    let instant_local = input
-        .0
-        .and_local_timezone(time_zone)
-        .latest()
-        .ok_or_else(|| ExprError::InvalidParam {
-            name: "local timestamp",
-            reason: format!(
-                "fail to interpret local timestamp \"{}\" in time zone \"{}\"",
-                input, time_zone
-            )
-            .into(),
-        })?;
+    //   * use UTC offset after the transition
+    let instant_local = match input.0.and_local_timezone(time_zone) {
+        LocalResult::Single(t) => t,
+        LocalResult::None => (input.0 + chrono::Duration::hours(1))
+            .and_local_timezone(time_zone)
+            .latest()
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "local timestamp",
+                reason: format!(
+                    "fail to interpret local timestamp \"{}\" in time zone \"{}\"",
+                    input, time_zone
+                )
+                .into(),
+            })?,
+        LocalResult::Ambiguous(_, latest) => latest,
+    };
     let usec = instant_local.timestamp_micros();
     Ok(Timestamptz::from_micros(usec))
 }
@@ -232,15 +235,17 @@ mod tests {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn test_time_zone_conversion_daylight_forward() {
-        for (local, zone) in [
-            ("2022-03-13 02:00:00", "US/Pacific"),
-            ("2022-03-13 02:59:00", "US/Pacific"),
-            ("2022-03-27 02:00:00", "europe/zurich"),
-            ("2022-03-27 02:59:00", "europe/zurich"),
-        ] {
-            let actual = timestamp_at_time_zone(local.parse().unwrap(), zone);
-            assert!(actual.is_err());
+        test("2022-03-13 02:00:00", "US/Pacific", "2022-03-13 10:00:00+00:00");
+        test("2022-03-13 02:59:00", "US/Pacific", "2022-03-13 10:59:00+00:00");
+        test("2022-03-27 02:00:00", "europe/zurich", "2022-03-27 01:00:00+00:00");
+        test("2022-03-27 02:59:00", "europe/zurich", "2022-03-27 01:59:00+00:00");
+
+        #[track_caller]
+        fn test(local: &str, zone: &str, instant: &str) {
+            let actual = timestamp_at_time_zone(local.parse().unwrap(), zone).unwrap().to_string();
+            assert_eq!(actual, instant);
         }
     }
 

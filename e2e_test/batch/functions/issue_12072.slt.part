@@ -125,5 +125,7 @@ select date_trunc('day', v, 'America/Havana') from t order by id;
 # There is no `2023-09-03 00:00:00-04:00` or `2023-09-03 00:00:00-03:00`.
 # PostgreSQL returns `2023-09-03 01:00:00-03:00` but it is hard using `chrono` crate.
 
-statement error interpret
+query T
 select date_trunc('day', '2023-09-03 12:00:00Z'::timestamptz, 'America/Santiago');
+----
+2023-09-03 04:00:00+00:00
