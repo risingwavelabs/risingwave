@@ -14,7 +14,7 @@ require (
 	github.com/urfave/cli v1.22.10
 	go.uber.org/ratelimit v0.2.0
 	gonum.org/v1/gonum v0.12.0
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/protobuf v1.33.0
 )
 
 require (
