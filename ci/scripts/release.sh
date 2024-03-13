@@ -39,6 +39,8 @@ source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
+# TODO: uncomment this line to use embedded dashboard in release build
+# unset RISINGWAVE_CI # disable ci mode, this is critical for building and embedding the dashboard assets
 
 echo "--- Install protoc3"
 PROTOC_ARCH=${ARCH}

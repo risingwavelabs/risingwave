@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod prometheus;
-mod proxy;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -416,7 +415,14 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-        let dashboard_router = risingwave_meta_dashboard::router();
+        let dashboard_router = if let Some(ui_path) = ui_path {
+            // TODO(bugen): remove `ui_path`
+            get_service(ServeDir::new(ui_path))
+                .handle_error(|e| async move { match e {} })
+                .boxed_clone()
+        } else {
+            risingwave_meta_dashboard::router().boxed_clone()
+        };
 
         let app = Router::new()
             .fallback_service(dashboard_router)
