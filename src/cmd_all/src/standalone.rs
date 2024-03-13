@@ -322,7 +322,6 @@ mod test {
                         FrontendOpts {
                             listen_addr: "127.0.0.1:4566",
                             advertise_addr: None,
-                            port: None,
                             meta_addr: List(
                                 [
                                     http://127.0.0.1:5690/,
