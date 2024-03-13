@@ -34,9 +34,9 @@ user        row_security
 user        rw_batch_enable_lookup_join
 user        rw_batch_enable_sort_agg
 user        rw_enable_join_ordering
+user        rw_enable_reusable_source
 user        rw_enable_share_plan
 user        rw_enable_two_phase_agg
-user        rw_enable_reusable_source
 user        rw_force_split_distinct_agg
 user        rw_force_two_phase_agg
 user        rw_implicit_flush
