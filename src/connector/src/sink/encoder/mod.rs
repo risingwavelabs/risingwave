@@ -27,7 +27,7 @@ pub mod template;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
-pub use proto::ProtoEncoder;
+pub use proto::{ProtoEncoder, ProtoHeader};
 
 /// Encode a row of a relation into
 /// * an object in json

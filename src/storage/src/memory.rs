@@ -537,7 +537,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
+    type Iter = RangeKvStateStoreIter<R>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -563,15 +563,14 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream> {
+    ) -> StorageResult<Self::Iter> {
         Ok(RangeKvStateStoreIter::new(
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(read_options.table_id, key_range),
             ),
             epoch,
-        )
-        .into_stream())
+        ))
     }
 }
 
@@ -636,10 +635,8 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        for (key, _) in self.inner.range((Unbounded, Unbounded), None).unwrap() {
-            assert!(key.epoch_with_gap.pure_epoch() <= prev_epoch);
-        }
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
+        unimplemented!("recovery not supported")
     }
 
     #[allow(clippy::unused_async)]
@@ -659,8 +656,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     last_key: Option<UserKey<Bytes>>,
 
-    /// For supporting semantic of `Fuse`
-    stopped: bool,
+    item_buffer: Option<StateStoreIterItem>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -669,29 +665,21 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
             inner,
             epoch,
             last_key: None,
-            stopped: false,
+            item_buffer: None,
         }
     }
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    type Item = StateStoreIterItem;
-
     #[allow(clippy::unused_async)]
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
-        if self.stopped {
-            Ok(None)
-        } else {
-            let ret = self.next_inner();
-            match &ret {
-                Err(_) | Ok(None) => {
-                    self.stopped = true;
-                }
-                _ => {}
-            }
-
-            ret
-        }
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        let ret = self.next_inner();
+        let item = ret?;
+        self.item_buffer = item;
+        Ok(self
+            .item_buffer
+            .as_ref()
+            .map(|(key, value)| (key.to_ref(), value.as_ref())))
     }
 }
 
