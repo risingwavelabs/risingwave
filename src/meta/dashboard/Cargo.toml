@@ -23,6 +23,7 @@ url = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"
 
 [build-dependencies]
 anyhow = "1"

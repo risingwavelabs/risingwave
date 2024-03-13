@@ -9761,6 +9761,7 @@ dependencies = [
  "thiserror-ext",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
 ]
 
