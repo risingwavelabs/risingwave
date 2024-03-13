@@ -27,7 +27,7 @@ pub mod template;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
-pub use proto::ProtoEncoder;
+pub use proto::{ProtoEncoder, ProtoHeader};
 
 /// Encode a row of a relation into
 /// * an object in json
@@ -144,6 +144,8 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks(HashMap<String, (u8, u8)>),
+    // bigquery need null array -> []
+    BigQuery,
     None,
 }
 

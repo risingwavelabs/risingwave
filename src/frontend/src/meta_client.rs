@@ -28,6 +28,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::EventLog;
@@ -61,6 +62,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
+
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn unpin_snapshot(&self) -> Result<()>;
 
@@ -149,6 +152,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
+    }
+
+    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
+        self.0.list_object_dependencies().await
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {

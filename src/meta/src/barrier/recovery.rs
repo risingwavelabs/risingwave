@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::DefaultParallelism;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -40,7 +41,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
@@ -84,13 +85,17 @@ impl GlobalBarrierManagerContext {
                     .collect();
                 debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
-                mgr.fragment_manager
+                let unregister_table_ids = mgr
+                    .fragment_manager
                     .drop_table_fragments_vec(&to_drop_streaming_ids)
                     .await?;
 
                 // unregister compaction group for dirty table fragments.
-                self.hummock_manager
-                    .unregister_table_fragments_vec(&to_drop_table_fragments)
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        unregister_table_ids,
+                    ))
                     .await;
 
                 // clean up source connector dirty changes.
@@ -106,13 +111,14 @@ impl GlobalBarrierManagerContext {
                 } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister compaction group for cleaned state tables.
-                self.hummock_manager
-                    .unregister_table_ids_fail_fast(
-                        &state_table_ids
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        state_table_ids
                             .into_iter()
                             .map(|id| id as StateTableId)
                             .collect_vec(),
-                    )
+                    ))
                     .await;
 
                 // unregister cleaned sources.
@@ -306,9 +312,16 @@ impl GlobalBarrierManager {
         if !cancelled.is_empty() {
             match &self.context.metadata_manager {
                 MetadataManager::V1(mgr) => {
-                    mgr.fragment_manager
+                    let unregister_table_ids = mgr
+                        .fragment_manager
                         .drop_table_fragments_vec(&cancelled)
                         .await?;
+                    self.env
+                        .notification_manager()
+                        .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                            unregister_table_ids,
+                        ))
+                        .await;
                 }
                 MetadataManager::V2(mgr) => {
                     for job_id in cancelled {
@@ -379,9 +392,18 @@ impl GlobalBarrierManager {
                         .cloned()
                         .collect_vec();
 
+                    let background_streaming_jobs = self
+                        .context
+                        .metadata_manager
+                        .list_background_creating_jobs()
+                        .await?;
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
-                    let mut info = if !self.env.opts.disable_automatic_parallelism_control {
+                    // FIXME: Transactions should be used.
+                    let mut info = if !self.env.opts.disable_automatic_parallelism_control
+                        && background_streaming_jobs.is_empty()
+                    {
                         self.context
                             .scale_actors(all_nodes.clone())
                             .await
@@ -697,6 +719,7 @@ impl GlobalBarrierManagerContext {
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
                 )
@@ -725,6 +748,45 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
+    // We infer the new parallelism strategy based on the prior level of parallelism of the table.
+    // If the parallelism strategy is Fixed or Auto, we won't make any modifications.
+    // For Custom, we'll assess the parallelism of the core fragment;
+    // if the parallelism is higher than the currently available parallelism, we'll set it to Adaptive.
+    // If it's lower, we'll set it to Fixed.
+    // If it was previously set to Adaptive, but the default_parallelism in the configuration isn’t Full,
+    // and it matches the actual fragment parallelism, in this case, it will be handled by downgrading to Fixed.
+    fn derive_target_parallelism(
+        available_parallelism: usize,
+        assigned_parallelism: TableParallelism,
+        actual_fragment_parallelism: Option<usize>,
+        default_parallelism: DefaultParallelism,
+    ) -> TableParallelism {
+        match assigned_parallelism {
+            TableParallelism::Custom => {
+                if let Some(fragment_parallelism) = actual_fragment_parallelism {
+                    if fragment_parallelism >= available_parallelism {
+                        TableParallelism::Adaptive
+                    } else {
+                        TableParallelism::Fixed(fragment_parallelism)
+                    }
+                } else {
+                    TableParallelism::Adaptive
+                }
+            }
+            TableParallelism::Adaptive => {
+                match (default_parallelism, actual_fragment_parallelism) {
+                    (DefaultParallelism::Default(n), Some(fragment_parallelism))
+                        if fragment_parallelism == n.get() =>
+                    {
+                        TableParallelism::Fixed(fragment_parallelism)
+                    }
+                    _ => TableParallelism::Adaptive,
+                }
+            }
+            _ => assigned_parallelism,
+        }
+    }
+
     async fn scale_actors_v1(&self, workers: Vec<WorkerNode>) -> MetaResult<()> {
         let info = self.resolve_actor_info(workers.clone()).await?;
 
@@ -736,44 +798,17 @@ impl GlobalBarrierManagerContext {
             return Ok(());
         }
 
-        let current_parallelism = info
+        let available_parallelism = info
             .node_map
             .values()
             .flat_map(|worker_node| worker_node.parallel_units.iter())
             .count();
 
-        if current_parallelism == 0 {
+        if available_parallelism == 0 {
             return Err(anyhow!("no available parallel units for auto scaling").into());
         }
 
-        /// We infer the new parallelism strategy based on the prior level of parallelism of the table.
-        /// If the parallelism strategy is Fixed or Auto, we won't make any modifications.
-        /// For Custom, we'll assess the parallelism of the core fragment;
-        /// if the parallelism is higher than the currently available parallelism, we'll set it to Auto.
-        /// If it's lower, we'll set it to Fixed.
-        fn derive_target_parallelism_for_custom(
-            current_parallelism: usize,
-            table: &TableFragments,
-        ) -> TableParallelism {
-            let derive_from_fragment = table.mview_fragment().or_else(|| table.sink_fragment());
-
-            if let TableParallelism::Custom = &table.assigned_parallelism {
-                if let Some(fragment) = derive_from_fragment {
-                    let fragment_parallelism = fragment.get_actors().len();
-                    if fragment_parallelism >= current_parallelism {
-                        TableParallelism::Adaptive
-                    } else {
-                        TableParallelism::Fixed(fragment_parallelism)
-                    }
-                } else {
-                    TableParallelism::Adaptive
-                }
-            } else {
-                table.assigned_parallelism
-            }
-        }
-
-        let table_parallelisms: HashMap<_, _> = {
+        let all_table_parallelisms: HashMap<_, _> = {
             let guard = mgr.fragment_manager.get_fragment_read_guard().await;
 
             guard
@@ -781,15 +816,24 @@ impl GlobalBarrierManagerContext {
                 .iter()
                 .filter(|&(_, table)| matches!(table.state(), State::Created))
                 .map(|(table_id, table)| {
-                    let target_parallelism =
-                        derive_target_parallelism_for_custom(current_parallelism, table);
-
-                    (table_id.table_id, target_parallelism)
+                    let actual_fragment_parallelism = table
+                        .mview_fragment()
+                        .or_else(|| table.sink_fragment())
+                        .map(|fragment| fragment.get_actors().len());
+                    (
+                        *table_id,
+                        Self::derive_target_parallelism(
+                            available_parallelism,
+                            table.assigned_parallelism,
+                            actual_fragment_parallelism,
+                            self.env.opts.default_parallelism,
+                        ),
+                    )
                 })
                 .collect()
         };
 
-        let schedulable_worker_ids = workers
+        let schedulable_worker_ids: BTreeSet<_> = workers
             .iter()
             .filter(|worker| {
                 !worker
@@ -801,57 +845,59 @@ impl GlobalBarrierManagerContext {
             .map(|worker| worker.id)
             .collect();
 
-        let plan = self
-            .scale_controller
-            .generate_table_resize_plan(TableResizePolicy {
-                worker_ids: schedulable_worker_ids,
-                table_parallelisms: table_parallelisms.clone(),
-            })
-            .await?;
+        for (table_id, table_parallelism) in all_table_parallelisms {
+            let plan = self
+                .scale_controller
+                .generate_table_resize_plan(TableResizePolicy {
+                    worker_ids: schedulable_worker_ids.clone(),
+                    table_parallelisms: HashMap::from([(table_id.table_id, table_parallelism)]),
+                })
+                .await?;
 
-        let table_parallelisms: HashMap<_, _> = table_parallelisms
-            .into_iter()
-            .map(|(table_id, parallelism)| {
-                debug_assert_ne!(parallelism, TableParallelism::Custom);
-                (TableId::new(table_id), parallelism)
-            })
-            .collect();
+            if plan.is_empty() {
+                continue;
+            }
 
-        let mut compared_table_parallelisms = table_parallelisms.clone();
+            let table_parallelisms = HashMap::from([(table_id, table_parallelism)]);
 
-        // skip reschedule if no reschedule is generated.
-        let (reschedule_fragment, applied_reschedules) = if plan.is_empty() {
-            (HashMap::new(), HashMap::new())
-        } else {
-            self.scale_controller
+            let mut compared_table_parallelisms = table_parallelisms.clone();
+
+            let (reschedule_fragment, applied_reschedules) = self
+                .scale_controller
                 .prepare_reschedule_command(
                     plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: true,
+                        skip_create_new_actors: true,
                     },
                     Some(&mut compared_table_parallelisms),
                 )
-                .await?
-        };
+                .await?;
 
-        // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
-        debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
+            // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
+            debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
 
-        if let Err(e) = self
-            .scale_controller
-            .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
-            .await
-        {
-            tracing::error!(
-                error = %e.as_report(),
-                "failed to apply reschedule for offline scaling in recovery",
+            if let Err(e) = self
+                .scale_controller
+                .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
+                .await
+            {
+                tracing::error!(
+                    error = %e.as_report(),
+                    "failed to apply reschedule for offline scaling in recovery",
+                );
+
+                mgr.fragment_manager
+                    .cancel_apply_reschedules(applied_reschedules)
+                    .await;
+
+                return Err(e);
+            }
+
+            tracing::info!(
+                "offline rescheduling for job {} in recovery is done",
+                table_id.table_id
             );
-
-            mgr.fragment_manager
-                .cancel_apply_reschedules(applied_reschedules)
-                .await;
-
-            return Err(e);
         }
 
         debug!("scaling actors succeed.");
@@ -1063,5 +1109,91 @@ impl GlobalBarrierManager {
         debug!(prev_epoch, "all compute nodes have been reset.");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use super::*;
+    #[test]
+    fn test_derive_target_parallelism() {
+        // total 10, assigned custom, actual 5, default full -> fixed(5)
+        assert_eq!(
+            TableParallelism::Fixed(5),
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Custom,
+                Some(5),
+                DefaultParallelism::Full,
+            )
+        );
+
+        // total 10, assigned custom, actual 10, default full -> adaptive
+        assert_eq!(
+            TableParallelism::Adaptive,
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Custom,
+                Some(10),
+                DefaultParallelism::Full,
+            )
+        );
+
+        // total 10, assigned custom, actual 11, default full -> adaptive
+        assert_eq!(
+            TableParallelism::Adaptive,
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Custom,
+                Some(11),
+                DefaultParallelism::Full,
+            )
+        );
+
+        // total 10, assigned fixed(5), actual _, default full -> fixed(5)
+        assert_eq!(
+            TableParallelism::Adaptive,
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Custom,
+                None,
+                DefaultParallelism::Full,
+            )
+        );
+
+        // total 10, assigned adaptive, actual _, default full -> adaptive
+        assert_eq!(
+            TableParallelism::Adaptive,
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Adaptive,
+                None,
+                DefaultParallelism::Full,
+            )
+        );
+
+        // total 10, assigned adaptive, actual 5, default 5 -> fixed(5)
+        assert_eq!(
+            TableParallelism::Fixed(5),
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Adaptive,
+                Some(5),
+                DefaultParallelism::Default(NonZeroUsize::new(5).unwrap()),
+            )
+        );
+
+        // total 10, assigned adaptive, actual 6, default 5 -> adaptive
+        assert_eq!(
+            TableParallelism::Adaptive,
+            GlobalBarrierManagerContext::derive_target_parallelism(
+                10,
+                TableParallelism::Adaptive,
+                Some(6),
+                DefaultParallelism::Default(NonZeroUsize::new(5).unwrap()),
+            )
+        );
     }
 }

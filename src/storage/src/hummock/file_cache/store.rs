@@ -676,12 +676,13 @@ impl Cursor for CachedSstableCursor {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
     use crate::hummock::{BlockBuilder, BlockBuilderOptions, BlockMeta, CompressionAlgorithm};
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
@@ -696,10 +697,22 @@ mod tests {
         };
 
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k1", test_epoch(1)),
+            b"v01",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k2", test_epoch(2)),
+            b"v02",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k3", test_epoch(3)),
+            b"v03",
+        );
+        builder.add_for_test(
+            construct_full_key_struct_for_test(0, b"k4", test_epoch(4)),
+            b"v04",
+        );
 
         let uncompress = builder.uncompressed_block_size();
         Box::new(Block::decode(builder.build().to_vec().into(), uncompress).unwrap())
