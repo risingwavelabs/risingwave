@@ -1,10 +1,11 @@
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use cargo_emit::{rerun_if_changed, rustc_cfg};
 use npm_rs::{NodeEnv, NpmEnv};
 
-fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
+fn env_var_is_true(key: &str) -> bool {
+    cargo_emit::rerun_if_env_changed!(key);
+
     std::env::var(key)
         .map(|value| {
             ["1", "t", "true"]
@@ -44,15 +45,14 @@ fn build() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    let skip_build =
-        env_var_is_true("RISINGWAVE_CI") || std::env::var("PROFILE").unwrap() == "debug";
+    let should_build = env_var_is_true("ENABLE_BUILD_DASHBOARD") // asked to build by RiseDev
+        || (std::env::var("PROFILE").unwrap() == "release" && !env_var_is_true("RISINGWAVE_CI")); // release build and not in CI
 
-    if skip_build {
-        // Do not build.
-        std::fs::create_dir_all(dest_dir())?;
-    } else {
+    if should_build {
         build()?;
         rustc_cfg!("dashboard_built");
+    } else {
+        std::fs::create_dir_all(dest_dir())?;
     }
 
     Ok(())
