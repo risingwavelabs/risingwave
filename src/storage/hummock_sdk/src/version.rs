@@ -21,6 +21,7 @@ use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 
+use crate::change_log::TableChangeLog;
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId};
 
@@ -31,6 +32,7 @@ pub struct HummockVersion {
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
 impl Default for HummockVersion {
@@ -72,6 +74,16 @@ impl HummockVersion {
                     )
                 })
                 .collect(),
+            table_change_log: pb_version
+                .table_change_logs
+                .iter()
+                .map(|(table_id, change_log)| {
+                    (
+                        TableId::new(*table_id),
+                        TableChangeLog::from_protobuf(change_log),
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -89,6 +101,11 @@ impl HummockVersion {
                 .table_watermarks
                 .iter()
                 .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
+                .collect(),
+            table_change_logs: self
+                .table_change_log
+                .iter()
+                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
                 .collect(),
         }
     }

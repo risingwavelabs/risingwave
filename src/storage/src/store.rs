@@ -54,6 +54,10 @@ impl IterItem for StateStoreIterItem {
     type ItemRef<'a> = StateStoreIterItemRef<'a>;
 }
 
+impl IterItem for StateStoreReadLogItem {
+    type ItemRef<'a> = StateStoreReadLogItemRef<'a>;
+}
+
 pub trait StateStoreIter<T: IterItem = StateStoreIterItem>: Send {
     fn try_next(
         &mut self,
@@ -164,8 +168,41 @@ pub type StateStoreIterItemRef<'a> = (FullKey<&'a [u8]>, &'a [u8]);
 pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreReadIter = StateStoreIter + 'static;
 
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub enum ChangeLogValue<T> {
+    Insert(T),
+    Update { new_value: T, old_value: T },
+    Delete(T),
+}
+
+impl<T> ChangeLogValue<T> {
+    pub fn try_map<O>(self, f: impl Fn(T) -> StorageResult<O>) -> StorageResult<ChangeLogValue<O>> {
+        Ok(match self {
+            ChangeLogValue::Insert(value) => ChangeLogValue::Insert(f(value)?),
+            ChangeLogValue::Update {
+                new_value,
+                old_value,
+            } => ChangeLogValue::Update {
+                new_value: f(new_value)?,
+                old_value: f(old_value)?,
+            },
+            ChangeLogValue::Delete(value) => ChangeLogValue::Delete(f(value)?),
+        })
+    }
+}
+
+pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
+pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
+#[derive(Clone)]
+pub struct ReadLogOptions {
+    pub table_id: TableId,
+}
+
+pub trait StateStoreReadChangeLogIter = StateStoreIter<StateStoreReadLogItem> + Send + 'static;
+
 pub trait StateStoreRead: StaticSendSync {
     type Iter: StateStoreReadIter;
+    type ChangeLogIter: StateStoreReadChangeLogIter;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -187,6 +224,13 @@ pub trait StateStoreRead: StaticSendSync {
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + Send + '_;
+
+    fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_;
 }
 
 pub trait StateStoreReadExt: StaticSendSync {

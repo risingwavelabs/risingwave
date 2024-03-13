@@ -1226,6 +1226,7 @@ mod tests {
             max_committed_epoch: epoch,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
         }
     }
 

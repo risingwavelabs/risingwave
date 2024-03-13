@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::buffer::Bitmap;
@@ -42,7 +43,8 @@ use sync_point::sync_point;
 use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, MergeIterator, UserIterator,
+    ChangeLogIterator, ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion,
+    MergeIterator, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -52,15 +54,15 @@ use crate::hummock::utils::{
     prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockStorageIterator,
-    HummockStorageIteratorInner, LocalHummockStorageIterator, ReadVersionTuple, Sstable,
-    SstableDeleteRangeIterator, SstableIterator,
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockError, HummockResult,
+    HummockStorageIterator, HummockStorageIteratorInner, LocalHummockStorageIterator,
+    ReadVersionTuple, Sstable, SstableDeleteRangeIterator, SstableIterator,
 };
 use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadOptions};
+use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -1139,5 +1141,59 @@ impl HummockVersionReader {
         }
 
         Ok(false)
+    }
+
+    pub async fn iter_log(
+        &self,
+        version: PinnedVersion,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> HummockResult<ChangeLogIterator> {
+        let (new_value_ssts, old_value_ssts) =
+            if let Some(change_log) = version.version().table_change_log.get(&options.table_id) {
+                change_log.filter(epoch_range, &key_range)
+            } else {
+                (vec![], vec![])
+            };
+        let read_options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: Default::default(),
+            must_iterated_end_user_key: None,
+            max_preload_retry_times: 0,
+            prefetch_for_large_query: false,
+        });
+
+        let make_iter = |ssts: Vec<SstableInfo>| async {
+            let iters = try_join_all(
+                ssts.into_iter()
+                    .filter(|sst| filter_single_sst(sst, options.table_id, &key_range))
+                    .map(|sst| {
+                        let sstable_store = self.sstable_store.clone();
+                        let read_options = read_options.clone();
+                        async move {
+                            let mut local_stat = StoreLocalStatistic::default();
+                            let table_holder = sstable_store.sstable(&sst, &mut local_stat).await?;
+                            Ok::<_, HummockError>(SstableIterator::new(
+                                table_holder,
+                                sstable_store,
+                                read_options,
+                            ))
+                        }
+                    }),
+            )
+            .await?;
+            Ok::<_, HummockError>(MergeIterator::new(iters))
+        };
+
+        let new_value_iter = make_iter(new_value_ssts).await?;
+        let old_value_iter = make_iter(old_value_ssts).await?;
+        ChangeLogIterator::new(
+            epoch_range,
+            key_range,
+            new_value_iter,
+            old_value_iter,
+            options.table_id,
+        )
+        .await
     }
 }

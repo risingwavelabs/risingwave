@@ -137,6 +137,23 @@ message TableWatermarks {
   bool is_ascending = 2;
 }
 
+message ChangeLogShard {
+  repeated SstableInfo old_value = 1;
+  repeated SstableInfo new_value = 2;
+  common.Buffer vnode_bitmap = 3;
+}
+
+message EpochNewChangeLog {
+  repeated ChangeLogShard shards = 1;
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front
+  repeated uint64 epochs = 2;
+}
+
+message TableChangeLog {
+  // Epochs should be sorted in ascending order, which means earlier epoch at the front.
+  repeated EpochNewChangeLog change_logs = 1;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
@@ -153,6 +170,7 @@ message HummockVersion {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 4;
   map<uint32, TableWatermarks> table_watermarks = 5;
+  map<uint32, TableChangeLog> table_change_logs = 6;
 }
 
 message HummockVersionDelta {

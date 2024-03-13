@@ -37,6 +37,7 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
+pub mod change_log;
 pub mod compact;
 pub mod compaction_group;
 pub mod key;

@@ -19,7 +19,8 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use risingwave_common::array::DataChunk;
+use futures_async_stream::try_stream;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::catalog::Schema;
 pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::hash::VirtualNode;
@@ -28,7 +29,10 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::key::TableKey;
 
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
+use crate::row_serde::value_serde::ValueRowSerde;
+use crate::store::{ChangeLogValue, StateStoreIterExt, StateStoreReadLogItem};
+use crate::StateStoreIter;
 
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
@@ -140,5 +144,33 @@ impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.row
+    }
+}
+
+#[try_stream(ok = (Op, OwnedRow), error = StorageError)]
+pub async fn deserialize_log_stream<'a>(
+    iter: impl StateStoreIter<StateStoreReadLogItem> + 'a,
+    deserializer: &'a impl ValueRowSerde,
+) {
+    let stream = iter.into_stream(|(_key, log_value)| {
+        log_value.try_map(|slice| Ok(OwnedRow::new(deserializer.deserialize(slice)?)))
+    });
+    #[for_await]
+    for log_value in stream {
+        match log_value? {
+            ChangeLogValue::Insert(row) => {
+                yield (Op::Insert, row);
+            }
+            ChangeLogValue::Delete(row) => {
+                yield (Op::Delete, row);
+            }
+            ChangeLogValue::Update {
+                new_value,
+                old_value,
+            } => {
+                yield (Op::UpdateDelete, old_value);
+                yield (Op::UpdateInsert, new_value);
+            }
+        }
     }
 }

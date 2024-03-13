@@ -352,6 +352,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
         table_watermarks: HashMap::new(),
+        table_change_log: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -574,6 +575,7 @@ mod tests {
             max_committed_epoch: 0,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            table_change_log: HashMap::new(),
         };
         for cg in 1..3 {
             version.levels.insert(

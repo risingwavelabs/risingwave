@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
 use crate::mem_table::MemtableLocalStateStore;
+use crate::panic_store::PanicStateStoreIter;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -537,6 +538,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = RangeKvStateStoreIter<R>;
 
     #[allow(clippy::unused_async)]
@@ -571,6 +573,15 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             ),
             epoch,
         ))
+    }
+
+    async fn iter_log(
+        &self,
+        _epoch_range: (u64, u64),
+        _key_range: TableKeyRange,
+        _options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        unimplemented!()
     }
 }
 

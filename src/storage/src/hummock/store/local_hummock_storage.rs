@@ -30,7 +30,8 @@ use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, UserIterator,
+    ChangeLogIterator, ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator,
+    UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -205,6 +206,7 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
+    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
 
     fn get(
@@ -226,6 +228,20 @@ impl StateStoreRead for LocalHummockStorage {
         assert!(epoch <= self.epoch());
         self.iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
+    }
+
+    async fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        let version = self.read_version.read().committed().clone();
+        let iter = self
+            .hummock_version_reader
+            .iter_log(version, epoch_range, key_range, options)
+            .await?;
+        Ok(iter)
     }
 }
 

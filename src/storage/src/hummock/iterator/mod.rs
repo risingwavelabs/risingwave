@@ -41,6 +41,8 @@ use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
+mod change_log;
+pub use change_log::*;
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
 mod skip_watermark;

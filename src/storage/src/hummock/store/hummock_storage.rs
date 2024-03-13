@@ -442,6 +442,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
+    type ChangeLogIter = ChangeLogIterator;
     type Iter = HummockStorageIterator;
 
     fn get(
@@ -468,6 +469,20 @@ impl StateStoreRead for HummockStorage {
             read_options.table_id
         );
         self.iter_inner(key_range, epoch, read_options)
+    }
+
+    async fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        let version = (**self.pinned_version.load()).clone();
+        let iter = self
+            .hummock_version_reader
+            .iter_log(version, epoch_range, key_range, options)
+            .await?;
+        Ok(iter)
     }
 }
 
@@ -571,6 +586,8 @@ impl StateStore for HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::version::HummockVersion;
+
+use crate::hummock::iterator::ChangeLogIterator;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
