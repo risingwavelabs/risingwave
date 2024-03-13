@@ -1515,7 +1515,7 @@ pub mod default {
 
         // decrease this configure when the generation of checkpoint barrier is not frequent.
         const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 12;
-        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+        const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 2 * 1024 * 1024; // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
