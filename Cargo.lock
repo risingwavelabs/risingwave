@@ -9228,6 +9228,7 @@ dependencies = [
  "num-bigint",
  "opendal",
  "parking_lot 0.12.1",
+ "parquet 50.0.0",
  "paste",
  "pretty_assertions",
  "prometheus",

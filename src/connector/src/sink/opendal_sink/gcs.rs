@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
-use opendal::Operator;
+use opendal::{Operator, Writer as OpendalWriter};
+use parquet::arrow::async_writer::AsyncArrowWriter;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use crate::sink::opendal_sink::OpenDalSinkWriter;
+use crate::sink::opendal_sink::{change_schema_to_arrow_schema, OpenDalSinkWriter};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY,
@@ -146,13 +148,21 @@ impl Sink for GcsSink {
     ) -> Result<Self::LogSinker> {
         let op = Self::new_gcs_sink(self.config.clone())?;
         let path = self.config.common.path.as_ref();
-        let writer = op
+        let gcs_writer = op
             .writer_with(path)
             .concurrent(8)
             .buffer(GCS_WRITE_BUFFER_SIZE)
             .await?;
+
+        let arrow_schema = change_schema_to_arrow_schema(self.schema.clone());
+        let sink_writer: AsyncArrowWriter<OpendalWriter> = AsyncArrowWriter::try_new(
+            gcs_writer,
+            Arc::new(arrow_schema),
+            GCS_WRITE_BUFFER_SIZE,
+            None,
+        )?;
         Ok(OpenDalSinkWriter::new(
-            writer,
+            sink_writer,
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,

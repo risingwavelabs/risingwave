@@ -14,13 +14,16 @@
 
 pub mod gcs;
 pub mod s3;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use arrow_schema::{
+    DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
+};
 use async_trait::async_trait;
-use opendal::Writer;
-use risingwave_common::array::{Op, StreamChunk};
+use opendal::Writer as OpendalWriter;
+use parquet::arrow::async_writer::AsyncArrowWriter;
+use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use serde_json::Value;
@@ -32,10 +35,9 @@ pub const GCS_SINK: &str = "gcs";
 
 pub struct OpenDalSinkWriter {
     schema: Schema,
-    writer: Writer,
+    writer: AsyncArrowWriter<OpendalWriter>,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    row_encoder: JsonEncoder,
 }
 
 #[async_trait]
@@ -53,19 +55,12 @@ impl SinkWriter for OpenDalSinkWriter {
     }
 
     async fn abort(&mut self) -> Result<()> {
-        self.writer.abort().await?;
         Ok(())
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         if is_checkpoint {
-            match self.writer.close().await {
-                Ok(_) => (),
-                Err(err) => {
-                    self.writer.abort().await?;
-                    return Err(err.into());
-                }
-            };
+           todo!()
         }
 
         Ok(())
@@ -78,29 +73,34 @@ impl SinkWriter for OpenDalSinkWriter {
 
 impl OpenDalSinkWriter {
     pub fn new(
-        writer: Writer,
+        writer: AsyncArrowWriter<OpendalWriter>,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let decimal_map = HashMap::default();
         Ok(Self {
             schema: schema.clone(),
             pk_indices,
             writer,
             is_append_only,
-            row_encoder: JsonEncoder::new_with_s3(schema, None, decimal_map),
         })
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            if op != Op::Insert {
-                continue;
-            }
-            let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.writer.write(row_json_string).await?;
-        }
+        let (mut chunk, ops) = chunk.compact().into_parts();
+        let filters =
+            chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
+        chunk.set_visibility(filters);
+        let arrow_schema = change_schema_to_arrow_schema(self.schema.clone());
+        let batch = to_record_batch_with_schema(Arc::new(arrow_schema), &chunk.compact())?;
+        self.writer.write(&batch).await?;
+
         Ok(())
     }
+}
+
+fn change_schema_to_arrow_schema(
+    schema: risingwave_common::catalog::Schema,
+) -> arrow_schema::Schema {
+    todo!()
 }

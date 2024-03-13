@@ -48,6 +48,7 @@ use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use opendal::Error as OpendalError;
+use risingwave_common::array::ArrayError;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
@@ -565,6 +566,18 @@ impl From<icelake::Error> for SinkError {
 
 impl From<OpendalError> for SinkError {
     fn from(error: OpendalError) -> Self {
+        SinkError::Opendal(error.to_string())
+    }
+}
+
+impl From<parquet::errors::ParquetError> for SinkError {
+    fn from(error: parquet::errors::ParquetError) -> Self {
+        SinkError::Opendal(error.to_string())
+    }
+}
+
+impl From<ArrayError> for SinkError {
+    fn from(error: ArrayError) -> Self {
         SinkError::Opendal(error.to_string())
     }
 }
