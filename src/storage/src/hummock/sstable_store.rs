@@ -42,8 +42,9 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, CachedSstable, FileCache,
-    RecentFilter, Sstable, SstableBlockIndex, SstableMeta, SstableWriter,
+    Block, BlockCache, BlockCacheConfig, BlockMeta, BlockResponse, CachedBlock, CachedSstable,
+    EvictionConfig, FileCache, RecentFilter, Sstable, SstableBlockIndex, SstableMeta,
+    SstableWriter,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -100,6 +101,7 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
+#[derive(Debug)]
 pub struct BlockCacheEventListener {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     metrics: Arc<HummockStateStoreMetrics>,
@@ -233,15 +235,18 @@ impl SstableStore {
             meta_cache_shard_bits -= 1;
         }
 
-        let block_cache = BlockCache::new(
-            config.block_cache_capacity,
-            MAX_CACHE_SHARD_BITS,
-            config.high_priority_ratio,
-            BlockCacheEventListener::new(
+        // TODO(MrCroxx): support other cache algorithm
+        let block_cache = BlockCache::new(BlockCacheConfig {
+            capacity: config.block_cache_capacity,
+            max_shard_bits: MAX_CACHE_SHARD_BITS,
+            eviction: EvictionConfig::Lru(LruConfig {
+                high_priority_pool_ratio: config.high_priority_ratio as f64 / 100.0,
+            }),
+            listener: BlockCacheEventListener::new(
                 config.data_file_cache.clone(),
                 config.state_store_metrics.clone(),
             ),
-        );
+        });
         // TODO(MrCroxx): support other cache algorithm
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: config.meta_cache_capacity,
@@ -291,15 +296,18 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(
-                block_cache_capacity,
-                0,
-                0,
-                BlockCacheEventListener::new(
+            // TODO(MrCroxx): support other cache algorithm
+            block_cache: BlockCache::new(BlockCacheConfig {
+                capacity: block_cache_capacity,
+                max_shard_bits: 0,
+                eviction: EvictionConfig::Lru(LruConfig {
+                    high_priority_pool_ratio: 0.0,
+                }),
+                listener: BlockCacheEventListener::new(
                     FileCache::none(),
                     Arc::new(HummockStateStoreMetrics::unused()),
                 ),
-            ),
+            }),
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
