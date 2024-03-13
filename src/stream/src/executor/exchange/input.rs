@@ -198,13 +198,14 @@ impl RemoteInput {
                     let mut msg = msg_res.context("RemoteInput decode message error")?;
 
                     // Read barrier mutation from local barrier manager and attach it to the barrier message.
-                    #[cfg(not(test))]
-                    if let Message::Barrier(barrier) = &mut msg {
-                        let mutation = local_barrier_manager
-                            .read_barrier_mutation(barrier)
-                            .await
-                            .context("Read barrier mutation error")?;
-                        barrier.mutation = mutation;
+                    if cfg!(not(test)) {
+                        if let Message::Barrier(barrier) = &mut msg {
+                            let mutation = local_barrier_manager
+                                .read_barrier_mutation(barrier)
+                                .await
+                                .context("Read barrier mutation error")?;
+                            barrier.mutation = mutation;
+                        }
                     }
                     yield msg;
                 }
