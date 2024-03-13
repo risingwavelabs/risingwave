@@ -1414,7 +1414,7 @@ pub async fn handle_create_source(
 
     let catalog_writer = session.catalog_writer()?;
 
-    if has_streaming_job && session.config().enable_reusable_source() {
+    if has_streaming_job && session.config().rw_enable_reusable_source() {
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
             let source_node = LogicalSource::with_catalog(

@@ -16,12 +16,12 @@ use std::collections::BTreeMap;
 
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::user::UserId;
 
 /// This struct `SourceCatalog` is used in frontend.
@@ -87,9 +87,8 @@ impl SourceCatalog {
 
     pub fn connector_name(&self) -> String {
         self.with_properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.to_lowercase())
-            .unwrap()
+            .get_connector()
+            .expect("connector name is missing")
     }
 }
 

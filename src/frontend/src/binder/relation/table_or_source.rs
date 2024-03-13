@@ -57,17 +57,15 @@ impl BoundSource {
     pub fn is_shared_cdc_source(&self) -> bool {
         self.catalog.with_properties.is_shared_cdc_source()
     }
+
+    pub fn can_backfill(&self) -> bool {
+        self.catalog.info.has_streaming_job
+    }
 }
 
 impl From<&SourceCatalog> for BoundSource {
     fn from(s: &SourceCatalog) -> Self {
         Self { catalog: s.clone() }
-    }
-}
-
-impl BoundSource {
-    pub fn can_backfill(&self) -> bool {
-        self.catalog.info.has_streaming_job
     }
 }
 

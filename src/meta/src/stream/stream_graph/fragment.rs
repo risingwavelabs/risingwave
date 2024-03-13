@@ -301,7 +301,7 @@ impl StreamFragmentEdge {
 /// This only includes nodes and edges of the current job itself. It will be converted to [`CompleteStreamFragmentGraph`] later,
 /// that contains the additional information of pre-existing
 /// fragments, which are connected to the graph's top-most or bottom-most fragments.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
     fragments: HashMap<GlobalFragmentId, BuildingFragment>,
@@ -528,7 +528,7 @@ pub(super) enum EitherFragment {
     /// An internal fragment that is being built for the current streaming job.
     Building(BuildingFragment),
 
-    /// An existing fragment that is external but connected to the fragments being built.!!!!!!!!!!!!!
+    /// An existing fragment that is external but connected to the fragments being built.
     Existing(Fragment),
 }
 
@@ -540,7 +540,6 @@ pub(super) enum EitherFragment {
 ///   `Materialize` node will be included in this structure.
 /// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
 ///   containing the `StreamScan` nodes will be included in this structure.
-#[derive(Debug)]
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,

@@ -686,7 +686,7 @@ impl CommandContext {
         }
     }
 
-    /// For `CreateStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `StreamScan`, and `StreamValue` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {

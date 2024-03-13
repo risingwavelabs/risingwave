@@ -119,7 +119,7 @@ impl StreamSourceBackfill {
             .collect_vec();
 
         let source_catalog = self.source_catalog();
-        let source_inner = SourceBackfillNode {
+        let backfill = SourceBackfillNode {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
@@ -140,8 +140,6 @@ impl StreamSourceBackfill {
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         };
 
-        let stream_scan_body = PbNodeBody::SourceBackfill(source_inner);
-
         let fields = self.schema().to_prost();
         // plan: merge -> backfill
         Ok(PbStreamNode {
@@ -156,7 +154,7 @@ impl StreamSourceBackfill {
                     ..Default::default()
                 },
             ],
-            node_body: Some(stream_scan_body),
+            node_body: Some(PbNodeBody::SourceBackfill(backfill)),
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),

@@ -93,7 +93,11 @@ impl Planner {
             )
             .into())
         } else if source.can_backfill()
-            && self.ctx().session_ctx().config().enable_reusable_source()
+            && self
+                .ctx()
+                .session_ctx()
+                .config()
+                .rw_enable_reusable_source()
         {
             Ok(LogicalSourceBackfill::new(Rc::new(source.catalog), self.ctx())?.into())
         } else {

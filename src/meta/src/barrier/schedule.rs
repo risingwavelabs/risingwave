@@ -276,11 +276,9 @@ impl BarrierScheduler {
         let mut infos = Vec::with_capacity(contexts.len());
 
         for (injected_rx, collect_rx, finish_rx) in contexts {
-            tracing::trace!("waiting for command to be injected");
             // Wait for this command to be injected, and record the result.
             let info = injected_rx.await.ok().context("failed to inject barrier")?;
             infos.push(info);
-            tracing::trace!("injected_rx finished");
 
             // Throw the error if it occurs when collecting this barrier.
             collect_rx

@@ -344,7 +344,7 @@ impl SourceManagerCore {
                             actors
                         }
                         Err(err) => {
-                            tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
+                            tracing::warn!(error = %err.as_report(),"Failed to get the actor of the fragment, maybe the fragment doesn't exist anymore");
                             continue;
                         }
                     };

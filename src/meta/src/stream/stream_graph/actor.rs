@@ -660,7 +660,6 @@ impl ActorGraphBuildState {
 
 /// The result of a built actor graph. Will be further embedded into the `Context` for building
 /// actors on the compute nodes.
-#[derive(Debug)]
 pub struct ActorGraphBuildResult {
     /// The graph of sealed fragments, including all actors.
     pub graph: BTreeMap<FragmentId, Fragment>,
