@@ -223,6 +223,10 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
         // 1. advance the new_value_iter to the newest op between max and min epoch
         self.advance_to_valid_key().await?;
 
+        if !self.is_current_pos_valid {
+            return Ok(());
+        }
+
         // 2. advance new_value_iter to out of the valid range, and save the oldest value
         let oldest_epoch = self.advance_to_find_oldest_epoch().await?;
 
@@ -342,5 +346,77 @@ impl StateStoreIter<StateStoreReadLogItem> for ChangeLogIterator {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::ops::Bound;
+
+    use bytes::Bytes;
+    use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::{TableKey, UserKey};
+    use risingwave_hummock_sdk::EpochWithGap;
+
+    use crate::hummock::iterator::change_log::ChangeLogIteratorInner;
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_table_key_of, iterator_test_value_of,
+    };
+    use crate::hummock::iterator::MergeIterator;
+    use crate::mem_table::{MemTable, MemTableHummockIterator};
+    use crate::store::{ChangeLogValue, OpConsistencyLevel};
+
+    #[tokio::test]
+    async fn test_basic() {
+        let table_id = TableId::new(233);
+
+        let count = 100;
+        let kvs = (0..count)
+            .map(|i| {
+                (
+                    TableKey(Bytes::from(iterator_test_table_key_of(i))),
+                    Bytes::from(iterator_test_value_of(i)),
+                )
+            })
+            .collect_vec();
+        let mem_tables = kvs
+            .iter()
+            .map(|(key, value)| {
+                let mut t = MemTable::new(OpConsistencyLevel::Inconsistent);
+                t.insert(key.clone(), value.clone()).unwrap();
+                t
+            })
+            .collect_vec();
+        let epoch = EpochWithGap::new_from_epoch(test_epoch(1));
+        let new_value_iter = MergeIterator::new(
+            mem_tables
+                .iter()
+                .map(|mem_table| MemTableHummockIterator::new(&mem_table.buffer, epoch, table_id)),
+        );
+        let empty = BTreeMap::new();
+        let old_value_iter = MemTableHummockIterator::new(&empty, epoch, table_id);
+        let mut iter = ChangeLogIteratorInner::new(
+            (epoch.pure_epoch(), epoch.pure_epoch()),
+            Bound::Unbounded,
+            new_value_iter,
+            old_value_iter,
+        );
+        iter.rewind().await.unwrap();
+        for (key, value) in kvs {
+            assert!(iter.is_valid());
+            assert_eq!(
+                UserKey {
+                    table_id,
+                    table_key: key.to_ref(),
+                },
+                iter.key()
+            );
+            assert_eq!(ChangeLogValue::Insert(value.as_ref()), iter.log_value());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
     }
 }
