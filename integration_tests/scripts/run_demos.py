@@ -66,6 +66,14 @@ def iceberg_sink_demo():
     print("Running demo: iceberg-sink2")
     subprocess.run(["bash", "./run.sh"], cwd=demo_dir, check=True)
 
+def iceberg_source_demo():
+    demo = "iceberg-source"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: iceberg-source")
+    subprocess.run(["bash", "./run.sh"], cwd=demo_dir, check=True)
+
 
 arg_parser = argparse.ArgumentParser(description="Run the demo")
 arg_parser.add_argument(
@@ -86,5 +94,7 @@ if args.case == "iceberg-cdc":
     iceberg_cdc_demo()
 elif args.case == "iceberg-sink":
     iceberg_sink_demo()
+elif args.case == "iceberg-source":
+    iceberg_source_demo()
 else:
     run_demo(args.case, args.format)

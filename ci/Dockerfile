@@ -37,7 +37,7 @@ ENV PATH /root/.cargo/bin/:$PATH
 RUN rustup show
 RUN rustup default `rustup show active-toolchain | awk '{print $1}'`
 
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
+RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies

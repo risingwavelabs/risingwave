@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(coverage_attribute))]
+mod message;
+mod reader;
 
-risingwave_cmd::main!(compute);
+pub use reader::*;
+
+pub use crate::source::mqtt::split::*;

@@ -655,7 +655,7 @@ impl SstableStore {
             _ => (),
         }
         stats.cache_meta_block_total += 1;
-        lookup_response.verbose_instrument_await("sstable")
+        lookup_response
     }
 
     pub async fn list_object_metadata_from_object_store(
@@ -1020,9 +1020,9 @@ impl SstableWriter for StreamingUploadWriter {
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
-        let meta_data = Bytes::from(meta.encode_to_bytes());
+        let metadata = Bytes::from(meta.encode_to_bytes());
 
-        self.object_uploader.write_bytes(meta_data).await?;
+        self.object_uploader.write_bytes(metadata).await?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {

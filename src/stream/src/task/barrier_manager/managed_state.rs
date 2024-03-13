@@ -454,15 +454,17 @@ impl ManagedBarrierState {
 mod tests {
     use std::collections::HashSet;
 
+    use risingwave_common::util::epoch::test_epoch;
+
     use crate::executor::Barrier;
     use crate::task::barrier_manager::managed_state::ManagedBarrierState;
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {
         let mut managed_barrier_state = ManagedBarrierState::for_test();
-        let barrier1 = Barrier::new_test_barrier(1);
-        let barrier2 = Barrier::new_test_barrier(2);
-        let barrier3 = Barrier::new_test_barrier(3);
+        let barrier1 = Barrier::new_test_barrier(test_epoch(1));
+        let barrier2 = Barrier::new_test_barrier(test_epoch(2));
+        let barrier3 = Barrier::new_test_barrier(test_epoch(3));
         let actor_ids_to_collect1 = HashSet::from([1, 2]);
         let actor_ids_to_collect2 = HashSet::from([1, 2]);
         let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
@@ -471,39 +473,48 @@ mod tests {
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(2, &barrier1);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 0);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(0)
+        );
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
                 .first_key_value()
                 .unwrap()
                 .0,
-            &1
+            &test_epoch(1)
         );
         managed_barrier_state.collect(1, &barrier2);
         managed_barrier_state.collect(1, &barrier3);
         managed_barrier_state.collect(2, &barrier2);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 1);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(1)
+        );
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
                 .first_key_value()
                 .unwrap()
                 .0,
-            &2
+            { &test_epoch(2) }
         );
         managed_barrier_state.collect(2, &barrier3);
         managed_barrier_state.collect(3, &barrier3);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 2);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(2)
+        );
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 
     #[tokio::test]
     async fn test_managed_state_stop_actor() {
         let mut managed_barrier_state = ManagedBarrierState::for_test();
-        let barrier1 = Barrier::new_test_barrier(1);
-        let barrier2 = Barrier::new_test_barrier(2);
-        let barrier3 = Barrier::new_test_barrier(3);
+        let barrier1 = Barrier::new_test_barrier(test_epoch(1));
+        let barrier2 = Barrier::new_test_barrier(test_epoch(2));
+        let barrier3 = Barrier::new_test_barrier(test_epoch(3));
         let actor_ids_to_collect1 = HashSet::from([1, 2, 3, 4]);
         let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
         let actor_ids_to_collect3 = HashSet::from([1, 2]);
@@ -536,18 +547,27 @@ mod tests {
             &0
         );
         managed_barrier_state.collect(4, &barrier1);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 0);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 1);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 2);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(0)
+        );
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(1)
+        );
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(2)
+        );
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 
     #[tokio::test]
     async fn test_managed_state_issued_after_collect() {
         let mut managed_barrier_state = ManagedBarrierState::for_test();
-        let barrier1 = Barrier::new_test_barrier(1);
-        let barrier2 = Barrier::new_test_barrier(2);
-        let barrier3 = Barrier::new_test_barrier(3);
+        let barrier1 = Barrier::new_test_barrier(test_epoch(1));
+        let barrier2 = Barrier::new_test_barrier(test_epoch(2));
+        let barrier3 = Barrier::new_test_barrier(test_epoch(3));
         let actor_ids_to_collect1 = HashSet::from([1, 2]);
         let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
         let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
@@ -559,7 +579,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            &2
+            { &test_epoch(2) }
         );
         managed_barrier_state.collect(1, &barrier2);
         assert_eq!(
@@ -568,7 +588,7 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            &1
+            { &test_epoch(1) }
         );
         managed_barrier_state.collect(1, &barrier1);
         assert_eq!(
@@ -583,25 +603,31 @@ mod tests {
         managed_barrier_state.collect(2, &barrier2);
         managed_barrier_state.collect(2, &barrier3);
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 0);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(0)
+        );
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
                 .first_key_value()
                 .unwrap()
                 .0,
-            &1
+            { &test_epoch(1) }
         );
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2);
         managed_barrier_state.collect(3, &barrier2);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 1);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(1)
+        );
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
                 .first_key_value()
                 .unwrap()
                 .0,
-            &2
+            { &test_epoch(2) }
         );
         managed_barrier_state.collect(3, &barrier3);
         assert_eq!(
@@ -610,10 +636,13 @@ mod tests {
                 .first_key_value()
                 .unwrap()
                 .0,
-            &2
+            { &test_epoch(2) }
         );
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3);
-        assert_eq!(managed_barrier_state.pop_next_completed_epoch().await, 2);
+        assert_eq!(
+            managed_barrier_state.pop_next_completed_epoch().await,
+            test_epoch(2)
+        );
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 }

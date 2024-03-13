@@ -264,3 +264,17 @@
     insert into t select * from t;
   expected_outputs:
   - batch_distributed_plan
+- name: test binding for insert select issue 15594
+  sql: |
+    create table t (a int);
+    create table t2 (b int);
+    insert into t select 1 as a from t2 group by a;
+  expected_outputs:
+  - batch_plan
+- name: test binding for insert select issue 15594
+  sql: |
+    create table t (a int);
+    create table t2 (b int);
+    insert into t select 1 as a from t2 group by a returning a;
+  expected_outputs:
+    - batch_plan

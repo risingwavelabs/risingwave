@@ -37,6 +37,8 @@ source backwards-compat-tests/scripts/utils.sh
 ################################### Main
 
 configure_rw() {
+VERSION="$1"
+
 echo "--- Setting up cluster config"
 cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
@@ -61,12 +63,13 @@ ENABLE_KAFKA=true
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
 
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
+
+if version_le "${VERSION:-}" "1.7.0" ; then
+  echo "ENABLE_ALL_IN_ONE=true" >> risedev-components.user.env
+fi
 }
 
 configure_rw_build() {
@@ -94,9 +97,6 @@ ENABLE_KAFKA=true
 # Make sure that it builds
 ENABLE_BUILD_RUST=true
 
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
@@ -122,7 +122,7 @@ setup_old_cluster() {
 
     echo "--- Start cluster on tag $OLD_VERSION"
     git config --global --add safe.directory /risingwave
-    configure_rw
+    configure_rw $OLD_VERSION
   fi
 }
 
@@ -144,7 +144,10 @@ main() {
   seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
-  configure_rw
+  # Assume we use the latest version, so we just set to some large number.
+  # The current $NEW_VERSION as of this change is 1.7.0, so we can't use that.
+  # See: https://github.com/risingwavelabs/risingwave/pull/15448
+  configure_rw "99.99.99"
   validate_new_cluster "$NEW_VERSION"
 }
 

@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures::{pin_mut, TryStreamExt};
+use futures::pin_mut;
 use risingwave_common::cache::CachePriority;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -82,7 +83,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .await
     });
 
-    let epoch = 100;
+    let epoch = test_epoch(100);
     runtime
         .block_on(hummock_storage.init_for_test(epoch))
         .unwrap();

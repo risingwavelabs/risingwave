@@ -78,6 +78,13 @@ pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
     (left, right)
 }
 
+// Ensure there is only one vnode involved in table key range and return the vnode
+pub fn vnode(range: &TableKeyRange) -> VirtualNode {
+    let (l, r_exclusive) = vnode_range(range);
+    assert_eq!(r_exclusive - l, 1);
+    VirtualNode::from_index(l)
+}
+
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
     let res = epoch.to_be();
@@ -395,6 +402,23 @@ pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
     map_table_key_range((start, end))
 }
 
+pub trait SetSlice<S: AsRef<[u8]> + ?Sized> {
+    fn set(&mut self, value: &S);
+}
+
+impl<S: AsRef<[u8]> + ?Sized> SetSlice<S> for Vec<u8> {
+    fn set(&mut self, value: &S) {
+        self.clear();
+        self.extend_from_slice(value.as_ref());
+    }
+}
+
+impl SetSlice<Bytes> for Bytes {
+    fn set(&mut self, value: &Bytes) {
+        *self = value.clone()
+    }
+}
+
 pub trait CopyFromSlice {
     fn copy_from_slice(slice: &[u8]) -> Self;
 }
@@ -474,6 +498,12 @@ impl<T: AsRef<[u8]>> Borrow<[u8]> for TableKey<T> {
 impl EstimateSize for TableKey<Bytes> {
     fn estimated_heap_size(&self) -> usize {
         self.0.estimated_heap_size()
+    }
+}
+
+impl<'a> TableKey<&'a [u8]> {
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> TableKey<T> {
+        TableKey(T::copy_from_slice(self.as_ref()))
     }
 }
 
@@ -617,21 +647,22 @@ impl UserKey<Vec<u8>> {
         buf.advance(len);
         UserKey::new(TableId::new(table_id), TableKey(data))
     }
+}
 
-    pub fn extend_from_other(&mut self, other: &UserKey<&[u8]>) {
-        self.table_id = other.table_id;
-        self.table_key.0.clear();
-        self.table_key.0.extend_from_slice(other.table_key.as_ref());
-    }
-
+impl<T: AsRef<[u8]>> UserKey<T> {
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
     /// table key without reallocating a new `UserKey` object.
-    pub fn set(&mut self, other: UserKey<&[u8]>) {
+    pub fn set<F>(&mut self, other: UserKey<F>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
         self.table_id = other.table_id;
-        self.table_key.clear();
-        self.table_key.extend_from_slice(other.table_key.as_ref());
+        self.table_key.0.set(&other.table_key.0);
     }
+}
 
+impl UserKey<Vec<u8>> {
     pub fn into_bytes(self) -> UserKey<Bytes> {
         UserKey {
             table_id: self.table_id,
@@ -804,10 +835,14 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     }
 }
 
-impl FullKey<Vec<u8>> {
+impl<T: AsRef<[u8]>> FullKey<T> {
     /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
     /// table key without reallocating a new `FullKey` object.
-    pub fn set(&mut self, other: FullKey<&[u8]>) {
+    pub fn set<F>(&mut self, other: FullKey<F>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
         self.user_key.set(other.user_key);
         self.epoch_with_gap = other.epoch_with_gap;
     }
@@ -825,15 +860,6 @@ impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
 impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl<'a, T> From<UserKey<&'a [u8]>> for UserKey<T>
-where
-    T: AsRef<[u8]> + CopyFromSlice,
-{
-    fn from(value: UserKey<&'a [u8]>) -> Self {
-        value.copy_into()
     }
 }
 
@@ -932,24 +958,18 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     (start, end)
 }
 
-pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq> {
+/// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool = false> {
     pub latest_full_key: FullKey<T>,
     last_observed_epoch_with_gap: EpochWithGap,
-    /// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
-    allow_same_full_key: bool,
 }
 
-impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
+impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_DEDUP> {
     pub fn new(init_full_key: FullKey<T>) -> Self {
-        Self::with_config(init_full_key, false)
-    }
-
-    pub fn with_config(init_full_key: FullKey<T>, allow_same_full_key: bool) -> Self {
         let epoch_with_gap = init_full_key.epoch_with_gap;
         Self {
             latest_full_key: init_full_key,
             last_observed_epoch_with_gap: epoch_with_gap,
-            allow_same_full_key,
         }
     }
 
@@ -965,7 +985,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     ///
     /// let table_id = TableId { table_id: 1 };
     /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
-    /// let mut a = FullKeyTracker::<Bytes>::new(full_key1.clone());
+    /// let mut a: FullKeyTracker<_> = FullKeyTracker::<Bytes>::new(full_key1.clone());
     ///
     /// // Panic on non-decreasing epoch observed for the same user key.
     /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6 << EPOCH_AVAILABLE_BITS);
@@ -976,18 +996,20 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
     /// // a.observe(full_key_with_smaller_user_key);
     ///
     /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3 << EPOCH_AVAILABLE_BITS);
-    /// assert_eq!(a.observe(full_key2), None);
+    /// assert_eq!(a.observe(full_key2.clone()), false);
+    /// assert_eq!(a.latest_user_key(), &full_key2.user_key);
     ///
     /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4 << EPOCH_AVAILABLE_BITS);
-    /// assert_eq!(a.observe(full_key3), Some(full_key1));
+    /// assert_eq!(a.observe(full_key3.clone()), true);
+    /// assert_eq!(a.latest_user_key(), &full_key3.user_key);
     /// ```
     ///
     /// Return:
-    /// - If the provided `key` contains a new user key, return the latest full key observed for the previous user key.
-    /// - Otherwise: return None
-    pub fn observe<F>(&mut self, key: FullKey<F>) -> Option<FullKey<T>>
+    /// - If the provided `key` contains a new user key, return true.
+    /// - Otherwise: return false
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> bool
     where
-        UserKey<F>: Into<UserKey<T>>,
+        T: SetSlice<F>,
         F: AsRef<[u8]>,
     {
         self.observe_multi_version(key.user_key, once(key.epoch_with_gap))
@@ -998,9 +1020,9 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
         &mut self,
         user_key: UserKey<F>,
         mut epochs: impl Iterator<Item = EpochWithGap>,
-    ) -> Option<FullKey<T>>
+    ) -> bool
     where
-        UserKey<F>: Into<UserKey<T>>,
+        T: SetSlice<F>,
         F: AsRef<[u8]>,
     {
         let max_epoch_with_gap = epochs.next().expect("non-empty");
@@ -1030,18 +1052,15 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
                 self.last_observed_epoch_with_gap = min_epoch_with_gap;
 
                 // Take the previous key and set latest key
-                Some(std::mem::replace(
-                    &mut self.latest_full_key,
-                    FullKey {
-                        user_key: user_key.into(),
-                        epoch_with_gap: min_epoch_with_gap,
-                    },
-                ))
+                self.latest_full_key.set(FullKey {
+                    user_key,
+                    epoch_with_gap: min_epoch_with_gap,
+                });
+                true
             }
             Ordering::Equal => {
                 if max_epoch_with_gap > self.last_observed_epoch_with_gap
-                    || (!self.allow_same_full_key
-                        && max_epoch_with_gap == self.last_observed_epoch_with_gap)
+                    || (!SKIP_DEDUP && max_epoch_with_gap == self.last_observed_epoch_with_gap)
                 {
                     // Epoch from the same user key should be monotonically decreasing
                     panic!(
@@ -1050,7 +1069,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
                     );
                 }
                 self.last_observed_epoch_with_gap = min_epoch_with_gap;
-                None
+                false
             }
             Ordering::Greater => {
                 // User key should be monotonically increasing
@@ -1065,40 +1084,49 @@ impl<T: AsRef<[u8]> + Ord + Eq> FullKeyTracker<T> {
             }
         }
     }
+
+    pub fn latest_user_key(&self) -> &UserKey<T> {
+        &self.latest_full_key.user_key
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
 
+    use risingwave_common::util::epoch::test_epoch;
+
     use super::*;
 
     #[test]
     fn test_encode_decode() {
+        let epoch = test_epoch(1);
         let table_key = b"abc".to_vec();
         let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
-        let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
+        let key = FullKey::for_test(TableId::new(1), &table_key[..], epoch);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
         let mut table_key = vec![1];
-        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        let a = FullKey::for_test(TableId::new(1), table_key.clone(), epoch);
         table_key[0] = 2;
-        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        let b = FullKey::for_test(TableId::new(1), table_key.clone(), epoch);
         table_key[0] = 129;
-        let c = FullKey::for_test(TableId::new(1), table_key, 1);
+        let c = FullKey::for_test(TableId::new(1), table_key, epoch);
         assert!(a.lt(&b));
         assert!(b.lt(&c));
     }
 
     #[test]
     fn test_key_cmp() {
+        let epoch = test_epoch(1);
+        let epoch2 = test_epoch(2);
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), epoch);
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), epoch);
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch2);
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch);
 
         assert_eq!(key1.cmp(&key1), Ordering::Equal);
         assert_eq!(key1.cmp(&key2), Ordering::Less);
