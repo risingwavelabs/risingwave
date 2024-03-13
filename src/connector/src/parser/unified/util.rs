@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
-
-use super::{Access, AccessError, AccessResult, ChangeEvent};
+use super::{Access, AccessResult, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::SourceColumnDesc;
@@ -24,7 +22,7 @@ pub fn apply_row_operation_on_stream_chunk_writer_with_op(
     writer: &mut SourceStreamChunkRowWriter<'_>,
     op: ChangeEventOperation,
 ) -> AccessResult<()> {
-    let f = |column: &SourceColumnDesc| row_op.access_field(&column.name, &column.data_type);
+    let f = |column: &SourceColumnDesc| row_op.access_field(column);
     match op {
         ChangeEventOperation::Upsert => writer.insert(f),
         ChangeEventOperation::Delete => writer.delete(f),
@@ -44,10 +42,4 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
     writer: &mut SourceStreamChunkRowWriter<'_>,
 ) -> AccessResult<()> {
     writer.insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
-}
-
-impl From<AccessError> for RwError {
-    fn from(val: AccessError) -> Self {
-        ErrorCode::InternalError(format!("AccessError: {:?}", val)).into()
-    }
 }

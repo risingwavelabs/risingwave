@@ -43,11 +43,12 @@
                 <include>*:risingwave-sink-cassandra</include>
                 <include>*:risingwave-sink-jdbc</include>
                 <include>*:risingwave-sink-iceberg</include>
-                <include>*:risingwave-sink-deltalake</include>
+                <include>*:risingwave-sink-mock-flink-http-sink</include>
 
-                <!-- For S3-->
-                <include>*:s3-common</include>
             </includes>
+            <excludes>
+                <exclude>org.apache.iceberg:iceberg-common</exclude>
+            </excludes>
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <useTransitiveFiltering>true</useTransitiveFiltering>
         </dependencySet>

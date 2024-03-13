@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
-    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins, Value,
+    DataType as AstDataType, Distinct, Expr, Select, SelectItem, Value,
 };
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -31,19 +28,9 @@ use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME, PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
-};
-use crate::catalog::system_catalog::rw_catalog::{
-    RW_TABLE_STATS_COLUMNS, RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX,
-    RW_TABLE_STATS_TABLE_NAME, RW_TABLE_STATS_VALUE_SIZE_INDEX,
-};
-use crate::expr::{
-    AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
-    InputRef, OrderBy,
-};
+use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::group_by::GroupBy;
-use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -227,21 +214,50 @@ impl Binder {
         self.context.clause = Some(Clause::GroupBy);
 
         // Only support one grouping item in group by clause
-        let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
-            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
-        } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
-            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
-        } else if select.group_by.len() == 1 && let Expr::Cube(cube) = &select.group_by[0] {
-            GroupBy::Cube(self.bind_grouping_items_expr_in_select(cube.clone(), &out_name_to_index, &select_items)?)
+        let group_by = if select.group_by.len() == 1
+            && let Expr::GroupingSets(grouping_sets) = &select.group_by[0]
+        {
+            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(
+                grouping_sets.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
+        } else if select.group_by.len() == 1
+            && let Expr::Rollup(rollup) = &select.group_by[0]
+        {
+            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(
+                rollup.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
+        } else if select.group_by.len() == 1
+            && let Expr::Cube(cube) = &select.group_by[0]
+        {
+            GroupBy::Cube(self.bind_grouping_items_expr_in_select(
+                cube.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
         } else {
-            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_)) || matches!(expr, Expr::Cube(_))) {
-                return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
+            if select.group_by.iter().any(|expr| {
+                matches!(expr, Expr::GroupingSets(_))
+                    || matches!(expr, Expr::Rollup(_))
+                    || matches!(expr, Expr::Cube(_))
+            }) {
+                return Err(ErrorCode::BindError(
+                    "Only support one grouping item in group by clause".to_string(),
+                )
+                .into());
             }
-            GroupBy::GroupKey(select
-                .group_by
-                .into_iter()
-                .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
-                .try_collect()?)
+            GroupBy::GroupKey(
+                select
+                    .group_by
+                    .into_iter()
+                    .map(|expr| {
+                        self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items)
+                    })
+                    .try_collect()?,
+            )
         };
         self.context.clause = None;
 
@@ -502,224 +518,6 @@ impl Binder {
         Ok((returning_list, fields))
     }
 
-    /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
-    /// this is used for function `pg_catalog.get_user_by_id()`.
-    pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
-        let select_items = vec![InputRef::new(PG_USER_NAME_INDEX, DataType::Varchar).into()];
-        let schema = Schema {
-            fields: vec![Field::with_name(
-                DataType::Varchar,
-                UNNAMED_COLUMN.to_string(),
-            )],
-        };
-        let input = match input {
-            ExprImpl::InputRef(input_ref) => {
-                CorrelatedInputRef::new(input_ref.index(), input_ref.return_type(), 1).into()
-            }
-            ExprImpl::CorrelatedInputRef(col_input_ref) => CorrelatedInputRef::new(
-                col_input_ref.index(),
-                col_input_ref.return_type(),
-                col_input_ref.depth() + 1,
-            )
-            .into(),
-            ExprImpl::Literal(_) => input.clone(),
-            _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-        };
-        let from = Some(self.bind_relation_by_name_inner(
-            Some(PG_CATALOG_SCHEMA_NAME),
-            PG_USER_TABLE_NAME,
-            None,
-            false,
-        )?);
-        let where_clause = Some(
-            FunctionCall::new(
-                ExprType::Equal,
-                vec![
-                    input,
-                    InputRef::new(PG_USER_ID_INDEX, DataType::Int32).into(),
-                ],
-            )?
-            .into(),
-        );
-
-        Ok(BoundSelect {
-            distinct: BoundDistinct::All,
-            select_items,
-            aliases: vec![None],
-            from,
-            where_clause,
-            group_by: GroupBy::GroupKey(vec![]),
-            having: None,
-            schema,
-        })
-    }
-
-    /// This returns the size of all the indexes that are on the specified table.
-    pub fn bind_get_indexes_size_select(&mut self, table: &ExprImpl) -> Result<BoundSelect> {
-        // this function is implemented with the following query:
-        //     SELECT sum(total_key_size + total_value_size)
-        //     FROM rw_catalog.rw_table_stats as stats
-        //     JOIN pg_index on stats.id = pg_index.indexrelid
-        //     WHERE pg_index.indrelid = 'table_name'::regclass
-
-        let indexrelid_col = PG_INDEX_COLUMNS[0].1;
-        let tbl_stats_id_col = RW_TABLE_STATS_COLUMNS[0].1;
-
-        // Filter to only the Indexes on this table
-        let table_id = self.table_id_query(table)?;
-
-        let constraint = JoinConstraint::On(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new_unchecked(tbl_stats_id_col))),
-            op: BinaryOperator::Eq,
-            right: Box::new(Expr::Identifier(Ident::new_unchecked(indexrelid_col))),
-        });
-        let indexes_with_stats = self.bind_table_with_joins(TableWithJoins {
-            relation: TableFactor::Table {
-                name: ObjectName(vec![
-                    RW_CATALOG_SCHEMA_NAME.into(),
-                    RW_TABLE_STATS_TABLE_NAME.into(),
-                ]),
-                alias: None,
-                for_system_time_as_of_proctime: false,
-            },
-            joins: vec![Join {
-                relation: TableFactor::Table {
-                    name: ObjectName(vec![
-                        PG_CATALOG_SCHEMA_NAME.into(),
-                        PG_INDEX_TABLE_NAME.into(),
-                    ]),
-                    alias: None,
-                    for_system_time_as_of_proctime: false,
-                },
-                join_operator: JoinOperator::Inner(constraint),
-            }],
-        })?;
-
-        // Get the size of an index by adding the size of the keys and the size of the values
-        let sum = FunctionCall::new(
-            ExprType::Add,
-            vec![
-                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
-                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
-            ],
-        )?
-        .into();
-
-        // There could be multiple indexes on a table so aggregate the sizes of all indexes
-        let select_items: Vec<ExprImpl> = vec![AggCall::new(
-            AggKind::Sum0,
-            vec![sum],
-            false,
-            OrderBy::any(),
-            Condition::true_cond(),
-            vec![],
-        )?
-        .into()];
-
-        let indrelid_col = PG_INDEX_COLUMNS[1].1;
-        let indrelid_ref = self.bind_column(&[indrelid_col.into()])?;
-        let where_clause: Option<ExprImpl> =
-            Some(FunctionCall::new(ExprType::Equal, vec![indrelid_ref, table_id])?.into());
-
-        // define the output schema
-        let result_schema = Schema {
-            fields: vec![Field::with_name(
-                DataType::Int64,
-                "pg_indexes_size".to_string(),
-            )],
-        };
-
-        Ok(BoundSelect {
-            distinct: BoundDistinct::All,
-            select_items,
-            aliases: vec![None],
-            from: Some(indexes_with_stats),
-            where_clause,
-            group_by: GroupBy::GroupKey(vec![]),
-            having: None,
-            schema: result_schema,
-        })
-    }
-
-    pub fn bind_get_table_size_select(
-        &mut self,
-        output_name: &str,
-        table: &ExprImpl,
-    ) -> Result<BoundSelect> {
-        // define the output schema
-        let result_schema = Schema {
-            fields: vec![Field::with_name(DataType::Int64, output_name.to_string())],
-        };
-
-        // Get table stats data
-        let from = Some(self.bind_relation_by_name_inner(
-            Some(RW_CATALOG_SCHEMA_NAME),
-            RW_TABLE_STATS_TABLE_NAME,
-            None,
-            false,
-        )?);
-
-        let table_id = self.table_id_query(table)?;
-
-        // Filter to only the Indexes on this table
-        let where_clause: Option<ExprImpl> = Some(
-            FunctionCall::new(
-                ExprType::Equal,
-                vec![
-                    table_id,
-                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
-                ],
-            )?
-            .into(),
-        );
-
-        // Add the space used by keys and the space used by values to get the total space used by
-        // the table
-        let key_value_size_sum = FunctionCall::new(
-            ExprType::Add,
-            vec![
-                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
-                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
-            ],
-        )?
-        .into();
-        let select_items = vec![key_value_size_sum];
-
-        Ok(BoundSelect {
-            distinct: BoundDistinct::All,
-            select_items,
-            aliases: vec![None],
-            from,
-            where_clause,
-            group_by: GroupBy::GroupKey(vec![]),
-            having: None,
-            schema: result_schema,
-        })
-    }
-
-    /// Given literal varchar this will return the Object ID of the table or index whose
-    /// name matches the varchar.  Given a literal integer, this will return the integer regardless
-    /// of whether an object exists with an Object ID that matches the integer.
-    fn table_id_query(&mut self, table: &ExprImpl) -> Result<ExprImpl> {
-        match table.as_literal() {
-            Some(literal) if literal.return_type().is_int() => Ok(table.clone()),
-            Some(literal) if literal.return_type() == DataType::Varchar => {
-                let table_name = literal
-                    .get_data()
-                    .as_ref()
-                    .expect("ExprImpl value is a Literal but cannot get ref to data")
-                    .as_utf8();
-                self.bind_cast(
-                    Expr::Value(Value::SingleQuotedString(table_name.to_string())),
-                    AstDataType::Regclass,
-                )
-            }
-            _ => Err(RwError::from(ErrorCode::ExprError(
-                "Expected an integer or varchar literal".into(),
-            ))),
-        }
-    }
-
     pub fn iter_bound_columns<'a>(
         column_binding: impl Iterator<Item = &'a ColumnBinding>,
     ) -> (Vec<ExprImpl>, Vec<Option<String>>) {
@@ -795,7 +593,9 @@ impl Binder {
                 let mut bound_exprs = vec![];
                 for expr in exprs {
                     let expr_impl = match expr {
-                        Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => {
+                        Expr::Identifier(name)
+                            if let Some(index) = name_to_index.get(&name.real_value()) =>
+                        {
                             match *index {
                                 usize::MAX => {
                                     return Err(ErrorCode::BindError(format!(
@@ -804,29 +604,23 @@ impl Binder {
                                     ))
                                     .into())
                                 }
-                                _ => {
-                                    InputRef::new(*index, select_items[*index].return_type()).into()
-                                }
+                                _ => select_items[*index].clone(),
                             }
                         }
-                        Expr::Value(Value::Number(number)) => {
-                            match number.parse::<usize>() {
-                                Ok(index) if 1 <= index && index <= select_items.len() => {
-                                    let idx_from_0 = index - 1;
-                                    InputRef::new(idx_from_0, select_items[idx_from_0].return_type()).into()
-                                }
-                                _ => {
-                                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                                        "Invalid ordinal number in DISTINCT ON: {}",
-                                        number
-                                    ))
-                                    .into())
-                                }
+                        Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
+                            Ok(index) if 1 <= index && index <= select_items.len() => {
+                                let idx_from_0 = index - 1;
+                                select_items[idx_from_0].clone()
                             }
-                        }
-                        expr => {
-                            self.bind_expr(expr)?
-                        }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "Invalid ordinal number in DISTINCT ON: {}",
+                                    number
+                                ))
+                                .into())
+                            }
+                        },
+                        expr => self.bind_expr(expr)?,
                     };
                     bound_exprs.push(expr_impl);
                 }
@@ -905,6 +699,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Regproc => "regproc".to_string(),
         AstDataType::Text => "text".to_string(),
         AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Struct(_) => {

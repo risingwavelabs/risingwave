@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -62,10 +62,30 @@ public class SourceValidateHandler {
                 .build();
     }
 
-    public static void ensurePropNotNull(Map<String, String> props, String name) {
+    private static void ensurePropNotBlank(Map<String, String> props, String name) {
+        ensurePropsExists(props, name);
+        if (StringUtils.isBlank(props.get(name))) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format("'%s' cannot be empty. Please check the WITH properties", name));
+        }
+    }
+
+    private static void ensurePropsExists(Map<String, String> props, String name) {
         if (!props.containsKey(name)) {
             throw ValidatorUtils.invalidArgument(
-                    String.format("'%s' not found, please check the WITH properties", name));
+                    String.format("'%s' is not found. Please check the WITH properties", name));
+        }
+    }
+
+    static void ensureRequiredProps(Map<String, String> props, boolean isCdcSourceJob) {
+        ensurePropNotBlank(props, DbzConnectorConfig.HOST);
+        ensurePropNotBlank(props, DbzConnectorConfig.PORT);
+        ensurePropNotBlank(props, DbzConnectorConfig.DB_NAME);
+        ensurePropNotBlank(props, DbzConnectorConfig.USER);
+        ensurePropsExists(props, DbzConnectorConfig.PASSWORD);
+        // ensure table name is passed by user in non-sharing mode
+        if (!isCdcSourceJob) {
+            ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
         }
     }
 
@@ -73,33 +93,32 @@ public class SourceValidateHandler {
             throws Exception {
         var props = request.getPropertiesMap();
 
-        ensurePropNotNull(props, DbzConnectorConfig.HOST);
-        ensurePropNotNull(props, DbzConnectorConfig.PORT);
-        ensurePropNotNull(props, DbzConnectorConfig.DB_NAME);
-        ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
-        ensurePropNotNull(props, DbzConnectorConfig.USER);
-        ensurePropNotNull(props, DbzConnectorConfig.PASSWORD);
+        boolean isCdcSourceJob = request.getIsSourceJob();
+        boolean isBackfillTable = request.getIsBackfillTable();
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
-                ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
-                ensurePropNotNull(props, DbzConnectorConfig.PG_SLOT_NAME);
-                ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_NAME);
-                ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_CREATE);
-                try (var validator = new PostgresValidator(props, tableSchema)) {
+                ensureRequiredProps(props, isCdcSourceJob);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
+                try (var validator = new PostgresValidator(props, tableSchema, isCdcSourceJob)) {
                     validator.validateAll();
                 }
                 break;
 
             case CITUS:
-                ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                ensureRequiredProps(props, isCdcSourceJob);
+                ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
                     coordinatorValidator.validateDistributedTable();
                     coordinatorValidator.validateTable();
                 }
 
-                ensurePropNotNull(props, DbzConnectorConfig.DB_SERVERS);
+                ensurePropNotBlank(props, DbzConnectorConfig.DB_SERVERS);
                 var workerServers =
                         StringUtils.split(props.get(DbzConnectorConfig.DB_SERVERS), ',');
                 // props extracted from grpc request, clone it to modify
@@ -120,9 +139,18 @@ public class SourceValidateHandler {
 
                 break;
             case MYSQL:
-                try (var validator = new MySqlValidator(props, tableSchema)) {
+                ensureRequiredProps(props, isCdcSourceJob);
+                ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
+                try (var validator =
+                        new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
                 }
+                break;
+            case MONGODB:
+                ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
+                ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
+                var validator = new MongoDbValidator(props);
+                validator.validateDbConfig();
                 break;
             default:
                 LOG.warn("Unknown source type");

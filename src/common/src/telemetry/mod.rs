@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,21 @@
 // limitations under the License.
 
 pub mod manager;
+pub mod pb_compatible;
 pub mod report;
 
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
+use thiserror_ext::AsReport;
 
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
 
 /// Url of telemetry backend
-pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
+pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
 /// Telemetry reporting interval in seconds, 6 hours
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
@@ -76,7 +78,6 @@ pub struct SystemData {
 #[derive(Debug, Serialize, Deserialize)]
 struct Memory {
     used: usize,
-    available: usize,
     total: usize,
 }
 
@@ -95,25 +96,16 @@ struct Cpu {
 
 impl SystemData {
     pub fn new() -> Self {
-        let mut sys = System::new();
-
         let memory = {
-            let available = system_memory_available_bytes();
+            let total = system_memory_available_bytes();
             let used = total_memory_used_bytes();
-            Memory {
-                available,
-                used,
-                total: available + used,
-            }
+            Memory { used, total }
         };
 
-        let os = {
-            sys.refresh_system();
-            Os {
-                name: sys.name().unwrap_or_default(),
-                kernel_version: sys.kernel_version().unwrap_or_default(),
-                version: sys.os_version().unwrap_or_default(),
-            }
+        let os = Os {
+            name: System::name().unwrap_or_default(),
+            kernel_version: System::kernel_version().unwrap_or_default(),
+            version: System::os_version().unwrap_or_default(),
         };
 
         let cpu = Cpu {
@@ -131,15 +123,15 @@ impl Default for SystemData {
 }
 
 /// Sends a `POST` request of the telemetry reporting to a URL.
-async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
+async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::CONTENT_TYPE, "application/x-protobuf")
         .body(report_body)
         .send()
         .await
-        .map_err(|err| format!("failed to send telemetry report, err: {}", err))?;
+        .map_err(|err| format!("failed to send telemetry report, err: {}", err.as_report()))?;
     if res.status().is_success() {
         Ok(())
     } else {
@@ -172,7 +164,6 @@ mod tests {
     fn test_system_data_new() {
         let system_data = SystemData::new();
 
-        assert!(system_data.memory.available > 0);
         assert!(system_data.memory.used > 0);
         assert!(system_data.memory.total > 0);
         assert!(!system_data.os.name.is_empty());

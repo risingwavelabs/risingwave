@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
+use futures::TryStreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
@@ -25,16 +26,18 @@ use risingwave_pb::connector_service::sink_coordinator_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
-    Barrier, BeginEpoch, Request as SinkRequest, StartSink, WriteBatch,
+    Barrier, Request as SinkRequest, StartSink, WriteBatch,
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
+use thiserror_ext::AsReport;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 use tracing::error;
 
 use crate::error::{Result, RpcError};
-use crate::BidiStreamHandle;
+use crate::{BidiStreamHandle, BidiStreamReceiver, BidiStreamSender};
 
 #[derive(Clone, Debug)]
 pub struct ConnectorClient {
@@ -42,17 +45,13 @@ pub struct ConnectorClient {
     endpoint: String,
 }
 
-pub type SinkWriterStreamHandle =
-    BidiStreamHandle<SinkWriterStreamRequest, SinkWriterStreamResponse>;
+pub type SinkWriterRequestSender<REQ = SinkWriterStreamRequest> = BidiStreamSender<REQ>;
+pub type SinkWriterResponseReceiver = BidiStreamReceiver<SinkWriterStreamResponse>;
 
-impl SinkWriterStreamHandle {
-    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
-        })
-        .await
-    }
+pub type SinkWriterStreamHandle<REQ = SinkWriterStreamRequest> =
+    BidiStreamHandle<REQ, SinkWriterStreamResponse>;
 
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterRequestSender<REQ> {
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::WriteBatch(WriteBatch {
@@ -64,24 +63,19 @@ impl SinkWriterStreamHandle {
         .await
     }
 
-    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+    pub async fn barrier(&mut self, epoch: u64, is_checkpoint: bool) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::Barrier(Barrier {
                 epoch,
-                is_checkpoint: false,
+                is_checkpoint,
             })),
         })
         .await
     }
+}
 
-    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::Barrier(Barrier {
-                epoch,
-                is_checkpoint: true,
-            })),
-        })
-        .await?;
+impl SinkWriterResponseReceiver {
+    pub async fn next_commit_response(&mut self) -> Result<CommitResponse> {
         match self.next_response().await? {
             SinkWriterStreamResponse {
                 response: Some(sink_writer_stream_response::Response::Commit(rsp)),
@@ -91,6 +85,23 @@ impl SinkWriterStreamHandle {
                 msg
             ))),
         }
+    }
+}
+
+impl<REQ: From<SinkWriterStreamRequest>> SinkWriterStreamHandle<REQ> {
+    pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
+        self.request_sender
+            .write_batch(epoch, batch_id, payload)
+            .await
+    }
+
+    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+        self.request_sender.barrier(epoch, false).await
+    }
+
+    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
+        self.request_sender.barrier(epoch, true).await?;
+        self.response_stream.next_commit_response().await
     }
 }
 
@@ -140,8 +151,9 @@ impl ConnectorClient {
                 Ok(client) => Some(client),
                 Err(e) => {
                     error!(
-                        "invalid connector endpoint {:?}: {:?}",
-                        connector_endpoint, e
+                        endpoint = connector_endpoint,
+                        error = %e.as_report(),
+                        "invalid connector endpoint",
                     );
                     None
                 }
@@ -152,12 +164,7 @@ impl ConnectorClient {
     #[allow(clippy::unused_async)]
     pub async fn new(connector_endpoint: &String) -> Result<Self> {
         let endpoint = Endpoint::from_shared(format!("http://{}", connector_endpoint))
-            .map_err(|e| {
-                RpcError::Internal(anyhow!(format!(
-                    "invalid connector endpoint `{}`: {:?}",
-                    &connector_endpoint, e
-                )))
-            })?
+            .with_context(|| format!("invalid connector endpoint `{}`", connector_endpoint))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5));
@@ -196,6 +203,7 @@ impl ConnectorClient {
         start_offset: Option<String>,
         properties: HashMap<String, String>,
         snapshot_done: bool,
+        is_source_job: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .rpc_client
@@ -206,6 +214,7 @@ impl ConnectorClient {
                 start_offset: start_offset.unwrap_or_default(),
                 properties,
                 snapshot_done,
+                is_source_job,
             })
             .await
             .inspect_err(|err| {
@@ -225,6 +234,8 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        is_source_job: bool,
+        is_backfill_table: bool,
     ) -> Result<()> {
         let response = self
             .rpc_client
@@ -234,6 +245,8 @@ impl ConnectorClient {
                 source_type: source_type as _,
                 properties,
                 table_schema,
+                is_source_job,
+                is_backfill_table,
             })
             .await
             .inspect_err(|err| {
@@ -251,18 +264,26 @@ impl ConnectorClient {
 
     pub async fn start_sink_writer_stream(
         &self,
-        sink_param: SinkParam,
+        payload_schema: Option<TableSchema>,
+        sink_proto: PbSinkParam,
         sink_payload_format: SinkPayloadFormat,
     ) -> Result<SinkWriterStreamHandle> {
         let mut rpc_client = self.rpc_client.clone();
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
             SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    sink_param: Some(sink_param),
+                    payload_schema,
+                    sink_param: Some(sink_proto),
                     format: sink_payload_format as i32,
                 })),
             },
-            |req_stream| async move { rpc_client.sink_writer_stream(req_stream).await },
+            |rx| async move {
+                rpc_client
+                    .sink_writer_stream(ReceiverStream::new(rx))
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
         )
         .await?;
 
@@ -288,7 +309,13 @@ impl ConnectorClient {
                     StartCoordinator { param: Some(param) },
                 )),
             },
-            |req_stream| async move { rpc_client.sink_coordinator_stream(req_stream).await },
+            |rx| async move {
+                rpc_client
+                    .sink_coordinator_stream(ReceiverStream::new(rx))
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
         )
         .await?;
 

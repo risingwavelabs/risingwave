@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
+use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
     Query, StructField, TrimWhereField, UnaryOperator,
@@ -24,7 +25,9 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 mod binary_op;
 mod column;
@@ -33,46 +36,27 @@ mod order_by;
 mod subquery;
 mod value;
 
+/// The limit arms for case-when expression
+/// When the number of condition arms exceed
+/// this limit, we will try optimize the case-when
+/// expression to `ConstantLookupExpression`
+/// Check `case.rs` for details.
+const CASE_WHEN_ARMS_OPTIMIZE_LIMIT: usize = 30;
+
 impl Binder {
+    /// Bind an expression with `bind_expr_inner`, attach the original expression
+    /// to the error message.
+    ///
+    /// This may only be called at the root of the expression tree or when crossing
+    /// the boundary of a subquery. Otherwise, the source chain might be too deep
+    /// and confusing to the user.
+    // TODO(error-handling): use a dedicated error type during binding to make it clear.
     pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
-        // We use a different function instead `map_err` directly in `bind_expr_inner`, because in
-        // some cases, recursive error messages don't look good. Whole expr-level should be enough
-        // in most cases.
-        //
-        // e.g., too verbose:
-        //
-        // ```ignore
-        // Bind error: failed to bind expression: a1 + b1 = c1
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: a1 + b1
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: a1
-        //
-        // Caused by:
-        //   Item not found: Invalid column: a1
-        // ```
-        //
-        // confusing message with an unused subexpr, when the expr is rewritten while binding:
-        //
-        // ```ignore
-        // > create table t (v1 int);
-        // > select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
-        //
-        // Bind error: failed to bind expression: CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: v1 = true
-        //
-        // Caused by:
-        //   Feature is not yet implemented: Equal[Int32, Boolean]
-        // ```
         self.bind_expr_inner(expr.clone()).map_err(|e| {
-            RwError::from(ErrorCode::BindError(format!(
-                "failed to bind expression: {}\n\nCaused by:\n  {}",
-                expr, e
-            )))
+            RwError::from(ErrorCode::BindErrorRoot {
+                expr: expr.to_string(),
+                error: Box::new(e),
+            })
         })
     }
 
@@ -163,6 +147,12 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::SimilarTo {
+                expr,
+                negated,
+                pat,
+                esc_text,
+            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
             Expr::InList {
                 expr,
                 list,
@@ -193,11 +183,9 @@ impl Binder {
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
-            _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported expression {:?}", expr),
-                112.into(),
-            )
-            .into()),
+            Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
+            _ => bail_not_implemented!(issue = 112, "unsupported expression {:?}", expr),
         }
     }
 
@@ -209,12 +197,11 @@ impl Binder {
             vec![self.bind_string(field.clone())?.into(), arg],
         )
         .map_err(|_| {
-            ErrorCode::NotImplemented(
-                format!(
-                    "function extract({} from {:?}) doesn't exist",
-                    field, arg_type
-                ),
-                112.into(),
+            not_implemented!(
+                issue = 112,
+                "function extract({} from {:?}) doesn't exist",
+                field,
+                arg_type
             )
         })?
         .into())
@@ -316,13 +303,7 @@ impl Binder {
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
             UnaryOperator::PGCubeRoot => ExprType::Cbrt,
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported unary expression: {:?}", op),
-                    112.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
@@ -405,6 +386,22 @@ impl Binder {
     }
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
+        // Special check for sql udf
+        // Note: This is specific to sql udf with unnamed parameters, since the
+        // parameters will be parsed and treated as `Parameter`.
+        // For detailed explanation, consider checking `bind_column`.
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
+                return Ok(expr.clone());
+            }
+            // Same as `bind_column`, the error message here
+            // help with hint display when invalid definition occurs
+            return Err(ErrorCode::BindError(format!(
+                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
+            ))
+            .into());
+        }
+
         Ok(Parameter::new(index, self.param_types.clone()).into())
     }
 
@@ -446,6 +443,276 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
+    pub(super) fn bind_similar_to(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        pat: Expr,
+        esc_text: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let expr = self.bind_expr_inner(expr)?;
+        let pat = self.bind_expr_inner(pat)?;
+
+        let esc_inputs = if let Some(et) = esc_text {
+            let esc_text = self.bind_expr_inner(*et)?;
+            vec![pat, esc_text]
+        } else {
+            vec![pat]
+        };
+
+        let esc_call =
+            FunctionCall::new_unchecked(ExprType::SimilarToEscape, esc_inputs, DataType::Varchar);
+
+        let regex_call = FunctionCall::new_unchecked(
+            ExprType::RegexpEq,
+            vec![expr, esc_call.into()],
+            DataType::Boolean,
+        );
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![regex_call.into()], DataType::Boolean)
+        } else {
+            regex_call
+        };
+
+        Ok(func_call.into())
+    }
+
+    /// The optimization check for the following case-when expression pattern
+    /// e.g., select case 1 when (...) then (...) else (...) end;
+    fn check_constant_case_when_optimization(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        operand: Option<Box<Expr>>,
+        fallback: Option<ExprImpl>,
+        constant_case_when_eval_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        // The operand value to be compared later
+        let operand_value;
+
+        if let Some(operand) = operand {
+            let Ok(operand) = self.bind_expr_inner(*operand) else {
+                return false;
+            };
+            if !operand.is_const() {
+                return false;
+            }
+            operand_value = operand;
+        } else {
+            return false;
+        }
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::Value(_) = condition.clone() {
+                let Ok(res) = self.bind_expr_inner(condition.clone()) else {
+                    return false;
+                };
+                // Found a match
+                if res == operand_value {
+                    constant_case_when_eval_inputs.push(result);
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        // Otherwise this will eventually go through fallback arm
+        debug_assert!(
+            constant_case_when_eval_inputs.is_empty(),
+            "expect `inputs` to be empty"
+        );
+
+        let Some(fallback) = fallback else {
+            return false;
+        };
+
+        constant_case_when_eval_inputs.push(fallback);
+        true
+    }
+
+    /// Helper function to compare or set column identifier
+    /// used in `check_convert_simple_form`
+    fn compare_or_set(col_expr: &mut Option<Expr>, test_expr: Expr) -> bool {
+        let Expr::Identifier(test_ident) = test_expr else {
+            return false;
+        };
+        if let Some(expr) = col_expr {
+            let Expr::Identifier(ident) = expr else {
+                return false;
+            };
+            if ident.real_value() != test_ident.real_value() {
+                return false;
+            }
+        } else {
+            *col_expr = Some(Expr::Identifier(test_ident));
+        }
+        true
+    }
+
+    /// left expression and right expression must be either:
+    /// `<constant> <Eq> <identifier>` or `<identifier> <Eq> <constant>`
+    /// used in `check_convert_simple_form`
+    fn check_invariant(left: Expr, op: BinaryOperator, right: Expr) -> bool {
+        if op != BinaryOperator::Eq {
+            return false;
+        }
+        if let Expr::Identifier(_) = left {
+            // <identifier> <Eq> <constant>
+            let Expr::Value(_) = right else {
+                return false;
+            };
+        } else {
+            // <constant> <Eq> <identifier>
+            let Expr::Value(_) = left else {
+                return false;
+            };
+            let Expr::Identifier(_) = right else {
+                return false;
+            };
+        }
+        true
+    }
+
+    /// Helper function to extract expression out and insert
+    /// the corresponding bound version to `inputs`
+    /// used in `check_convert_simple_form`
+    /// Note: this function will be invoked per arm
+    fn try_extract_simple_form(
+        &mut self,
+        ident_expr: Expr,
+        constant_expr: Expr,
+        column_expr: &mut Option<Expr>,
+        inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        if !Self::compare_or_set(column_expr, ident_expr) {
+            return false;
+        }
+        let Ok(bound_expr) = self.bind_expr_inner(constant_expr) else {
+            return false;
+        };
+        inputs.push(bound_expr);
+        true
+    }
+
+    /// See if the case when expression in form
+    /// `select case when <expr_1 = constant> (...with same pattern...) else <constant> end;`
+    /// If so, this expression could also be converted to constant lookup
+    fn check_convert_simple_form(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        fallback: Option<ExprImpl>,
+        constant_lookup_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        let mut column_expr = None;
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::BinaryOp { left, op, right } = condition {
+                if !Self::check_invariant(*(left.clone()), op.clone(), *(right.clone())) {
+                    return false;
+                }
+                if let Expr::Identifier(_) = *(left.clone()) {
+                    if !self.try_extract_simple_form(
+                        *left,
+                        *right,
+                        &mut column_expr,
+                        constant_lookup_inputs,
+                    ) {
+                        return false;
+                    }
+                } else if !self.try_extract_simple_form(
+                    *right,
+                    *left,
+                    &mut column_expr,
+                    constant_lookup_inputs,
+                ) {
+                    return false;
+                }
+                constant_lookup_inputs.push(result);
+            } else {
+                return false;
+            }
+        }
+
+        // Insert operand first
+        let Some(operand) = column_expr else {
+            return false;
+        };
+        let Ok(bound_operand) = self.bind_expr_inner(operand) else {
+            return false;
+        };
+        constant_lookup_inputs.insert(0, bound_operand);
+
+        // fallback insertion
+        if let Some(expr) = fallback {
+            constant_lookup_inputs.push(expr);
+        }
+
+        true
+    }
+
+    /// The helper function to check if the current case-when
+    /// expression in `bind_case` could be optimized
+    /// into `ConstantLookupExpression`
+    fn check_bind_case_optimization(
+        &mut self,
+        conditions: Vec<Expr>,
+        results_expr: Vec<ExprImpl>,
+        operand: Option<Box<Expr>>,
+        fallback: Option<ExprImpl>,
+        constant_lookup_inputs: &mut Vec<ExprImpl>,
+    ) -> bool {
+        if conditions.len() < CASE_WHEN_ARMS_OPTIMIZE_LIMIT {
+            return false;
+        }
+
+        if let Some(operand) = operand {
+            let Ok(operand) = self.bind_expr_inner(*operand) else {
+                return false;
+            };
+            // This optimization should be done in subsequent optimization phase
+            // if the operand is const
+            // e.g., select case 1 when 1 then 114514 else 1919810 end;
+            if operand.is_const() {
+                return false;
+            }
+            constant_lookup_inputs.push(operand);
+        } else {
+            // Try converting to simple form
+            // see the example as illustrated in `check_convert_simple_form`
+            return self.check_convert_simple_form(
+                conditions,
+                results_expr,
+                fallback,
+                constant_lookup_inputs,
+            );
+        }
+
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            if let Expr::Value(_) = condition.clone() {
+                let Ok(input) = self.bind_expr_inner(condition.clone()) else {
+                    return false;
+                };
+                constant_lookup_inputs.push(input);
+            } else {
+                // If at least one condition is not in the simple form / not constant,
+                // we can NOT do the subsequent optimization pass
+                return false;
+            }
+
+            constant_lookup_inputs.push(result);
+        }
+
+        // The fallback arm for case-when expression
+        if let Some(expr) = fallback {
+            constant_lookup_inputs.push(expr);
+        }
+
+        true
+    }
+
     pub(super) fn bind_case(
         &mut self,
         operand: Option<Box<Expr>>,
@@ -462,6 +729,42 @@ impl Binder {
             .map(|expr| self.bind_expr_inner(*expr))
             .transpose()?;
 
+        let mut constant_lookup_inputs = Vec::new();
+        let mut constant_case_when_eval_inputs = Vec::new();
+
+        let constant_case_when_flag = self.check_constant_case_when_optimization(
+            conditions.clone(),
+            results_expr.clone(),
+            operand.clone(),
+            else_result_expr.clone(),
+            &mut constant_case_when_eval_inputs,
+        );
+
+        if constant_case_when_flag {
+            // Sanity check
+            if constant_case_when_eval_inputs.len() != 1 {
+                return Err(ErrorCode::BindError(
+                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_string()
+                )
+                .into());
+            }
+            // Directly return the first element of the vector
+            return Ok(constant_case_when_eval_inputs[0].take());
+        }
+
+        // See if the case-when expression can be optimized
+        let optimize_flag = self.check_bind_case_optimization(
+            conditions.clone(),
+            results_expr.clone(),
+            operand.clone(),
+            else_result_expr.clone(),
+            &mut constant_lookup_inputs,
+        );
+
+        if optimize_flag {
+            return Ok(FunctionCall::new(ExprType::ConstantLookup, constant_lookup_inputs)?.into());
+        }
+
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
@@ -477,14 +780,18 @@ impl Binder {
             );
             inputs.push(result);
         }
+
+        // The fallback arm for case-when expression
         if let Some(expr) = else_result_expr {
             inputs.push(expr);
         }
+
         if inputs.iter().any(ExprImpl::has_table_function) {
             return Err(
                 ErrorCode::BindError("table functions are not allowed in CASE".into()).into(),
             );
         }
+
         Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
@@ -518,23 +825,9 @@ impl Binder {
         match &data_type {
             // Casting to Regclass type means getting the oid of expr.
             // See https://www.postgresql.org/docs/current/datatype-oid.html.
-            // Currently only string liter expr is supported since we cannot handle subquery in join
-            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
-            // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                match input.return_type() {
-                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new_unchecked(
-                            ExprType::CastRegclass,
-                            vec![input],
-                            DataType::Int32,
-                        ),
-                    ))),
-                    DataType::Int32 => Ok(input),
-                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
-                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
-                }
+                Ok(input.cast_to_regclass()?)
             }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;
@@ -561,6 +854,29 @@ impl Binder {
         let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
     }
+
+    pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
+        if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
+            bail_not_implemented!("Collate collation other than `C` or `POSIX` is not implemented");
+        }
+
+        let bound_inner = self.bind_expr_inner(expr)?;
+        let ret_type = bound_inner.return_type();
+
+        match ret_type {
+            DataType::Varchar => {}
+            _ => {
+                return Err(ErrorCode::NotSupported(
+                    format!("{} is not a collatable data type", ret_type),
+                    "The only built-in collatable data types are `varchar`, please check your type"
+                        .into(),
+                )
+                .into());
+            }
+        }
+
+        Ok(bound_inner)
+    }
 }
 
 /// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
@@ -568,16 +884,11 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
         defs.iter()
             .map(|f| {
-                Ok(ColumnDesc {
-                    data_type: bind_data_type(&f.data_type)?,
-                    // Literals don't have `column_id`.
-                    column_id: ColumnId::new(0),
-                    name: f.name.real_value(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                    generated_or_default_column: None,
-                    description: None,
-                })
+                Ok(ColumnDesc::named(
+                    f.name.real_value(),
+                    ColumnId::new(0), // Literals don't have `column_id`.
+                    bind_data_type(&f.data_type)?,
+                ))
             })
             .collect::<Result<Vec<_>>>()?
     } else {
@@ -591,16 +902,13 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
+        additional_column: AdditionalColumn { column_type: None },
+        version: ColumnDescVersion::Pr13707,
     })
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
-    let new_err = || {
-        ErrorCode::NotImplemented(
-            format!("unsupported data type: {:}", data_type),
-            None.into(),
-        )
-    };
+    let new_err = || not_implemented!("unsupported data type: {:}", data_type);
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
         AstDataType::SmallInt => DataType::Int16,
@@ -618,11 +926,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
-            return Err(ErrorCode::NotImplemented(
-                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
-                None.into(),
-            )
-            .into())
+            bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
         AstDataType::Struct(types) => DataType::new_struct(
             types
@@ -642,7 +946,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
-                "jsonb" => DataType::Jsonb,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -654,6 +957,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             }
         }
         AstDataType::Bytea => DataType::Bytea,
+        AstDataType::Jsonb => DataType::Jsonb,
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid

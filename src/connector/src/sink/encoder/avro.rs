@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 
 use std::sync::Arc;
 
-use apache_avro::schema::Schema as AvroSchema;
+use apache_avro::schema::{RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use thiserror_ext::AsReport;
 
 use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
 
@@ -134,7 +135,7 @@ impl SerTo<Vec<u8>> for AvroEncoded {
             )));
         };
         let raw = apache_avro::to_avro_datum(&self.schema, self.value)
-            .map_err(|e| crate::sink::SinkError::Encode(e.to_string()))?;
+            .map_err(|e| crate::sink::SinkError::Encode(e.to_report_string()))?;
         let mut buf = Vec::with_capacity(1 + 4 + raw.len());
         buf.put_u8(0);
         buf.put_i32(schema_id);
@@ -250,7 +251,7 @@ fn validate_fields<'rw>(
     rw_fields: impl Iterator<Item = (&'rw str, &'rw DataType)>,
     avro: &AvroSchema,
 ) -> Result<()> {
-    let AvroSchema::Record { fields, lookup, .. } = avro else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = avro else {
         return Err(FieldEncodeError::new(format!(
             "expect avro record but got {}",
             avro.canonical_form(),
@@ -283,7 +284,7 @@ fn encode_fields<'avro, 'rw>(
     schema: &'avro AvroSchema,
 ) -> Result<Record<'avro>> {
     let mut record = Record::new(schema).unwrap();
-    let AvroSchema::Record { fields, lookup, .. } = schema else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = schema else {
         unreachable!()
     };
     let mut present = vec![false; fields.len()];
@@ -570,9 +571,7 @@ mod tests {
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            // r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             Value::Duration(apache_avro::Duration::new(
                 apache_avro::Months::new(13),
                 apache_avro::Days::new(2),
@@ -648,8 +647,7 @@ mod tests {
                 -1,
                 i64::MAX,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             "encode  error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
         );
 
@@ -768,31 +766,21 @@ mod tests {
 
         test_ok(
             &DataType::List(DataType::Int32.into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                Some(ScalarImpl::Int32(5)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([4, 5]))),
             avro_schema,
             Value::Array(vec![Value::Int(4), Value::Int(5)]),
         );
 
         test_err(
             &DataType::List(DataType::Int32.into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                None,
-            ])))
-            .to_datum_ref(),
+            Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
             "encode  error: found null but required",
         );
 
         test_ok(
             &DataType::List(DataType::Int32.into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                None,
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))),
             r#"{
                 "type": "array",
                 "items": ["null", "int"]
@@ -805,15 +793,9 @@ mod tests {
 
         test_ok(
             &DataType::List(DataType::List(DataType::Int32.into()).into()),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::List(ListValue::new(vec![
-                    Some(ScalarImpl::Int32(26)),
-                    Some(ScalarImpl::Int32(29)),
-                ]))),
-                Some(ScalarImpl::List(ListValue::new(vec![
-                    Some(ScalarImpl::Int32(46)),
-                    Some(ScalarImpl::Int32(49)),
-                ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([
+                ListValue::from_iter([26, 29]),
+                ListValue::from_iter([46, 49]),
             ]))),
             r#"{
                 "type": "array",

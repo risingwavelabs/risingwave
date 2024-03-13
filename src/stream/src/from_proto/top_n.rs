@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ use crate::executor::{AppendOnlyTopNExecutor, TopNExecutor};
 
 pub struct TopNExecutorBuilder<const APPEND_ONLY: bool>;
 
-#[async_trait::async_trait]
 impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONLY> {
     type Node = TopNNode;
 
@@ -31,8 +30,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let table = node.get_table()?;
@@ -49,18 +47,12 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
-
         macro_rules! build {
             ($excutor:ident, $with_ties:literal) => {
                 Ok($excutor::<_, $with_ties>::new(
                     input,
                     params.actor_context,
-                    info,
+                    params.info.schema.clone(),
                     storage_key,
                     (node.offset as usize, node.limit as usize),
                     order_by,
@@ -70,11 +62,12 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
             };
         }
 
-        match (APPEND_ONLY, node.with_ties) {
+        let exec: StreamResult<Box<dyn Execute>> = match (APPEND_ONLY, node.with_ties) {
             (true, true) => build!(AppendOnlyTopNExecutor, true),
             (true, false) => build!(AppendOnlyTopNExecutor, false),
             (false, true) => build!(TopNExecutor, true),
             (false, false) => build!(TopNExecutor, false),
-        }
+        };
+        Ok((params.info, exec?).into())
     }
 }

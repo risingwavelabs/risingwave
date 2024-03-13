@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_pb::catalog::connection::PbInfo;
 use risingwave_pb::catalog::PbConnection;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
 
 use crate::{ConnectionId, PrivateLinkService};
 
@@ -71,9 +71,9 @@ impl From<PbConnection> for ActiveModel {
         };
 
         Self {
-            connection_id: ActiveValue::Set(conn.id as _),
-            name: ActiveValue::Set(conn.name),
-            info: ActiveValue::Set(PrivateLinkService(private_link_srv)),
+            connection_id: Set(conn.id as _),
+            name: Set(conn.name),
+            info: Set(PrivateLinkService(private_link_srv)),
         }
     }
 }

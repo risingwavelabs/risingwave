@@ -19,3 +19,23 @@
         int32 id = 1;
         int32 value = 2;
       }
+- sql: |
+    insert into s values (1,2);
+  logical_plan: |-
+    LogicalInsert { table: s, mapping: [0:0, 1:1] }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: s, mapping: [0:0, 1:1] }
+      └─BatchValues { rows: [[1:Int32, 2:Int32]] }
+  create_table_with_connector:
+    format: plain
+    encode: protobuf
+    name: s
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        int32 value = 2;
+      }

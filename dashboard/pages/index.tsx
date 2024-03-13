@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,11 @@ export default function Home() {
         <VStack spacing={3}>
           <HStack spacing={2}>
             <Flex flexDirection="column" width="md" alignItems="end">
-              <Image boxSize="sm" src="/risingwave.svg" alt="RisingWave Logo" />
+              <Image
+                boxSize="200px"
+                src="/risingwave.svg"
+                alt="RisingWave Logo"
+              />
             </Flex>
             <VStack alignItems="start" width="md">
               <Text fontSize="2xl">Welcome to</Text>

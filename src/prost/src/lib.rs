@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,9 @@
 #![feature(lint_reasons)]
 
 use std::str::FromStr;
+
+use risingwave_error::tonic::ToTonicStatus;
+use thiserror::Error;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -86,6 +89,9 @@ pub mod java_binding;
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
+#[path = "sim/telemetry.rs"]
+pub mod telemetry;
+#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]
@@ -148,13 +154,17 @@ pub mod backup_service_serde;
 #[rustfmt::skip]
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
+#[rustfmt::skip]
+#[path = "telemetry.serde.rs"]
+pub mod telemetry_serde;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Error)]
+#[error("field `{0}` not found")]
 pub struct PbFieldNotFound(pub &'static str);
 
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
-        tonic::Status::new(tonic::Code::Internal, e.0)
+        e.to_status_unnamed(tonic::Code::Internal)
     }
 }
 
@@ -163,6 +173,26 @@ impl FromStr for crate::expr::table_function::PbType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::from_str_name(&s.to_uppercase()).ok_or(())
+    }
+}
+
+impl stream_plan::MaterializeNode {
+    pub fn dist_key_indices(&self) -> Vec<u32> {
+        self.get_table()
+            .unwrap()
+            .distribution_key
+            .iter()
+            .map(|i| *i as u32)
+            .collect()
+    }
+
+    pub fn column_ids(&self) -> Vec<i32> {
+        self.get_table()
+            .unwrap()
+            .columns
+            .iter()
+            .map(|c| c.get_column_desc().unwrap().column_id)
+            .collect()
     }
 }
 

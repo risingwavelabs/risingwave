@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,11 +32,11 @@ import path from "path"
 import { Fragment, useEffect, useState } from "react"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
+import api from "../lib/api/api"
+import { getClusterInfoComputeNode } from "../lib/api/cluster"
+import useFetch from "../lib/api/fetch"
 import { WorkerNode } from "../proto/gen/common"
 import { ListHeapProfilingResponse } from "../proto/gen/monitor_service"
-import api from "./api/api"
-import { getClusterInfoComputeNode } from "./api/cluster"
-import useFetch from "./api/fetch"
 
 const SIDEBAR_WIDTH = 200
 
@@ -75,12 +75,12 @@ export default function HeapProfiling() {
       try {
         let list: ListHeapProfilingResponse =
           ListHeapProfilingResponse.fromJSON(
-            await api.get(`/api/monitor/list_heap_profile/${computeNodeId}`)
+            await api.get(`/monitor/list_heap_profile/${computeNodeId}`)
           )
         setProfileList(list)
       } catch (e: any) {
         console.error(e)
-        let result = `Getting Profiling File List\n$Error: ${e.message}]`
+        let result = `Getting Profiling File List\n\nError: ${e.message}\n${e.cause}`
         setDisplayInfo(result)
       }
     }
@@ -119,8 +119,12 @@ export default function HeapProfiling() {
   }, [selectedProfileList])
 
   async function dumpProfile() {
-    api.get(`/api/monitor/dump_heap_profile/${computeNodeId}`)
-    getProfileList(computeNodes, computeNodeId)
+    try {
+      await api.get(`/monitor/dump_heap_profile/${computeNodeId}`)
+      getProfileList(computeNodes, computeNodeId)
+    } catch (e: any) {
+      setDisplayInfo(`Dumping heap profile.\n\nError: ${e.message}\n${e.cause}`)
+    }
   }
 
   async function analyzeHeapFile() {
@@ -149,7 +153,7 @@ export default function HeapProfiling() {
     try {
       let analyzeFilePathBase64 = base64url(analyzeFilePath)
       let resObj = await fetch(
-        `/api/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
+        `/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
       ).then(async (res) => ({
         filename: res.headers.get("content-disposition"),
         blob: await res.blob(),
@@ -179,7 +183,7 @@ export default function HeapProfiling() {
           height="full"
         >
           <FormControl>
-            <FormLabel textColor="teal.500">Dump Heap Profile</FormLabel>
+            <FormLabel textColor="blue.500">Dump Heap Profile</FormLabel>
             <VStack>
               <FormLabel>Compute Nodes</FormLabel>
               <Select
@@ -200,7 +204,7 @@ export default function HeapProfiling() {
             </VStack>
           </FormControl>
           <FormControl>
-            <FormLabel textColor="teal.500">Analyze Heap Profile</FormLabel>
+            <FormLabel textColor="blue.500">Analyze Heap Profile</FormLabel>
             <VStack>
               <FormLabel>Dumped By</FormLabel>
               <Select onChange={(event) => setProfileType(event.target.value)}>

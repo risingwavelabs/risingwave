@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
     type Node = LookupUnionNode;
 
@@ -27,8 +26,8 @@ impl ExecutorBuilder for LookupUnionExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
-        Ok(LookupUnionExecutor::new(params.pk_indices, params.input, node.order.clone()).boxed())
+    ) -> StreamResult<Executor> {
+        let exec = LookupUnionExecutor::new(params.input, node.order.clone());
+        Ok((params.info, exec).into())
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::Row;
@@ -29,6 +28,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_expr::expr::BoxedExpression;
 
+use crate::error::BatchError;
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
@@ -69,7 +69,7 @@ impl<K: HashKey> LookupJoinBase<K> {
     ///      deduplication.
     ///   2. Inner side input lookups inner side table with keys and builds hash map.
     ///   3. Outer side rows join each inner side rows by probing the hash map.
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
 
@@ -146,7 +146,7 @@ impl<K: HashKey> LookupJoinBase<K> {
 
             // Build hash map
             for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-                let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
+                let build_keys = K::build_many(&hash_join_build_side_key_idxs, build_chunk);
 
                 for (build_row_id, (build_key, visible)) in build_keys
                     .into_iter()

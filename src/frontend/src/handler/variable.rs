@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,34 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::session_config::ConfigReporter;
-use risingwave_common::system_param::is_mutable;
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
+use risingwave_sqlparser::keywords::Keyword;
 
-use super::RwPgResponse;
+use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
+use crate::error::Result;
 use crate::handler::HandlerArgs;
+
+/// convert `SetVariableValue` to string while remove the quotes on literals.
+pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
+    match value {
+        SetVariableValue::Single(var) => Some(var.to_string_unquoted()),
+        SetVariableValue::List(list) => Some(
+            list.iter()
+                .map(|var| var.to_string_unquoted())
+                .join(SESSION_CONFIG_LIST_SEP),
+        ),
+        SetVariableValue::Default => None,
+    }
+}
 
 pub fn handle_set(
     handler_args: HandlerArgs,
     name: Ident,
-    value: Vec<SetVariableValue>,
+    value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_vals = value
-        .into_iter()
-        .map(|v| match v {
-            SetVariableValue::Literal(Value::DoubleQuotedString(s))
-            | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s,
-            _ => v.to_string(),
-        })
-        .collect_vec();
+    let mut string_val = set_var_to_param_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -55,12 +62,24 @@ pub fn handle_set(
         }
     }
 
+    // special handle for streaming parallelism,
+    if name
+        .real_value()
+        .eq_ignore_ascii_case("streaming_parallelism")
+        && string_val
+            .as_ref()
+            .map(|val| val.eq_ignore_ascii_case(Keyword::ADAPTIVE.to_string().as_str()))
+            .unwrap_or(false)
+    {
+        string_val = None;
+    }
+
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
     handler_args.session.set_config_report(
         &name.real_value().to_lowercase(),
-        string_vals,
+        string_val,
         Reporter {
             status: &mut status,
         },
@@ -76,8 +95,9 @@ pub(super) fn handle_set_time_zone(
     value: SetTimeZoneValue,
 ) -> Result<RwPgResponse> {
     let tz_info = match value {
-        SetTimeZoneValue::Local => iana_time_zone::get_timezone()
-            .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
+        SetTimeZoneValue::Local => {
+            iana_time_zone::get_timezone().context("Failed to get local time zone")
+        }
         SetTimeZoneValue::Default => Ok("UTC".to_string()),
         SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
@@ -85,7 +105,7 @@ pub(super) fn handle_set_time_zone(
         _ => Ok(value.to_string()),
     }?;
 
-    handler_args.session.set_config("timezone", vec![tz_info])?;
+    handler_args.session.set_config("timezone", tz_info)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
@@ -97,64 +117,31 @@ pub(super) async fn handle_show(
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("PARAMETERS") {
-        return handle_show_system_params(handler_args).await;
+        handle_show_system_params(handler_args).await
+    } else if name.eq_ignore_ascii_case("ALL") {
+        handle_show_all(handler_args.clone())
+    } else {
+        let config_reader = handler_args.session.config();
+        Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+            .rows([ShowVariableRow {
+                name: config_reader.get(&name)?,
+            }])
+            .into())
     }
-    // Show session config.
-    let config_reader = handler_args.session.config();
-    if name.eq_ignore_ascii_case("ALL") {
-        return handle_show_all(handler_args.clone());
-    }
-    let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
-
-    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(
-            vec![row].into(),
-            vec![PgFieldDescriptor::new(
-                name.to_ascii_lowercase(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )],
-        )
-        .into())
 }
 
 fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let config_reader = handler_args.session.config();
 
-    let all_variables = config_reader.get_all();
+    let all_variables = config_reader.show_all();
 
-    let rows = all_variables
-        .iter()
-        .map(|info| {
-            Row::new(vec![
-                Some(info.name.clone().into()),
-                Some(info.setting.clone().into()),
-                Some(info.description.clone().into()),
-            ])
-        })
-        .collect_vec();
-
-    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(
-            rows.into(),
-            vec![
-                PgFieldDescriptor::new(
-                    "Name".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Setting".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Description".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-            ],
-        )
+    let rows = all_variables.iter().map(|info| ShowVariableAllRow {
+        name: info.name.clone(),
+        setting: info.setting.clone(),
+        description: info.description.clone(),
+    });
+    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+        .rows(rows)
         .into())
 }
 
@@ -166,36 +153,48 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         .get_system_params()
         .await?;
     let rows = params
-        .to_kv()
+        .get_all()
         .into_iter()
-        .map(|(k, v)| {
-            let is_mutable_bytes = ScalarRefImpl::Bool(is_mutable(&k).unwrap())
-                .text_format(&DataType::Boolean)
-                .into();
-            Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
-        })
-        .collect_vec();
-
-    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
-        .values(
-            rows.into(),
-            vec![
-                PgFieldDescriptor::new(
-                    "Name".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Value".to_string(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Mutable".to_string(),
-                    DataType::Boolean.to_oid(),
-                    DataType::Boolean.type_len(),
-                ),
-            ],
-        )
+        .map(|info| ShowVariableParamsRow {
+            name: info.name.into(),
+            value: info.value,
+            description: info.description.into(),
+            mutable: info.mutable,
+        });
+    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+        .rows(rows)
         .into())
+}
+
+pub fn infer_show_variable(name: &str) -> Vec<PgFieldDescriptor> {
+    fields_to_descriptors(if name.eq_ignore_ascii_case("ALL") {
+        ShowVariableAllRow::fields()
+    } else if name.eq_ignore_ascii_case("PARAMETERS") {
+        ShowVariableParamsRow::fields()
+    } else {
+        ShowVariableRow::fields()
+    })
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowVariableRow {
+    name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowVariableAllRow {
+    name: String,
+    setting: String,
+    description: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowVariableParamsRow {
+    name: String,
+    value: String,
+    description: String,
+    mutable: bool,
 }

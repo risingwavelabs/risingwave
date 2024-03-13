@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,6 +75,7 @@ impl TestSuite {
         self.simple_cancel(true).await?;
         self.complex_cancel(false).await?;
         self.complex_cancel(true).await?;
+        self.subquery_with_param().await?;
         Ok(())
     }
 
@@ -301,7 +302,7 @@ impl TestSuite {
         for t in 0..5 {
             let rows = transaction.query_portal(&portal, 1).await?;
             test_eq!(rows.len(), 1);
-            let row = rows.get(0).unwrap();
+            let row = rows.first().unwrap();
             let id: i32 = row.get(0);
             test_eq!(id, t);
         }
@@ -340,21 +341,21 @@ impl TestSuite {
 
         let rows = transaction.query_portal(&portal_1, 1).await?;
         test_eq!(rows.len(), 1);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 1);
 
         let rows = transaction.query_portal(&portal_2, 1).await?;
         test_eq!(rows.len(), 1);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 1);
 
         let rows = transaction.query_portal(&portal_2, 3).await?;
         test_eq!(rows.len(), 3);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 2);
         test_eq!(rows.get(1).unwrap().get::<usize, i32>(0), 3);
         test_eq!(rows.get(2).unwrap().get::<usize, i32>(0), 4);
 
         let rows = transaction.query_portal(&portal_1, 1).await?;
         test_eq!(rows.len(), 1);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 2);
 
         Ok(())
     }
@@ -539,6 +540,19 @@ impl TestSuite {
         new_client.execute("drop table t1", &[]).await?;
         new_client.execute("drop table t2", &[]).await?;
         new_client.execute("drop table t3", &[]).await?;
+        Ok(())
+    }
+
+    async fn subquery_with_param(&self) -> anyhow::Result<()> {
+        let client = self.create_client(false).await?;
+
+        let res = client
+            .query("select (select $1::SMALLINT)", &[&1024_i16])
+            .await
+            .unwrap();
+
+        assert_eq!(res[0].get::<usize, i16>(0), 1024_i16);
+
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ use crate::executor::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectExecutorBuilder {
     type Node = ProjectNode;
 
@@ -31,8 +30,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let project_exprs: Vec<_> = node
             .get_select_list()
@@ -62,16 +60,14 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             )
         });
         let materialize_selectivity_threshold = if extremely_light { 0.0 } else { 0.5 };
-        Ok(ProjectExecutor::new(
+        let exec = ProjectExecutor::new(
             params.actor_context,
             input,
-            params.pk_indices,
             project_exprs,
-            params.executor_id,
             watermark_derivations,
             nondecreasing_expr_indices,
             materialize_selectivity_threshold,
-        )
-        .boxed())
+        );
+        Ok((params.info, exec).into())
     }
 }

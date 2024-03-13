@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,24 +14,25 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::types::DataType;
-use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_common::catalog::TableId;
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpendalGcs, OpendalPosixFs, OpendalS3,
+};
+use risingwave_connector::source::reader::desc::SourceDescBuilder;
+use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::StreamFsFetchNode;
-use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::{
-    BoxedExecutor, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
+    Execute, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
     StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for FsFetchExecutorBuilder {
     type Node = StreamFsFetchNode;
 
@@ -39,8 +40,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
@@ -48,38 +48,27 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let source_id = TableId::new(source.source_id);
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
-
+        let properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         let source_desc_builder = SourceDescBuilder::new(
             source.columns.clone(),
             params.env.source_metrics(),
             source.row_id_index.map(|x| x as _),
-            source.properties.clone(),
+            source.with_properties.clone(),
             source_info.clone(),
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
-            params.pk_indices.clone(),
+            params.info.pk_indices.clone(),
         );
-
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: params.env.config().developer.chunk_size,
+            rate_limit: source.rate_limit.map(|x| x as _),
         };
 
-        let column_ids: Vec<_> = source
-            .columns
+        let source_column_ids: Vec<_> = source_desc_builder
+            .column_catalogs_to_source_column_descs()
             .iter()
-            .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
+            .map(|column| column.column_id)
             .collect();
-        let fields = source
-            .columns
-            .iter()
-            .map(|prost| {
-                let column_desc = prost.column_desc.as_ref().unwrap();
-                let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
-                let name = column_desc.name.clone();
-                Field::with_name(data_type, name)
-            })
-            .collect();
-        let schema = Schema::new(fields);
 
         let vnodes = Some(Arc::new(
             params
@@ -95,24 +84,49 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let stream_source_core = StreamSourceCore::new(
             source_id,
             source_name,
-            column_ids,
+            source_column_ids,
             source_desc_builder,
             state_table_handler,
         );
 
-        let executor = FsFetchExecutor::new(
-            params.actor_context,
-            schema,
-            params.pk_indices,
-            stream_source_core,
-            params.executor_id,
-            upstream,
-            source_ctrl_opts,
-            params.env.connector_params(),
-        )
-        .boxed();
+        let exec = match properties {
+            risingwave_connector::source::ConnectorProperties::Gcs(_) => {
+                FsFetchExecutor::<_, OpendalGcs>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::OpendalS3(_) => {
+                FsFetchExecutor::<_, OpendalS3>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
+                FsFetchExecutor::<_, OpendalPosixFs>::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source_ctrl_opts,
+                    params.env.connector_params(),
+                )
+                .boxed()
+            }
+            _ => unreachable!(),
+        };
+        let mut info = params.info.clone();
+        info.identity = format!("{} (flow controlled)", info.identity);
 
-        let rate_limit = source.get_rate_limit().cloned().ok();
-        Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+        let rate_limit = source.rate_limit.map(|x| x as _);
+        let exec = FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
+        Ok((params.info, exec).into())
     }
 }

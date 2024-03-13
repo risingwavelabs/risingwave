@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 
-use risingwave_pb::hummock::{HummockVersion, PbTableStats};
+use risingwave_pb::hummock::PbTableStats;
 
-use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+use crate::version::HummockVersion;
 
 pub type TableStatsMap = HashMap<u32, TableStats>;
 
@@ -105,14 +105,12 @@ pub fn from_prost_table_stats_map(
 pub fn purge_prost_table_stats(
     table_stats: &mut PbTableStatsMap,
     hummock_version: &HummockVersion,
-) {
+) -> bool {
     let mut all_tables_in_version: HashSet<u32> = HashSet::default();
-    for group in hummock_version.levels.keys() {
-        hummock_version.level_iter(*group, |level| {
-            all_tables_in_version
-                .extend(level.table_infos.iter().flat_map(|s| s.table_ids.clone()));
-            true
-        })
+    let prev_count = table_stats.len();
+    for group in hummock_version.levels.values() {
+        all_tables_in_version.extend(group.member_table_ids.clone());
     }
     table_stats.retain(|k, _| all_tables_in_version.contains(k));
+    prev_count != table_stats.len()
 }

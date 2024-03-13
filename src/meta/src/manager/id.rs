@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{NON_RESERVED_SYS_CATALOG_ID, NON_RESERVED_USER_ID};
+use risingwave_common::catalog::NON_RESERVED_USER_ID;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
 
 use crate::manager::cluster::META_NODE_ID;
@@ -57,7 +58,7 @@ impl StoredIdGenerator {
         let current_id = match res {
             Ok(value) => memcomparable::from_slice(&value).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
-            Err(e) => panic!("{:?}", e),
+            Err(e) => panic!("{}", e.as_report()),
         };
 
         let next_allocate_id = current_id + ID_PREALLOCATE_INTERVAL;
@@ -69,7 +70,7 @@ impl StoredIdGenerator {
             )
             .await
         {
-            panic!("{:?}", err)
+            panic!("{}", err.as_report());
         }
 
         StoredIdGenerator {
@@ -168,14 +169,7 @@ impl IdGeneratorManager {
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
             database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
             schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
-            table: Arc::new(
-                StoredIdGenerator::new(
-                    meta_store.clone(),
-                    "table",
-                    Some(NON_RESERVED_SYS_CATALOG_ID as u64),
-                )
-                .await,
-            ),
+            table: Arc::new(StoredIdGenerator::new(meta_store.clone(), "table", Some(1)).await),
             function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))

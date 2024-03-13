@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,12 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::sig::FUNCTION_REGISTRY;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::{
     TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
 };
 
-use super::{Expr, ExprImpl, ExprRewriter, RwResult};
+use super::{infer_type, Expr, ExprImpl, ExprRewriter, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
@@ -42,11 +41,8 @@ pub struct TableFunction {
 impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
-    pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> RwResult<Self> {
-        let return_type = FUNCTION_REGISTRY.get_return_type(
-            func_type,
-            &args.iter().map(|c| c.return_type()).collect_vec(),
-        )?;
+    pub fn new(func_type: TableFunctionType, mut args: Vec<ExprImpl>) -> RwResult<Self> {
+        let return_type = infer_type(func_type.into(), &mut args)?;
         Ok(TableFunction {
             args,
             return_type,
@@ -77,10 +73,13 @@ impl TableFunction {
                 .udtf_catalog
                 .as_ref()
                 .map(|c| UserDefinedTableFunctionPb {
+                    arg_names: c.arg_names.clone(),
                     arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
                     language: c.language.clone(),
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
+                    body: c.body.clone(),
+                    compressed_binary: c.compressed_binary.clone(),
                 }),
         }
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 
 use await_tree::InstrumentAwait;
 use futures::{Future, StreamExt};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::actor::spawn_blocking_drop_stream;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message, MessageStreamItem};
+use super::{Execute, Executor, Message, MessageStreamItem};
 use crate::task::ActorId;
 
 /// Handle used to drive the subtask.
@@ -28,30 +29,12 @@ pub type SubtaskHandle = impl Future<Output = ()> + Send + 'static;
 /// The thin wrapper for subtask-wrapped executor, containing a channel to receive the messages from
 /// the subtask.
 pub struct SubtaskRxExecutor {
-    info: ExecutorInfo,
-
     rx: mpsc::Receiver<MessageStreamItem>,
 }
 
-impl Executor for SubtaskRxExecutor {
+impl Execute for SubtaskRxExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         ReceiverStream::new(self.rx).boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
     }
 }
 
@@ -61,15 +44,9 @@ impl Executor for SubtaskRxExecutor {
 /// Used when there're multiple stateful executors in an actor. These subtasks can be concurrently
 /// executed to improve the I/O performance, while the computing resource can be still bounded to a
 /// single thread.
-pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskRxExecutor) {
+pub fn wrap(input: Executor, actor_id: ActorId) -> (SubtaskHandle, SubtaskRxExecutor) {
     let (tx, rx) = mpsc::channel(1);
-    let rx_executor = SubtaskRxExecutor {
-        info: ExecutorInfo {
-            identity: "SubtaskRxExecutor".to_owned(),
-            ..input.info()
-        },
-        rx,
-    };
+    let rx_executor = SubtaskRxExecutor { rx };
 
     let handle = async move {
         let mut input = input.execute();
@@ -92,7 +69,8 @@ pub fn wrap(input: BoxedExecutor, actor_id: ActorId) -> (SubtaskHandle, SubtaskR
                 match item {
                     Ok(_) => tracing::error!("actor downstream subtask failed"),
                     Err(e) => tracing::error!(
-                        "after actor downstream subtask failed, another error occurs: {e}"
+                        error = %e.as_report(),
+                        "after actor downstream subtask failed, another error occurs"
                     ),
                 }
                 break;

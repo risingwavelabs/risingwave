@@ -20,8 +20,27 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName};
+use super::ConnectorSchema;
+use crate::ast::{
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
+};
 use crate::tokenizer::Token;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterDatabaseOperation {
+    ChangeOwner { new_owner_name: Ident },
+    RenameDatabase { database_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSchemaOperation {
+    ChangeOwner { new_owner_name: Ident },
+    RenameSchema { schema_name: ObjectName },
+}
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -71,31 +90,74 @@ pub enum AlterTableOperation {
         column_name: Ident,
         op: AlterColumnOperation,
     },
-
+    /// `OWNER TO <owner_name>`
     ChangeOwner {
         new_owner_name: Ident,
     },
+    /// `SET SCHEMA <schema_name>`
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    RefreshSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterIndexOperation {
-    RenameIndex { index_name: ObjectName },
+    RenameIndex {
+        index_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
-    RenameView { view_name: ObjectName },
+    RenameView {
+        view_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
-    RenameSink { sink_name: ObjectName },
+    RenameSink {
+        sink_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,6 +166,49 @@ pub enum AlterSinkOperation {
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
+    ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
+    FormatEncode { connector_schema: ConnectorSchema },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterFunctionOperation {
+    SetSchema { new_schema_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterConnectionOperation {
+    SetSchema { new_schema_name: ObjectName },
+}
+
+impl fmt::Display for AlterDatabaseOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterDatabaseOperation::RenameDatabase { database_name } => {
+                write!(f, "RENAME TO {}", database_name)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSchemaOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSchemaOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSchemaOperation::RenameSchema { schema_name } => {
+                write!(f, "RENAME TO {}", schema_name)
+            }
+        }
+    }
 }
 
 impl fmt::Display for AlterTableOperation {
@@ -158,6 +263,23 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
             }
+            AlterTableOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterTableOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterTableOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
+            }
         }
     }
 }
@@ -167,6 +289,17 @@ impl fmt::Display for AlterIndexOperation {
         match self {
             AlterIndexOperation::RenameIndex { index_name } => {
                 write!(f, "RENAME TO {index_name}")
+            }
+            AlterIndexOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }
@@ -178,6 +311,23 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::RenameView { view_name } => {
                 write!(f, "RENAME TO {view_name}")
             }
+            AlterViewOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterViewOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterViewOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
         }
     }
 }
@@ -187,6 +337,23 @@ impl fmt::Display for AlterSinkOperation {
         match self {
             AlterSinkOperation::RenameSink { sink_name } => {
                 write!(f, "RENAME TO {sink_name}")
+            }
+            AlterSinkOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSinkOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSinkOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
         }
     }
@@ -200,6 +367,35 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::AddColumn { column_def } => {
                 write!(f, "ADD COLUMN {column_def}")
+            }
+            AlterSourceOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSourceOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSourceOperation::FormatEncode { connector_schema } => {
+                write!(f, "{connector_schema}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterFunctionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterFunctionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {new_schema_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterConnectionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterConnectionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {new_schema_name}")
             }
         }
     }
@@ -362,6 +558,12 @@ impl ColumnDef {
             collation,
             options,
         }
+    }
+
+    pub fn is_generated(&self) -> bool {
+        self.options
+            .iter()
+            .any(|option| matches!(option.option, ColumnOption::GeneratedColumns(_)))
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -21,12 +22,11 @@ use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, GroupTopNExecutor};
+use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, Executor, GroupTopNExecutor};
 use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder<const APPEND_ONLY: bool>;
 
-#[async_trait::async_trait]
 impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEND_ONLY> {
     type Node = GroupTopNNode;
 
@@ -34,8 +34,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let group_by: Vec<usize> = node
             .get_group_key()
             .iter()
@@ -60,35 +59,29 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
-
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
-            info,
+            schema: params.info.schema.clone(),
             storage_key,
             offset_and_limit: (node.offset as usize, node.limit as usize),
             order_by,
             group_by,
             state_table,
-            watermark_epoch: stream.get_watermark_epoch(),
+            watermark_epoch: params.watermark_epoch,
             group_key_types,
 
             with_ties: node.with_ties,
             append_only: APPEND_ONLY,
         };
-        args.dispatch()
+        Ok((params.info, args.dispatch()?).into())
     }
 }
 
 struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
-    input: BoxedExecutor,
+    input: Executor,
     ctx: ActorContextRef,
-    info: ExecutorInfo,
+    schema: Schema,
     storage_key: Vec<ColumnOrder>,
     offset_and_limit: (usize, usize),
     order_by: Vec<ColumnOrder>,
@@ -102,7 +95,7 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
 }
 
 impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         macro_rules! build {
@@ -110,7 +103,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 Ok($excutor::<K, S, $with_ties>::new(
                     self.input,
                     self.ctx,
-                    self.info,
+                    self.schema,
                     self.storage_key,
                     self.offset_and_limit,
                     self.order_by,

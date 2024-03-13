@@ -163,7 +163,7 @@ create table s8_no_schema_field (
   properties.bootstrap.server = 'message_queue:29092'
 ) FORMAT DEBEZIUM ENCODE JSON
 
-statement ok
+statement error without schema registry
 create table s9 with (
   connector = 'kafka',
   topic = 'avro_bin',
@@ -172,21 +172,31 @@ create table s9 with (
 ) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-simple-schema.avsc');
 
 statement ok
+create table s9 with (
+  connector = 'kafka',
+  topic = 'avro_bin',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-simple-schema.avsc', with_deprecated_file_header = true);
+
+statement ok
 create table s10 with (
   connector = 'kafka',
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc');
+) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc', with_deprecated_file_header = true);
 
 statement ok
 create table s11 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
-) FORMAT PLAIN ENCODE PROTOBUF (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
+  scan.startup.mode = 'earliest')
+FORMAT PLAIN ENCODE PROTOBUF (
+  message = 'test.User',
+  schema.location = 'file:///risingwave/proto-complex-schema'
+);
 
 statement ok
 CREATE TABLE s12(
@@ -268,9 +278,11 @@ create source s17 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
-) FORMAT PLAIN ENCODE PROTOBUF (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
+  scan.startup.mode = 'earliest')
+FORMAT PLAIN ENCODE PROTOBUF (
+  message = 'test.User',
+  schema.location = 'file:///risingwave/proto-complex-schema'
+);
 
 statement ok
 create source s18 with (
@@ -278,7 +290,7 @@ create source s18 with (
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc');
+) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc', with_deprecated_file_header = true);
 
 # we cannot use confluent schema registry when connector is not kafka
 statement error
@@ -289,8 +301,8 @@ with (
   properties.bootstrap.server = 'message_queue:29092'
 ) FORMAT PLAIN ENCODE AVRO (schema.registry = 'http://127.0.0.1:8081');
 
-# we cannot create debezium source with generated column
-statement error
+# create debezium source with generated column
+statement ok
 create table s20 (
   id integer primary key,
   first_name varchar,
@@ -363,6 +375,25 @@ create table s27 with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/json-complex-schema')
 
+# currently _rw_key can be set as primary key
+# statement ok
+# create table s28 (id bytea, PRIMARY KEY(_rw_key)) with (
+#   connector = 'kafka',
+#   topic = 'kafka_source_format_bytes',
+#   properties.bootstrap.server = 'message_queue:29092',
+#   scan.startup.mode = 'earliest'
+# ) FORMAT PLAIN ENCODE BYTES
+
+# throttle option
+statement ok
+create table s29 (id bytea) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+  streaming_rate_limit = 200
+) FORMAT PLAIN ENCODE BYTES
+
 statement ok
 CREATE TABLE mongo_customers (
 	_id BIGINT PRIMARY KEY,
@@ -392,8 +423,10 @@ CREATE TABLE upsert_students_default_key (
     "lastName" VARCHAR,
     age INT,
     height REAL,
-    weight REAL
+    weight REAL,
+    primary key (rw_key)
 )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -402,13 +435,15 @@ FORMAT UPSERT ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
-    "ID" INT PRIMARY KEY,
+    "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
     age INT,
     height REAL,
-    weight REAL
+    weight REAL,
+    primary key (rw_key)
 )
+INCLUDE KEY AS rw_key
 WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -450,6 +485,18 @@ create table source_with_rdkafka_props (v1 int, v2 varchar) with (
   properties.queued.min.messages = 10000,
   properties.queued.max.messages.kbytes = 65536
 ) FORMAT PLAIN ENCODE JSON
+
+statement ok
+CREATE TABLE debezium_ignore_key (
+  order_id int primary key
+) with (
+  connector = 'kafka',
+  topic = 'debezium_mess_key',
+  kafka.brokers = 'message_queue:29092',
+  kafka.scan.startup.mode = 'earliest')
+FORMAT DEBEZIUM ENCODE JSON (
+  ignore_key = 'true'
+)
 
 statement ok
 flush;
@@ -620,17 +667,17 @@ select id, sequence_id, name, score, avg_score, is_lasted, entrance_date, birthd
 query ITITT
 select id, code, timestamp, xfas, contacts, sex from s10;
 ----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) MALE
+100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") MALE
 
 query ITITT
 select id, code, timestamp, xfas, contacts, sex from s11;
 ----
-0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) MALE
+0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") MALE
 
 query ITITT
 select id, code, timestamp, xfas, contacts, jsonb from s12;
 ----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) {"blockNumber": 16938734}
+100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") {"blockNumber": 16938734}
 
 query ITIT
 select * from s13 order by id;
@@ -653,10 +700,10 @@ select count(*) from s16
 ----
 0
 
-statement error Feature is not yet implemented: Alter source with schema registry
+statement error Not supported: alter source with schema registry
 alter source s18 add column v10 int;
 
-statement error Feature is not yet implemented: Alter source with schema registry
+statement error Not supported: alter source with schema registry
 alter source s17 add column v10 int;
 
 query III rowsort
@@ -708,7 +755,7 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID", "firstName", "lastName", "age", "height", "weight"
 FROM
 	upsert_students
 ORDER BY
@@ -724,7 +771,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students_default_key
 ORDER BY
@@ -752,7 +804,7 @@ order by
 56166    2
 
 query I
-SELECT * FROM source_mv3 ORDER BY id;
+SELECT id FROM source_mv3 ORDER BY id;
 ----
 \x6b6b
 \x776561776566776566
@@ -766,6 +818,11 @@ query TFITT
 select * from s27
 ----
 (9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
+
+query I
+select count(order_id) from debezium_ignore_key
+----
+3
 
 statement ok
 drop materialized view source_mv1
@@ -816,6 +873,9 @@ statement ok
 drop source s18
 
 statement ok
+drop table s20
+
+statement ok
 drop table s21
 
 statement ok
@@ -829,6 +889,12 @@ drop source s24
 
 statement ok
 drop table s27
+
+# statement ok
+# drop table s28
+
+statement ok
+drop table s29
 
 statement ok
 DROP TABLE mongo_customers;
@@ -847,3 +913,6 @@ drop table dbz_ignore_case_json;
 
 statement ok
 drop table source_with_rdkafka_props;
+
+statement ok
+drop table debezium_ignore_key;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
-use aws_sdk_kinesis::error::DisplayErrorContext;
+use anyhow::{anyhow, Context};
 use aws_sdk_kinesis::operation::put_record::PutRecordOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
@@ -25,6 +24,7 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
+use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::SinkParam;
@@ -105,10 +105,8 @@ impl Sink for KinesisSink {
             .stream_name(&self.config.common.stream_name)
             .send()
             .await
-            .map_err(|e| {
-                tracing::warn!("failed to list shards: {}", DisplayErrorContext(&e));
-                SinkError::Kinesis(anyhow!("failed to list shards: {}", DisplayErrorContext(e)))
-            })?;
+            .context("failed to list shards")
+            .map_err(SinkError::Kinesis)?;
         Ok(())
     }
 
@@ -127,7 +125,7 @@ impl Sink for KinesisSink {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KinesisSinkConfig {
     #[serde(flatten)]
     pub common: KinesisCommon,
@@ -175,7 +173,7 @@ impl KinesisSinkWriter {
             .common
             .build_client()
             .await
-            .map_err(SinkError::Kinesis)?;
+            .map_err(|err| SinkError::Kinesis(anyhow!(err)))?;
         Ok(Self {
             config: config.clone(),
             formatter,
@@ -200,18 +198,8 @@ impl KinesisSinkPayloadWriter {
             },
         )
         .await
-        .map_err(|e| {
-            tracing::warn!(
-                "failed to put record: {} to {}",
-                DisplayErrorContext(&e),
-                self.config.common.stream_name
-            );
-            SinkError::Kinesis(anyhow!(
-                "failed to put record: {} to {}",
-                DisplayErrorContext(e),
-                self.config.common.stream_name
-            ))
-        })
+        .with_context(|| format!("failed to put record to {}", self.config.common.stream_name))
+        .map_err(SinkError::Kinesis)
     }
 }
 

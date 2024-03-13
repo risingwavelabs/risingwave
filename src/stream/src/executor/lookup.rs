@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
+use crate::executor::{Barrier, BoxedMessageStream, Execute};
 
 mod cache;
 mod sides;
@@ -28,7 +27,7 @@ mod impl_;
 
 pub use impl_::LookupExecutorParams;
 
-use super::ActorContextRef;
+use super::{ActorContextRef, Executor};
 
 #[cfg(test)]
 mod tests;
@@ -45,12 +44,6 @@ pub struct LookupExecutor<S: StateStore> {
     /// the data types of the produced data chunk inside lookup (before reordering)
     chunk_data_types: Vec<DataType>,
 
-    /// The schema of the lookup executor (after reordering)
-    schema: Schema,
-
-    /// The primary key indices of the schema (after reordering)
-    pk_indices: PkIndices,
-
     /// The join side of the arrangement
     arrangement: ArrangeJoinSide<S>,
 
@@ -58,10 +51,10 @@ pub struct LookupExecutor<S: StateStore> {
     stream: StreamJoinSide,
 
     /// The executor for arrangement.
-    arrangement_executor: Option<Box<dyn Executor>>,
+    arrangement_executor: Option<Executor>,
 
     /// The executor for stream.
-    stream_executor: Option<Box<dyn Executor>>,
+    stream_executor: Option<Executor>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,
@@ -87,20 +80,8 @@ pub struct LookupExecutor<S: StateStore> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for LookupExecutor<S> {
+impl<S: StateStore> Execute for LookupExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        "LookupExecutor"
     }
 }

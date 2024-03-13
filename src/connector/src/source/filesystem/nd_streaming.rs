@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use bytes::BytesMut;
 use futures::io::Cursor;
 use futures::AsyncBufReadExt;
 use futures_async_stream::try_stream;
 
+use crate::parser::EncodingProperties;
 use crate::source::{BoxSourceStream, SourceMessage};
 
-#[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+pub fn need_nd_streaming(encode_config: &EncodingProperties) -> bool {
+    matches!(encode_config, &EncodingProperties::Json(_))
+        || matches!(encode_config, EncodingProperties::Csv(_))
+}
+
+#[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
 /// This function splits a byte stream by the newline separator "(\r)\n" into a message stream.
 /// It can be difficult to split and compute offsets correctly when the bytes are received in
 /// chunks.  There are two cases to consider:
@@ -44,7 +50,7 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
             .map(|msg| (msg.offset.clone(), msg.split_id.clone(), msg.meta.clone()))
             .unwrap();
 
-        let mut offset: usize = offset.parse()?;
+        let mut offset: usize = offset.parse().context("failed to parse the offset")?;
         let mut buf = BytesMut::new();
         for msg in batch {
             let payload = msg.payload.unwrap_or_default();
@@ -102,7 +108,7 @@ pub async fn split_stream(data_stream: BoxSourceStream) {
                         last_message = msgs.pop();
                     }
                 }
-                Err(e) => return Err(anyhow!(e)),
+                Err(e) => return Err(e.into()),
             }
 
             line_cnt += 1;
@@ -126,7 +132,7 @@ mod tests {
     async fn test_split_stream() {
         // Test with tail separators.
         for tail_separator in ["", "\n", "\r\n"] {
-            const N1: usize = 10000;
+            const N1: usize = 1000;
             const N2: usize = 500;
             const N3: usize = 50;
             let lines = (0..N1)

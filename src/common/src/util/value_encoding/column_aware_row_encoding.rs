@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use bitflags::bitflags;
@@ -98,6 +98,25 @@ impl RowEncoding {
             offset_usize.push(self.buf.len());
             if let Some(v) = datum.to_datum_ref() {
                 serialize_scalar(v, &mut self.buf);
+            }
+        }
+        let max_offset = *offset_usize
+            .last()
+            .expect("should encode at least one column");
+        self.set_offsets(&offset_usize, max_offset);
+    }
+
+    // TODO: Avoid duplicated code. `encode_slice` is the same as `encode` except it doesn't require column type.
+    fn encode_slice<'a>(&mut self, datum_refs: impl Iterator<Item = Option<&'a [u8]>>) {
+        debug_assert!(
+            self.buf.is_empty(),
+            "should not encode one RowEncoding object multiple times."
+        );
+        let mut offset_usize = vec![];
+        for datum in datum_refs {
+            offset_usize.push(self.buf.len());
+            if let Some(v) = datum {
+                self.buf.put_slice(v);
             }
         }
         let max_offset = *offset_usize
@@ -267,4 +286,90 @@ impl ValueRowDeserializer for ColumnAwareSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         self.deserializer.deserialize(encoded_bytes)
     }
+}
+
+/// Deserializes row `encoded_bytes`, drops columns not in `valid_column_ids`, serializes and returns.
+/// If no column is dropped, returns None.
+// TODO: Avoid duplicated code. The current code combines`Serializer` and `Deserializer` with unavailable parameter removed, e.g. `Deserializer::schema`.
+pub fn try_drop_invalid_columns(
+    mut encoded_bytes: &[u8],
+    valid_column_ids: &HashSet<i32>,
+) -> Option<Vec<u8>> {
+    let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
+    let datum_num = encoded_bytes.get_u32_le() as usize;
+    let mut is_column_dropped = false;
+    let mut encoded_bytes_copy = encoded_bytes;
+    for _ in 0..datum_num {
+        let this_id = encoded_bytes_copy.get_i32_le();
+        if !valid_column_ids.contains(&this_id) {
+            is_column_dropped = true;
+            break;
+        }
+    }
+    if !is_column_dropped {
+        return None;
+    }
+
+    // Slow path that drops columns. Should be rare.
+    let offset_bytes = match flag - Flag::EMPTY {
+        Flag::OFFSET8 => 1,
+        Flag::OFFSET16 => 2,
+        Flag::OFFSET32 => 4,
+        _ => panic!("invalid flag {}", flag.bits()),
+    };
+    let offsets_start_idx = 4 * datum_num;
+    let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
+    let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
+    let data = &encoded_bytes[data_start_idx..];
+    let mut datums: Vec<Option<&[u8]>> = Vec::with_capacity(valid_column_ids.len());
+    let mut column_ids = Vec::with_capacity(valid_column_ids.len());
+    for i in 0..datum_num {
+        let this_id = encoded_bytes.get_i32_le();
+        if valid_column_ids.contains(&this_id) {
+            column_ids.push(this_id);
+            let this_offset_start_idx = i * offset_bytes;
+            let mut this_offset_slice =
+                &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
+            let this_offset = deserialize_width(offset_bytes, &mut this_offset_slice);
+            let data = if i + 1 < datum_num {
+                let mut next_offset_slice = &offsets[(this_offset_start_idx + offset_bytes)
+                    ..(this_offset_start_idx + 2 * offset_bytes)];
+                let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
+                if this_offset == next_offset {
+                    None
+                } else {
+                    let data_slice = &data[this_offset..next_offset];
+                    Some(data_slice)
+                }
+            } else if this_offset == data.len() {
+                None
+            } else {
+                let data_slice = &data[this_offset..];
+                Some(data_slice)
+            };
+            datums.push(data);
+        }
+    }
+    if column_ids.is_empty() {
+        // According to `RowEncoding::encode`, at least one column is required.
+        return None;
+    }
+
+    let mut encoding = RowEncoding::new();
+    encoding.encode_slice(datums.into_iter());
+    let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
+    let datum_num = column_ids.len() as u32;
+    for id in column_ids {
+        encoded_column_ids.put_i32_le(id);
+    }
+    let mut row_bytes = Vec::with_capacity(
+        5 + encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
+    );
+    row_bytes.put_u8(encoding.flag.bits());
+    row_bytes.put_u32_le(datum_num);
+    row_bytes.extend(&encoded_column_ids);
+    row_bytes.extend(&encoding.offsets);
+    row_bytes.extend(&encoding.buf);
+
+    Some(row_bytes)
 }

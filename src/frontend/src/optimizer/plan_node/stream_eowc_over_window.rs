@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use super::generic::{self, GenericPlanRef, PlanWindowFunction};
 use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -81,8 +82,7 @@ impl StreamEowcOverWindow {
         // The EOWC over window state table has the same schema as the input.
 
         let in_fields = self.core.input.schema().fields();
-        let mut tbl_builder =
-            TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
+        let mut tbl_builder = TableCatalogBuilder::default();
         for field in in_fields {
             tbl_builder.add_column(field);
         }
@@ -160,4 +160,7 @@ impl StreamNode for StreamEowcOverWindow {
         })
     }
 }
+
 impl ExprRewritable for StreamEowcOverWindow {}
+
+impl ExprVisitable for StreamEowcOverWindow {}

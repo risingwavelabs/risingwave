@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ pub enum RisingWaveService {
     Frontend(Vec<OsString>),
     #[allow(dead_code)]
     Compactor(Vec<OsString>),
-    ConnectorNode(Vec<OsString>),
 }
 
 impl RisingWaveService {
@@ -34,10 +33,7 @@ impl RisingWaveService {
             RisingWaveService::Compute(args0)
             | RisingWaveService::Meta(args0)
             | RisingWaveService::Frontend(args0)
-            | RisingWaveService::Compactor(args0)
-            | RisingWaveService::ConnectorNode(args0) => {
-                args0.extend(args.iter().map(|s| s.into()))
-            }
+            | RisingWaveService::Compactor(args0) => args0.extend(args.iter().map(|s| s.into())),
         }
     }
 }

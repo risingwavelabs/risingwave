@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,12 +24,12 @@ use crate::storage::MetaStoreRef;
 use crate::MetaResult;
 
 pub struct TelemetryInfoServiceImpl {
-    meta_store: MetaStoreRef,
+    meta_store: Option<MetaStoreRef>,
     sql_meta_store: Option<SqlMetaStore>,
 }
 
 impl TelemetryInfoServiceImpl {
-    pub fn new(meta_store: MetaStoreRef, sql_meta_store: Option<SqlMetaStore>) -> Self {
+    pub fn new(meta_store: Option<MetaStoreRef>, sql_meta_store: Option<SqlMetaStore>) -> Self {
         Self {
             meta_store,
             sql_meta_store,
@@ -42,10 +42,12 @@ impl TelemetryInfoServiceImpl {
             return Ok(cluster.map(|c| c.cluster_id.to_string().into()));
         }
 
-        Ok(ClusterId::from_meta_store(&self.meta_store)
-            .await
-            .ok()
-            .flatten())
+        Ok(
+            ClusterId::from_meta_store(self.meta_store.as_ref().unwrap())
+                .await
+                .ok()
+                .flatten(),
+        )
     }
 }
 

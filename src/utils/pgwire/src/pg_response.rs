@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,12 +67,16 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    ALTER_DATABASE,
+    ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
     ALTER_TABLE,
     ALTER_MATERIALIZED_VIEW,
     ALTER_SINK,
     ALTER_SOURCE,
+    ALTER_FUNCTION,
+    ALTER_CONNECTION,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
@@ -94,6 +98,7 @@ pub enum StatementType {
     SET_TRANSACTION,
     CANCEL_COMMAND,
     WAIT,
+    KILL,
 }
 
 impl std::fmt::Display for StatementType {
@@ -393,7 +398,7 @@ where
         }
 
         if let Some(callback) = self.callback.take() {
-            callback.await.map_err(PsqlError::ExecuteError)?;
+            callback.await.map_err(PsqlError::SimpleQueryError)?;
         }
         Ok(())
     }

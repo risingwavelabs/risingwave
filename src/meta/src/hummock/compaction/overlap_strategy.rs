@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp;
+use std::fmt::Debug;
 use std::ops::Range;
 
 use itertools::Itertools;
@@ -20,7 +21,7 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-pub trait OverlapInfo {
+pub trait OverlapInfo: Debug {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
     fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize>;
@@ -67,7 +68,7 @@ pub trait OverlapStrategy: Send + Sync {
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo>;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RangeOverlapInfo {
     target_range: Option<KeyRange>,
 }
@@ -94,15 +95,10 @@ impl OverlapInfo for RangeOverlapInfo {
                 if overlap_begin >= others.len() {
                     return overlap_begin..overlap_begin;
                 }
-                let mut overlap_end = overlap_begin;
-                for table in &others[overlap_begin..] {
-                    if key_range.compare_right_with(&table.key_range.as_ref().unwrap().left)
-                        == cmp::Ordering::Less
-                    {
-                        break;
-                    }
-                    overlap_end += 1;
-                }
+                let overlap_end = others.partition_point(|table_status| {
+                    key_range.compare_right_with(&table_status.key_range.as_ref().unwrap().left)
+                        != cmp::Ordering::Less
+                });
                 overlap_begin..overlap_end
             }
             None => others.len()..others.len(),

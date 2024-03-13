@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,23 +15,25 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde_derive::{Deserialize, Serialize};
+use with_options::WithOptions;
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceEnumeratorContextRef,
-    SourceProperties, SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
+    BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
+    SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromHashmap,
 };
 
 pub type BoxListSplits = Box<
     dyn FnMut(
             TestSourceProperties,
             SourceEnumeratorContextRef,
-        ) -> anyhow::Result<Vec<TestSourceSplit>>
+        ) -> ConnectorResult<Vec<TestSourceSplit>>
         + Send
         + 'static,
 >;
@@ -43,7 +45,7 @@ pub type BoxIntoSourceStream = Box<
             ParserConfig,
             SourceContextRef,
             Option<Vec<Column>>,
-        ) -> BoxSourceWithStateStream
+        ) -> BoxChunkSourceStream
         + Send
         + 'static,
 >;
@@ -58,7 +60,7 @@ impl BoxSource {
         list_splits: impl FnMut(
                 TestSourceProperties,
                 SourceEnumeratorContextRef,
-            ) -> anyhow::Result<Vec<TestSourceSplit>>
+            ) -> ConnectorResult<Vec<TestSourceSplit>>
             + Send
             + 'static,
         into_source_stream: impl FnMut(
@@ -67,7 +69,7 @@ impl BoxSource {
                 ParserConfig,
                 SourceContextRef,
                 Option<Vec<Column>>,
-            ) -> BoxSourceWithStateStream
+            ) -> BoxChunkSourceStream
             + Send
             + 'static,
     ) -> BoxSource {
@@ -114,17 +116,20 @@ pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
 
 pub const TEST_CONNECTOR: &str = "test";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, WithOptions)]
 pub struct TestSourceProperties {
     properties: HashMap<String, String>,
 }
 
 impl TryFromHashmap for TestSourceProperties {
-    fn try_from_hashmap(props: HashMap<String, String>) -> anyhow::Result<Self> {
+    fn try_from_hashmap(
+        props: HashMap<String, String>,
+        _deny_unknown_fields: bool,
+    ) -> ConnectorResult<Self> {
         if cfg!(any(madsim, test)) {
             Ok(TestSourceProperties { properties: props })
         } else {
-            Err(anyhow!("test source only available at test"))
+            bail!("test source only available at test")
         }
     }
 }
@@ -145,11 +150,11 @@ impl SplitMetaData for TestSourceSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         self.offset = start_offset;
         Ok(())
     }
@@ -168,14 +173,14 @@ impl SplitEnumerator for TestSourceSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             properties,
             context,
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
         (get_registry()
             .box_source
             .lock()
@@ -204,7 +209,7 @@ impl SplitReader for TestSourceSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             properties,
             state,
@@ -214,7 +219,7 @@ impl SplitReader for TestSourceSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxSourceWithStateStream {
+    fn into_stream(self) -> BoxChunkSourceStream {
         (get_registry()
             .box_source
             .lock()
@@ -236,4 +241,10 @@ impl SourceProperties for TestSourceProperties {
     type SplitReader = TestSourceSplitReader;
 
     const SOURCE_NAME: &'static str = TEST_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for TestSourceProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        HashMap::new()
+    }
 }

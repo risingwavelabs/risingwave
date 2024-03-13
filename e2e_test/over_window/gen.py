@@ -25,19 +25,27 @@ for mode in contexts.keys():
     shutil.rmtree(mode_dir)
     os.makedirs(mode_dir, exist_ok=True)
 
-for file in os.listdir(templates_dir):
-    if not file.endswith(".slt") and not file.endswith(".slt.part"):
-        continue
 
-    print(f"Generating `{file}`...")
+def render(filepath: str):
+    relpath = path.relpath(filepath, templates_dir)
+    print(f"Rendering `{relpath}`...")
 
-    with open(path.join(templates_dir, file), "r") as f:
+    with open(path.join(templates_dir, relpath), "r") as f:
         tpl = Template(f.read())
 
     for mode, context in contexts.items():
-        out_file = path.join(generated_dir, mode, file)
+        out_file = path.join(generated_dir, mode, relpath)
+        os.makedirs(path.dirname(out_file), exist_ok=True)
         with open(out_file, "w") as f:
             f.write(file_head + "\n\n")
             f.write(tpl.safe_substitute(context))
+
+
+for dirpath, dirnames, filenames in os.walk(templates_dir):
+    for filename in filenames:
+        if not filename.endswith(".slt") and not filename.endswith(".slt.part"):
+            continue
+        render(path.join(dirpath, filename))
+
 
 print("Done.")

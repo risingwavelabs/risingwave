@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ use std::rc::Rc;
 
 use educe::Educe;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
@@ -30,8 +29,10 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::error::Result;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
+use crate::scheduler::SchedulerResult;
 
 /// The mutable state when building fragment graph.
 #[derive(Educe)]
@@ -47,7 +48,7 @@ pub struct BuildFragmentGraphState {
     next_table_id: u32,
 
     /// rewrite will produce new operators, and we need to track next operator id
-    #[educe(Default(expression = "u32::MAX - 1"))]
+    #[educe(Default(expression = u32::MAX - 1))]
     next_operator_id: u32,
 
     /// dependent streaming job ids.
@@ -112,11 +113,11 @@ impl BuildFragmentGraphState {
     }
 }
 
-pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+pub fn build_graph(plan_node: PlanRef) -> SchedulerResult<StreamFragmentGraphProto> {
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
-    let stream_node = plan_node.to_stream_prost(&mut state);
+    let stream_node = plan_node.to_stream_prost(&mut state)?;
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
     fragment_graph.dependent_table_ids = state
@@ -125,7 +126,7 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
         .map(|id| id.table_id)
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
-    fragment_graph
+    Ok(fragment_graph)
 }
 
 #[cfg(any())]
@@ -135,7 +136,8 @@ fn is_stateful_executor(stream_node: &StreamNode) -> bool {
         NodeBody::HashAgg(_)
             | NodeBody::HashJoin(_)
             | NodeBody::DeltaIndexJoin(_)
-            | NodeBody::Chain(_)
+            | NodeBody::StreamScan(_)
+            | NodeBody::StreamCdcScan(_)
             | NodeBody::DynamicFilter(_)
     )
 }
@@ -257,8 +259,16 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
         }
 
-        NodeBody::Source(_) => {
+        NodeBody::Source(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+
+            if let Some(source) = node.source_inner.as_ref()
+                && let Some(source_info) = source.info.as_ref()
+                && source_info.cdc_source_job
+            {
+                tracing::debug!("mark cdc source job as singleton");
+                current_fragment.requires_singleton = true;
+            }
         }
 
         NodeBody::Dml(_) => {
@@ -273,13 +283,31 @@ fn build_fragment(
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
-        NodeBody::Chain(node) => {
-            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
+        NodeBody::StreamScan(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // memorize table id for later use
+            // The table id could be a upstream CDC source
             state
                 .dependent_table_ids
                 .insert(TableId::new(node.table_id));
             current_fragment.upstream_table_ids.push(node.table_id);
+        }
+
+        NodeBody::StreamCdcScan(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+            // the backfill algorithm is not parallel safe
+            current_fragment.requires_singleton = true;
+        }
+
+        NodeBody::CdcFilter(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
+            // memorize upstream source id for later use
+            state
+                .dependent_table_ids
+                .insert(TableId::new(node.upstream_source_id));
+            current_fragment
+                .upstream_table_ids
+                .push(node.upstream_source_id);
         }
 
         NodeBody::Now(_) => {

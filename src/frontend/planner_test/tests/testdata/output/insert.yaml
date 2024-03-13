@@ -244,7 +244,11 @@
   sql: |
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning sum(a);
-  binder_error: 'Bind error: should not have agg/window in the `RETURNING` list'
+  binder_error: |
+    Failed to bind expression: sum(a)
+
+    Caused by:
+      Invalid input syntax: aggregate functions are not allowed in INSERT
 - name: insert and specify all columns with values
   sql: |
     create table t (a int, b int);
@@ -330,5 +334,44 @@
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t, mapping: [0:0], default: [1<-(2:Int32 + 3:Int32)] }
+    └─BatchInsert { table: t, mapping: [0:0], default: [1<-5:Int32] }
       └─BatchValues { rows: [[1:Int32]] }
+- name: distributed insert
+  sql: |
+    set batch_enable_distributed_dml = true;
+    create table t (a int, b int);
+    insert into t select * from t;
+  batch_distributed_plan: |-
+    BatchSimpleAgg { aggs: [sum()] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchInsert { table: t, mapping: [0:0, 1:1] }
+        └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+          └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+- name: test binding for insert select issue 15594
+  sql: |
+    create table t (a int);
+    create table t2 (b int);
+    insert into t select 1 as a from t2 group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, mapping: [0:0] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [1:Int32] }
+          └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+              └─BatchProject { exprs: [1:Int32] }
+                └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+- name: test binding for insert select issue 15594
+  sql: |
+    create table t (a int);
+    create table t2 (b int);
+    insert into t select 1 as a from t2 group by a returning a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, returning: true, mapping: [0:0] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [1:Int32] }
+          └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+              └─BatchProject { exprs: [1:Int32] }
+                └─BatchScan { table: t2, columns: [], distribution: SomeShard }

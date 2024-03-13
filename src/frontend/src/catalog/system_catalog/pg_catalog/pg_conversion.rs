@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
-
-pub const PG_CONVERSION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "conname"),
-    (DataType::Int32, "connamespace"),
-    (DataType::Int32, "conowner"),
-    (DataType::Int16, "conforencoding"),
-    (DataType::Int16, "contoencoding"),
-    (DataType::Int32, "conproc"),
-    (DataType::Boolean, "condefault"),
-];
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_conversion` describes encoding conversion functions.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-conversion.html`]
-pub static PG_CONVERSION: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_conversion",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: PG_CONVERSION_COLUMNS,
-    sql: infer_dummy_view_sql(PG_CONVERSION_COLUMNS),
-});
+#[system_catalog(view, "pg_catalog.pg_conversion")]
+#[derive(Fields)]
+struct PgConversion {
+    oid: i32,
+    conname: String,
+    connamespace: i32,
+    conowner: i32,
+    conforencoding: i16,
+    contoencoding: i16,
+    conproc: i32,
+    condefault: bool,
+}

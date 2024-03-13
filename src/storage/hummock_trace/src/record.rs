@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
     LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions,
 };
 
 pub type RecordId = u64;
@@ -170,10 +170,13 @@ pub enum Operation {
     TryWaitEpoch(TracedHummockReadEpoch),
 
     /// clear shared buffer
-    ClearSharedBuffer,
+    ClearSharedBuffer(u64),
 
     /// Seal current epoch
-    SealCurrentEpoch(u64),
+    SealCurrentEpoch {
+        epoch: u64,
+        opts: TracedSealCurrentEpochOptions,
+    },
 
     /// validate read epoch
     ValidateReadEpoch(TracedHummockReadEpoch),
@@ -182,7 +185,9 @@ pub enum Operation {
 
     LocalStorageIsDirty,
 
-    Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
+    TryFlush,
+
+    Flush,
     /// Finish operation of Hummock.
     Finish,
 }
@@ -287,13 +292,13 @@ pub enum OperationResult {
     Get(TraceResult<Option<TracedBytes>>),
     Insert(TraceResult<()>),
     Delete(TraceResult<()>),
+    TryFlush(TraceResult<()>),
     Flush(TraceResult<usize>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    ClearSharedBuffer(TraceResult<()>),
     ValidateReadEpoch(TraceResult<()>),
     LocalStorageEpoch(TraceResult<u64>),
     LocalStorageIsDirty(TraceResult<bool>),

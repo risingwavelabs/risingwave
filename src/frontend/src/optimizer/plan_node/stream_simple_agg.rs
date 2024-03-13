@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -128,7 +129,7 @@ impl StreamNode for StreamSimpleAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
-            version: PbAggNodeVersion::Issue12140 as _,
+            version: PbAggNodeVersion::Issue13465 as _,
         })
     }
 }
@@ -142,5 +143,11 @@ impl ExprRewritable for StreamSimpleAgg {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.row_count_idx).into()
+    }
+}
+
+impl ExprVisitable for StreamSimpleAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

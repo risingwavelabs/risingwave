@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
 
 use futures::pin_mut;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{Distribution, TableIter};
+use risingwave_storage::table::TableIter;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
@@ -75,7 +75,7 @@ async fn test_storage_table_value_indices() {
         pk_indices,
         value_indices.into_iter().map(|v| v as usize).collect_vec(),
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -108,7 +108,7 @@ async fn test_storage_table_value_indices() {
         Some("2222".to_string().into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -195,7 +195,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     let table = StorageTable::for_test(
@@ -221,7 +221,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         Some(222_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -299,20 +299,16 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
             .await;
 
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
-    let table = StorageTable::new_partial(
+    let table = StorageTable::for_test_with_partial_columns(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
         column_ids_partial,
         order_types.clone(),
         pk_indices,
-        Distribution::fallback(),
-        TableOption::default(),
         value_indices,
-        0,
-        false,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
@@ -328,7 +324,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         None,
         Some(222_i32.into()),
     ]));
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
@@ -408,20 +404,16 @@ async fn test_batch_scan_with_value_indices() {
 
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
 
-    let table = StorageTable::new_partial(
+    let table = StorageTable::for_test_with_partial_columns(
         test_env.storage.clone(),
         TEST_TABLE_ID,
         column_descs.clone(),
         column_ids_partial,
         order_types.clone(),
         pk_indices,
-        Distribution::fallback(),
-        TableOption::default(),
         value_indices,
-        0,
-        false,
     );
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -443,7 +435,7 @@ async fn test_batch_scan_with_value_indices() {
         Some(2222_i32.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 

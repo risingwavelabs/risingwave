@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package com.risingwave.connector.sink.jdbc;
 
 import static org.junit.Assert.*;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
@@ -26,6 +25,12 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -38,9 +43,9 @@ public class JDBCSinkTest {
     }
 
     private static final String pgCreateStmt =
-            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb JSONB, v_bytea BYTEA)";
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_timestamptz TIMESTAMPTZ, v_jsonb JSONB, v_bytea BYTEA)";
     private static final String mysqlCreateStmt =
-            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb JSON, v_bytea BLOB)";
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME(6), v_timestamp DATETIME(6), v_timestamptz TIMESTAMP(6), v_jsonb JSON, v_bytea BLOB)";
 
     static void createMockTable(String jdbcUrl, String tableName, TestType testType)
             throws SQLException {
@@ -60,13 +65,21 @@ public class JDBCSinkTest {
     static TableSchema getTestTableSchema() {
         return new TableSchema(
                 Lists.newArrayList(
-                        "id", "v_varchar", "v_date", "v_time", "v_timestamp", "v_jsonb", "v_bytea"),
+                        "id",
+                        "v_varchar",
+                        "v_date",
+                        "v_time",
+                        "v_timestamp",
+                        "v_timestamptz",
+                        "v_jsonb",
+                        "v_bytea"),
                 Lists.newArrayList(
                         Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.DATE).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.TIME).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.TIMESTAMP).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIMESTAMPTZ).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.BYTEA).build()),
                 Lists.newArrayList("id"));
@@ -81,20 +94,21 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
                                 "Alice",
-                                new Date(1000000000),
-                                new Time(1000000000),
-                                new Timestamp(1000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
+        sink.barrier(true);
 
         Statement stmt = conn.createStatement();
         try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
@@ -106,17 +120,18 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
                                 "Bob",
-                                new Date(1000000000),
-                                new Time(1000000000),
-                                new Timestamp(1000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
+        sink.barrier(true);
         try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
             int count;
             for (count = 0; rs.next(); ) {
@@ -125,8 +140,9 @@ public class JDBCSinkTest {
             assertEquals(2, count);
         }
         stmt.close();
+        conn.close();
 
-        sink.sync();
+        sink.barrier(true);
         sink.drop();
     }
 
@@ -140,27 +156,29 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
         Statement stmt = conn.createStatement();
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
                                 "Alice",
-                                new Date(1000000000),
-                                new Time(1000000000),
-                                new Timestamp(1000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes()),
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
                                 "Bob",
-                                new Date(1000000000),
-                                new Time(1000000000),
-                                new Timestamp(1000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
 
@@ -171,32 +189,35 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,
                                 "Alice",
-                                new Date(1000000000),
-                                new Time(1000000000),
-                                new Timestamp(1000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes()),
                         new ArraySinkRow(
                                 Op.UPDATE_INSERT,
                                 1,
                                 "Clare",
-                                new Date(2000000000),
-                                new Time(2000000000),
-                                new Timestamp(2000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
                                 "I want to eat".getBytes()),
                         new ArraySinkRow(
                                 Op.DELETE,
                                 2,
                                 "Bob",
-                                new Date(1000000000),
-                                new Time(1000000000),
-                                new Timestamp(1000000000),
+                                LocalDate.ofEpochDay(0),
+                                LocalTime.of(0, 0, 0, 1000),
+                                LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                                OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
 
@@ -206,18 +227,24 @@ public class JDBCSinkTest {
             // check if rows are inserted
             assertEquals(1, rs.getInt(1));
             assertEquals("Clare", rs.getString(2));
-            assertEquals(new Date(2000000000).toString(), rs.getDate(3).toString());
-            assertEquals(new Time(2000000000).toString(), rs.getTime(4).toString());
-            assertEquals(new Timestamp(2000000000), rs.getTimestamp(5));
+            assertEquals(LocalDate.ofEpochDay(0), rs.getObject(3, LocalDate.class));
+            assertEquals(LocalTime.of(0, 0, 0, 1000), rs.getObject(4, LocalTime.class));
+            assertEquals(
+                    LocalDateTime.of(1970, 1, 1, 0, 0, 0, 1000),
+                    rs.getObject(5, LocalDateTime.class));
+            assertEquals(
+                    OffsetDateTime.of(1970, 1, 1, 0, 0, 1, 1000, ZoneOffset.UTC),
+                    rs.getObject(6, OffsetDateTime.class).toInstant().atOffset(ZoneOffset.UTC));
             assertEquals(
                     "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
-                    rs.getString(6));
-            assertEquals("I want to eat", new String(rs.getBytes(7)));
+                    rs.getString(7));
+            assertEquals("I want to eat", new String(rs.getBytes(8)));
             assertFalse(rs.next());
         }
 
-        sink.sync();
+        sink.barrier(true);
         stmt.close();
+        conn.close();
     }
 
     static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
@@ -232,11 +259,7 @@ public class JDBCSinkTest {
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
         sink.drop();
-        try {
-            assertTrue(conn.isClosed());
-        } catch (SQLException e) {
-            fail(String.valueOf(e));
-        }
+        assertTrue(conn.isClosed());
     }
 
     @Test
@@ -259,7 +282,7 @@ public class JDBCSinkTest {
     @Test
     public void testMySQL() throws SQLException {
         MySQLContainer mysql =
-                new MySQLContainer<>("mysql:8")
+                new MySQLContainer<>("mysql:8.0")
                         .withDatabaseName("test")
                         .withUsername("postgres")
                         .withPassword("password")

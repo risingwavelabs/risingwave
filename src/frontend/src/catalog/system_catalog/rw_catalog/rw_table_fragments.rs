@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,33 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{extract_parallelism_from_table_state, SysCatalogReaderImpl};
+use crate::error::Result;
 
-pub const RW_TABLE_FRAGMENTS: BuiltinTable = BuiltinTable {
-    name: "rw_table_fragments",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[(DataType::Int32, "table_id"), (DataType::Varchar, "status")],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwTableFragment {
+    #[primary_key]
+    table_id: i32,
+    status: String,
+    parallelism: String,
+}
 
-impl SysCatalogReaderImpl {
-    pub async fn read_rw_table_fragments_info(&self) -> Result<Vec<OwnedRow>> {
-        let states = self.meta_client.list_table_fragment_states().await?;
+#[system_catalog(table, "rw_catalog.rw_table_fragments")]
+async fn read_rw_table_fragments_info(
+    reader: &SysCatalogReaderImpl,
+) -> Result<Vec<RwTableFragment>> {
+    let states = reader.meta_client.list_table_fragment_states().await?;
 
-        Ok(states
-            .into_iter()
-            .map(|state| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(state.table_id as i32)),
-                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
-                ])
-            })
-            .collect_vec())
-    }
+    Ok(states
+        .into_iter()
+        .map(|state| {
+            let parallelism = extract_parallelism_from_table_state(&state);
+            RwTableFragment {
+                table_id: state.table_id as i32,
+                status: state.state().as_str_name().into(),
+                parallelism: parallelism.to_uppercase(),
+            }
+        })
+        .collect())
 }

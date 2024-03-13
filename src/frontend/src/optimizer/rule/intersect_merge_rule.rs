@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,9 @@ impl Rule for IntersectMergeRule {
         let mut new_inputs = vec![];
         let mut has_merge = false;
         for input in top_intersect.inputs() {
-            if let Some(bottom_intersect) = input.as_logical_intersect() && bottom_intersect.all() == top_all {
+            if let Some(bottom_intersect) = input.as_logical_intersect()
+                && bottom_intersect.all() == top_all
+            {
                 new_inputs.extend(bottom_intersect.inputs());
                 has_merge = true;
             } else {

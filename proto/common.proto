@@ -27,12 +27,12 @@ message ActorInfo {
 }
 
 enum WorkerType {
-  UNSPECIFIED = 0;
-  FRONTEND = 1;
-  COMPUTE_NODE = 2;
-  RISE_CTL = 3;
-  COMPACTOR = 4;
-  META = 5;
+  WORKER_TYPE_UNSPECIFIED = 0;
+  WORKER_TYPE_FRONTEND = 1;
+  WORKER_TYPE_COMPUTE_NODE = 2;
+  WORKER_TYPE_RISE_CTL = 3;
+  WORKER_TYPE_COMPACTOR = 4;
+  WORKER_TYPE_META = 5;
 }
 
 message ParallelUnit {
@@ -52,6 +52,11 @@ message WorkerNode {
     bool is_serving = 2;
     bool is_unschedulable = 3;
   }
+  message Resource {
+    string rw_version = 1;
+    uint64 total_memory_bytes = 2;
+    uint64 total_cpu_cores = 3;
+  }
   uint32 id = 1;
   WorkerType type = 2;
   HostAddress host = 3;
@@ -62,6 +67,14 @@ message WorkerNode {
 
   // Ranges from 0 to 1023, used to generate the machine ID field in the global unique ID.
   optional uint32 transactional_id = 7;
+  // Resource spec.
+  // It's populated by meta node with the value reported by worker node, when the worker node is added by meta node.
+  // It's not persistent in meta store.
+  optional Resource resource = 8;
+  // Timestamp the worker node is added by meta node, in seconds.
+  // It's populated by meta node, when the worker node is added by meta node.
+  // It's not persistent in meta store.
+  optional uint64 started_at = 9;
 }
 
 message Buffer {

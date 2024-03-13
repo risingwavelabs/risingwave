@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,16 +13,19 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::PbBuffer;
 
 use crate::TracedBytes;
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedPrefetchOptions {
-    pub exhaust_iter: bool,
+    pub prefetch: bool,
+    pub for_large_query: bool,
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
@@ -57,7 +60,7 @@ impl From<TracedCachePriority> for CachePriority {
     }
 }
 
-#[derive(Copy, Encode, Decode, PartialEq, Eq, Debug, Clone, Hash)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableId {
     pub table_id: u32,
 }
@@ -95,7 +98,10 @@ impl TracedReadOptions {
         Self {
             prefix_hint: Some(TracedBytes::from(vec![0])),
             ignore_range_tombstone: true,
-            prefetch_options: TracedPrefetchOptions { exhaust_iter: true },
+            prefetch_options: TracedPrefetchOptions {
+                prefetch: true,
+                for_large_query: true,
+            },
             cache_policy: TracedCachePolicy::Disable,
             retention_seconds: None,
             table_id: TracedTableId { table_id },
@@ -110,7 +116,7 @@ pub struct TracedWriteOptions {
     pub table_id: TracedTableId,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableOption {
     pub retention_seconds: Option<u32>,
 }
@@ -131,31 +137,41 @@ impl From<TracedTableOption> for TableOption {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+pub enum TracedOpConsistencyLevel {
+    Inconsistent,
+    ConsistentOldValue,
+}
+
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
-    pub is_consistent_op: bool,
+    pub op_consistency_level: TracedOpConsistencyLevel,
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
+    pub vnodes: TracedBitmap,
 }
 
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
+        use risingwave_common::hash::VirtualNode;
+
         Self {
             table_id: TracedTableId { table_id },
-            is_consistent_op: true,
+            op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
             table_option: TracedTableOption {
                 retention_seconds: None,
             },
             is_replicated: false,
+            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
         }
     }
 }
 
 pub type TracedHummockEpoch = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum TracedHummockReadEpoch {
     Committed(TracedHummockEpoch),
     Current(TracedHummockEpoch),
@@ -185,7 +201,7 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedEpochPair {
     pub curr: TracedHummockEpoch,
     pub prev: TracedHummockEpoch,
@@ -209,7 +225,40 @@ impl From<TracedEpochPair> for EpochPair {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedInitOptions {
     pub epoch: TracedEpochPair,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub struct TracedSealCurrentEpochOptions {
+    // The watermark is serialized into protobuf
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>)>,
+    pub switch_op_consistency_level: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub struct TracedBitmap {
+    pub compression: i32,
+    pub body: Vec<u8>,
+}
+
+impl From<Bitmap> for TracedBitmap {
+    fn from(value: Bitmap) -> Self {
+        let pb = value.to_protobuf();
+        Self {
+            compression: pb.compression,
+            body: pb.body,
+        }
+    }
+}
+
+impl From<TracedBitmap> for Bitmap {
+    fn from(value: TracedBitmap) -> Self {
+        let pb = PbBuffer {
+            compression: value.compression,
+            body: value.body,
+        };
+        Bitmap::from(&pb)
+    }
 }

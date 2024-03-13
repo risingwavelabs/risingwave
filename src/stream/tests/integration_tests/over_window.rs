@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,13 @@ async fn create_executor<S: StateStore>(
         OrderType::ascending(),
     ];
 
-    let output_pk_indices = vec![2];
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
 
     let state_table = StateTable::new_without_distribution(
         store,
@@ -67,12 +73,14 @@ async fn create_executor<S: StateStore>(
     )
     .await;
 
-    let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_pk_indices.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
-        input: source.boxed(),
-        actor_ctx: ActorContext::create(123),
-        pk_indices: output_pk_indices,
-        executor_id: 1,
+        actor_ctx: ActorContext::for_test(123),
+
+        input: source,
+
+        schema: output_schema,
         calls,
         partition_key_indices,
         order_key_indices,

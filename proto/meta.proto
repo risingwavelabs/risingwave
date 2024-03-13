@@ -97,7 +97,8 @@ message TableFragments {
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
-  stream_plan.StreamEnvironment env = 6;
+  stream_plan.StreamContext ctx = 6;
+  TableParallelism parallelism = 7;
 }
 
 /// Parallel unit mapping with fragment id, used for notification.
@@ -196,7 +197,7 @@ message ListTableFragmentsResponse {
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;
-    stream_plan.StreamEnvironment env = 2;
+    stream_plan.StreamContext ctx = 2;
   }
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
@@ -207,6 +208,7 @@ message ListTableFragmentStatesResponse {
   message TableFragmentState {
     uint32 table_id = 1;
     TableFragments.State state = 2;
+    TableParallelism parallelism = 3;
   }
   repeated TableFragmentState states = 1;
 }
@@ -238,6 +240,32 @@ message ListActorStatesResponse {
   repeated ActorState states = 1;
 }
 
+message ListObjectDependenciesRequest {}
+
+message ListObjectDependenciesResponse {
+  message ObjectDependencies {
+    uint32 object_id = 1;
+    uint32 referenced_object_id = 2;
+  }
+  repeated ObjectDependencies dependencies = 1;
+}
+
+enum ThrottleTarget {
+  THROTTLE_TARGET_UNSPECIFIED = 0;
+  SOURCE = 1;
+  MV = 2;
+}
+
+message ApplyThrottleRequest {
+  ThrottleTarget kind = 1;
+  uint32 id = 2;
+  optional uint32 rate = 3;
+}
+
+message ApplyThrottleResponse {
+  common.Status status = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -247,6 +275,8 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
+  rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
 }
 
 // Below for cluster service.
@@ -262,17 +292,19 @@ message AddWorkerNodeRequest {
   common.HostAddress host = 2;
   reserved 3;
   Property property = 4;
+  common.WorkerNode.Resource resource = 5;
 }
 
 message AddWorkerNodeResponse {
   reserved 3;
   reserved "system_params";
   common.Status status = 1;
-  common.WorkerNode node = 2;
+  optional uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeRequest {
   common.HostAddress host = 1;
+  uint32 node_id = 2;
 }
 
 message ActivateWorkerNodeResponse {
@@ -304,7 +336,7 @@ message UpdateWorkerNodeSchedulabilityResponse {
 }
 
 message ListAllNodesRequest {
-  common.WorkerType worker_type = 1;
+  optional common.WorkerType worker_type = 1;
   // Whether to include nodes still starting
   bool include_starting_nodes = 2;
 }
@@ -352,6 +384,7 @@ message MetaSnapshot {
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
+  repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   // for streaming
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
@@ -373,6 +406,7 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
+    catalog.Subscription subscription = 6;
   }
 }
 
@@ -441,6 +475,26 @@ message RescheduleRequest {
 message RescheduleResponse {
   bool success = 1;
   uint64 revision = 2;
+}
+
+message TableParallelism {
+  message FixedParallelism {
+    uint32 parallelism = 1;
+  }
+
+  // deprecated, treated as AdaptiveParallelism
+  message AutoParallelism {}
+
+  message AdaptiveParallelism {}
+
+  message CustomParallelism {}
+
+  oneof parallelism {
+    FixedParallelism fixed = 1;
+    AutoParallelism auto = 2;
+    CustomParallelism custom = 3;
+    AdaptiveParallelism adaptive = 4;
+  }
 }
 
 message GetReschedulePlanRequest {
@@ -514,6 +568,8 @@ message SystemParams {
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
+  optional string wasm_storage_url = 14 [deprecated = true];
+  optional bool enable_tracing = 15;
 }
 
 message GetSystemParamsRequest {}
@@ -546,4 +602,80 @@ message GetServingVnodeMappingsResponse {
 
 service ServingService {
   rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
+}
+
+message EventLog {
+  message EventMetaNodeStart {
+    string advertise_addr = 1;
+    string listen_addr = 2;
+    string opts = 3;
+  }
+  message EventCreateStreamJobFail {
+    uint32 id = 1;
+    string name = 2;
+    string definition = 3;
+    string error = 4;
+  }
+  message EventDirtyStreamJobClear {
+    uint32 id = 1;
+    string name = 2;
+    string definition = 3;
+    string error = 4;
+  }
+  message EventBarrierComplete {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    double duration_sec = 3;
+    string command = 4;
+    string barrier_kind = 5;
+  }
+  message EventInjectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventCollectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventWorkerNodePanic {
+    uint32 worker_id = 1;
+    common.WorkerType worker_type = 2;
+    common.HostAddress host_addr = 3;
+    string panic_info = 4;
+  }
+  // Event logs identifier, which should be populated by event log service.
+  optional string unique_id = 1;
+  // Processing time, which should be populated by event log service.
+  optional uint64 timestamp = 2;
+  oneof event {
+    EventCreateStreamJobFail create_stream_job_fail = 3;
+    EventDirtyStreamJobClear dirty_stream_job_clear = 4;
+    EventMetaNodeStart meta_node_start = 5;
+    EventBarrierComplete barrier_complete = 6;
+    EventInjectBarrierFail inject_barrier_fail = 7;
+    EventCollectBarrierFail collect_barrier_fail = 8;
+    EventLog.EventWorkerNodePanic worker_node_panic = 9;
+  }
+}
+
+message ListEventLogRequest {}
+
+message ListEventLogResponse {
+  repeated EventLog event_logs = 1;
+}
+
+message AddEventLogRequest {
+  // A subset of EventLog.event that can be added by non meta node.
+  oneof event {
+    EventLog.EventWorkerNodePanic worker_node_panic = 1;
+  }
+}
+
+message AddEventLogResponse {}
+
+service EventLogService {
+  rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
+  rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
 }

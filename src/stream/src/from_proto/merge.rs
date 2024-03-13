@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
 use super::*;
@@ -21,7 +20,6 @@ use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MergeExecutorBuilder {
     type Node = MergeNode;
 
@@ -29,21 +27,17 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
-        let fields = node.fields.iter().map(Field::from).collect();
-        let schema = Schema::new(fields);
-        let actor_context = params.actor_context;
 
         let inputs: Vec<_> = upstreams
             .iter()
             .map(|&upstream_actor_id| {
                 new_input(
-                    &stream.context,
-                    stream.streaming_metrics.clone(),
-                    actor_context.id,
+                    &params.shared_context,
+                    params.executor_stats.clone(),
+                    params.actor_context.id,
                     params.fragment_id,
                     upstream_actor_id,
                     upstream_fragment_id,
@@ -62,33 +56,29 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             DispatcherType::NoShuffle => true,
         };
 
-        if always_single_input {
-            Ok(ReceiverExecutor::new(
-                schema,
-                params.pk_indices,
-                actor_context,
+        let exec = if always_single_input {
+            ReceiverExecutor::new(
+                params.actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
                 inputs.into_iter().exactly_one().unwrap(),
-                stream.context.clone(),
+                params.shared_context.clone(),
                 params.operator_id,
-                stream.streaming_metrics.clone(),
+                params.executor_stats.clone(),
             )
-            .boxed())
+            .boxed()
         } else {
-            Ok(MergeExecutor::new(
-                schema,
-                params.pk_indices,
-                actor_context,
+            MergeExecutor::new(
+                params.actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
-                params.executor_id,
                 inputs,
-                stream.context.clone(),
+                params.shared_context.clone(),
                 params.operator_id,
-                stream.streaming_metrics.clone(),
+                params.executor_stats.clone(),
             )
-            .boxed())
-        }
+            .boxed()
+        };
+        Ok((params.info, exec).into())
     }
 }

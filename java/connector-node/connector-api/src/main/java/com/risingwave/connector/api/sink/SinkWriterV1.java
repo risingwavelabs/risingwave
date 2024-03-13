@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,11 +43,12 @@ public interface SinkWriterV1 {
         public void beginEpoch(long epoch) {}
 
         @Override
-        public void write(Iterator<SinkRow> rows) {
+        public boolean write(Iterable<SinkRow> rows) {
             if (!hasBegun) {
                 hasBegun = true;
             }
-            this.inner.write(rows);
+            this.inner.write(rows.iterator());
+            return false;
         }
 
         @Override

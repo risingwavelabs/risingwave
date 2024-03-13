@@ -1,10 +1,10 @@
 CREATE TABLE delete_test (
-    id SERIAL PRIMARY KEY,
+    id INTEGER PRIMARY KEY,
     a INT,
     b text
 );
-INSERT INTO delete_test (a) VALUES (10);
-INSERT INTO delete_test (a, b) VALUES (50, repeat('x', 10000));
+INSERT INTO delete_test (id, a) VALUES (1, 10);
+INSERT INTO delete_test (id, a, b) VALUES (2, 50, repeat('x', 10000));
 INSERT INTO delete_test (a) VALUES (100);
 -- allow an alias to be specified for DELETE's target table
 DELETE FROM delete_test AS dt WHERE dt.a > 75;
@@ -15,7 +15,7 @@ ERROR:  invalid reference to FROM-clause entry for table "delete_test"
 LINE 1: DELETE FROM delete_test dt WHERE delete_test.a > 25;
                                          ^
 HINT:  Perhaps you meant to reference the table alias "dt".
-SELECT id, a, char_length(b) FROM delete_test;
+SELECT id, a, char_length(b) FROM delete_test ORDER BY id;
  id | a  | char_length 
 ----+----+-------------
   1 | 10 |            

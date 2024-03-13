@@ -164,6 +164,22 @@ pub enum Token {
     HashArrow,
     /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
     HashLongArrow,
+    /// `#-`, delete a key from a JSON object in PostgreSQL
+    HashMinus,
+    /// `@>`, does the left JSON value contain the right JSON path/value entries at the top level
+    AtArrow,
+    /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
+    ArrowAt,
+    /// `?`, does the string exist as a top-level key within the JSON value
+    QuestionMark,
+    /// `?|`, do any of the strings exist as top-level keys or array elements?
+    QuestionMarkPipe,
+    /// `?&`, do all of the strings exist as top-level keys or array elements?
+    QuestionMarkAmpersand,
+    /// `@?`, does JSON path return any item for the specified JSON value?
+    AtQuestionMark,
+    /// `@@`, returns the result of a JSON path predicate check for the specified JSON value.
+    AtAt,
 }
 
 impl fmt::Display for Token {
@@ -231,6 +247,14 @@ impl fmt::Display for Token {
             Token::LongArrow => f.write_str("->>"),
             Token::HashArrow => f.write_str("#>"),
             Token::HashLongArrow => f.write_str("#>>"),
+            Token::HashMinus => f.write_str("#-"),
+            Token::AtArrow => f.write_str("@>"),
+            Token::ArrowAt => f.write_str("<@"),
+            Token::QuestionMark => f.write_str("?"),
+            Token::QuestionMarkPipe => f.write_str("?|"),
+            Token::QuestionMarkAmpersand => f.write_str("?&"),
+            Token::AtQuestionMark => f.write_str("@?"),
+            Token::AtAt => f.write_str("@@"),
         }
     }
 }
@@ -515,14 +539,6 @@ impl<'a> Tokenizer<'a> {
                     chars.next(); // consume the first char
                     let s = self.tokenize_word(ch, chars);
 
-                    if s.chars().all(|x| x.is_ascii_digit() || x == '.') {
-                        let mut s = peeking_take_while(&mut s.chars().peekable(), |ch| {
-                            ch.is_ascii_digit() || ch == '.'
-                        });
-                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_digit() || ch == '.');
-                        s += s2.as_str();
-                        return Ok(Some(Token::Number(s)));
-                    }
                     Ok(Some(Token::make_word(&s, None)))
                 }
                 // string
@@ -550,13 +566,24 @@ impl<'a> Tokenizer<'a> {
                     let mut s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // match binary literal that starts with 0x
-                    if s == "0" && chars.peek() == Some(&'x') {
+                    if s == "0"
+                        && let Some(&radix) = chars.peek()
+                        && "xob".contains(radix.to_ascii_lowercase())
+                    {
                         chars.next();
-                        let s2 = peeking_take_while(
-                            chars,
-                            |ch| matches!(ch, '0'..='9' | 'A'..='F' | 'a'..='f'),
-                        );
-                        return Ok(Some(Token::HexStringLiteral(s2)));
+                        let radix = radix.to_ascii_lowercase();
+                        let base = match radix {
+                            'x' => 16,
+                            'o' => 8,
+                            'b' => 2,
+                            _ => unreachable!(),
+                        };
+                        let s2 = peeking_take_while(chars, |ch| ch.is_digit(base));
+                        if s2.is_empty() {
+                            return self.tokenizer_error("incomplete integer literal");
+                        }
+                        self.reject_number_junk(chars)?;
+                        return Ok(Some(Token::Number(format!("0{radix}{s2}"))));
                     }
 
                     // match one period
@@ -582,11 +609,13 @@ impl<'a> Tokenizer<'a> {
                                 chars.next();
                             }
                             s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
+                            self.reject_number_junk(chars)?;
                             return Ok(Some(Token::Number(s)));
                         }
                         // Not a scientific number
                         _ => {}
                     };
+                    self.reject_number_junk(chars)?;
                     Ok(Some(Token::Number(s)))
                 }
                 // punctuation
@@ -693,6 +722,7 @@ impl<'a> Tokenizer<'a> {
                         }
                         Some('>') => self.consume_and_return(chars, Token::Neq),
                         Some('<') => self.consume_and_return(chars, Token::ShiftLeft),
+                        Some('@') => self.consume_and_return(chars, Token::ArrowAt),
                         _ => Ok(Some(Token::Lt)),
                     }
                 }
@@ -745,6 +775,7 @@ impl<'a> Tokenizer<'a> {
                 '#' => {
                     chars.next(); // consume the '#'
                     match chars.peek() {
+                        Some('-') => self.consume_and_return(chars, Token::HashMinus),
                         Some('>') => {
                             chars.next(); // consume first '>'
                             match chars.peek() {
@@ -759,7 +790,25 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Sharp)),
                     }
                 }
-                '@' => self.consume_and_return(chars, Token::AtSign),
+                '@' => {
+                    chars.next(); // consume the '@'
+                    match chars.peek() {
+                        Some('>') => self.consume_and_return(chars, Token::AtArrow),
+                        Some('?') => self.consume_and_return(chars, Token::AtQuestionMark),
+                        Some('@') => self.consume_and_return(chars, Token::AtAt),
+                        // a regular '@' operator
+                        _ => Ok(Some(Token::AtSign)),
+                    }
+                }
+                '?' => {
+                    chars.next(); // consume the '?'
+                    match chars.peek() {
+                        Some('|') => self.consume_and_return(chars, Token::QuestionMarkPipe),
+                        Some('&') => self.consume_and_return(chars, Token::QuestionMarkAmpersand),
+                        // a regular '?' operator
+                        _ => Ok(Some(Token::QuestionMark)),
+                    }
+                }
                 other => self.consume_and_return(chars, Token::Char(other)),
             },
             None => Ok(None),
@@ -820,7 +869,7 @@ impl<'a> Tokenizer<'a> {
                 match chars.peek() {
                     Some('$') => {
                         chars.next();
-                        for (_, c) in value.chars().enumerate() {
+                        for c in value.chars() {
                             let next_char = chars.next();
                             if Some(c) != next_char {
                                 return self.tokenizer_error(format!(
@@ -858,6 +907,15 @@ impl<'a> Tokenizer<'a> {
             col: self.col,
             line: self.line,
         })
+    }
+
+    fn reject_number_junk(&self, chars: &mut Peekable<Chars<'_>>) -> Result<(), TokenizerError> {
+        if let Some(ch) = chars.peek()
+            && is_identifier_start(*ch)
+        {
+            return self.tokenizer_error("trailing junk after numeric literal");
+        }
+        Ok(())
     }
 
     // Consume characters until newline
@@ -983,7 +1041,9 @@ impl<'a> Tokenizer<'a> {
         ) -> Result<(), String> {
             let mut unicode_seq: String = String::with_capacity(len);
             for _ in 0..len {
-                if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
+                if let Some(c) = chars.peek()
+                    && c.is_ascii_hexdigit()
+                {
                     unicode_seq.push(chars.next().unwrap());
                 } else {
                     break;
@@ -1027,7 +1087,9 @@ impl<'a> Tokenizer<'a> {
             let mut unicode_seq: String = String::with_capacity(3);
             unicode_seq.push(digit);
             for _ in 0..2 {
-                if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
+                if let Some(c) = chars.peek()
+                    && matches!(*c, '0'..='7')
+                {
                     unicode_seq.push(chars.next().unwrap());
                 } else {
                     break;

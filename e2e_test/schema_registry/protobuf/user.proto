@@ -2,12 +2,15 @@ syntax = "proto3";
 
 package test;
 
+import "google/protobuf/source_context.proto";
+
 message User {
   int32 id = 1;
   string name = 2;
   string address = 3;
   string city = 4;
   Gender gender = 5;
+  google.protobuf.SourceContext sc = 6;
 }
 
 enum Gender {

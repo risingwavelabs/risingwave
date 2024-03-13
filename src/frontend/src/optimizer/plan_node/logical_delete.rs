@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::error::Result;
 
 use super::utils::impl_distill_by_unit;
 use super::{
@@ -21,6 +20,8 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::error::Result;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -90,6 +91,8 @@ impl ColPrunable for LogicalDelete {
 }
 
 impl ExprRewritable for LogicalDelete {}
+
+impl ExprVisitable for LogicalDelete {}
 
 impl PredicatePushdown for LogicalDelete {
     fn predicate_pushdown(

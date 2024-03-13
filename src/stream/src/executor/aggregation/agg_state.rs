@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
@@ -35,10 +36,11 @@ pub enum AggStateStorage<S: StateStore> {
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
     /// `mapping` describes the mapping between the columns in the state table and the input
-    /// chunks.
+    /// chunks. `order_columns` list the index and order type of sort keys.
     MaterializedInput {
         table: StateTable<S>,
         mapping: StateTableColumnMapping,
+        order_columns: Vec<ColumnOrder>,
     },
 }
 
@@ -83,16 +85,19 @@ impl AggState {
                 };
                 Self::Value(state)
             }
-            AggStateStorage::MaterializedInput { mapping, .. } => {
-                Self::MaterializedInput(Box::new(MaterializedInputState::new(
-                    version,
-                    agg_call,
-                    pk_indices,
-                    mapping,
-                    extreme_cache_size,
-                    input_schema,
-                )?))
-            }
+            AggStateStorage::MaterializedInput {
+                mapping,
+                order_columns,
+                ..
+            } => Self::MaterializedInput(Box::new(MaterializedInputState::new(
+                version,
+                agg_call,
+                pk_indices,
+                order_columns,
+                mapping,
+                extreme_cache_size,
+                input_schema,
+            )?)),
         })
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -85,12 +85,12 @@ public class CassandraFactory implements SinkFactory {
         // 3. close client
         session.close();
         switch (sinkType) {
-            case UPSERT:
+            case SINK_TYPE_UPSERT:
                 CassandraUtil.checkPrimaryKey(
                         tableMetadata.getPrimaryKey(), tableSchema.getPrimaryKeys());
                 break;
-            case APPEND_ONLY:
-            case FORCE_APPEND_ONLY:
+            case SINK_TYPE_APPEND_ONLY:
+            case SINK_TYPE_FORCE_APPEND_ONLY:
                 break;
             default:
                 throw Status.INTERNAL.asRuntimeException();

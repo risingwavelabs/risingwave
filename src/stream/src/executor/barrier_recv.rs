@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndicesRef,
+    ActorContext, ActorContextRef, Barrier, BoxedMessageStream, Execute, Message,
     StreamExecutorError,
 };
 
@@ -26,31 +25,25 @@ use super::{
 /// of the streaming graph.
 pub struct BarrierRecvExecutor {
     _ctx: ActorContextRef,
-    identity: String,
 
     /// The barrier receiver registered in the local barrier manager.
     barrier_receiver: UnboundedReceiver<Barrier>,
 }
 
 impl BarrierRecvExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        barrier_receiver: UnboundedReceiver<Barrier>,
-        executor_id: u64,
-    ) -> Self {
+    pub fn new(ctx: ActorContextRef, barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
         Self {
             _ctx: ctx,
-            identity: format!("BarrierRecvExecutor {:X}", executor_id),
             barrier_receiver,
         }
     }
 
     pub fn for_test(barrier_receiver: UnboundedReceiver<Barrier>) -> Self {
-        Self::new(ActorContext::create(0), barrier_receiver, 0)
+        Self::new(ActorContext::for_test(0), barrier_receiver)
     }
 }
 
-impl Executor for BarrierRecvExecutor {
+impl Execute for BarrierRecvExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         UnboundedReceiverStream::new(self.barrier_receiver)
             .map(|barrier| Ok(Message::Barrier(barrier)))
@@ -61,23 +54,12 @@ impl Executor for BarrierRecvExecutor {
             }))
             .boxed()
     }
-
-    fn schema(&self) -> &Schema {
-        Schema::empty()
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &[]
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use futures::pin_mut;
+    use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -91,13 +73,17 @@ mod tests {
         let stream = barrier_recv.execute();
         pin_mut!(stream);
 
-        barrier_tx.send(Barrier::new_test_barrier(114)).unwrap();
-        barrier_tx.send(Barrier::new_test_barrier(514)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(1)))
+            .unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(2)))
+            .unwrap();
 
         let barrier_1 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_1.epoch.curr, 114);
+        assert_eq!(barrier_1.epoch.curr, test_epoch(1));
         let barrier_2 = stream.next_unwrap_ready_barrier().unwrap();
-        assert_eq!(barrier_2.epoch.curr, 514);
+        assert_eq!(barrier_2.epoch.curr, test_epoch(2));
 
         stream.next_unwrap_pending();
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,57 +13,59 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{Fields, Timestamptz};
+use risingwave_frontend_macro::system_catalog;
 
-use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
 
 /// `rw_worker_nodes` contains all information about the compute nodes in the cluster.
-/// TODO: Add other type of nodes if necessary in the future.
-pub const RW_WORKER_NODES: BuiltinTable = BuiltinTable {
-    name: "rw_worker_nodes",
-    schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "host"),
-        (DataType::Varchar, "port"),
-        (DataType::Varchar, "type"),
-        (DataType::Varchar, "state"),
-        (DataType::Int32, "parallelism"),
-        (DataType::Boolean, "is_streaming"),
-        (DataType::Boolean, "is_serving"),
-        (DataType::Boolean, "is_unschedulable"),
-    ],
-    pk: &[0],
-};
+#[derive(Fields)]
+struct RwWorkerNode {
+    #[primary_key]
+    id: i32,
+    host: Option<String>,
+    port: Option<String>,
+    r#type: String,
+    state: String,
+    parallelism: i32,
+    is_streaming: Option<bool>,
+    is_serving: Option<bool>,
+    is_unschedulable: Option<bool>,
+    rw_version: Option<String>,
+    system_total_memory_bytes: Option<i64>,
+    system_total_cpu_cores: Option<i64>,
+    started_at: Option<Timestamptz>,
+}
 
-impl SysCatalogReaderImpl {
-    pub fn read_rw_worker_nodes_info(&self) -> Result<Vec<OwnedRow>> {
-        let workers = self.worker_node_manager.list_worker_nodes();
+#[system_catalog(table, "rw_catalog.rw_worker_nodes")]
+async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwWorkerNode>> {
+    let workers = reader.meta_client.list_all_nodes().await?;
 
-        Ok(workers
-            .into_iter()
-            .map(|worker| {
-                let host = worker.host.as_ref().unwrap();
-                let property = worker.property.as_ref().unwrap();
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(worker.id as i32)),
-                    Some(ScalarImpl::Utf8(host.host.clone().into())),
-                    Some(ScalarImpl::Utf8(host.port.to_string().into())),
-                    Some(ScalarImpl::Utf8(
-                        worker.get_type().unwrap().as_str_name().into(),
-                    )),
-                    Some(ScalarImpl::Utf8(
-                        worker.get_state().unwrap().as_str_name().into(),
-                    )),
-                    Some(ScalarImpl::Int32(worker.parallel_units.len() as i32)),
-                    Some(ScalarImpl::Bool(property.is_streaming)),
-                    Some(ScalarImpl::Bool(property.is_serving)),
-                    Some(ScalarImpl::Bool(property.is_unschedulable)),
-                ])
-            })
-            .collect_vec())
-    }
+    Ok(workers
+        .into_iter()
+        .sorted_by_key(|w| w.id)
+        .map(|worker| {
+            let host = worker.host.as_ref();
+            let property = worker.property.as_ref();
+            let resource = worker.resource.as_ref();
+            RwWorkerNode {
+                id: worker.id as i32,
+                host: host.map(|h| h.host.clone()),
+                port: host.map(|h| h.port.to_string()),
+                r#type: worker.get_type().unwrap().as_str_name().into(),
+                state: worker.get_state().unwrap().as_str_name().into(),
+                parallelism: worker.parallel_units.len() as i32,
+                is_streaming: property.map(|p| p.is_streaming),
+                is_serving: property.map(|p| p.is_serving),
+                is_unschedulable: property.map(|p| p.is_unschedulable),
+                rw_version: resource.map(|r| r.rw_version.to_owned()),
+                system_total_memory_bytes: resource.map(|r| r.total_memory_bytes as _),
+                system_total_cpu_cores: resource.map(|r| r.total_cpu_cores as _),
+                started_at: worker
+                    .started_at
+                    .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),
+            }
+        })
+        .collect())
 }

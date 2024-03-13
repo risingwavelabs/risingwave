@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -35,6 +36,26 @@ where
     visit_inner(stream_node, &mut f)
 }
 
+/// A utility for to accessing the [`StreamNode`]. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont<F>(stream_node: &mut StreamNode, mut f: F)
+where
+    F: FnMut(&mut StreamNode) -> bool,
+{
+    fn visit_inner<F>(stream_node: &mut StreamNode, f: &mut F)
+    where
+        F: FnMut(&mut StreamNode) -> bool,
+    {
+        if !f(stream_node) {
+            return;
+        }
+        for input in &mut stream_node.input {
+            visit_inner(input, f);
+        }
+    }
+
+    visit_inner(stream_node, &mut f)
+}
+
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
 pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
@@ -45,9 +66,10 @@ where
 }
 
 /// Visit the tables of a [`StreamNode`].
-fn visit_stream_node_tables_inner<F>(
+pub fn visit_stream_node_tables_inner<F>(
     stream_node: &mut StreamNode,
     internal_tables_only: bool,
+    visit_child_recursively: bool,
     mut f: F,
 ) where
     F: FnMut(&mut Table, &str),
@@ -77,7 +99,7 @@ fn visit_stream_node_tables_inner<F>(
         };
     }
 
-    visit_stream_node(stream_node, |body| {
+    let mut visit_body = |body: &mut NodeBody| {
         match body {
             // Join
             NodeBody::HashJoin(node) => {
@@ -88,7 +110,12 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.right_degree_table, "HashJoinDegreeRight");
             }
             NodeBody::DynamicFilter(node) => {
-                always!(node.left_table, "DynamicFilterLeft");
+                if node.condition_always_relax {
+                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
+                } else {
+                    always!(node.left_table, "DynamicFilterLeft");
+                }
+
                 always!(node.right_table, "DynamicFilterRight");
             }
 
@@ -104,7 +131,11 @@ fn visit_stream_node_tables_inner<F>(
                         }
                     }
                 }
-                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                for (distinct_col, dedup_table) in node
+                    .distinct_dedup_tables
+                    .iter_mut()
+                    .sorted_by_key(|(i, _)| *i)
+                {
                     f(dedup_table, &format!("HashAggDedupForCol{}", distinct_col));
                 }
             }
@@ -119,7 +150,11 @@ fn visit_stream_node_tables_inner<F>(
                         }
                     }
                 }
-                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                for (distinct_col, dedup_table) in node
+                    .distinct_dedup_tables
+                    .iter_mut()
+                    .sorted_by_key(|(i, _)| *i)
+                {
                     f(
                         dedup_table,
                         &format!("SimpleAggDedupForCol{}", distinct_col),
@@ -194,9 +229,14 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "Sort");
             }
 
-            // Chain
-            NodeBody::Chain(node) => {
-                optional!(node.state_table, "Chain")
+            // Stream Scan
+            NodeBody::StreamScan(node) => {
+                optional!(node.state_table, "StreamScan")
+            }
+
+            // Stream Cdc Scan
+            NodeBody::StreamCdcScan(node) => {
+                always!(node.state_table, "StreamCdcScan")
             }
 
             // Note: add internal tables for new nodes here.
@@ -205,14 +245,19 @@ fn visit_stream_node_tables_inner<F>(
             }
             _ => {}
         }
-    })
+    };
+    if visit_child_recursively {
+        visit_stream_node(stream_node, visit_body)
+    } else {
+        visit_body(stream_node.node_body.as_mut().unwrap())
+    }
 }
 
 pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
 {
-    visit_stream_node_tables_inner(stream_node, true, f)
+    visit_stream_node_tables_inner(stream_node, true, true, f)
 }
 
 #[allow(dead_code)]
@@ -220,7 +265,7 @@ pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
 {
-    visit_stream_node_tables_inner(stream_node, false, f)
+    visit_stream_node_tables_inner(stream_node, false, true, f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].

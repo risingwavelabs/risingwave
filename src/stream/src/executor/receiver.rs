@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,17 +17,14 @@ use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
 use super::ActorContextRef;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    expect_first_barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices,
-    PkIndicesRef,
-};
+use crate::executor::utils::ActorInputMetrics;
+use crate::executor::{expect_first_barrier, BoxedMessageStream, Execute, Message};
 use crate::task::{FragmentId, SharedContext};
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -35,9 +32,6 @@ use crate::task::{FragmentId, SharedContext};
 pub struct ReceiverExecutor {
     /// Input from upstream.
     input: BoxedInput,
-
-    /// Logical Operator Info
-    info: ExecutorInfo,
 
     /// The context of the actor.
     actor_context: ActorContextRef,
@@ -57,18 +51,13 @@ pub struct ReceiverExecutor {
 
 impl std::fmt::Debug for ReceiverExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReceiverExecutor")
-            .field("schema", &self.info.schema)
-            .field("pk_indices", &self.info.pk_indices)
-            .finish()
+        f.debug_struct("ReceiverExecutor").finish()
     }
 }
 
 impl ReceiverExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
         ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
@@ -79,11 +68,6 @@ impl ReceiverExecutor {
     ) -> Self {
         Self {
             input,
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "ReceiverExecutor".to_string(),
-            },
             actor_context: ctx,
             upstream_fragment_id,
             metrics,
@@ -99,9 +83,7 @@ impl ReceiverExecutor {
         use crate::executor::ActorContext;
 
         Self::new(
-            Schema::default(),
-            vec![],
-            ActorContext::create(114),
+            ActorContext::for_test(114),
             514,
             1919,
             LocalInput::new(input, 0).boxed_input(),
@@ -112,24 +94,23 @@ impl ReceiverExecutor {
     }
 }
 
-impl Executor for ReceiverExecutor {
+impl Execute for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
-        let actor_id_str = actor_id.to_string();
-        let fragment_id_str = self.fragment_id.to_string();
-        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+
+        let mut metrics = ActorInputMetrics::new(
+            &self.metrics,
+            actor_id,
+            self.fragment_id,
+            self.upstream_fragment_id,
+        );
 
         let stream = #[try_stream]
         async move {
             let mut start_time = Instant::now();
             while let Some(msg) = self.input.next().await {
-                self.metrics
+                metrics
                     .actor_input_buffer_blocking_duration_ns
-                    .with_label_values(&[
-                        &actor_id_str,
-                        &fragment_id_str,
-                        &upstream_fragment_id_str,
-                    ])
                     .inc_by(start_time.elapsed().as_nanos() as u64);
                 let mut msg: Message = msg?;
 
@@ -138,10 +119,7 @@ impl Executor for ReceiverExecutor {
                         // Do nothing.
                     }
                     Message::Chunk(chunk) => {
-                        self.metrics
-                            .actor_in_record_cnt
-                            .with_label_values(&[&actor_id_str, &fragment_id_str])
-                            .inc_by(chunk.cardinality() as _);
+                        metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(barrier) => {
                         tracing::debug!(
@@ -196,7 +174,12 @@ impl Executor for ReceiverExecutor {
                             self.input = new_upstream;
 
                             self.upstream_fragment_id = new_upstream_fragment_id;
-                            upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+                            metrics = ActorInputMetrics::new(
+                                &self.metrics,
+                                actor_id,
+                                self.fragment_id,
+                                self.upstream_fragment_id,
+                            );
                         }
                     }
                 };
@@ -208,22 +191,6 @@ impl Executor for ReceiverExecutor {
 
         stream.boxed()
     }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
-    }
 }
 
 #[cfg(test)]
@@ -233,16 +200,15 @@ mod tests {
 
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 
     use super::*;
-    use crate::executor::{ActorContext, Barrier, Executor, Mutation};
+    use crate::executor::{ActorContext, Barrier, Execute, Mutation, UpdateMutation};
     use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let schema = Schema { fields: vec![] };
-
         let actor_id = 233;
         let (old, new) = (114, 514); // old and new upstream actor id
 
@@ -273,9 +239,7 @@ mod tests {
         .unwrap();
 
         let receiver = ReceiverExecutor::new(
-            schema,
-            vec![],
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             fragment_id,
             upstream_fragment_id,
             input,
@@ -334,14 +298,16 @@ mod tests {
             }
         };
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
-            dispatchers: Default::default(),
-            merges: merge_updates,
-            vnode_bitmaps: Default::default(),
-            dropped_actors: Default::default(),
-            actor_splits: Default::default(),
-            actor_new_dispatchers: Default::default(),
-        });
+        let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                dispatchers: Default::default(),
+                merges: merge_updates,
+                vnode_bitmaps: Default::default(),
+                dropped_actors: Default::default(),
+                actor_splits: Default::default(),
+                actor_new_dispatchers: Default::default(),
+            },
+        ));
         send!([new], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, as new is not the upstream.
 

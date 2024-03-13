@@ -134,13 +134,17 @@
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
   expected_outputs:
-    - binder_error
+    - logical_plan
+    - stream_plan
+    - batch_plan
 - id: aggregate with over clause, range frame definition with between
   sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING and UNBOUNDED FOLLOWING) from t;
   expected_outputs:
-    - binder_error
+    - logical_plan
+    - stream_plan
+    - batch_plan
 - id: aggregate with over clause, unbounded range, with ORDER BY
   sql: |
     create table t(x int, y int);
@@ -183,12 +187,12 @@
 - id: multiple rank function calls
   sql: |
     create table t(x int);
-    select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
+    select row_number() over(PARTITION BY x ORDER BY x), rank() over(PARTITION BY x ORDER BY x), dense_rank() over (PARTITION BY x ORDER BY x) from t;
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_stream
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 - id: row_number with valid over clause
   sql: |
     create table t(x int, y int);
@@ -251,8 +255,8 @@
     -- OFFSET for RANK() is not yet supported
   expected_outputs:
     - logical_plan
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 # >>> TopN by row_number, with offset
 - sql: |
     create table t(x int, y int);
@@ -370,6 +374,24 @@
     - optimized_logical_plan_for_stream
     - stream_plan
     - batch_plan
+- id: TopN among multiple window function calls, some not TopN
+  sql: |
+    create table t (x int, y int, z int);
+    select r2, r3
+    from (
+      select
+        *,
+        row_number() over (partition by x order by y) r1,
+        row_number() over (partition by x, y order by z) r2,
+        rank() over (partition by x, y order by z) r3
+      from t
+    ) Q
+    where Q.r1 < 10;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
 
 # TopN on nexmark schema
 - id: create_bid
@@ -471,6 +493,101 @@
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_stream
-    - stream_error
+    - stream_plan
     - optimized_logical_plan_for_batch
-    - batch_error
+    - batch_plan
+
+# With filter
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select * from (select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t) as with_prev
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (id int, cat varchar, rule varchar, at timestamptz);
+    select cat, rule, at, lag(rule) over (partition by cat order by at) as prev_rule from t
+    where rule = 'B' and cat is not null and at = '2023-11-23T12:00:42Z'::timestamptz;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+
+# Odd frames
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 preceding and 10 preceding)
+    from t;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and current row)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 1 following and 1 preceding)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between current row and 1 preceding)
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (a int, b int, c int);
+    select
+        count(*) over (partition by 1::int order by b rows between 10 following and 1 following)
+    from t;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
+
+# Range frames
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by i range 1 preceding) as col1,
+        count(*) over (partition by 1::int order by bi range 1 preceding) as col2,
+        count(*) over (partition by 1::int order by d range 1.5 preceding) as col3,
+        count(*) over (partition by 1::int order by f range 1.5 preceding) as col4,
+        -- count(*) over (partition by 1::int order by da range '1 day' preceding) as col5, -- `date` not supported yet
+        -- count(*) over (partition by 1::int order by t range '1 min' preceding) as col6, -- `time` not supported yet
+        count(*) over (partition by 1::int order by ts range '1 day 1 hour' preceding) as col7,
+        count(*) over (partition by 1::int order by tstz range '1 min' preceding) as col8
+    from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by da range '1 day' preceding) -- `date` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by t range '1 min' preceding) -- `time` not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (i int, bi bigint, d decimal, f float, da date, t time, ts timestamp, tstz timestamptz, itv interval);
+    select
+        count(*) over (partition by 1::int order by tstz range '1 day 1 hour' preceding) -- `timestamptz` +/- 'x month x day' not supported yet
+    from t;
+  expected_outputs:
+    - binder_error

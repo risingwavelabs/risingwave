@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,24 +20,23 @@ use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, Watermark,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 
 pub struct SortExecutor<S: StateStore> {
-    input: BoxedExecutor,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
 pub struct SortExecutorArgs<S: StateStore> {
-    pub input: BoxedExecutor,
-
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
 
+    pub input: Executor,
+
+    pub schema: Schema,
     pub buffer_table: StateTable<S>,
     pub chunk_size: usize,
     pub sort_column_index: usize,
@@ -45,8 +44,8 @@ pub struct SortExecutorArgs<S: StateStore> {
 
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     buffer_table: StateTable<S>,
     chunk_size: usize,
     sort_column_index: usize,
@@ -54,39 +53,21 @@ struct ExecutorInner<S: StateStore> {
 
 struct ExecutionVars<S: StateStore> {
     buffer: SortBuffer<S>,
-    buffer_changed: bool,
 }
 
-impl<S: StateStore> Executor for SortExecutor<S> {
+impl<S: StateStore> Execute for SortExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl<S: StateStore> SortExecutor<S> {
     pub fn new(args: SortExecutorArgs<S>) -> Self {
-        let schema = args.input.schema().clone();
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    identity: format!("SortExecutor {:X}", args.executor_id),
-                    schema,
-                    pk_indices: args.pk_indices,
-                },
+                schema: args.schema,
                 buffer_table: args.buffer_table,
                 chunk_size: args.chunk_size,
                 sort_column_index: args.sort_column_index,
@@ -109,7 +90,6 @@ impl<S: StateStore> SortExecutor<S> {
 
         let mut vars = ExecutionVars {
             buffer: SortBuffer::new(this.sort_column_index, &this.buffer_table),
-            buffer_changed: false,
         };
 
         // Populate the sort buffer cache on initialization.
@@ -122,7 +102,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if col_idx == this.sort_column_index =>
                 {
                     let mut chunk_builder =
-                        StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
+                        StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
                     #[for_await]
                     for row in vars
@@ -137,7 +117,6 @@ impl<S: StateStore> SortExecutor<S> {
                     if let Some(chunk) = chunk_builder.take() {
                         yield Message::Chunk(chunk);
                     }
-                    vars.buffer_changed = true;
 
                     yield Message::Watermark(watermark);
                 }
@@ -147,15 +126,10 @@ impl<S: StateStore> SortExecutor<S> {
                 }
                 Message::Chunk(chunk) => {
                     vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
-                    vars.buffer_changed = true;
+                    this.buffer_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    if vars.buffer_changed {
-                        this.buffer_table.commit(barrier.epoch).await?;
-                    } else {
-                        this.buffer_table.commit_no_data_expected(barrier.epoch);
-                    }
-                    vars.buffer_changed = false;
+                    this.buffer_table.commit(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
@@ -181,12 +155,13 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BoxedMessageStream, Executor};
+    use crate::executor::{ActorContext, BoxedMessageStream, Execute};
 
     async fn create_executor<S: StateStore>(
         sort_column_index: usize,
@@ -216,12 +191,12 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
-            input: source.boxed(),
-            actor_ctx: ActorContext::create(123),
-            pk_indices: input_pk_indices,
-            executor_id: 1,
+            actor_ctx: ActorContext::for_test(123),
+            schema: source.schema().clone(),
+            input: source,
             buffer_table,
             chunk_size: 1024,
             sort_column_index,
@@ -237,7 +212,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -287,7 +262,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -322,7 +297,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -344,7 +319,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -354,7 +329,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(3, false);
+        recovered_tx.push_barrier(test_epoch(3), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

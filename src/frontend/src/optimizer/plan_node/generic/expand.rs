@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,7 +134,7 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
         let map = (0..input_len)
             .map(|source| Some(source + input_len))
             .collect_vec();
-        ColIndexMapping::with_target_size(map, self.output_len())
+        ColIndexMapping::new(map, self.output_len())
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {

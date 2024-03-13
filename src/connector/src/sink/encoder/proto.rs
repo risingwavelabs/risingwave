@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -363,11 +363,7 @@ mod tests {
                 Some(ScalarImpl::Int32(1)),
                 Some(ScalarImpl::Utf8("".into())),
             ]))),
-            Some(ScalarImpl::List(ListValue::new(vec![
-                Some(ScalarImpl::Int32(4)),
-                Some(ScalarImpl::Int32(0)),
-                Some(ScalarImpl::Int32(4)),
-            ]))),
+            Some(ScalarImpl::List(ListValue::from_iter([4, 0, 4]))),
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(3))),
         ]);
 
@@ -420,11 +416,11 @@ mod tests {
             DataType::List(DataType::Int32.into()),
             "repeated_int_field",
         )]);
-        let row = OwnedRow::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
-            Some(ScalarImpl::Int32(0)),
+        let row = OwnedRow::new(vec![Some(ScalarImpl::List(ListValue::from_iter([
+            Some(0),
             None,
-            Some(ScalarImpl::Int32(2)),
-            Some(ScalarImpl::Int32(3)),
+            Some(2),
+            Some(3),
         ])))]);
 
         let err = encode_fields(

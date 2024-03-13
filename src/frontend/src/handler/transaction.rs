@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_not_implemented;
+use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
-use super::{HandlerArgs, RwPgResponse};
+use super::{HandlerArgs, RwPgResponse, RwPgResponseBuilderExt};
+use crate::error::Result;
 use crate::session::transaction::AccessMode;
 
 macro_rules! not_impl {
     ($body:expr) => {
-        Err(ErrorCode::NotImplemented($body.into(), 10736.into()))
+        bail_not_implemented!(issue = 10376, "{}", $body)
     };
 }
 
@@ -40,7 +42,7 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL")?,
+                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
             }
         }
 
@@ -74,7 +76,7 @@ pub async fn handle_commit(
     let HandlerArgs { session, .. } = handler_args;
 
     if chain {
-        not_impl!("COMMIT AND CHAIN")?;
+        not_impl!("COMMIT AND CHAIN");
     }
 
     session.txn_commit_explicit();
@@ -91,7 +93,7 @@ pub async fn handle_rollback(
     let HandlerArgs { session, .. } = handler_args;
 
     if chain {
-        not_impl!("ROLLBACK AND CHAIN")?;
+        not_impl!("ROLLBACK AND CHAIN");
     }
 
     session.txn_rollback_explicit();
@@ -112,5 +114,23 @@ pub async fn handle_set(
 
     Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
         .notice(MESSAGE)
+        .into())
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowVariableRow {
+    name: String,
+}
+
+pub fn handle_show_isolation_level(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
+
+    let rows = [ShowVariableRow {
+        name: config_reader.get("transaction_isolation")?,
+    }];
+
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .rows(rows)
         .into())
 }

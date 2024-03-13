@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::array::*;
-use risingwave_common::types::{DatumRef, DefaultOrdered, ToOwnedDatum};
+use risingwave_common::types::DefaultOrdered;
 use risingwave_expr::function;
 
 #[function("array_sort(anyarray) -> anyarray")]
-pub fn array_sort(list: ListRef<'_>) -> ListValue {
-    let mut v = list
-        .iter()
-        .map(DefaultOrdered)
-        .collect::<Vec<DefaultOrdered<DatumRef<'_>>>>();
-    v.sort();
-    ListValue::new(v.into_iter().map(|x| x.0.to_owned_datum()).collect())
+pub fn array_sort(array: ListRef<'_>) -> ListValue {
+    ListValue::from_datum_iter(
+        &array.data_type(),
+        array.iter().map(DefaultOrdered).sorted().map(|v| v.0),
+    )
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,11 @@ public abstract class DatabaseValidator {
     public void validateAll() {
         validateDbConfig();
         validateUserPrivilege();
-        validateTable();
+        // If the source connector is created by share source, it will capture events from
+        // multiple tables, skip validate its schema
+        if (!isCdcSourceJob()) {
+            validateTable();
+        }
     }
 
     /** Validate the config of the upstream database */
@@ -30,4 +34,7 @@ public abstract class DatabaseValidator {
 
     /** Validate the properties of the source table */
     abstract void validateTable();
+
+    /** Check if the validation is for CDC source job */
+    abstract boolean isCdcSourceJob();
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::Binder;
+use crate::binder::{Binder, Clause};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::handler::create_sql_function::SQL_UDF_PATTERN;
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -36,6 +37,32 @@ impl Binder {
                 )
             }
         };
+
+        // Special check for sql udf
+        // Note: The check in `bind_column` is to inline the identifiers,
+        // which, in the context of sql udf, will NOT be perceived as normal
+        // columns, but the actual named input parameters.
+        // Thus, we need to figure out if the current "column name" corresponds
+        // to the name of the defined sql udf parameters stored in `udf_context`.
+        // If so, we will treat this bind as an special bind, the actual expression
+        // stored in `udf_context` will then be bound instead of binding the non-existing column.
+        if self.udf_context.global_count() != 0 {
+            if let Some(expr) = self.udf_context.get_expr(&column_name) {
+                return Ok(expr.clone());
+            } else {
+                // The reason that we directly return error here,
+                // is because during a valid sql udf binding,
+                // there will not exist any column identifiers
+                // And invalid cases should already be caught
+                // during semantic check phase
+                // Note: the error message here also help with hint display
+                // when invalid definition occurs at sql udf creation time
+                return Err(ErrorCode::BindError(format!(
+                    "{SQL_UDF_PATTERN} failed to find named parameter {column_name}"
+                ))
+                .into());
+            }
+        }
 
         match self
             .context
@@ -79,6 +106,9 @@ impl Binder {
         for (i, lateral_context) in self.lateral_contexts.iter().rev().enumerate() {
             if lateral_context.is_visible {
                 let context = &lateral_context.context;
+                if matches!(context.clause, Some(Clause::Insert)) {
+                    continue;
+                }
                 // input ref from lateral context `depth` starts from 1.
                 let depth = i + 1;
                 match context.get_column_binding_index(&table_name, &column_name) {
@@ -101,6 +131,9 @@ impl Binder {
         for (i, (context, lateral_contexts)) in
             self.upper_subquery_contexts.iter().rev().enumerate()
         {
+            if matches!(context.clause, Some(Clause::Insert)) {
+                continue;
+            }
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
@@ -121,6 +154,9 @@ impl Binder {
             for (i, lateral_context) in lateral_contexts.iter().rev().enumerate() {
                 if lateral_context.is_visible {
                     let context = &lateral_context.context;
+                    if matches!(context.clause, Some(Clause::Insert)) {
+                        continue;
+                    }
                     // correlated input ref from lateral context `depth` starts from 1.
                     let depth = i + 1;
                     match context.get_column_binding_index(&table_name, &column_name) {
@@ -148,8 +184,10 @@ impl Binder {
         // FIXME: The type of `CTID` should be `tid`.
         // FIXME: The `CTID` column should be unique, so literal may break something.
         // FIXME: At least we should add a notice here.
-        if let ErrorCode::ItemNotFound(_) = err && column_name == "ctid" {
-            return Ok(Literal::new(Some("".into()), DataType::Varchar).into())
+        if let ErrorCode::ItemNotFound(_) = err
+            && column_name == "ctid"
+        {
+            return Ok(Literal::new(Some("".into()), DataType::Varchar).into());
         }
         Err(err.into())
     }

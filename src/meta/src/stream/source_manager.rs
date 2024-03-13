@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
-use itertools::Itertools;
+use anyhow::Context;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::dispatch_source_prop;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
@@ -31,6 +32,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -38,14 +40,17 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
+use crate::manager::{MetaSrvEnv, MetadataManager, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 
+/// `SourceManager` keeps fetching the latest split metadata from the external source services ([`ConnectorSourceWorker::tick`]),
+/// and sends a split assignment command if split changes detected ([`Self::tick`]).
 pub struct SourceManager {
     pub paused: Mutex<()>,
     env: MetaSrvEnv,
@@ -62,6 +67,8 @@ struct SharedSplitMap {
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
+/// `ConnectorSourceWorker` keeps fetching the latest split metadata from the external source service ([`Self::tick`]),
+/// and maintains it in `current_splits`.
 struct ConnectorSourceWorker<P: SourceProperties> {
     source_id: SourceId,
     source_name: String,
@@ -72,10 +79,16 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     connector_properties: P,
     connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
+    source_is_up: LabelGuardedIntGauge<2>,
 }
 
-fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
-    let mut properties = ConnectorProperties::extract(source.properties.clone())?;
+fn extract_prop_from_existing_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
+    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), false)?;
+    properties.init_from_pb_source(source);
+    Ok(properties)
+}
+fn extract_prop_from_new_source(source: &Source) -> ConnectorResult<ConnectorProperties> {
+    let mut properties = ConnectorProperties::extract(source.with_properties.clone(), true)?;
     properties.init_from_pb_source(source);
     Ok(properties)
 }
@@ -83,6 +96,7 @@ fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> 
 const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
 
 impl<P: SourceProperties> ConnectorSourceWorker<P> {
+    /// Recreate the `SplitEnumerator` to establish a new connection to the external source service.
     async fn refresh(&mut self) -> MetaResult<()> {
         let enumerator = P::SplitEnumerator::new(
             self.connector_properties.clone(),
@@ -94,13 +108,16 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 connector_client: self.connector_client.clone(),
             }),
         )
-        .await?;
+        .await
+        .context("failed to create SplitEnumerator")?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
         Ok(())
     }
 
+    /// On creation, connection to the external source service will be established, but `splits`
+    /// will not be updated until `tick` is called.
     pub async fn create(
         connector_client: &Option<ConnectorClient>,
         source: &Source,
@@ -119,7 +136,12 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 connector_client: connector_client.clone(),
             }),
         )
-        .await?;
+        .await
+        .context("failed to create SplitEnumerator")?;
+
+        let source_is_up = metrics
+            .source_is_up
+            .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
             source_id: source.id,
@@ -131,6 +153,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             connector_properties,
             connector_client: connector_client.clone(),
             fail_cnt: 0,
+            source_is_up,
         })
     }
 
@@ -151,23 +174,21 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 _ = interval.tick() => {
                     if self.fail_cnt > MAX_FAIL_CNT {
                         if let Err(e) = self.refresh().await {
-                            tracing::error!("error happened when refresh from connector source worker: {}", e.to_string());
+                            tracing::error!(error = %e.as_report(), "error happened when refresh from connector source worker");
                         }
                     }
                     if let Err(e) = self.tick().await {
-                        tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
+                        tracing::error!(error = %e.as_report(), "error happened when tick from connector source worker");
                     }
                 }
             }
         }
     }
 
+    /// Uses [`SplitEnumerator`] to fetch the latest split metadata from the external source service.
     async fn tick(&mut self) -> MetaResult<()> {
         let source_is_up = |res: i64| {
-            self.metrics
-                .source_is_up
-                .with_label_values(&[self.source_id.to_string().as_str(), &self.source_name])
-                .set(res);
+            self.source_is_up.set(res);
         };
         let splits = self.enumerator.list_splits().await.map_err(|e| {
             source_is_up(0);
@@ -188,6 +209,7 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
     }
 }
 
+/// Handle for a running [`ConnectorSourceWorker`].
 struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
@@ -202,7 +224,7 @@ impl ConnectorSourceWorkerHandle {
 }
 
 pub struct SourceManagerCore {
-    fragment_manager: FragmentManagerRef,
+    metadata_manager: MetadataManager,
 
     /// Managed source loops
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -217,7 +239,7 @@ pub struct SourceManagerCore {
 
 impl SourceManagerCore {
     fn new(
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -230,7 +252,7 @@ impl SourceManagerCore {
         }
 
         Self {
-            fragment_manager,
+            metadata_manager,
             managed_sources,
             source_fragments,
             fragment_sources,
@@ -238,7 +260,12 @@ impl SourceManagerCore {
         }
     }
 
-    async fn diff(&self) -> MetaResult<SplitAssignment> {
+    /// Checks whether the external source metadata has changed,
+    /// and re-assigns splits if there's a diff.
+    ///
+    /// `self.actor_splits` will not be updated. It will be updated by `Self::apply_source_change`,
+    /// after the mutation barrier has been collected.
+    async fn reassign_splits(&self) -> MetaResult<SplitAssignment> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
         for (source_id, handle) in &self.managed_sources {
@@ -249,47 +276,48 @@ impl SourceManagerCore {
                 }
             };
 
-            if let Some(discovered_splits) = handle.discovered_splits().await {
-                for fragment_id in fragment_ids {
-                    let actor_ids = match self
-                        .fragment_manager
-                        .get_running_actors_of_fragment(*fragment_id)
-                        .await
-                    {
-                        Ok(actor_ids) => actor_ids,
-                        Err(err) => {
-                            tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
-                            continue;
-                        }
-                    };
+            let Some(discovered_splits) = handle.discovered_splits().await else {
+                return Ok(split_assignment);
+            };
+            if discovered_splits.is_empty() {
+                tracing::warn!("No splits discovered for source {}", source_id);
+            }
 
-                    let prev_actor_splits: HashMap<_, _> = actor_ids
-                        .into_iter()
-                        .map(|actor_id| {
-                            (
-                                actor_id,
-                                self.actor_splits
-                                    .get(&actor_id)
-                                    .cloned()
-                                    .unwrap_or_default(),
-                            )
-                        })
-                        .collect();
-
-                    if discovered_splits.is_empty() {
-                        tracing::warn!("No splits discovered for source {}", source_id);
+            for fragment_id in fragment_ids {
+                let actor_ids = match self
+                    .metadata_manager
+                    .get_running_actors_of_fragment(*fragment_id)
+                    .await
+                {
+                    Ok(actor_ids) => actor_ids,
+                    Err(err) => {
+                        tracing::warn!(error = %err.as_report(), "Failed to get the actor of the fragment, maybe the fragment doesn't exist anymore");
+                        continue;
                     }
+                };
 
-                    if let Some(change) = diff_splits(
-                        *fragment_id,
-                        prev_actor_splits,
-                        &discovered_splits,
-                        SplitDiffOptions {
-                            enable_scale_in: handle.enable_scale_in,
-                        },
-                    ) {
-                        split_assignment.insert(*fragment_id, change);
-                    }
+                let prev_actor_splits: HashMap<_, _> = actor_ids
+                    .into_iter()
+                    .map(|actor_id| {
+                        (
+                            actor_id,
+                            self.actor_splits
+                                .get(&actor_id)
+                                .cloned()
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .collect();
+
+                if let Some(new_assignment) = reassign_splits(
+                    *fragment_id,
+                    prev_actor_splits,
+                    &discovered_splits,
+                    SplitDiffOptions {
+                        enable_scale_in: handle.enable_scale_in,
+                    },
+                ) {
+                    split_assignment.insert(*fragment_id, new_assignment);
                 }
             }
         }
@@ -297,7 +325,7 @@ impl SourceManagerCore {
         Ok(split_assignment)
     }
 
-    pub fn apply_source_change(
+    fn apply_source_change(
         &mut self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         split_assignment: Option<SplitAssignment>,
@@ -331,10 +359,10 @@ impl SourceManagerCore {
         }
     }
 
-    pub fn drop_source_change(
+    fn drop_source_fragments(
         &mut self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        actor_splits: &HashSet<ActorId>,
+        removed_actors: &HashSet<ActorId>,
     ) {
         for (source_id, fragment_ids) in source_fragments {
             if let Entry::Occupied(mut entry) = self.source_fragments.entry(source_id) {
@@ -353,16 +381,13 @@ impl SourceManagerCore {
             }
         }
 
-        for actor_id in actor_splits {
+        for actor_id in removed_actors {
             self.actor_splits.remove(actor_id);
         }
     }
-
-    pub fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
-        self.actor_splits.clone()
-    }
 }
 
+/// Note: the `PartialEq` and `Ord` impl just compares the number of splits.
 #[derive(Debug)]
 struct ActorSplitsAssignment<T: SplitMetaData> {
     actor_id: ActorId,
@@ -385,6 +410,7 @@ impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
 
 impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     fn cmp(&self, other: &Self) -> Ordering {
+        // Note: this is reversed order, to make BinaryHeap a min heap.
         other.splits.len().cmp(&self.splits.len())
     }
 }
@@ -403,7 +429,31 @@ impl Default for SplitDiffOptions {
     }
 }
 
-fn diff_splits<T>(
+/// Reassigns splits if there are new splits or dropped splits,
+/// i.e., `actor_splits` and `discovered_splits` differ.
+///
+/// The existing splits will remain unmoved in their currently assigned actor.
+///
+/// - `fragment_id`: just for logging
+///
+/// ## Different connectors' behavior of split change
+///
+/// ### Kafka and Pulsar
+/// They only support increasing the number of splits via adding new empty splits.
+/// Old data is not moved.
+///
+/// ### Kinesis
+/// It supports *pairwise* shard split and merge.
+///
+/// In both cases, old data remain in the old shard(s) and the old shard is still available.
+/// New data are routed to the new shard(s).
+/// After the retention period has expired, the old shard will become `EXPIRED` and isn't
+/// listed any more. In other words, the total number of shards will first increase and then decrease.
+///
+/// See also:
+/// - [Kinesis resharding doc](https://docs.aws.amazon.com/streams/latest/dev/kinesis-using-sdk-java-after-resharding.html#kinesis-using-sdk-java-resharding-data-routing)
+/// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
+fn reassign_splits<T>(
     fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
@@ -440,7 +490,7 @@ where
         }
     }
 
-    let new_discovered_splits: HashSet<_> = discovered_split_ids
+    let new_discovered_splits: BTreeSet<_> = discovered_split_ids
         .into_iter()
         .filter(|split_id| !prev_split_ids.contains(split_id))
         .collect();
@@ -475,6 +525,14 @@ where
     }
 
     for split_id in new_discovered_splits {
+        // ActorSplitsAssignment's Ord is reversed, so this is min heap, i.e.,
+        // we get the assignment with the least splits here.
+
+        // Note: If multiple actors have the same number of splits, it will be randomly picked.
+        // When the number of source actors is larger than the number of splits,
+        // It's possible that the assignment is uneven.
+        // e.g., https://github.com/risingwavelabs/risingwave/issues/14324#issuecomment-1875033158
+        // TODO: We should make the assignment rack-aware to make sure it's even.
         let mut peek_ref = heap.peek_mut().unwrap();
         peek_ref
             .splits
@@ -495,13 +553,12 @@ impl SourceManager {
     pub async fn new(
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
-        catalog_manager: CatalogManagerRef,
-        fragment_manager: FragmentManagerRef,
+        metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let sources = catalog_manager.list_sources().await;
+            let sources = metadata_manager.list_sources().await?;
             for source in sources {
                 Self::create_source_worker_async(
                     env.connector_client(),
@@ -514,18 +571,55 @@ impl SourceManager {
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager
-            .get_fragment_read_guard()
-            .await
-            .table_fragments()
-            .values()
-        {
-            source_fragments.extend(table_fragments.stream_source_fragments());
-            actor_splits.extend(table_fragments.actor_splits.clone());
+
+        match &metadata_manager {
+            MetadataManager::V1(mgr) => {
+                for table_fragments in mgr
+                    .fragment_manager
+                    .get_fragment_read_guard()
+                    .await
+                    .table_fragments()
+                    .values()
+                {
+                    source_fragments.extend(table_fragments.stream_source_fragments());
+                    actor_splits.extend(table_fragments.actor_splits.clone());
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                source_fragments = mgr
+                    .catalog_controller
+                    .load_source_fragment_ids()
+                    .await?
+                    .into_iter()
+                    .map(|(source_id, fragment_ids)| {
+                        (
+                            source_id as SourceId,
+                            fragment_ids.into_iter().map(|id| id as _).collect(),
+                        )
+                    })
+                    .collect();
+                actor_splits = mgr
+                    .catalog_controller
+                    .load_actor_splits()
+                    .await?
+                    .into_iter()
+                    .map(|(actor_id, splits)| {
+                        (
+                            actor_id as ActorId,
+                            splits
+                                .into_inner()
+                                .splits
+                                .iter()
+                                .map(|split| SplitImpl::try_from(split).unwrap())
+                                .collect(),
+                        )
+                    })
+                    .collect();
+            }
         }
 
         let core = Mutex::new(SourceManagerCore::new(
-            fragment_manager,
+            metadata_manager,
             managed_sources,
             source_fragments,
             actor_splits,
@@ -540,16 +634,26 @@ impl SourceManager {
         })
     }
 
-    pub async fn drop_source_change(&self, table_fragments_vec: &[TableFragments]) {
+    pub async fn drop_source_fragments_v2(
+        &self,
+        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+        removed_actors: HashSet<ActorId>,
+    ) {
+        let mut core = self.core.lock().await;
+        core.drop_source_fragments(source_fragments, &removed_actors);
+    }
+
+    /// For dropping MV.
+    pub async fn drop_source_fragments(&self, table_fragments: &[TableFragments]) {
         let mut core = self.core.lock().await;
 
         // Extract the fragments that include source operators.
-        let source_fragments = table_fragments_vec
+        let source_fragments = table_fragments
             .iter()
             .flat_map(|table_fragments| table_fragments.stream_source_fragments())
             .collect::<HashMap<_, _>>();
 
-        let fragments = table_fragments_vec
+        let fragments = table_fragments
             .iter()
             .flat_map(|table_fragments| &table_fragments.fragments)
             .collect::<BTreeMap<_, _>>();
@@ -561,9 +665,10 @@ impl SourceManager {
             .map(|actor| actor.get_actor_id())
             .collect::<HashSet<_>>();
 
-        core.drop_source_change(source_fragments, &dropped_actors);
+        core.drop_source_fragments(source_fragments, &dropped_actors);
     }
 
+    /// Updates states after split change (`post_collect` barrier) or scaling (`post_apply_reschedule`).
     pub async fn apply_source_change(
         &self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
@@ -574,11 +679,13 @@ impl SourceManager {
         core.apply_source_change(source_fragments, split_assignment, dropped_actors);
     }
 
-    // After introducing the remove function for split, there may be a very occasional split removal
-    // during scaling, in which case we need to use the old splits for reallocation instead of the
-    // latest splits (which may be missing), so that we can resolve the split removal in the next
-    // command.
-    pub async fn reallocate_splits(
+    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
+    ///
+    /// Very occasionally split removal may happen
+    /// during scaling, in which case we need to use the old splits for reallocation instead of the
+    /// latest splits (which may be missing), so that we can resolve the split removal in the next
+    /// command.
+    pub async fn migrate_splits(
         &self,
         fragment_id: FragmentId,
         prev_actor_ids: &[ActorId],
@@ -589,20 +696,15 @@ impl SourceManager {
         let prev_splits = prev_actor_ids
             .iter()
             .flat_map(|actor_id| core.actor_splits.get(actor_id).unwrap())
-            .cloned()
-            .collect_vec();
+            .map(|split| (split.id(), split.clone()))
+            .collect();
 
         let empty_actor_splits = curr_actor_ids
             .iter()
             .map(|actor_id| (*actor_id, vec![]))
             .collect();
 
-        let prev_splits = prev_splits
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
-
-        let diff = diff_splits(
+        let diff = reassign_splits(
             fragment_id,
             empty_actor_splits,
             &prev_splits,
@@ -614,11 +716,12 @@ impl SourceManager {
         Ok(diff)
     }
 
-    pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
+    /// Allocates splits to actors for a newly created source executor.
+    pub async fn allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
-            .fragment_manager
-            .select_table_fragments_by_table_id(table_id)
+            .metadata_manager
+            .get_job_fragments_by_id(table_id)
             .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();
@@ -629,7 +732,7 @@ impl SourceManager {
             let handle = core
                 .managed_sources
                 .get(&source_id)
-                .ok_or_else(|| anyhow!("could not found source {}", source_id))?;
+                .with_context(|| format!("could not find source {}", source_id))?;
 
             if handle.splits.lock().await.splits.is_none() {
                 // force refresh source
@@ -637,8 +740,11 @@ impl SourceManager {
                 handle
                     .sync_call_tx
                     .send(tx)
-                    .map_err(|e| anyhow!(e.to_string()))?;
-                rx.await.map_err(|e| anyhow!(e.to_string()))??;
+                    .ok()
+                    .context("failed to send sync call")?;
+                rx.await
+                    .ok()
+                    .context("failed to receive sync call response")??;
             }
 
             let splits = handle.discovered_splits().await.unwrap();
@@ -658,7 +764,7 @@ impl SourceManager {
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
 
-                if let Some(diff) = diff_splits(
+                if let Some(diff) = reassign_splits(
                     fragment_id,
                     empty_actor_splits,
                     &splits,
@@ -682,14 +788,25 @@ impl SourceManager {
                 self.env.connector_client(),
                 source,
                 &mut core.managed_sources,
-                true,
                 self.metrics.clone(),
             )
-            .await?;
+            .await
+            .context("failed to create source worker")?;
         }
         Ok(())
     }
 
+    /// Unregister connector worker for source.
+    pub async fn unregister_sources(&self, source_ids: Vec<SourceId>) {
+        let mut core = self.core.lock().await;
+        for source_id in source_ids {
+            if let Some(handle) = core.managed_sources.remove(&source_id) {
+                handle.handle.abort();
+            }
+        }
+    }
+
+    /// Used on startup ([`Self::new`]). Failed sources will not block meta startup.
     fn create_source_worker_async(
         connector_client: Option<ConnectorClient>,
         source: Source,
@@ -698,14 +815,13 @@ impl SourceManager {
     ) -> MetaResult<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
-        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
-
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let current_splits_ref = splits.clone();
         let source_id = source.id;
 
-        let connector_properties = extract_prop_from_source(&source)?;
+        let connector_properties = extract_prop_from_existing_source(&source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
+        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -719,7 +835,7 @@ impl SourceManager {
                         &source,
                         prop.deref().clone(),
                         DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                        splits.clone(),
+                        current_splits_ref.clone(),
                         metrics.clone(),
                     )
                     .await
@@ -728,7 +844,7 @@ impl SourceManager {
                             break worker;
                         }
                         Err(e) => {
-                            tracing::warn!("failed to create source worker: {}", e);
+                            tracing::warn!(error = %e.as_report(), "failed to create source worker");
                         }
                     }
                 };
@@ -742,22 +858,29 @@ impl SourceManager {
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
-                splits: current_splits_ref,
+                splits,
                 enable_scale_in,
             },
         );
         Ok(())
     }
 
+    /// Used when registering new sources (`Self::register_source`).
+    ///
+    /// It will call `ConnectorSourceWorker::tick()` to fetch split metadata once before returning.
     async fn create_source_worker(
         connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
-        force_tick: bool,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
-        let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
-        let connector_properties = extract_prop_from_source(source)?;
+        tracing::info!("spawning new watcher for source {}", source.id);
+
+        let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+        let current_splits_ref = splits.clone();
+        let source_id = source.id;
+
+        let connector_properties = extract_prop_from_new_source(source)?;
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = dispatch_source_prop!(connector_properties, prop, {
@@ -771,35 +894,30 @@ impl SourceManager {
             )
             .await?;
 
-            tracing::info!("spawning new watcher for source {}", source.id);
+            // if fail to fetch meta info, will refuse to create source
 
-            // don't force tick in process of recovery. One source down should not lead to meta
-            // recovery failure.
-            if force_tick {
-                // if fail to fetch meta info, will refuse to create source
-
-                // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
-                // in kafka
-                tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
-                    .await
-                    .map_err(|_e| {
-                        anyhow!(
-                            "failed to fetch meta info for source {}, error: timeout {}",
-                            source.id,
-                            Self::DEFAULT_SOURCE_TICK_TIMEOUT.as_secs()
-                        )
-                    })??;
-            }
+            // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
+            // in kafka
+            tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+                .await
+                .ok()
+                .with_context(|| {
+                    format!(
+                        "failed to fetch meta info for source {}, timeout {:?}",
+                        source.id,
+                        Self::DEFAULT_SOURCE_TICK_TIMEOUT
+                    )
+                })??;
 
             tokio::spawn(async move { worker.run(sync_call_rx).await })
         });
 
         managed_sources.insert(
-            source.id,
+            source_id,
             ConnectorSourceWorkerHandle {
                 handle,
                 sync_call_tx,
-                splits: current_splits_ref,
+                splits,
                 enable_scale_in,
             },
         );
@@ -807,29 +925,27 @@ impl SourceManager {
         Ok(())
     }
 
-    /// unregister connector worker for source.
-    pub async fn unregister_sources(&self, source_ids: Vec<SourceId>) {
-        let mut core = self.core.lock().await;
-        for source_id in source_ids {
-            if let Some(handle) = core.managed_sources.remove(&source_id) {
-                handle.handle.abort();
-            }
-        }
-    }
-
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         let core = self.core.lock().await;
         core.actor_splits.clone()
     }
 
+    /// Checks whether the external source metadata has changed, and sends a split assignment command
+    /// if it has.
+    ///
+    /// This is also how a newly created `SourceExecutor` is initialized.
+    /// (force `tick` in `Self::create_source_worker`)
+    ///
+    /// The command will first updates `SourceExecutor`'s splits, and finally calls `Self::apply_source_change`
+    /// to update states in `SourceManager`.
     async fn tick(&self) -> MetaResult<()> {
-        let diff = {
+        let split_assignment = {
             let core_guard = self.core.lock().await;
-            core_guard.diff().await?
+            core_guard.reassign_splits().await?
         };
 
-        if !diff.is_empty() {
-            let command = Command::SourceSplitAssignment(diff);
+        if !split_assignment.is_empty() {
+            let command = Command::SourceSplitAssignment(split_assignment);
             tracing::info!(command = ?command, "pushing down split assignment command");
             self.barrier_scheduler.run_command(command).await?;
         }
@@ -845,15 +961,11 @@ impl SourceManager {
             let _pause_guard = self.paused.lock().await;
             if let Err(e) = self.tick().await {
                 tracing::error!(
-                    "error happened while running source manager tick: {}",
-                    e.to_string()
+                    error = %e.as_report(),
+                    "error happened while running source manager tick",
                 );
             }
         }
-    }
-
-    pub async fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
-        self.core.lock().await.get_actor_splits()
     }
 }
 
@@ -894,13 +1006,13 @@ pub fn build_actor_split_impls(
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
-    use anyhow::anyhow;
     use risingwave_common::types::JsonbVal;
+    use risingwave_connector::error::ConnectorResult;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
     use crate::model::{ActorId, FragmentId};
-    use crate::stream::source_manager::{diff_splits, SplitDiffOptions};
+    use crate::stream::source_manager::{reassign_splits, SplitDiffOptions};
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     struct TestSplit {
@@ -916,11 +1028,11 @@ mod tests {
             serde_json::to_value(*self).unwrap().into()
         }
 
-        fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-            serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+            serde_json::from_value(value.take()).map_err(Into::into)
         }
 
-        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+        fn update_with_offset(&mut self, _start_offset: String) -> ConnectorResult<()> {
             Ok(())
         }
     }
@@ -970,7 +1082,7 @@ mod tests {
             .flat_map(|splits| splits.iter().map(|split| split.id()))
             .collect();
 
-        let diff = diff_splits(
+        let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,
@@ -1010,7 +1122,7 @@ mod tests {
             enable_scale_in: true,
         };
 
-        let diff = diff_splits(
+        let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,
@@ -1022,10 +1134,10 @@ mod tests {
     }
 
     #[test]
-    fn test_diff_splits() {
+    fn test_reassign_splits() {
         let actor_splits = HashMap::new();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        assert!(diff_splits(
+        assert!(reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,
@@ -1035,7 +1147,7 @@ mod tests {
 
         let actor_splits = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        let diff = diff_splits(
+        let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,
@@ -1055,7 +1167,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(
+        let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,
@@ -1077,7 +1189,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(
+        let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,
@@ -1104,7 +1216,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(
+        let diff = reassign_splits(
             FragmentId::default(),
             actor_splits,
             &discovered_splits,

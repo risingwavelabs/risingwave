@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,23 @@ use risingwave_pb::connector_service::CdcMessage;
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
+#[derive(Debug, Clone)]
+pub struct DebeziumCdcMeta {
+    pub full_table_name: String,
+    // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
+    pub source_ts_ms: i64,
+    // Whether the message is a transaction metadata
+    pub is_transaction_meta: bool,
+}
+
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
-            key: None,
+            key: if message.key.is_empty() {
+                None // only data message has key
+            } else {
+                Some(message.key.as_bytes().to_vec())
+            },
             payload: if message.payload.is_empty() {
                 None // heartbeat message
             } else {
@@ -28,7 +41,11 @@ impl From<CdcMessage> for SourceMessage {
             },
             offset: message.offset,
             split_id: message.partition.into(),
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
+                full_table_name: message.full_table_name,
+                source_ts_ms: message.source_ts_ms,
+                is_transaction_meta: message.is_transaction_meta,
+            }),
         }
     }
 }

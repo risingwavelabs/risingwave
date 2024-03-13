@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
+use easy_ext::ext;
 use parse_display::Display;
 
 use crate::types::{ScalarImpl, Timestamptz};
@@ -42,24 +42,23 @@ impl Epoch {
 
     #[must_use]
     pub fn next(self) -> Self {
-        let physical_now = Epoch::physical_now();
+        let mut physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
 
-        let next_epoch = match physical_now.cmp(&prev_physical_time) {
-            Ordering::Greater => Self::from_physical_time(physical_now),
-            Ordering::Equal => {
-                tracing::warn!("New generate epoch is too close to the previous one.");
-                Epoch(self.0 + 1)
+        loop {
+            if physical_now > prev_physical_time {
+                break;
             }
-            Ordering::Less => {
-                tracing::warn!(
-                    "Clock goes backwards when calling Epoch::next(): prev={}, curr={}",
-                    prev_physical_time,
-                    physical_now
-                );
-                Epoch(self.0 + 1)
-            }
-        };
+            physical_now = Epoch::physical_now();
+
+            #[cfg(madsim)]
+            tokio::time::advance(std::time::Duration::from_micros(10));
+            #[cfg(not(madsim))]
+            std::hint::spin_loop();
+        }
+        // The last 16 bits of the previous epoch ((prev_epoch + 1, prev_epoch + 65536)) will be
+        // used as the gap epoch when the mem table spill occurs.
+        let next_epoch = Self::from_physical_time(physical_now);
 
         assert!(next_epoch.0 > self.0);
         next_epoch
@@ -116,6 +115,29 @@ impl Epoch {
     }
 }
 
+pub const EPOCH_AVAILABLE_BITS: u64 = 16;
+pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
+// Low EPOCH_AVAILABLE_BITS bits set to 1
+pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
+// High (64-EPOCH_AVAILABLE_BITS) bits set to 1
+const EPOCH_MASK: u64 = !EPOCH_SPILL_TIME_MASK;
+pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
+
+// EPOCH_INC_MIN_STEP_FOR_TEST is the minimum increment step for epoch in unit tests.
+// We need to keep the lower 16 bits of the epoch unchanged during each increment,
+// and only increase the upper 48 bits.
+const EPOCH_INC_MIN_STEP_FOR_TEST: u64 = test_epoch(1);
+
+pub fn is_max_epoch(epoch: u64) -> bool {
+    // Since we have write `MAX_EPOCH` as max epoch to sstable in some previous version,
+    // it means that there may be two value in our system which represent infinite. We must check
+    // both of them for compatibility. See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+    epoch >= MAX_EPOCH
+}
+pub fn is_compatibility_max_epoch(epoch: u64) -> bool {
+    // See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+    epoch == MAX_EPOCH
+}
 impl From<u64> for Epoch {
     fn from(epoch: u64) -> Self {
         Self(epoch)
@@ -134,14 +156,43 @@ impl EpochPair {
         Self { curr, prev }
     }
 
-    pub fn inc(&mut self) {
-        self.curr += 1;
-        self.prev += 1;
+    pub fn inc_for_test(&mut self) {
+        self.prev = self.curr;
+        self.curr += EPOCH_INC_MIN_STEP_FOR_TEST;
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {
-        assert!(curr > 0);
-        Self::new(curr, curr - 1)
+        if !is_max_epoch(curr) {
+            assert!(curr >= EPOCH_INC_MIN_STEP_FOR_TEST);
+            assert!((curr & EPOCH_SPILL_TIME_MASK) == 0);
+        }
+        Self::new(curr, curr - EPOCH_INC_MIN_STEP_FOR_TEST)
+    }
+}
+/// As most unit tests initializ a new epoch from a random value (e.g. 1, 2, 233 etc.), but the correct epoch in the system is a u64 with the last `EPOCH_AVAILABLE_BITS` bits set to 0.
+/// This method is to turn a a random epoch into a well shifted value.
+pub const fn test_epoch(value: u64) -> u64 {
+    value << EPOCH_AVAILABLE_BITS
+}
+
+/// There are numerous operations in our system's unit tests that involve incrementing or decrementing the epoch.
+/// These extensions for u64 type are specifically used within the unit tests.
+#[ext(EpochExt)]
+pub impl u64 {
+    fn inc_epoch(&mut self) {
+        *self += EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn dec_epoch(&mut self) {
+        *self -= EPOCH_INC_MIN_STEP_FOR_TEST;
+    }
+
+    fn next_epoch(self) -> u64 {
+        self + EPOCH_INC_MIN_STEP_FOR_TEST
+    }
+
+    fn prev_epoch(self) -> u64 {
+        self - EPOCH_INC_MIN_STEP_FOR_TEST
     }
 }
 
@@ -203,8 +254,8 @@ mod tests {
         assert_eq!(risingwave_st, *UNIX_RISINGWAVE_DATE_EPOCH);
     }
 
-    #[test]
-    fn test_epoch_generate() {
+    #[tokio::test]
+    async fn test_epoch_generate() {
         let mut prev_epoch = Epoch::now();
         for _ in 0..1000 {
             let epoch = prev_epoch.next();

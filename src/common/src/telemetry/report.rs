@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use super::{
-    post_telemetry_report, Result, TelemetryReport, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
-};
+use super::{Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
+use crate::telemetry::pb_compatible::TelemetryToProtobuf;
+use crate::telemetry::post_telemetry_report_pb;
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
@@ -37,7 +37,7 @@ pub trait TelemetryReportCreator {
         tracking_id: String,
         session_id: String,
         up_time: u64,
-    ) -> Result<impl TelemetryReport>;
+    ) -> Result<impl TelemetryToProtobuf>;
 
     fn report_type(&self) -> &str;
 }
@@ -85,20 +85,16 @@ where
             }
 
             // create a report and serialize to json
-            let report_json = match report_creator
+            let bin_report = match report_creator
                 .create_report(
                     tracking_id.clone(),
                     session_id.clone(),
                     begin_time.elapsed().as_secs(),
                 )
                 .await
-                .map(|r| serde_json::to_string(&r))
+                .map(TelemetryToProtobuf::to_pb_bytes)
             {
-                Ok(Ok(report_json)) => report_json,
-                Ok(Err(e)) => {
-                    tracing::error!("Telemetry failed to serialize report to json, {}", e);
-                    continue;
-                }
+                Ok(bin_report) => bin_report,
                 Err(e) => {
                     tracing::error!("Telemetry failed to create report {}", e);
                     continue;
@@ -108,7 +104,7 @@ where
             let url =
                 (TELEMETRY_REPORT_URL.to_owned() + "/" + report_creator.report_type()).to_owned();
 
-            match post_telemetry_report(&url, report_json).await {
+            match post_telemetry_report_pb(&url, bin_report).await {
                 Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
                 Err(e) => tracing::error!("Telemetry post error, {}", e),
             }

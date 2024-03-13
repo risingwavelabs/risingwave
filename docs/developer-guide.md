@@ -47,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
 - [Understanding RisingWave Macros](#understanding-risingwave-macros)
+- [CI Labels Guide](#ci-labels-guide)
 
 ## Read the design docs
 
@@ -74,6 +75,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
 * LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
+* Python (>= 3.12) (Optional, only required by `embedded-python-udf` feature)
 
 To install the dependencies on macOS, run:
 
@@ -91,9 +93,34 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Then you'll be able to compile and start RiseDev!
 
-> **Note**
+> [!NOTE]
 >
 > `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
+
+> [!INFO]
+>
+> If you want to build RisingWave with `embedded-python-udf` feature, you need to install Python 3.12.
+>
+> To install Python 3.12 on macOS, run:
+>
+> ```shell
+> brew install python@3.12
+> ```
+>
+> To install Python 3.12 on Debian-based Linux systems, run:
+>
+> ```shell
+> sudo apt install software-properties-common
+> sudo add-apt-repository ppa:deadsnakes/ppa
+> sudo apt-get update
+> sudo apt-get install python3.12 python3.12-dev
+> ```
+>
+> If the default `python3` version is not 3.12, please set the `PYO3_PYTHON` environment variable:
+>
+> ```shell
+> export PYO3_PYTHON=python3.12
+> ```
 
 ## Start and monitor a dev cluster
 
@@ -144,7 +171,7 @@ To manually add those components into the cluster, you will need to configure Ri
 ./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
 ./risedev configure enable minio                  # enable MinIO
 ```
-> **Note**
+> [!NOTE]
 >
 > Enabling a component with the `./risedev configure enable` command will only download the component to your environment. To allow it to function, you must revise the corresponding configuration setting in `risedev.yml` and restart the dev cluster.
 
@@ -164,7 +191,7 @@ For example, you can modify the default section to:
       persist-data: true
 ```
 
-> **Note**
+> [!NOTE]
 >
 > The Kafka service depends on the ZooKeeper service. If you want to enable the Kafka component, enable the ZooKeeper component first.
 
@@ -334,7 +361,7 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 ./risedev slt-all -p 4566 -d dev -j 1
 ```
 
-> **Note**
+> [!NOTE]
 >
 > Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 
@@ -523,3 +550,20 @@ Instructions about submitting PRs are included in the [contribution guidelines](
 - [CPU Profiling Guide](./cpu-profiling.md)
 - [Memory (Heap) Profiling Guide](./memory-profiling.md)
 - [Microbench Guide](./microbenchmarks.md)
+
+## CI Labels Guide
+
+- `[ci/run-xxx ...]`: Run additional steps indicated by `ci/run-xxx` in your PR.
+- `ci/skip-ci` + `[ci/run-xxx ...]` : Skip steps except for those indicated by `ci/run-xxx` in your **DRAFT PR.**
+- `ci/run-main-cron`: Run full `main-cron`.
+- `ci/run-main-cron` + `ci/main-cron/skip-ci` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
+  from the `main-cron` workflow, in your PR. Can use to verify some `main-cron` fix works as expected.
+- To reference `[ci/run-xxx ...]` labels, you may look at steps from `pull-request.yml` and `main-cron.yml`.
+- **Be sure to add all the dependencies.**
+
+  For example to run `e2e-test` for `main-cron` in your pull request:
+  1. Add `ci/run-build`, `ci/run-build-other`, `ci/run-docslt` .
+     These correspond to its `depends` field in `pull-request.yml` and `main-cron.yml` .
+  2. Add `ci/run-e2e-test` to run the step as well.
+  3. Add `ci/run-main-cron` to run `main-cron` workflow in your pull request,
+  4. Add `ci/main-cron/skip-ci` to skip all other steps which were not selected with `ci/run-xxx`.

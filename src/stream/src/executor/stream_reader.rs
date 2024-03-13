@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,8 @@ use std::task::Poll;
 use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
-use risingwave_connector::source::BoxTryStream;
 
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::Message;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
@@ -48,26 +46,14 @@ pub(super) struct StreamReaderWithPause<const BIASED: bool, M> {
 }
 
 impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
-    /// Receive messages from the reader. Hang up on error.
-    #[try_stream(ok = M, error = StreamExecutorError)]
-    async fn data_stream(stream: BoxTryStream<M>) {
-        // TODO: support stack trace for Stream
-        #[for_await]
-        for m in stream {
-            match m {
-                Ok(m) => yield m,
-                Err(err) => {
-                    return Err(StreamExecutorError::connector_error(err));
-                }
-            }
-        }
-    }
-
     /// Construct a `StreamReaderWithPause` with one stream receiving barrier messages (and maybe
     /// other types of messages) and the other receiving data only (no barrier).
-    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxTryStream<M>) -> Self {
+    pub fn new(
+        message_stream: ExecutorMessageStream,
+        data_stream: impl Stream<Item = StreamExecutorResult<M>> + Send + 'static,
+    ) -> Self {
         let message_stream_arm = message_stream.map_ok(Either::Left).boxed();
-        let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
+        let data_stream_arm = data_stream.map_ok(Either::Right).boxed();
         let inner = Self::new_inner(message_stream_arm, data_stream_arm);
         Self {
             inner,
@@ -89,7 +75,10 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.
-    pub fn replace_data_stream(&mut self, data_stream: BoxTryStream<M>) {
+    pub fn replace_data_stream(
+        &mut self,
+        data_stream: impl Stream<Item = StreamExecutorResult<M>> + Send + 'static,
+    ) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
@@ -100,7 +89,7 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
         // to ensure the internal state of the `SelectWithStrategy` is reset. (#6300)
         self.inner = Self::new_inner(
             barrier_receiver_arm,
-            Self::data_stream(data_stream).map_ok(Either::Right).boxed(),
+            data_stream.map_ok(Either::Right).boxed(),
         );
     }
 
@@ -143,15 +132,16 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_connector::source::StreamChunkWithState;
-    use risingwave_source::TableDmlHandle;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_dml::TableDmlHandle;
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::executor::{barrier_to_message_stream, Barrier};
+    use crate::executor::{barrier_to_message_stream, Barrier, StreamExecutorError};
 
     const TEST_TRANSACTION_ID1: TxnId = 0;
     const TEST_TRANSACTION_ID2: TxnId = 1;
+    const TEST_SESSION_ID: u32 = 0;
     const TEST_DML_CHANNEL_INIT_PERMITS: usize = 32768;
 
     #[tokio::test]
@@ -160,14 +150,20 @@ mod tests {
 
         let table_dml_handle = TableDmlHandle::new(vec![], TEST_DML_CHANNEL_INIT_PERMITS);
 
-        let source_stream = table_dml_handle.stream_reader().into_data_stream_for_test();
+        let source_stream = table_dml_handle
+            .stream_reader()
+            .into_data_stream_for_test()
+            .map_err(StreamExecutorError::from);
 
-        let mut write_handle1 = table_dml_handle.write_handle(TEST_TRANSACTION_ID1).unwrap();
-        let mut write_handle2 = table_dml_handle.write_handle(TEST_TRANSACTION_ID2).unwrap();
+        let mut write_handle1 = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID1)
+            .unwrap();
+        let mut write_handle2 = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID2)
+            .unwrap();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
-        let stream =
-            StreamReaderWithPause::<true, StreamChunkWithState>::new(barrier_stream, source_stream);
+        let stream = StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
@@ -187,25 +183,29 @@ mod tests {
             .write_chunk(StreamChunk::default())
             .await
             .unwrap();
-        // We don't call end() here, since we test `StreamChunkWithState` instead of `TxnMsg`.
+        // We don't call end() here, since we test `StreamChunk` instead of `TxnMsg`.
 
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
-        barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(1)))
+            .unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_stream();
 
         // Write a barrier.
-        barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(2)))
+            .unwrap();
         // Then write a chunk.
         write_handle2.begin().unwrap();
         write_handle2
             .write_chunk(StreamChunk::default())
             .await
             .unwrap();
-        // We don't call end() here, since we test `StreamChunkWithState` instead of `TxnMsg`.
+        // We don't call end() here, since we test `StreamChunk` instead of `TxnMsg`.
 
         // We should receive the barrier.
         assert_matches!(next!().unwrap(), Either::Left(_));

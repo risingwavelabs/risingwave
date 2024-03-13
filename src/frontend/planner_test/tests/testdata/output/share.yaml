@@ -234,35 +234,30 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── materialized table: 4294967294
+    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum0(count)] }
-        └── StreamSimpleAgg { aggs: [sum0(count), count] }
-            ├── intermediate state table: 0
-            ├── state tables: []
-            ├── distinct tables: []
+        └── StreamSimpleAgg { aggs: [sum0(count), count] } { tables: [ SimpleAggState: 0 ] }
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamStatelessSimpleAgg { aggs: [count] }
     └── StreamHashJoin { type: Inner, predicate: t.a = t.a, output: all }
-        ├── left table: 1
-        ├── right table: 3
-        ├── left degree table: 2
-        ├── right degree table: 4
+        ├── tables:
+        │   ┌── HashJoinLeft: 1
+        │   ├── HashJoinDegreeLeft: 2
+        │   ├── HashJoinRight: 3
+        │   └── HashJoinDegreeRight: 4
         ├── StreamExchange NoShuffle from 2
         └── StreamExchange NoShuffle from 4
 
     Fragment 2
     StreamProject { exprs: [t.a] }
-    └── StreamHashAgg { group_key: [t.a], aggs: [count] }
-        ├── intermediate state table: 5
-        ├── state tables: []
-        ├── distinct tables: []
+    └── StreamHashAgg { group_key: [t.a], aggs: [count] } { tables: [ HashAggState: 5 ] }
         └── StreamExchange Hash([0]) from 3
 
     Fragment 3
-    Chain { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-    ├── state table: 6
+    StreamTableScan { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
 
@@ -337,10 +332,12 @@
     └─BatchHashJoin { type: Inner, predicate: id = id, output: [id, id, date_time, date_time] }
       ├─BatchExchange { order: [], dist: HashShard(id) }
       │ └─BatchFilter { predicate: (initial_bid = 1:Int32) AND (AtTimeZone(date_time, 'UTC':Varchar) > '2021-03-31 23:59:59+00:00':Timestamptz) }
-      │   └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+      │   └─BatchProject { exprs: [id, initial_bid, date_time] }
+      │     └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
       └─BatchExchange { order: [], dist: HashShard(id) }
         └─BatchFilter { predicate: (initial_bid = 2:Int32) }
-          └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
+          └─BatchProject { exprs: [id, initial_bid, date_time] }
+            └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [a_id, b_id, a_ts, b_ts, _row_id(hidden), _row_id#1(hidden)], stream_key: [_row_id, _row_id#1, a_id], pk_columns: [_row_id, _row_id#1, a_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(id, _row_id, _row_id) }

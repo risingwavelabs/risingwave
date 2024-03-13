@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,15 +17,17 @@ use opendal::services::Fs;
 use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
+
 impl OpendalObjectStore {
     /// create opendal fs engine.
     pub fn new_fs_engine(root: String) -> ObjectResult<Self> {
         // Create fs backend builder.
         let mut builder = Fs::default();
-
         builder.root(&root);
-
+        let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
+        builder.atomic_write_dir(&atomic_write_dir);
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
             .finish();

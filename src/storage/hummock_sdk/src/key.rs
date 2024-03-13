@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::iter::once;
 use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
@@ -23,7 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
 
-use crate::HummockEpoch;
+use crate::{EpochWithGap, HummockEpoch};
 
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
@@ -44,6 +46,44 @@ pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
     Bound<FullKey<KeyPayloadType>>,
 );
+
+pub fn is_empty_key_range(key_range: &TableKeyRange) -> bool {
+    match key_range {
+        (Included(start), Excluded(end)) => start == end,
+        _ => false,
+    }
+}
+
+// returning left inclusive and right exclusive
+pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
+    let (left, right) = range;
+    let left = match left {
+        Included(key) | Excluded(key) => key.vnode_part().to_index(),
+        Unbounded => 0,
+    };
+    let right = match right {
+        Included(key) => key.vnode_part().to_index() + 1,
+        Excluded(key) => {
+            let (vnode, inner_key) = key.split_vnode();
+            if inner_key.is_empty() {
+                // When the exclusive end key range contains only a vnode,
+                // the whole vnode is excluded.
+                vnode.to_index()
+            } else {
+                vnode.to_index() + 1
+            }
+        }
+        Unbounded => VirtualNode::COUNT,
+    };
+    (left, right)
+}
+
+// Ensure there is only one vnode involved in table key range and return the vnode
+pub fn vnode(range: &TableKeyRange) -> VirtualNode {
+    let (l, r_exclusive) = vnode_range(range);
+    assert_eq!(r_exclusive - l, 1);
+    VirtualNode::from_index(l)
+}
 
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
@@ -279,6 +319,17 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     }
 }
 
+pub fn end_bound_of_vnode(vnode: VirtualNode) -> Bound<Bytes> {
+    if vnode == VirtualNode::MAX {
+        Unbounded
+    } else {
+        let end_bound_index = vnode.to_index() + 1;
+        Excluded(Bytes::copy_from_slice(
+            &VirtualNode::from_index(end_bound_index).to_be_bytes(),
+        ))
+    }
+}
+
 /// Get the end bound of the given `prefix` when transforming it to a key range.
 pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
@@ -315,17 +366,20 @@ pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Bytes>, Bound<Bytes>) {
     }
 }
 
+pub fn prefix_slice_with_vnode(vnode: VirtualNode, slice: &[u8]) -> Bytes {
+    let prefix = vnode.to_be_bytes();
+    let mut buf = BytesMut::with_capacity(prefix.len() + slice.len());
+    buf.extend_from_slice(&prefix);
+    buf.extend_from_slice(slice);
+    buf.freeze()
+}
+
 /// Prepend the `prefix` to the given key `range`.
-pub fn prefixed_range<B: AsRef<[u8]>>(
+pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
-    prefix: &[u8],
-) -> (Bound<Bytes>, Bound<Bytes>) {
-    let prefixed = |b: &B| -> Bytes {
-        let mut buf = BytesMut::with_capacity(prefix.len() + b.as_ref().len());
-        buf.extend_from_slice(prefix);
-        buf.extend_from_slice(b.as_ref());
-        buf.freeze()
-    };
+    vnode: VirtualNode,
+) -> TableKeyRange {
+    let prefixed = |b: &B| -> Bytes { prefix_slice_with_vnode(vnode, b.as_ref()) };
 
     let start: Bound<Bytes> = match range.start_bound() {
         Included(b) => Included(prefixed(b)),
@@ -333,7 +387,7 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
             assert!(!b.as_ref().is_empty());
             Excluded(prefixed(b))
         }
-        Unbounded => Included(Bytes::copy_from_slice(prefix)),
+        Unbounded => Included(Bytes::copy_from_slice(&vnode.to_be_bytes())),
     };
 
     let end = match range.end_bound() {
@@ -342,10 +396,27 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
             assert!(!b.as_ref().is_empty());
             Excluded(prefixed(b))
         }
-        Unbounded => end_bound_of_prefix(prefix),
+        Unbounded => end_bound_of_vnode(vnode),
     };
 
-    (start, end)
+    map_table_key_range((start, end))
+}
+
+pub trait SetSlice<S: AsRef<[u8]> + ?Sized> {
+    fn set(&mut self, value: &S);
+}
+
+impl<S: AsRef<[u8]> + ?Sized> SetSlice<S> for Vec<u8> {
+    fn set(&mut self, value: &S) {
+        self.clear();
+        self.extend_from_slice(value.as_ref());
+    }
+}
+
+impl SetSlice<Bytes> for Bytes {
+    fn set(&mut self, value: &Bytes) {
+        *self = value.clone()
+    }
 }
 
 pub trait CopyFromSlice {
@@ -399,16 +470,28 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 }
 
 impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn split_vnode(&self) -> (VirtualNode, &[u8]) {
+        debug_assert!(
+            self.0.as_ref().len() >= VirtualNode::SIZE,
+            "too short table key: {:?}",
+            self.0.as_ref()
+        );
+        let (vnode, inner_key) = self.0.as_ref().split_array_ref::<{ VirtualNode::SIZE }>();
+        (VirtualNode::from_be_bytes(*vnode), inner_key)
+    }
+
     pub fn vnode_part(&self) -> VirtualNode {
-        VirtualNode::from_be_bytes(
-            self.0.as_ref()[..VirtualNode::SIZE]
-                .try_into()
-                .expect("slice with incorrect length"),
-        )
+        self.split_vnode().0
     }
 
     pub fn key_part(&self) -> &[u8] {
-        &self.0.as_ref()[VirtualNode::SIZE..]
+        self.split_vnode().1
+    }
+}
+
+impl<T: AsRef<[u8]>> Borrow<[u8]> for TableKey<T> {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -418,9 +501,25 @@ impl EstimateSize for TableKey<Bytes> {
     }
 }
 
+impl<'a> TableKey<&'a [u8]> {
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> TableKey<T> {
+        TableKey(T::copy_from_slice(self.as_ref()))
+    }
+}
+
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
+}
+
+pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
+    TableKey(Bytes::from(
+        [vnode.to_be_bytes().as_slice(), payload].concat(),
+    ))
+}
+
+pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
+    gen_key_from_bytes(vnode, payload.as_bytes())
 }
 
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
@@ -473,7 +572,9 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 
     /// Encode in to a buffer.
-    pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
+    ///
+    /// length prefixed requires 4B more than its `encoded_len()`
+    pub fn encode_length_prefixed(&self, mut buf: impl BufMut) {
         buf.put_u32(self.table_id.table_id());
         buf.put_u32(self.table_key.as_ref().len() as u32);
         buf.put_slice(self.table_key.as_ref());
@@ -546,21 +647,22 @@ impl UserKey<Vec<u8>> {
         buf.advance(len);
         UserKey::new(TableId::new(table_id), TableKey(data))
     }
+}
 
-    pub fn extend_from_other(&mut self, other: &UserKey<&[u8]>) {
-        self.table_id = other.table_id;
-        self.table_key.0.clear();
-        self.table_key.0.extend_from_slice(other.table_key.as_ref());
-    }
-
+impl<T: AsRef<[u8]>> UserKey<T> {
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
     /// table key without reallocating a new `UserKey` object.
-    pub fn set(&mut self, other: UserKey<&[u8]>) {
+    pub fn set<F>(&mut self, other: UserKey<F>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
         self.table_id = other.table_id;
-        self.table_key.clear();
-        self.table_key.extend_from_slice(other.table_key.as_ref());
+        self.table_key.0.set(&other.table_key.0);
     }
+}
 
+impl UserKey<Vec<u8>> {
     pub fn into_bytes(self) -> UserKey<Bytes> {
         UserKey {
             table_id: self.table_id,
@@ -575,12 +677,19 @@ impl UserKey<Vec<u8>> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
-    pub epoch: HummockEpoch,
+    pub epoch_with_gap: EpochWithGap,
 }
 
 impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
+        write!(
+            f,
+            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}, spill_offset: {}}}",
+            self.user_key,
+            self.epoch_with_gap.pure_epoch(),
+            self.epoch_with_gap.as_u64(),
+            self.epoch_with_gap.as_u64() - self.epoch_with_gap.pure_epoch(),
+        )
     }
 }
 
@@ -588,26 +697,40 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::new(table_id, table_key),
-            epoch,
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
+        }
+    }
+
+    pub fn new_with_gap_epoch(
+        table_id: TableId,
+        table_key: TableKey<T>,
+        epoch_with_gap: EpochWithGap,
+    ) -> Self {
+        Self {
+            user_key: UserKey::new(table_id, table_key),
+            epoch_with_gap,
         }
     }
 
     pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
-        Self { user_key, epoch }
+        Self {
+            user_key,
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+        }
     }
 
     /// Pass the inner type of `table_key` to make the code less verbose.
     pub fn for_test(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::for_test(table_id, table_key),
-            epoch,
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
         self.user_key.encode_into(buf);
-        buf.put_u64(self.epoch);
+        buf.put_u64(self.epoch_with_gap.as_u64());
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -621,7 +744,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     // Encode in to a buffer.
     pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
         self.user_key.encode_table_key_into(buf);
-        buf.put_u64(self.epoch);
+        buf.put_u64(self.epoch_with_gap.as_u64());
     }
 
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
@@ -629,7 +752,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
         );
         self.user_key.encode_into(&mut buf);
-        buf.put_u64(u64::MAX - self.epoch);
+        buf.put_u64(u64::MAX - self.epoch_with_gap.as_u64());
         buf
     }
 
@@ -651,7 +774,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch,
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
@@ -665,7 +788,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
-            epoch,
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
@@ -676,7 +799,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch: u64::MAX - epoch,
+            epoch_with_gap: EpochWithGap::from_u64(u64::MAX - epoch),
         }
     }
 
@@ -687,7 +810,7 @@ impl<'a> FullKey<&'a [u8]> {
     pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> FullKey<T> {
         FullKey {
             user_key: self.user_key.copy_into(),
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch_with_gap,
         }
     }
 }
@@ -697,7 +820,7 @@ impl FullKey<Vec<u8>> {
     /// `Bytes`
     pub fn into_bytes(self) -> FullKey<Bytes> {
         FullKey {
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch_with_gap,
             user_key: self.user_key.into_bytes(),
         }
     }
@@ -707,17 +830,21 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn to_ref(&self) -> FullKey<&[u8]> {
         FullKey {
             user_key: self.user_key.as_ref(),
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch_with_gap,
         }
     }
 }
 
-impl FullKey<Vec<u8>> {
+impl<T: AsRef<[u8]>> FullKey<T> {
     /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
     /// table key without reallocating a new `FullKey` object.
-    pub fn set(&mut self, other: FullKey<&[u8]>) {
+    pub fn set<F>(&mut self, other: FullKey<F>)
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
         self.user_key.set(other.user_key);
-        self.epoch = other.epoch;
+        self.epoch_with_gap = other.epoch_with_gap;
     }
 }
 
@@ -726,7 +853,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
         // When `user_key` is the same, greater epoch comes first.
         self.user_key
             .cmp(&other.user_key)
-            .then_with(|| other.epoch.cmp(&self.epoch))
+            .then_with(|| other.epoch_with_gap.cmp(&self.epoch_with_gap))
     }
 }
 
@@ -831,38 +958,175 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     (start, end)
 }
 
+/// TODO: Temporary bypass full key check. Remove this field after #15099 is resolved.
+pub struct FullKeyTracker<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool = false> {
+    pub latest_full_key: FullKey<T>,
+    last_observed_epoch_with_gap: EpochWithGap,
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_DEDUP> {
+    pub fn new(init_full_key: FullKey<T>) -> Self {
+        let epoch_with_gap = init_full_key.epoch_with_gap;
+        Self {
+            latest_full_key: init_full_key,
+            last_observed_epoch_with_gap: epoch_with_gap,
+        }
+    }
+
+    /// Check and observe a new full key during iteration
+    ///
+    /// # Examples:
+    /// ```
+    /// use bytes::Bytes;
+    /// use risingwave_common::catalog::TableId;
+    /// use risingwave_common::util::epoch::EPOCH_AVAILABLE_BITS;
+    /// use risingwave_hummock_sdk::EpochWithGap;
+    /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
+    ///
+    /// let table_id = TableId { table_id: 1 };
+    /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
+    /// let mut a: FullKeyTracker<_> = FullKeyTracker::<Bytes>::new(full_key1.clone());
+    ///
+    /// // Panic on non-decreasing epoch observed for the same user key.
+    /// // let full_key_with_larger_epoch = FullKey::new(table_id, TableKey(Bytes::from("c")), 6 << EPOCH_AVAILABLE_BITS);
+    /// // a.observe(full_key_with_larger_epoch);
+    ///
+    /// // Panic on non-increasing user key observed.
+    /// // let full_key_with_smaller_user_key = FullKey::new(table_id, TableKey(Bytes::from("b")), 3 << EPOCH_AVAILABLE_BITS);
+    /// // a.observe(full_key_with_smaller_user_key);
+    ///
+    /// let full_key2 = FullKey::new(table_id, TableKey(Bytes::from("c")), 3 << EPOCH_AVAILABLE_BITS);
+    /// assert_eq!(a.observe(full_key2.clone()), false);
+    /// assert_eq!(a.latest_user_key(), &full_key2.user_key);
+    ///
+    /// let full_key3 = FullKey::new(table_id, TableKey(Bytes::from("f")), 4 << EPOCH_AVAILABLE_BITS);
+    /// assert_eq!(a.observe(full_key3.clone()), true);
+    /// assert_eq!(a.latest_user_key(), &full_key3.user_key);
+    /// ```
+    ///
+    /// Return:
+    /// - If the provided `key` contains a new user key, return true.
+    /// - Otherwise: return false
+    pub fn observe<F>(&mut self, key: FullKey<F>) -> bool
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
+        self.observe_multi_version(key.user_key, once(key.epoch_with_gap))
+    }
+
+    /// `epochs` comes from greater to smaller
+    pub fn observe_multi_version<F>(
+        &mut self,
+        user_key: UserKey<F>,
+        mut epochs: impl Iterator<Item = EpochWithGap>,
+    ) -> bool
+    where
+        T: SetSlice<F>,
+        F: AsRef<[u8]>,
+    {
+        let max_epoch_with_gap = epochs.next().expect("non-empty");
+        let min_epoch_with_gap = epochs.fold(
+            max_epoch_with_gap,
+            |prev_epoch_with_gap, curr_epoch_with_gap| {
+                assert!(
+                    prev_epoch_with_gap > curr_epoch_with_gap,
+                    "epoch list not sorted. prev: {:?}, curr: {:?}, user_key: {:?}",
+                    prev_epoch_with_gap,
+                    curr_epoch_with_gap,
+                    user_key
+                );
+                curr_epoch_with_gap
+            },
+        );
+        match self
+            .latest_full_key
+            .user_key
+            .as_ref()
+            .cmp(&user_key.as_ref())
+        {
+            Ordering::Less => {
+                // Observe a new user key
+
+                // Reset epochs
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+
+                // Take the previous key and set latest key
+                self.latest_full_key.set(FullKey {
+                    user_key,
+                    epoch_with_gap: min_epoch_with_gap,
+                });
+                true
+            }
+            Ordering::Equal => {
+                if max_epoch_with_gap > self.last_observed_epoch_with_gap
+                    || (!SKIP_DEDUP && max_epoch_with_gap == self.last_observed_epoch_with_gap)
+                {
+                    // Epoch from the same user key should be monotonically decreasing
+                    panic!(
+                        "key {:?} epoch {:?} >= prev epoch {:?}",
+                        user_key, max_epoch_with_gap, self.last_observed_epoch_with_gap
+                    );
+                }
+                self.last_observed_epoch_with_gap = min_epoch_with_gap;
+                false
+            }
+            Ordering::Greater => {
+                // User key should be monotonically increasing
+                panic!(
+                    "key {:?} <= prev key {:?}",
+                    user_key,
+                    FullKey {
+                        user_key: self.latest_full_key.user_key.as_ref(),
+                        epoch_with_gap: self.last_observed_epoch_with_gap
+                    }
+                );
+            }
+        }
+    }
+
+    pub fn latest_user_key(&self) -> &UserKey<T> {
+        &self.latest_full_key.user_key
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
+
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
 
     #[test]
     fn test_encode_decode() {
+        let epoch = test_epoch(1);
         let table_key = b"abc".to_vec();
         let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
-        let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
+        let key = FullKey::for_test(TableId::new(1), &table_key[..], epoch);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
         let mut table_key = vec![1];
-        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        let a = FullKey::for_test(TableId::new(1), table_key.clone(), epoch);
         table_key[0] = 2;
-        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        let b = FullKey::for_test(TableId::new(1), table_key.clone(), epoch);
         table_key[0] = 129;
-        let c = FullKey::for_test(TableId::new(1), table_key, 1);
+        let c = FullKey::for_test(TableId::new(1), table_key, epoch);
         assert!(a.lt(&b));
         assert!(b.lt(&c));
     }
 
     #[test]
     fn test_key_cmp() {
+        let epoch = test_epoch(1);
+        let epoch2 = test_epoch(2);
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), epoch);
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), epoch);
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch2);
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), epoch);
 
         assert_eq!(key1.cmp(&key1), Ordering::Equal);
         assert_eq!(key1.cmp(&key2), Ordering::Less);
@@ -977,5 +1241,88 @@ mod tests {
         let c = c.encode();
         assert!(a.lt(&b));
         assert!(b.lt(&c));
+    }
+
+    #[test]
+    fn test_prefixed_range_with_vnode() {
+        let concat = |vnode: usize, b: &[u8]| -> Bytes {
+            prefix_slice_with_vnode(VirtualNode::from_index(vnode), b)
+        };
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Included(Bytes::from("1")), Included(Bytes::from("2"))),
+                VirtualNode::from_index(233),
+            ),
+            (
+                Included(TableKey(concat(233, b"1"))),
+                Included(TableKey(concat(233, b"2")))
+            )
+        );
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Excluded(Bytes::from("1")), Excluded(Bytes::from("2"))),
+                VirtualNode::from_index(233),
+            ),
+            (
+                Excluded(TableKey(concat(233, b"1"))),
+                Excluded(TableKey(concat(233, b"2")))
+            )
+        );
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::from_index(233),
+            ),
+            (
+                Included(TableKey(concat(233, b""))),
+                Excluded(TableKey(concat(234, b"")))
+            )
+        );
+        let max_vnode = VirtualNode::COUNT - 1;
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::from_index(max_vnode),
+            ),
+            (Included(TableKey(concat(max_vnode, b""))), Unbounded)
+        );
+        let second_max_vnode = max_vnode - 1;
+        assert_eq!(
+            prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                VirtualNode::from_index(second_max_vnode),
+            ),
+            (
+                Included(TableKey(concat(second_max_vnode, b""))),
+                Excluded(TableKey(concat(max_vnode, b"")))
+            )
+        );
+    }
+
+    #[test]
+    fn test_single_vnode_range() {
+        let left_bound = vec![
+            Included(b"0".as_slice()),
+            Excluded(b"0".as_slice()),
+            Unbounded,
+        ];
+        let right_bound = vec![
+            Included(b"1".as_slice()),
+            Excluded(b"1".as_slice()),
+            Unbounded,
+        ];
+        for vnode in 0..VirtualNode::COUNT {
+            for left in &left_bound {
+                for right in &right_bound {
+                    assert_eq!(
+                        (vnode, vnode + 1),
+                        vnode_range(&prefixed_range_with_vnode::<&[u8]>(
+                            (*left, *right),
+                            VirtualNode::from_index(vnode)
+                        ))
+                    )
+                }
+            }
+        }
     }
 }

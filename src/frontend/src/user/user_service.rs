@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
+use crate::error::Result;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::{UserId, UserInfoVersion};
 
@@ -61,7 +61,7 @@ pub trait UserInfoWriter: Send + Sync {
         &self,
         users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<UserId>,
+        granted_by: UserId,
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
@@ -109,7 +109,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
         &self,
         users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<UserId>,
+        granted_by: UserId,
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
@@ -140,9 +140,7 @@ impl UserInfoWriterImpl {
     async fn wait_version(&self, version: UserInfoVersion) -> Result<()> {
         let mut rx = self.user_updated_rx.clone();
         while *rx.borrow_and_update() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+            rx.changed().await.map_err(|e| anyhow!(e))?;
         }
         Ok(())
     }

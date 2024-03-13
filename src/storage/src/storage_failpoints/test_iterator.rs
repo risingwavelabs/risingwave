@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,13 @@ use std::sync::Arc;
 
 use crate::hummock::compactor::{SstableStreamIterator, TaskProgress};
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base, iterator_test_bytes_key_of, iterator_test_key_of,
-    iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+    gen_iterator_test_sstable_base, gen_iterator_test_sstable_info, iterator_test_bytes_key_of,
+    iterator_test_key_of, iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store,
+    TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
-    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
-    UnorderedMergeIteratorInner, UserIterator,
+    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator, MergeIterator,
+    UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
@@ -41,7 +42,7 @@ async fn test_failpoints_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base(
+    let table0 = gen_iterator_test_sstable_info(
         0,
         default_builder_opt_for_test(),
         |x| x * 2,
@@ -49,7 +50,7 @@ async fn test_failpoints_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base(
+    let table1 = gen_iterator_test_sstable_info(
         1,
         default_builder_opt_for_test(),
         |x| (TEST_KEYS_COUNT + x) * 2,
@@ -58,7 +59,7 @@ async fn test_failpoints_concat_read_err() {
     )
     .await;
     let mut iter = ConcatIterator::new(
-        vec![table0.get_sstable_info(), table1.get_sstable_info()],
+        vec![table0, table1],
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
     );
@@ -101,7 +102,7 @@ async fn test_failpoints_backward_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base(
+    let table0 = gen_iterator_test_sstable_info(
         0,
         default_builder_opt_for_test(),
         |x| x * 2,
@@ -109,7 +110,7 @@ async fn test_failpoints_backward_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base(
+    let table1 = gen_iterator_test_sstable_info(
         1,
         default_builder_opt_for_test(),
         |x| (TEST_KEYS_COUNT + x) * 2,
@@ -118,7 +119,7 @@ async fn test_failpoints_backward_concat_read_err() {
     )
     .await;
     let mut iter = BackwardConcatIterator::new(
-        vec![table1.get_sstable_info(), table0.get_sstable_info()],
+        vec![table1, table0],
         sstable_store.clone(),
         Arc::new(SstableIteratorReadOptions::default()),
     );
@@ -174,17 +175,11 @@ async fn test_failpoints_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let mut mi = UnorderedMergeIteratorInner::new({
+    let mut mi = MergeIterator::new({
         let mut iters = vec![];
-        for table in &tables {
+        for table in tables {
             iters.push(SstableIterator::new(
-                sstable_store
-                    .sstable(
-                        &table.get_sstable_info(),
-                        &mut StoreLocalStatistic::default(),
-                    )
-                    .await
-                    .unwrap(),
+                table,
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
             ));
@@ -228,19 +223,10 @@ async fn test_failpoints_backward_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let mut mi = UnorderedMergeIteratorInner::new({
+    let mut mi = MergeIterator::new({
         let mut iters = vec![];
-        for table in &tables {
-            iters.push(BackwardSstableIterator::new(
-                sstable_store
-                    .sstable(
-                        &table.get_sstable_info(),
-                        &mut StoreLocalStatistic::default(),
-                    )
-                    .await
-                    .unwrap(),
-                sstable_store.clone(),
-            ));
+        for table in tables {
+            iters.push(BackwardSstableIterator::new(table, sstable_store.clone()));
         }
         iters
     });
@@ -280,27 +266,20 @@ async fn test_failpoints_user_read_err() {
         200,
     )
     .await;
-    let mut stats = StoreLocalStatistic::default();
     let iters = vec![
         SstableIterator::new(
-            sstable_store
-                .sstable(&table0.get_sstable_info(), &mut stats)
-                .await
-                .unwrap(),
+            table0,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         ),
         SstableIterator::new(
-            sstable_store
-                .sstable(&table1.get_sstable_info(), &mut stats)
-                .await
-                .unwrap(),
+            table1,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         ),
     ];
 
-    let mi = UnorderedMergeIteratorInner::new(iters);
+    let mi = MergeIterator::new(iters);
     let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
@@ -309,7 +288,7 @@ async fn test_failpoints_user_read_err() {
     while ui.is_valid() {
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_bytes_key_of(i));
+        assert_eq!(key, iterator_test_bytes_key_of(i).to_ref());
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         i += 1;
         let result = ui.next().await;
@@ -347,25 +326,12 @@ async fn test_failpoints_backward_user_read_err() {
         200,
     )
     .await;
-    let mut stats = StoreLocalStatistic::default();
     let iters = vec![
-        BackwardSstableIterator::new(
-            sstable_store
-                .sstable(&table0.get_sstable_info(), &mut stats)
-                .await
-                .unwrap(),
-            sstable_store.clone(),
-        ),
-        BackwardSstableIterator::new(
-            sstable_store
-                .sstable(&table1.get_sstable_info(), &mut stats)
-                .await
-                .unwrap(),
-            sstable_store.clone(),
-        ),
+        BackwardSstableIterator::new(table0, sstable_store.clone()),
+        BackwardSstableIterator::new(table1, sstable_store.clone()),
     ];
 
-    let mi = UnorderedMergeIteratorInner::new(iters);
+    let mi = MergeIterator::new(iters);
     let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
@@ -434,7 +400,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
     let mut sstable_iter = SstableStreamIterator::new(
-        table.value().meta.block_metas.clone(),
+        table.meta.block_metas.clone(),
         info,
         HashSet::from_iter(std::iter::once(0)),
         0,

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -698,8 +698,7 @@ mod tests {
                     100,
                     PrecomputedBuildHasher,
                 );
-            let keys =
-                K::build(column_indexes.as_slice(), &data).expect("Failed to build hash keys");
+            let keys = K::build_many(column_indexes.as_slice(), &data);
 
             for (row_id, key) in keys.into_iter().enumerate() {
                 let row_ids = fast_hash_map.entry(key).or_default();
@@ -741,7 +740,7 @@ mod tests {
         F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
         let (data, types) = data_gen();
-        let keys = K::build(column_indexes.as_slice(), &data).expect("Failed to build hash keys");
+        let keys = K::build_many(column_indexes.as_slice(), &data);
 
         let mut array_builders = column_indexes
             .iter()
@@ -839,15 +838,14 @@ mod tests {
     // losslessly.
     #[test]
     fn test_simple_hash_key_nullable_serde() {
-        let keys = Key64::build(
+        let keys = Key64::build_many(
             &[0, 1],
             &DataChunk::from_pretty(
                 "i i
                  1 .
                  . 2",
             ),
-        )
-        .unwrap();
+        );
 
         let mut array_builders = [0, 1]
             .iter()

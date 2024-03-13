@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ use crate::executor::MaterializeExecutor;
 
 pub struct MaterializeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MaterializeExecutorBuilder {
     type Node = MaterializeNode;
 
@@ -33,8 +32,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let order_key = node
@@ -48,44 +46,38 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
 
         macro_rules! new_executor {
             ($SD:ident) => {
                 MaterializeExecutor::<_, $SD>::new(
                     input,
-                    info,
+                    params.info.schema.clone(),
                     store,
                     order_key,
                     params.actor_context,
                     params.vnode_bitmap.map(Arc::new),
                     table,
-                    stream.get_watermark_epoch(),
+                    params.watermark_epoch,
                     conflict_behavior,
-                    stream.streaming_metrics.clone(),
+                    params.executor_stats.clone(),
                 )
                 .await
                 .boxed()
             };
         }
 
-        let executor = if versioned {
+        let exec = if versioned {
             new_executor!(ColumnAwareSerde)
         } else {
             new_executor!(BasicSerde)
         };
 
-        Ok(executor)
+        Ok((params.info, exec).into())
     }
 }
 
 pub struct ArrangeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ArrangeExecutorBuilder {
     type Node = ArrangeNode;
 
@@ -93,8 +85,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let keys = node
@@ -111,25 +102,20 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
-        let executor = MaterializeExecutor::<_, BasicSerde>::new(
+        let exec = MaterializeExecutor::<_, BasicSerde>::new(
             input,
-            info,
+            params.info.schema.clone(),
             store,
             keys,
             params.actor_context,
             vnodes,
             table,
-            stream.get_watermark_epoch(),
+            params.watermark_epoch,
             conflict_behavior,
-            stream.streaming_metrics.clone(),
+            params.executor_stats.clone(),
         )
         .await;
 
-        Ok(executor.boxed())
+        Ok((params.info, exec.boxed()).into())
     }
 }

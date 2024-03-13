@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,9 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                 );
             }
 
-            if let Some(last_epoch) = last_epoch && !b.is_with_stop_mutation() {
+            if let Some(last_epoch) = last_epoch
+                && !b.is_with_stop_mutation()
+            {
                 assert_eq!(
                     b.epoch.prev,
                     last_epoch,
@@ -75,47 +77,49 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, StreamExt};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
 
     #[tokio::test]
     async fn test_epoch_ok() {
-        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(1, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(Default::default(), vec![]);
+        tx.push_barrier(test_epoch(1), false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(2, false);
-        tx.push_barrier(3, false);
-        tx.push_barrier(4, false);
+        tx.push_barrier(test_epoch(2), false);
+        tx.push_barrier(test_epoch(3), false);
+        tx.push_barrier(test_epoch(4), false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 1);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(1));
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 2);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 3);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 4);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(2));
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(3));
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(4));
     }
 
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_bad() {
-        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(100, false);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(Default::default(), vec![]);
+        tx.push_barrier(test_epoch(100), false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(514, false);
-        tx.push_barrier(514, false);
-        tx.push_barrier(114, false);
+        tx.push_barrier(test_epoch(514), false);
+        tx.push_barrier(test_epoch(514), false);
+        tx.push_barrier(test_epoch(114), false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(100));
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(514));
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == test_epoch(514));
 
         checked.next().await.unwrap().unwrap(); // should panic
     }
@@ -123,11 +127,12 @@ mod tests {
     #[should_panic]
     #[tokio::test]
     async fn test_epoch_first_not_barrier() {
-        let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(Default::default(), vec![]);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(114, false);
+        tx.push_barrier(test_epoch(114), false);
 
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         checked.next().await.unwrap().unwrap(); // should panic
@@ -135,9 +140,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty() {
-        let (_, mut source) = MockSource::channel(Default::default(), vec![]);
-        source = source.stop_on_finish(false);
-        let checked = epoch_check(source.info().into(), source.boxed().execute());
+        let (_, source) = MockSource::channel();
+        let source = source
+            .stop_on_finish(false)
+            .into_executor(Default::default(), vec![]);
+        let checked = epoch_check(source.info().clone().into(), source.execute());
         pin_mut!(checked);
 
         assert!(checked.next().await.transpose().unwrap().is_none());

@@ -164,6 +164,17 @@ profile:
       - use: compactor
       # - use: prometheus
       # - use: grafana
+  fs:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: opendal
+        engine: fs
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
   webhdfs:
     steps:
       # - use: etcd
@@ -187,6 +198,19 @@ profile:
       # If you want to use google cloud storage as storage backend, configure bucket name:
       - use: opendal
         engine: gcs
+        bucket: bucket-name
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
+  obs:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use obs as storage backend, configure bucket name:
+      - use: opendal
+        engine: obs
         bucket: bucket-name
       - use: compactor
       # - use: prometheus
@@ -528,6 +552,80 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-3cn-1fe-with-monitoring:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
+  ci-3cn-1fe-with-minio-rate-limit:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        api-requests-max: 30
+        api-requests-deadline: 3s
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-3cn-1fe-with-monitoring-and-minio-rate-limit:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        api-requests-max: 30
+        api-requests-deadline: 2s
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
   ci-3cn-3fe:
     config-path: src/config/ci.toml
     steps:
@@ -596,7 +694,7 @@ profile:
       - use: meta-node
       - use: opendal
         engine: fs
-        bucket: ""
+        bucket: "/tmp/rw_ci"
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -722,6 +820,43 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-3cn-1fe-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-1cn-1fe-kafka-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: zookeeper
+        persist-data: true
+      - use: kafka
+        persist-data: true
+
   ci-meta-backup-test:
     config-path: src/config/ci-meta-backup-test.toml
     steps:
@@ -738,11 +873,6 @@ profile:
       - use: etcd
       - use: minio
 
-  ci-delete-range-test:
-    config-path: src/config/ci-delete-range-test.toml
-    steps:
-      - use: minio
-
   ci-iceberg-test:
     config-path: src/config/ci-iceberg-test.toml
     steps:
@@ -753,17 +883,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  ci-clickhouse-test:
-    config-path: src/config/ci.toml
-    steps:
-      - use: minio
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-
-  ci-pulsar-test:
+  ci-sink-test:
     config-path: src/config/ci.toml
     steps:
       - use: minio
@@ -804,6 +924,18 @@ profile:
       - use: compactor
       - use: prometheus
       - use: grafana
+
+  full-with-batch-query-limit:
+    config-path: src/config/full-with-batch-query-limit.toml
+    steps:
+        - use: minio
+        - use: etcd
+        - use: meta-node
+        - use: compute-node
+        - use: frontend
+        - use: compactor
+        - use: prometheus
+        - use: grafana
 
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
@@ -846,6 +978,15 @@ template:
 
     # Prometheus nodes used by this MinIO
     provide-prometheus: "prometheus*"
+
+    # Max concurrent api requests.
+    # see: https://github.com/minio/minio/blob/master/docs/throttle/README.md.
+    # '0' means this env var will use the default of minio.
+    api-requests-max: 0
+
+    # Deadline for api requests.
+    # Empty string means this env var will use the default of minio.
+    api-requests-deadline: ""
 
   etcd:
     # Id of this instance
@@ -1013,6 +1154,9 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
+    # How frequently Prometheus scrape targets (collect metrics)
+    scrape-interval: 15s
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -1103,6 +1247,8 @@ template:
 
     # gRPC listen port of the OTLP collector
     otlp-port: 4317
+
+    max-bytes-per-trace: 5000000
 
   opendal:
     id: opendal

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
     Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec,
-    GenericGauge, GenericGaugeVec, MetricVec, MetricVecBuilder,
+    GenericGauge, GenericGaugeVec, GenericLocalCounter, MetricVec, MetricVecBuilder,
 };
+use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
-use prometheus::{Histogram, HistogramVec};
+use prometheus::{Gauge, Histogram, HistogramVec, IntCounter, IntGauge};
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 pub fn __extract_counter_builder<P: Atomic>(
@@ -119,11 +121,13 @@ pub type LabelGuardedIntGaugeVec<const N: usize> =
 pub type LabelGuardedGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
-pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<VecBuilderOfHistogram, N>;
-pub type LabelGuardedIntCounter<const N: usize> =
-    LabelGuardedMetric<VecBuilderOfCounter<AtomicU64>, N>;
-pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicI64>, N>;
-pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicF64>, N>;
+pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<Histogram, N>;
+pub type LabelGuardedIntCounter<const N: usize> = LabelGuardedMetric<IntCounter, N>;
+pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<IntGauge, N>;
+pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<Gauge, N>;
+
+pub type LabelGuardedLocalHistogram<const N: usize> = LabelGuardedMetric<LocalHistogram, N>;
+pub type LabelGuardedLocalIntCounter<const N: usize> = LabelGuardedMetric<LocalIntCounter, N>;
 
 fn gen_test_label<const N: usize>() -> [&'static str; N] {
     const TEST_LABELS: [&str; 5] = ["test1", "test2", "test3", "test4", "test5"];
@@ -140,6 +144,36 @@ struct LabelGuardedMetricsInfo<const N: usize> {
     uncollected_removed_labels: HashSet<[String; N]>,
 }
 
+impl<const N: usize> LabelGuardedMetricsInfo<N> {
+    fn register_new_label(mutex: &Arc<Mutex<Self>>, labels: &[&str; N]) -> LabelGuard<N> {
+        let mut guard = mutex.lock();
+        let label_string = labels.map(|str| str.to_string());
+        guard.uncollected_removed_labels.remove(&label_string);
+        *guard
+            .labeled_metrics_count
+            .entry(label_string.clone())
+            .or_insert(0) += 1;
+        LabelGuard {
+            labels: label_string,
+            info: mutex.clone(),
+        }
+    }
+}
+
+/// `LabelGuardedMetricVec` enhances the [`MetricVec`] to ensure the set of labels to be
+/// correctly removed from the Prometheus client once being dropped. This is useful for metrics
+/// that are associated with an object that can be dropped, such as streaming jobs, fragments,
+/// actors, batch tasks, etc.
+///
+/// When a set labels is dropped, it will record it in the `uncollected_removed_labels` set.
+/// Once the metrics has been collected, it will finally remove the metrics of the labels.
+///
+/// See also [`LabelGuardedMetricsInfo`] and [`LabelGuard::drop`].
+///
+/// # Arguments
+///
+/// * `T` - The type of the raw metrics vec.
+/// * `N` - The number of labels.
 #[derive(Clone)]
 pub struct LabelGuardedMetricVec<T: MetricVecBuilder, const N: usize> {
     inner: MetricVec<T>,
@@ -169,10 +203,10 @@ impl<T: MetricVecBuilder, const N: usize> Collector for LabelGuardedMetricVec<T,
                 .remove_label_values(&labels.each_ref().map(|s| s.as_str()))
             {
                 warn!(
-                    "err when delete metrics of {:?} of labels {:?}. Err {:?}",
+                    error = %e.as_report(),
+                    "err when delete metrics of {:?} of labels {:?}",
                     self.inner.desc().first().expect("should have desc").fq_name,
                     self.labels,
-                    e,
                 );
             }
         }
@@ -189,24 +223,28 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
         }
     }
 
-    pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T, N> {
-        let mut guard = self.info.lock();
-        let label_string = labels.map(|str| str.to_string());
-        guard.uncollected_removed_labels.remove(&label_string);
-        *guard.labeled_metrics_count.entry(label_string).or_insert(0) += 1;
+    /// This is similar to the `with_label_values` of the raw metrics vec.
+    /// We need to pay special attention that, unless for some special purpose,
+    /// we should not drop the returned `LabelGuardedMetric` immediately after
+    /// using it, such as `metrics.with_guarded_label_values(...).inc();`,
+    /// because after dropped the label will be regarded as not used any more,
+    /// and the internal raw metrics will be removed and reset.
+    ///
+    /// Instead, we should store the returned `LabelGuardedMetric` in a scope with longer
+    /// lifetime so that the labels can be regarded as being used in its whole life scope.
+    /// This is also the recommended way to use the raw metrics vec.
+    pub fn with_guarded_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+        let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
         let inner = self.inner.with_label_values(labels);
         LabelGuardedMetric {
-            inner: Arc::new(LabelGuardedMetricInner {
-                inner,
-                labels: labels.map(|str| str.to_string()),
-                info: self.info.clone(),
-            }),
+            inner,
+            _guard: Arc::new(guard),
         }
     }
 
-    pub fn with_test_label(&self) -> LabelGuardedMetric<T, N> {
+    pub fn with_test_label(&self) -> LabelGuardedMetric<T::M, N> {
         let labels: [&'static str; N] = gen_test_label::<N>();
-        self.with_label_values(&labels)
+        self.with_guarded_label_values(&labels)
     }
 }
 
@@ -258,13 +296,12 @@ impl<const N: usize> LabelGuardedHistogramVec<N> {
 }
 
 #[derive(Clone)]
-struct LabelGuardedMetricInner<T: MetricVecBuilder, const N: usize> {
-    inner: T::M,
+struct LabelGuard<const N: usize> {
     labels: [String; N],
     info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
 }
 
-impl<T: MetricVecBuilder, const N: usize> Drop for LabelGuardedMetricInner<T, N> {
+impl<const N: usize> Drop for LabelGuard<N> {
     fn drop(&mut self) {
         let mut guard = self.info.lock();
         let count = guard.labeled_metrics_count.get_mut(&self.labels).expect(
@@ -282,8 +319,9 @@ impl<T: MetricVecBuilder, const N: usize> Drop for LabelGuardedMetricInner<T, N>
 }
 
 #[derive(Clone)]
-pub struct LabelGuardedMetric<T: MetricVecBuilder, const N: usize> {
-    inner: Arc<LabelGuardedMetricInner<T, N>>,
+pub struct LabelGuardedMetric<T, const N: usize> {
+    inner: T,
+    _guard: Arc<LabelGuard<N>>,
 }
 
 impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
@@ -292,11 +330,11 @@ impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
     }
 }
 
-impl<T: MetricVecBuilder, const N: usize> Deref for LabelGuardedMetric<T, N> {
-    type Target = T::M;
+impl<T, const N: usize> Deref for LabelGuardedMetric<T, N> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.inner
+        &self.inner
     }
 }
 
@@ -324,6 +362,36 @@ impl<const N: usize> LabelGuardedGauge<N> {
     }
 }
 
+pub trait MetricWithLocal {
+    type Local;
+    fn local(&self) -> Self::Local;
+}
+
+impl MetricWithLocal for Histogram {
+    type Local = LocalHistogram;
+
+    fn local(&self) -> Self::Local {
+        self.local()
+    }
+}
+
+impl<P: Atomic> MetricWithLocal for GenericCounter<P> {
+    type Local = GenericLocalCounter<P>;
+
+    fn local(&self) -> Self::Local {
+        self.local()
+    }
+}
+
+impl<T: MetricWithLocal, const N: usize> LabelGuardedMetric<T, N> {
+    pub fn local(&self) -> LabelGuardedMetric<T::Local, N> {
+        LabelGuardedMetric {
+            inner: self.inner.local(),
+            _guard: self._guard.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use prometheus::core::Collector;
@@ -333,12 +401,12 @@ mod tests {
     #[test]
     fn test_label_guarded_metrics_drop() {
         let vec = LabelGuardedIntCounterVec::<3>::test_int_counter_vec();
-        let m1_1 = vec.with_label_values(&["1", "2", "3"]);
+        let m1_1 = vec.with_guarded_label_values(&["1", "2", "3"]);
         assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
-        let m1_2 = vec.with_label_values(&["1", "2", "3"]);
+        let m1_2 = vec.with_guarded_label_values(&["1", "2", "3"]);
         let m1_3 = m1_2.clone();
         assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
-        let m2 = vec.with_label_values(&["2", "2", "3"]);
+        let m2 = vec.with_guarded_label_values(&["2", "2", "3"]);
         assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_3);
         assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());

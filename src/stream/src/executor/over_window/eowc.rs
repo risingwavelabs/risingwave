@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::estimate_size::collections::VecDeque;
+use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::collections::EstimatedVecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
@@ -39,14 +39,14 @@ use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: WindowStates,
-    curr_row_buffer: VecDeque<OwnedRow>,
+    curr_row_buffer: EstimatedVecDeque<OwnedRow>,
 }
 
 impl EstimateSize for Partition {
@@ -95,14 +95,14 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// - `WindowState` should output agg result for `curr output row`.
 /// - Recover: iterate through state table, push rows to `WindowState`, ignore ready windows.
 pub struct EowcOverWindowExecutor<S: StateStore> {
-    input: Box<dyn Executor>,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     calls: Vec<WindowFuncCall>,
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
@@ -117,31 +117,18 @@ struct ExecutionVars<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> Executor for EowcOverWindowExecutor<S> {
+impl<S: StateStore> Execute for EowcOverWindowExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 pub struct EowcOverWindowExecutorArgs<S: StateStore> {
-    pub input: BoxedExecutor,
-
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
 
+    pub input: Executor,
+
+    pub schema: Schema,
     pub calls: Vec<WindowFuncCall>,
     pub partition_key_indices: Vec<usize>,
     pub order_key_index: usize,
@@ -151,25 +138,13 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
-        let input_info = args.input.info();
-
-        let schema = {
-            let mut schema = input_info.schema.clone();
-            args.calls.iter().for_each(|call| {
-                schema.fields.push(Field::unnamed(call.return_type.clone()));
-            });
-            schema
-        };
+        let input_info = args.input.info().clone();
 
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("EowcOverWindowExecutor {:X}", args.executor_id),
-                },
+                schema: args.schema,
                 calls: args.calls,
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
@@ -200,11 +175,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_with_prefix(
-                partition_key,
-                sub_range,
-                PrefetchOptions::new_for_exhaust_iter(),
-            )
+            .iter_with_prefix(partition_key, sub_range, PrefetchOptions::default())
             .await?;
 
         #[for_await]
@@ -241,7 +212,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
         // Ignore ready windows (all ready windows were outputted before).
         while partition.states.are_ready() {
-            partition.states.just_slide_forward();
+            partition.states.just_slide()?;
             partition.curr_row_buffer.pop_front();
         }
 
@@ -254,7 +225,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let mut builders = this.info.schema.create_array_builders(chunk.capacity()); // just an estimate
+        let mut builders = this.schema.create_array_builders(chunk.capacity()); // just an estimate
 
         // We assume that the input is sorted by order key.
         for record in chunk.records() {
@@ -276,7 +247,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 &encoded_partition_key,
             )
             .await?;
-            let mut partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
+            let partition: &mut Partition =
+                &mut vars.partitions.get_mut(&encoded_partition_key).unwrap();
 
             // Materialize input to state table.
             this.state_table.insert(input_row);
@@ -314,7 +286,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 // The partition is ready to output, so we can produce a row.
 
                 // Get all outputs.
-                let ret_values = partition.states.curr_output()?;
+                let (ret_values, evict_hint) = partition.states.slide()?;
                 let curr_row = partition
                     .curr_row_buffer
                     .pop_front()
@@ -330,12 +302,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 }
 
                 // Evict unneeded rows from state table.
-                let evict_hint = partition.states.slide_forward();
                 if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
                     for key in keys_to_evict {
                         let order_key = memcmp_encoding::decode_row(
                             &key.order_key,
-                            &[this.info.schema[this.order_key_index].data_type()],
+                            &[this.schema[this.order_key_index].data_type()],
                             &[OrderType::ascending()],
                         )?;
                         let state_row_pk = (&partition_key).chain(order_key).chain(key.pk);
@@ -402,6 +373,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     if let Some(chunk) = output_chunk {
                         yield Message::Chunk(chunk);
                     }
+                    this.state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;

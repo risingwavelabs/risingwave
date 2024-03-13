@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
@@ -32,9 +31,9 @@ use risingwave_common::config::{
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
@@ -44,7 +43,7 @@ use risingwave_storage::monitor::{
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::{StateStore, StateStoreImpl};
+use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
@@ -237,7 +236,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -248,7 +247,7 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
 
     let (new_meta_client, _) = MetaClient::register_new(
-        new_meta_endpoint,
+        new_meta_endpoint.parse()?,
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
@@ -280,7 +279,7 @@ async fn pull_version_deltas(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let (meta_client, _) = MetaClient::register_new(
-        cluster_meta_endpoint,
+        cluster_meta_endpoint.parse()?,
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
@@ -296,8 +295,7 @@ async fn pull_version_deltas(
     let res = meta_client
         .list_version_deltas(0, u32::MAX, u64::MAX)
         .await
-        .unwrap()
-        .version_deltas;
+        .unwrap();
 
     if let Err(err) = shutdown_tx.send(()) {
         tracing::warn!("Failed to send shutdown to heartbeat task: {:?}", err);
@@ -330,7 +328,7 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let (meta_client, system_params) = MetaClient::register_new(
-        &opts.meta_address,
+        opts.meta_address.parse()?,
         WorkerType::RiseCtl,
         &advertise_addr,
         Default::default(),
@@ -604,8 +602,7 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType =
-    Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::IterStream>>;
+type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
@@ -662,8 +659,6 @@ pub async fn check_compaction_results(
         let mut expect_cnt = 0;
         let mut actual_cnt = 0;
 
-        futures::pin_mut!(expect_iter);
-        futures::pin_mut!(actual_iter);
         while let Some(kv_expect) = expect_iter.try_next().await? {
             expect_cnt += 1;
             let ret = actual_iter.try_next().await?;

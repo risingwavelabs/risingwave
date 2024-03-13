@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,13 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{DataType, JsonbRef, JsonbVal, Scalar};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct JsonbArrayBuilder {
     bitmap: BitmapBuilder,
     builder: jsonbb::Builder,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
 pub struct JsonbArray {
     bitmap: Bitmap,
     /// Elements are stored as a single JSONB array value.
@@ -177,8 +177,14 @@ impl FromIterator<JsonbVal> for JsonbArray {
     }
 }
 
-impl EstimateSize for JsonbArray {
+impl EstimateSize for jsonbb::Value {
     fn estimated_heap_size(&self) -> usize {
-        self.bitmap.estimated_heap_size() + self.data.capacity()
+        self.capacity()
+    }
+}
+
+impl EstimateSize for jsonbb::Builder {
+    fn estimated_heap_size(&self) -> usize {
+        self.capacity()
     }
 }

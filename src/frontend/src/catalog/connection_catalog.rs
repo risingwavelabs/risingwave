@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::error::{Result, RwError};
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
-use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::catalog::{connection, PbConnection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
+use crate::error::{Result, RwError};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,23 +65,13 @@ impl OwnedByUserCatalog for ConnectionCatalog {
     }
 }
 
-#[inline(always)]
-fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
-}
-
 pub(crate) fn resolve_private_link_connection(
     connection: &Arc<ConnectionCatalog>,
     properties: &mut BTreeMap<String, String>,
 ) -> Result<()> {
     #[allow(irrefutable_let_patterns)]
     if let connection::Info::PrivateLinkService(svc) = &connection.info {
-        if !is_kafka_connector(properties) {
+        if !properties.is_kafka_connector() {
             return Err(RwError::from(anyhow!(
                 "Private link is only supported for Kafka connector"
             )));

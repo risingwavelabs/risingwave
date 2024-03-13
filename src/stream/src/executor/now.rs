@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,57 +18,45 @@ use std::ops::Bound::Unbounded;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{
-    Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices, PkIndicesRef,
-    StreamExecutorError, Watermark,
+    Barrier, BoxedMessageStream, Execute, Message, Mutation, StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 
 pub struct NowExecutor<S: StateStore> {
+    data_types: Vec<DataType>,
+
     /// Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
 
-    pk_indices: PkIndices,
-    identity: String,
-    schema: Schema,
     state_table: StateTable<S>,
 }
 
 impl<S: StateStore> NowExecutor<S> {
     pub fn new(
+        data_types: Vec<DataType>,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
-
         Self {
+            data_types,
             barrier_receiver,
-            pk_indices: vec![],
-            identity: format!("NowExecutor {:X}", executor_id),
-            schema,
             state_table,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(self) {
+    async fn execute_inner(self) {
         let Self {
-            mut barrier_receiver,
+            data_types,
+            barrier_receiver,
             mut state_table,
-            schema,
-            ..
         } = self;
 
         // Whether the executor is paused.
@@ -78,45 +66,57 @@ impl<S: StateStore> NowExecutor<S> {
         // Whether the first barrier is handled and `last_timestamp` is initialized.
         let mut initialized = false;
 
-        while let Some(barrier) = barrier_receiver.recv().await {
-            if !initialized {
-                // Handle the first barrier.
-                state_table.init_epoch(barrier.epoch);
-                let state_row = {
-                    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
-                    let data_iter = state_table
-                        .iter_with_prefix(row::empty(), sub_range, Default::default())
-                        .await?;
-                    pin_mut!(data_iter);
-                    if let Some(keyed_row) = data_iter.next().await {
-                        Some(keyed_row?)
-                    } else {
-                        None
-                    }
-                };
-                last_timestamp = state_row.and_then(|row| row[0].clone());
-                paused = barrier.is_pause_on_startup();
-                initialized = true;
-            } else if paused {
-                // Assert that no data is updated.
-                state_table.commit_no_data_expected(barrier.epoch);
-            } else {
-                state_table.commit(barrier.epoch).await?;
+        const MAX_MERGE_BARRIER_SIZE: usize = 64;
+
+        #[for_await]
+        for barriers in
+            UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
+        {
+            let mut timestamp = None;
+            if barriers.len() > 1 {
+                warn!(
+                    "handle multiple barriers at once in now executor: {}",
+                    barriers.len()
+                );
             }
-
-            // Extract timestamp from the current epoch.
-            let timestamp = Some(barrier.get_curr_epoch().as_scalar());
-
-            // Update paused state.
-            if let Some(mutation) = barrier.mutation.as_deref() {
-                match mutation {
-                    Mutation::Pause => paused = true,
-                    Mutation::Resume => paused = false,
-                    _ => {}
+            for barrier in barriers {
+                if !initialized {
+                    // Handle the first barrier.
+                    state_table.init_epoch(barrier.epoch);
+                    let state_row = {
+                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                            &(Unbounded, Unbounded);
+                        let data_iter = state_table
+                            .iter_with_prefix(row::empty(), sub_range, Default::default())
+                            .await?;
+                        pin_mut!(data_iter);
+                        if let Some(keyed_row) = data_iter.next().await {
+                            Some(keyed_row?)
+                        } else {
+                            None
+                        }
+                    };
+                    last_timestamp = state_row.and_then(|row| row[0].clone());
+                    paused = barrier.is_pause_on_startup();
+                    initialized = true;
+                } else {
+                    state_table.commit(barrier.epoch).await?;
                 }
-            }
 
-            yield Message::Barrier(barrier.clone());
+                // Extract timestamp from the current epoch.
+                timestamp = Some(barrier.get_curr_epoch().as_scalar());
+
+                // Update paused state.
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Pause => paused = true,
+                        Mutation::Resume => paused = false,
+                        _ => {}
+                    }
+                }
+
+                yield Message::Barrier(barrier);
+            }
 
             // Do not yield any messages if paused.
             if paused {
@@ -128,15 +128,12 @@ impl<S: StateStore> NowExecutor<S> {
                 let row = row::once(&timestamp);
                 state_table.update(last_row, row);
 
-                StreamChunk::from_rows(
-                    &[(Op::Delete, last_row), (Op::Insert, row)],
-                    &schema.data_types(),
-                )
+                StreamChunk::from_rows(&[(Op::Delete, last_row), (Op::Insert, row)], &data_types)
             } else {
                 let row = row::once(&timestamp);
                 state_table.insert(row);
 
-                StreamChunk::from_rows(&[(Op::Insert, row)], &schema.data_types())
+                StreamChunk::from_rows(&[(Op::Insert, row)], &data_types)
             };
 
             yield Message::Chunk(stream_chunk);
@@ -152,21 +149,9 @@ impl<S: StateStore> NowExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for NowExecutor<S> {
+impl<S: StateStore> Execute for NowExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        self.identity.as_str()
+        self.execute_inner().boxed()
     }
 }
 
@@ -176,7 +161,6 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -184,7 +168,7 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{
-        Barrier, BoxedMessageStream, Executor, Mutation, PkIndices, StreamExecutorResult, Watermark,
+        Barrier, BoxedMessageStream, Execute, Mutation, StreamExecutorResult, Watermark,
     };
 
     #[tokio::test]
@@ -387,16 +371,6 @@ mod tests {
         Ok(())
     }
 
-    #[inline]
-    fn create_pk_indices() -> PkIndices {
-        vec![]
-    }
-
-    #[inline]
-    fn create_order_types() -> Vec<OrderType> {
-        vec![]
-    }
-
     fn create_state_store() -> MemoryStateStore {
         MemoryStateStore::new()
     }
@@ -406,19 +380,19 @@ mod tests {
     ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
-        let order_types = create_order_types();
-        let pk_indices = create_pk_indices();
         let state_table = StateTable::new_without_distribution(
             state_store.clone(),
             table_id,
             column_descs,
-            order_types,
-            pk_indices,
+            vec![],
+            vec![],
         )
         .await;
 
         let (sender, barrier_receiver) = unbounded_channel();
-        let now_executor = NowExecutor::new(barrier_receiver, 1, state_table);
-        (sender, Box::new(now_executor).execute())
+
+        let now_executor =
+            NowExecutor::new(vec![DataType::Timestamptz], barrier_receiver, state_table);
+        (sender, now_executor.boxed().execute())
     }
 }

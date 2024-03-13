@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +19,14 @@ use risingwave_expr::{aggregate, ExprError, Result};
 
 #[aggregate("sum(int2) -> int8")]
 #[aggregate("sum(int4) -> int8")]
-#[aggregate("sum(int8) -> int8")]
 #[aggregate("sum(int8) -> decimal")]
 #[aggregate("sum(float4) -> float4")]
 #[aggregate("sum(float8) -> float8")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
-#[aggregate("sum0(int8) -> int8", init_state = "0i64")]
+#[aggregate("sum(int8) -> int8", internal)] // used internally for 2-phase sum(int2) and sum(int4)
+#[aggregate("sum0(int8) -> int8", internal, init_state = "0i64")] // used internally for 2-phase count
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
@@ -42,12 +42,86 @@ where
     }
 }
 
-#[aggregate("min(*) -> auto", state = "ref")]
+#[aggregate("avg(int2) -> decimal", rewritten)]
+#[aggregate("avg(int4) -> decimal", rewritten)]
+#[aggregate("avg(int8) -> decimal", rewritten)]
+#[aggregate("avg(decimal) -> decimal", rewritten)]
+#[aggregate("avg(float4) -> float8", rewritten)]
+#[aggregate("avg(float8) -> float8", rewritten)]
+#[aggregate("avg(int256) -> float8", rewritten)]
+#[aggregate("avg(interval) -> interval", rewritten)]
+fn _avg() {}
+
+#[aggregate("stddev_pop(int2) -> decimal", rewritten)]
+#[aggregate("stddev_pop(int4) -> decimal", rewritten)]
+#[aggregate("stddev_pop(int8) -> decimal", rewritten)]
+#[aggregate("stddev_pop(decimal) -> decimal", rewritten)]
+#[aggregate("stddev_pop(float4) -> float8", rewritten)]
+#[aggregate("stddev_pop(float8) -> float8", rewritten)]
+#[aggregate("stddev_pop(int256) -> float8", rewritten)]
+fn _stddev_pop() {}
+
+#[aggregate("stddev_samp(int2) -> decimal", rewritten)]
+#[aggregate("stddev_samp(int4) -> decimal", rewritten)]
+#[aggregate("stddev_samp(int8) -> decimal", rewritten)]
+#[aggregate("stddev_samp(decimal) -> decimal", rewritten)]
+#[aggregate("stddev_samp(float4) -> float8", rewritten)]
+#[aggregate("stddev_samp(float8) -> float8", rewritten)]
+#[aggregate("stddev_samp(int256) -> float8", rewritten)]
+fn _stddev_samp() {}
+
+#[aggregate("var_pop(int2) -> decimal", rewritten)]
+#[aggregate("var_pop(int4) -> decimal", rewritten)]
+#[aggregate("var_pop(int8) -> decimal", rewritten)]
+#[aggregate("var_pop(decimal) -> decimal", rewritten)]
+#[aggregate("var_pop(float4) -> float8", rewritten)]
+#[aggregate("var_pop(float8) -> float8", rewritten)]
+#[aggregate("var_pop(int256) -> float8", rewritten)]
+fn _var_pop() {}
+
+#[aggregate("var_samp(int2) -> decimal", rewritten)]
+#[aggregate("var_samp(int4) -> decimal", rewritten)]
+#[aggregate("var_samp(int8) -> decimal", rewritten)]
+#[aggregate("var_samp(decimal) -> decimal", rewritten)]
+#[aggregate("var_samp(float4) -> float8", rewritten)]
+#[aggregate("var_samp(float8) -> float8", rewritten)]
+#[aggregate("var_samp(int256) -> float8", rewritten)]
+fn _var_samp() {}
+
+// no `min(boolean)` and `min(jsonb)`
+#[aggregate("min(*int) -> auto", state = "ref")]
+#[aggregate("min(*float) -> auto", state = "ref")]
+#[aggregate("min(decimal) -> auto", state = "ref")]
+#[aggregate("min(int256) -> auto", state = "ref")]
+#[aggregate("min(serial) -> auto", state = "ref")]
+#[aggregate("min(date) -> auto", state = "ref")]
+#[aggregate("min(time) -> auto", state = "ref")]
+#[aggregate("min(interval) -> auto", state = "ref")]
+#[aggregate("min(timestamp) -> auto", state = "ref")]
+#[aggregate("min(timestamptz) -> auto", state = "ref")]
+#[aggregate("min(varchar) -> auto", state = "ref")]
+#[aggregate("min(bytea) -> auto", state = "ref")]
+#[aggregate("min(anyarray) -> auto", state = "ref")]
+#[aggregate("min(struct) -> auto", state = "ref")]
 fn min<T: Ord>(state: T, input: T) -> T {
     state.min(input)
 }
 
-#[aggregate("max(*) -> auto", state = "ref")]
+// no `max(boolean)` and `max(jsonb)`
+#[aggregate("max(*int) -> auto", state = "ref")]
+#[aggregate("max(*float) -> auto", state = "ref")]
+#[aggregate("max(decimal) -> auto", state = "ref")]
+#[aggregate("max(int256) -> auto", state = "ref")]
+#[aggregate("max(serial) -> auto", state = "ref")]
+#[aggregate("max(date) -> auto", state = "ref")]
+#[aggregate("max(time) -> auto", state = "ref")]
+#[aggregate("max(interval) -> auto", state = "ref")]
+#[aggregate("max(timestamp) -> auto", state = "ref")]
+#[aggregate("max(timestamptz) -> auto", state = "ref")]
+#[aggregate("max(varchar) -> auto", state = "ref")]
+#[aggregate("max(bytea) -> auto", state = "ref")]
+#[aggregate("max(anyarray) -> auto", state = "ref")]
+#[aggregate("max(struct) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
@@ -62,7 +136,7 @@ fn last_value<T>(_: T, input: T) -> T {
     input
 }
 
-#[aggregate("internal_last_seen_value(*) -> auto", state = "ref")]
+#[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
 fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
     if retract {
         state
@@ -274,7 +348,7 @@ mod tests {
         test_agg(
             "(min:int4[] $0:int4[])",
             input,
-            Some(ListValue::new(vec![Some(0i32.into())]).into()),
+            Some(ListValue::from_iter([0]).into()),
         );
     }
 

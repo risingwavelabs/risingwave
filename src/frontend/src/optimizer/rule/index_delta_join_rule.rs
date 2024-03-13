@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -52,7 +52,7 @@ impl Rule for IndexDeltaJoinRule {
         fn match_indexes(
             join_indices: &[usize],
             table_scan: &StreamTableScan,
-            chain_type: ChainType,
+            stream_scan_type: StreamScanType,
         ) -> Option<PlanRef> {
             for index in &table_scan.core().indexes {
                 // Only full covering index can be used in delta join
@@ -93,10 +93,10 @@ impl Rule for IndexDeltaJoinRule {
                     table_scan
                         .to_index_scan(
                             index.index_table.name.as_str(),
-                            index.index_table.table_desc().into(),
+                            index.index_table.clone(),
                             p2s_mapping,
                             index.function_mapping(),
-                            chain_type,
+                            stream_scan_type,
                         )
                         .into(),
                 );
@@ -120,11 +120,11 @@ impl Rule for IndexDeltaJoinRule {
                     return None;
                 }
 
-                if chain_type != table_scan.chain_type() {
+                if stream_scan_type != table_scan.stream_scan_type() {
                     Some(
-                        StreamTableScan::new_with_chain_type(
+                        StreamTableScan::new_with_stream_scan_type(
                             table_scan.core().clone(),
-                            chain_type,
+                            stream_scan_type,
                         )
                         .into(),
                     )
@@ -139,8 +139,9 @@ impl Rule for IndexDeltaJoinRule {
         // Delta join only needs to backfill one stream flow and others should be upstream only
         // chain. Here we choose the left one to backfill and right one to upstream only
         // chain.
-        if let Some(left) = match_indexes(&left_indices, input_left, ChainType::Backfill) {
-            if let Some(right) = match_indexes(&right_indices, input_right, ChainType::UpstreamOnly)
+        if let Some(left) = match_indexes(&left_indices, input_left, StreamScanType::Backfill) {
+            if let Some(right) =
+                match_indexes(&right_indices, input_right, StreamScanType::UpstreamOnly)
             {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.

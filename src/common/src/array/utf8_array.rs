@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -119,7 +119,7 @@ impl Utf8Array {
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct Utf8ArrayBuilder {
     bytes: BytesArrayBuilder,
 }

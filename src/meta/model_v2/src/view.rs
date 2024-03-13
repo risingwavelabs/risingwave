@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use risingwave_pb::catalog::PbView;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
 
 use crate::{FieldArray, Property, ViewId};
 
@@ -52,11 +52,11 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbView> for ActiveModel {
     fn from(view: PbView) -> Self {
         Self {
-            view_id: ActiveValue::Set(view.id as _),
-            name: ActiveValue::Set(view.name),
-            properties: ActiveValue::Set(Property(view.properties)),
-            definition: ActiveValue::Set(view.sql),
-            columns: ActiveValue::Set(FieldArray(view.columns)),
+            view_id: Set(view.id as _),
+            name: Set(view.name),
+            properties: Set(Property(view.properties)),
+            definition: Set(view.sql),
+            columns: Set(FieldArray(view.columns)),
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,12 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt};
+use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::Datum;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -35,18 +33,15 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, get_new_pos, iter_chunks, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter,
+    compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
+    mapping_message, mark_chunk, owned_row_iter, update_backfill_metrics, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier, Barrier, BoxedMessageStream, Execute, Executor, Message, Mutation,
+    StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
-
-/// vnode, `is_finished`, `row_count`, all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 3;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -83,7 +78,7 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
     upstream_table: StorageTable<S>,
     /// Upstream with the same schema with the upstream table.
-    upstream: BoxedExecutor,
+    upstream: Executor,
 
     /// Internal state table for persisting state of backfill state.
     state_table: Option<StateTable<S>>,
@@ -96,11 +91,14 @@ pub struct BackfillExecutor<S: StateStore> {
 
     actor_id: ActorId,
 
-    info: ExecutorInfo,
-
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    /// Rate limit, just used to initialize the chunk size for
+    /// snapshot read side.
+    /// If smaller than chunk_size, it will take precedence.
+    rate_limit: Option<usize>,
 }
 
 impl<S> BackfillExecutor<S>
@@ -110,39 +108,39 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         upstream_table: StorageTable<S>,
-        upstream: BoxedExecutor,
+        upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        executor_id: u64,
+        rate_limit: Option<usize>,
     ) -> Self {
+        let actor_id = progress.actor_id();
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("BackfillExecutor {:X}", executor_id),
-            },
             upstream_table,
             upstream,
             state_table,
             output_indices,
-            actor_id: progress.actor_id(),
             progress,
+            actor_id,
             metrics,
             chunk_size,
+            rate_limit,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // The primary key columns, in the output columns of the upstream_table scan.
-        let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+        // The primary key columns.
+        // We receive a pruned chunk from the upstream table,
+        // which will only contain output columns of the scan on the upstream table.
+        // The pk indices specify the pk columns of the pruned chunk.
+        let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
-        let state_len = pk_in_output_indices.len() + METADATA_STATE_LEN;
+        let mut rate_limit = self.rate_limit;
+
+        let state_len = pk_indices.len() + METADATA_STATE_LEN;
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
@@ -152,6 +150,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
+        let mut paused = first_barrier.is_pause_on_startup();
         let init_epoch = first_barrier.epoch.prev;
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
@@ -162,11 +161,11 @@ where
             is_finished,
             row_count,
             mut old_state,
-        } = Self::recover_backfill_state(self.state_table.as_ref(), pk_in_output_indices.len())
-            .await?;
+        } = Self::recover_backfill_state(self.state_table.as_ref(), pk_indices.len()).await?;
+        tracing::trace!(is_finished, row_count, "backfill state recovered");
 
-        let mut builder =
-            DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
+        let data_types = self.upstream_table.schema().data_types();
+        let mut builder = create_builder(rate_limit, self.chunk_size, data_types.clone());
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -229,14 +228,13 @@ where
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
-                    let right_snapshot = pin!(Self::snapshot_read(
+                    let right_snapshot = pin!(Self::make_snapshot_stream(
                         &self.upstream_table,
                         snapshot_read_epoch,
                         current_pos.clone(),
-                        true,
-                        &mut builder
+                        paused
                     )
-                    .map(Either::Right),);
+                    .map(Either::Right));
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
@@ -276,6 +274,18 @@ where
                                 has_snapshot_read = true;
                                 match msg? {
                                     None => {
+                                        // Consume remaining rows in the builder.
+                                        if let Some(data_chunk) = builder.consume_all() {
+                                            yield Self::handle_snapshot_chunk(
+                                                data_chunk,
+                                                &mut current_pos,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                                &mut total_snapshot_processed_rows,
+                                                &pk_indices,
+                                                &self.output_indices,
+                                            );
+                                        }
+
                                         // End of the snapshot read stream.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows
@@ -291,23 +301,27 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-
+                                        update_backfill_metrics(
+                                            &self.metrics,
+                                            self.actor_id,
+                                            upstream_table_id,
+                                            cur_barrier_snapshot_processed_rows,
+                                            cur_barrier_upstream_processed_rows,
+                                        );
                                         break 'backfill_loop;
                                     }
-                                    Some(chunk) => {
-                                        // Raise the current position.
-                                        // As snapshot read streams are ordered by pk, so we can
-                                        // just use the last row to update `current_pos`.
-                                        current_pos =
-                                            Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                                        let chunk_cardinality = chunk.cardinality() as u64;
-                                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                        total_snapshot_processed_rows += chunk_cardinality;
-                                        yield Message::Chunk(mapping_chunk(
-                                            chunk,
-                                            &self.output_indices,
-                                        ));
+                                    Some(record) => {
+                                        // Buffer the snapshot read row.
+                                        if let Some(data_chunk) = builder.append_one_row(record) {
+                                            yield Self::handle_snapshot_chunk(
+                                                data_chunk,
+                                                &mut current_pos,
+                                                &mut cur_barrier_snapshot_processed_rows,
+                                                &mut total_snapshot_processed_rows,
+                                                &pk_indices,
+                                                &self.output_indices,
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -317,7 +331,12 @@ where
                     // Before processing barrier, if did not snapshot read,
                     // do a snapshot read first.
                     // This is so we don't lose the tombstone iteration progress.
-                    if !has_snapshot_read {
+                    // If paused, we also can't read any snapshot records.
+                    if !has_snapshot_read && !paused {
+                        assert!(
+                            builder.is_empty(),
+                            "Builder should be empty if no snapshot read"
+                        );
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
                         for msg in snapshot {
@@ -332,19 +351,16 @@ where
                                     snapshot_read_complete = true;
                                     break;
                                 }
-                                Some(chunk) => {
-                                    // Raise the current position.
-                                    // As snapshot read streams are ordered by pk, so we can
-                                    // just use the last row to update `current_pos`.
-                                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                                    let chunk_cardinality = chunk.cardinality() as u64;
-                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                    total_snapshot_processed_rows += chunk_cardinality;
-                                    yield Message::Chunk(mapping_chunk(
+                                Some(row) => {
+                                    let chunk = DataChunk::from_rows(&[row], &data_types);
+                                    yield Self::handle_snapshot_chunk(
                                         chunk,
+                                        &mut current_pos,
+                                        &mut cur_barrier_snapshot_processed_rows,
+                                        &mut total_snapshot_processed_rows,
+                                        &pk_indices,
                                         &self.output_indices,
-                                    ));
+                                    );
                                     break;
                                 }
                             }
@@ -367,14 +383,14 @@ where
                 // Consume snapshot rows left in builder
                 let chunk = builder.consume_all();
                 if let Some(chunk) = chunk {
-                    let chunk_cardinality = chunk.cardinality() as u64;
-                    let ops = vec![Op::Insert; chunk.capacity()];
-                    let chunk = StreamChunk::from_parts(ops, chunk);
-                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
-
-                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                    total_snapshot_processed_rows += chunk_cardinality;
-                    yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                    yield Self::handle_snapshot_chunk(
+                        chunk,
+                        &mut current_pos,
+                        &mut cur_barrier_snapshot_processed_rows,
+                        &mut total_snapshot_processed_rows,
+                        &pk_indices,
+                        &self.output_indices,
+                    );
                 }
 
                 // Consume upstream buffer chunk
@@ -385,7 +401,7 @@ where
                     for chunk in upstream_chunk_buffer.drain(..) {
                         cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
                         yield Message::Chunk(mapping_chunk(
-                            mark_chunk(chunk, current_pos, &pk_in_output_indices, pk_order),
+                            mark_chunk(chunk, current_pos, &pk_indices, pk_order),
                             &self.output_indices,
                         ));
                     }
@@ -393,21 +409,13 @@ where
                     upstream_chunk_buffer.clear()
                 }
 
-                self.metrics
-                    .backfill_snapshot_read_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_snapshot_processed_rows);
-
-                self.metrics
-                    .backfill_upstream_output_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_upstream_processed_rows);
+                update_backfill_metrics(
+                    &self.metrics,
+                    self.actor_id,
+                    upstream_table_id,
+                    cur_barrier_snapshot_processed_rows,
+                    cur_barrier_upstream_processed_rows,
+                );
 
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
@@ -437,6 +445,36 @@ where
                     "Backfill state persisted"
                 );
 
+                // Update snapshot read chunk builder.
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Pause => {
+                            paused = true;
+                        }
+                        Mutation::Resume => {
+                            paused = false;
+                        }
+                        Mutation::Throttle(actor_to_apply) => {
+                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
+                            if let Some(new_rate_limit) = new_rate_limit_entry {
+                                rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
+                                tracing::info!(
+                                    id = self.actor_id,
+                                    new_rate_limit = ?self.rate_limit,
+                                    "actor rate limit changed",
+                                );
+                                assert!(builder.is_empty());
+                                builder = create_builder(
+                                    rate_limit,
+                                    self.chunk_size,
+                                    self.upstream_table.schema().data_types(),
+                                );
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+
                 yield Message::Barrier(barrier);
 
                 if snapshot_read_complete {
@@ -465,8 +503,7 @@ where
                         // since it expects to have been initialized in previous epoch
                         // (there's no epoch before the first epoch).
                         if current_pos.is_none() {
-                            current_pos =
-                                Some(construct_initial_finished_state(pk_in_output_indices.len()))
+                            current_pos = Some(construct_initial_finished_state(pk_indices.len()))
                         }
 
                         // We will update current_pos at least once,
@@ -504,6 +541,9 @@ where
                     yield msg;
                     break;
                 }
+                // Allow other messages to pass through.
+                // We won't yield twice here, since if there's a barrier,
+                // we will always break out of the loop.
                 yield msg;
             }
         }
@@ -582,19 +622,37 @@ where
         }
     }
 
+    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
+    async fn make_snapshot_stream(
+        upstream_table: &StorageTable<S>,
+        epoch: u64,
+        current_pos: Option<OwnedRow>,
+        paused: bool,
+    ) {
+        if paused {
+            #[for_await]
+            for _ in tokio_stream::pending() {
+                yield None;
+            }
+        } else {
+            #[for_await]
+            for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
+                yield r?;
+            }
+        }
+    }
+
     /// Snapshot read the upstream mv.
     /// The rows from upstream snapshot read will be buffered inside the `builder`.
     /// If snapshot is dropped before its rows are consumed,
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read<'a>(
-        upstream_table: &'a StorageTable<S>,
+    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
+    async fn snapshot_read(
+        upstream_table: &StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
-        ordered: bool,
-        builder: &'a mut DataChunkBuilder,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
@@ -612,18 +670,18 @@ where
                 HummockReadEpoch::NoWait(epoch),
                 row::empty(),
                 range_bounds,
-                ordered,
-                PrefetchOptions::new_for_exhaust_iter(),
+                true,
+                // Here we only use small range prefetch because every barrier change, the executor will recreate a new iterator. So we do not need prefetch too much data.
+                PrefetchOptions::prefetch_for_small_range_scan(),
             )
             .await?;
-
         let row_iter = owned_row_iter(iter);
-        pin_mut!(row_iter);
 
         #[for_await]
-        for chunk in iter_chunks(row_iter, builder) {
-            yield chunk?;
+        for row in row_iter {
+            yield Some(row?);
         }
+        yield None;
     }
 
     async fn persist_state(
@@ -648,25 +706,40 @@ where
         )
         .await
     }
+
+    /// 1. Converts from data chunk to stream chunk.
+    /// 2. Update the current position.
+    /// 3. Update Metrics
+    /// 4. Map the chunk according to output indices, return
+    ///    the stream message to be yielded downstream.
+    fn handle_snapshot_chunk(
+        data_chunk: DataChunk,
+        current_pos: &mut Option<OwnedRow>,
+        cur_barrier_snapshot_processed_rows: &mut u64,
+        total_snapshot_processed_rows: &mut u64,
+        pk_indices: &[usize],
+        output_indices: &[usize],
+    ) -> Message {
+        let ops = vec![Op::Insert; data_chunk.capacity()];
+        let chunk = StreamChunk::from_parts(ops, data_chunk);
+        // Raise the current position.
+        // As snapshot read streams are ordered by pk, so we can
+        // just use the last row to update `current_pos`.
+        *current_pos = Some(get_new_pos(&chunk, pk_indices));
+
+        let chunk_cardinality = chunk.cardinality() as u64;
+        *cur_barrier_snapshot_processed_rows += chunk_cardinality;
+        *total_snapshot_processed_rows += chunk_cardinality;
+
+        Message::Chunk(mapping_chunk(chunk, output_indices))
+    }
 }
 
-impl<S> Executor for BackfillExecutor<S>
+impl<S> Execute for BackfillExecutor<S>
 where
     S: StateStore,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 }

@@ -1,0 +1,108 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# collate in select
+
+query T
+select 'a' collate "C";
+----
+a
+
+query B
+select 'a' < 'b' collate "C";
+----
+t
+
+query B
+select 'b' < 'a' collate "POSIX";
+----
+f
+
+query T
+select (varchar 't') collate "C";
+----
+t
+
+# case-sensitive
+statement error
+select 'a' collate "c";
+
+# case-sensitive
+statement error
+select 'a' collate "posix";
+
+# case-sensitive
+statement error
+select 'a' collate "pOsIx";
+
+query BT
+select 'a' < 'b', 'a' collate "C";
+----
+t a
+
+query B
+select 'a' < ('b' collate "C");
+----
+t
+
+query B
+select '1' collate "C" > 2;
+----
+f
+
+query B
+select ('1' collate "C") = 1;
+----
+t
+
+query I
+select '10' collate "C" - 1;
+----
+9
+
+# only `text`, 'varchar' and `char` are built-in collatable types (in PostgreSQL)
+# the type of `('a' < 'b')` is Bool, it SHOULD be failed,
+statement error
+select ('a' < 'b') collate "C";
+
+statement error
+select 123 collate "C";
+
+# parser issue
+statement error
+select varchar 't' collate "C";
+
+statement error
+select 'a' collate "Invalid";
+
+# collate in create table
+
+statement ok
+create table t1 (
+  a text collate "C",
+  b int
+);
+
+statement ok
+create table t2 (
+  a text collate "POSIX",
+  b int
+);
+
+statement error
+create table t3 (
+  a text collate "pOsIx",
+  b int
+);
+
+statement error
+create table t4 (
+  a text collate "POSIX",
+  b int collate "C"
+);
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,10 +42,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private final boolean pubAutoCreate;
 
-    private static final String AWS_RDS_HOST = "rds.amazonaws.com";
+    private static final String AWS_RDS_HOST = "amazonaws.com";
     private final boolean isAwsRds;
 
-    public PostgresValidator(Map<String, String> userProps, TableSchema tableSchema)
+    // Whether the properties to validate is shared by multiple tables.
+    // If true, we will skip validation check for table
+    private final boolean isCdcSourceJob;
+
+    public PostgresValidator(
+            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -69,6 +74,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         this.pubAutoCreate =
                 userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+        this.isCdcSourceJob = isCdcSourceJob;
     }
 
     @Override
@@ -130,6 +136,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
+    @Override
+    boolean isCdcSourceJob() {
+        return isCdcSourceJob;
+    }
+
     /** For Citus which is a distributed version of PG */
     public void validateDistributedTable() throws SQLException {
         try (var stmt =
@@ -146,6 +157,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTableSchema() throws SQLException {
+        if (isCdcSourceJob) {
+            return;
+        }
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table"))) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
@@ -271,7 +285,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTablePrivileges(boolean isSuperUser) throws SQLException {
-        if (isSuperUser) {
+        // cdc source job doesn't have table schema to validate, since its schema is fixed to jsonb
+        if (isSuperUser || isCdcSourceJob) {
             return;
         }
 
@@ -297,9 +312,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     /* Check required privilege to create/alter a publication */
     private void validatePublicationConfig(boolean isSuperUser) throws SQLException {
-        boolean publicationCoversTable = false;
-        boolean publicationExists = false;
-        boolean partialPublication = false;
+        boolean isPublicationCoversTable = false;
+        boolean isPublicationExists = false;
+        boolean isPartialPublicationEnabled = false;
 
         // Check whether publication exists
         try (var stmt =
@@ -308,25 +323,39 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(1, pubName);
             var res = stmt.executeQuery();
             while (res.next()) {
-                publicationExists = res.getBoolean(1);
+                isPublicationExists = res.getBoolean(1);
             }
         }
 
-        if (!pubAutoCreate && !publicationExists) {
-            throw ValidatorUtils.invalidArgument(
-                    "Publication '" + pubName + "' doesn't exist and auto create is disabled");
+        if (!isPublicationExists) {
+            // We require a publication on upstream to publish table cdc events
+            if (!pubAutoCreate) {
+                throw ValidatorUtils.invalidArgument(
+                        "Publication '" + pubName + "' doesn't exist and auto create is disabled");
+            } else {
+                // createPublicationIfNeeded(Optional.empty());
+                LOG.info(
+                        "Publication '{}' doesn't exist, will be created in the process of streaming job.",
+                        this.pubName);
+            }
+        }
+
+        // If the source properties is created by share source, skip the following
+        // check of publication
+        if (isCdcSourceJob) {
+            return;
         }
 
         // When publication exists, we should check whether it covers the table
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.publication_att_exists"));
             while (res.next()) {
-                partialPublication = res.getBoolean(1);
+                isPartialPublicationEnabled = res.getBoolean(1);
             }
         }
         // PG 15 and up supports partial publication of table
         // check whether publication covers all columns of the table schema
-        if (partialPublication) {
+        if (isPartialPublicationEnabled) {
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.publication_attnames"))) {
@@ -346,10 +375,10 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                                             pubName, schemaName + "." + tableName));
                         }
                         if (i == tableSchema.getNumColumns() - 1) {
-                            publicationCoversTable = true;
+                            isPublicationCoversTable = true;
                         }
                     }
-                    if (publicationCoversTable) {
+                    if (isPublicationCoversTable) {
                         LOG.info(
                                 "The publication covers the table '{}'.",
                                 schemaName + "." + tableName);
@@ -368,9 +397,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 stmt.setString(3, pubName);
                 var res = stmt.executeQuery();
                 if (res.next()) {
-                    publicationCoversTable = res.getBoolean(1);
-                    if (publicationCoversTable) {
-                        LOG.info("The publication covers the table.");
+                    isPublicationCoversTable = res.getBoolean(1);
+                    if (isPublicationCoversTable) {
+                        LOG.info(
+                                "The publication covers the table '{}'.",
+                                schemaName + "." + tableName);
                     }
                 }
             }
@@ -378,12 +409,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         // If auto create is enabled and the publication doesn't exist or doesn't cover the table,
         // we need to create or alter the publication. And we need to check the required privileges.
-        if (!publicationCoversTable) {
+        if (!isPublicationCoversTable) {
             // check whether the user has the CREATE privilege on database
             if (!isSuperUser) {
                 validatePublicationPrivileges();
             }
-            if (publicationExists) {
+            if (isPublicationExists) {
                 alterPublicationIfNeeded();
             } else {
                 LOG.info(
@@ -394,6 +425,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validatePublicationPrivileges() throws SQLException {
+        if (isCdcSourceJob) {
+            throw ValidatorUtils.invalidArgument(
+                    "The connector properties is shared by multiple tables unexpectedly");
+        }
+
         // check whether the user has the CREATE privilege on database
         try (var stmt =
                 jdbcConnection.prepareStatement(
@@ -461,11 +497,16 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     protected void alterPublicationIfNeeded() throws SQLException {
+        if (isCdcSourceJob) {
+            throw ValidatorUtils.invalidArgument(
+                    "The connector properties is created by a shared source unexpectedly");
+        }
+
         String alterPublicationSql =
                 String.format(
                         "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
         try (var stmt = jdbcConnection.createStatement()) {
-            LOG.info("Altered publication with statement: {}", stmt);
+            LOG.info("Altered publication with statement: {}", alterPublicationSql);
             stmt.execute(alterPublicationSql);
         }
     }

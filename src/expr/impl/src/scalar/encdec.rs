@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::fmt::Write;
 
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
 use risingwave_expr::{function, ExprError, Result};
+use thiserror_ext::AsReport;
 
 const PARSE_BASE64_INVALID_END: &str = "invalid base64 end sequence";
 const PARSE_BASE64_INVALID_PADDING: &str = "unexpected \"=\" while decoding base64 sequence";
@@ -70,6 +71,43 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
             name: "format",
             reason: format!("unrecognized encoding: \"{}\"", format).into(),
         }),
+    }
+}
+
+enum CharacterSet {
+    Utf8,
+}
+
+impl CharacterSet {
+    fn recognize(encoding: &str) -> Result<Self> {
+        match encoding.to_uppercase().as_str() {
+            "UTF8" | "UTF-8" => Ok(Self::Utf8),
+            _ => Err(ExprError::InvalidParam {
+                name: "encoding",
+                reason: format!("unrecognized encoding: \"{}\"", encoding).into(),
+            }),
+        }
+    }
+}
+
+#[function("convert_from(bytea, varchar) -> varchar")]
+pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) -> Result<()> {
+    match CharacterSet::recognize(src_encoding)? {
+        CharacterSet::Utf8 => {
+            let text = String::from_utf8(data.to_vec()).map_err(|e| ExprError::InvalidParam {
+                name: "data",
+                reason: e.to_report_string().into(),
+            })?;
+            writer.write_str(&text).unwrap();
+            Ok(())
+        }
+    }
+}
+
+#[function("convert_to(varchar, varchar) -> bytea")]
+pub fn convert_to(string: &str, dest_encoding: &str) -> Result<Box<[u8]>> {
+    match CharacterSet::recognize(dest_encoding)? {
+        CharacterSet::Utf8 => Ok(string.as_bytes().into()),
     }
 }
 

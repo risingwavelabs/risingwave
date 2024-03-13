@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
@@ -75,7 +74,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         let hummock = context
             .hummock_store(HummockServiceOpts::from_env(args.data_dir.clone())?)
             .await?;
-        let version = hummock.inner().get_pinned_version().version();
+        let version = hummock.inner().get_pinned_version().version().clone();
         let sstable_store = hummock.sstable_store();
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {
@@ -204,7 +203,7 @@ pub async fn sst_dump_via_sstable_store(
     let sstable_cache = sstable_store
         .sstable(&sstable_info, &mut StoreLocalStatistic::default())
         .await?;
-    let sstable = sstable_cache.value().as_ref();
+    let sstable = sstable_cache.as_ref();
     let sstable_meta = &sstable.meta;
     let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
     let largest_key = FullKey::decode(&sstable_meta.largest_key);
@@ -320,13 +319,17 @@ fn print_kv_pairs(
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(full_val)?;
 
-        let epoch = Epoch::from(full_key.epoch);
+        let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
         let date_time = DateTime::<Utc>::from(epoch.as_system_time());
 
         println!("\t\t   key: {:?}, len={}", full_key, full_key.encoded_len());
         println!("\t\t value: {:?}, len={}", humm_val, humm_val.encoded_len());
-        println!("\t\t epoch: {} ({})", epoch, date_time);
-
+        println!(
+            "\t\t epoch: {} offset = {}  ({})",
+            epoch,
+            full_key.epoch_with_gap.offset(),
+            date_time
+        );
         if args.print_table {
             print_table_column(full_key, humm_val, table_data)?;
         }

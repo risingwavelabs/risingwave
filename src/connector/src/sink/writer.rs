@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,15 +22,14 @@ use futures::future::{select, Either};
 use futures::TryFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::drop_either_future;
+use rw_futures_util::drop_either_future;
 
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::SinkFormatter;
 use crate::sink::log_store::{
-    DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogReader, LogStoreReadItem,
-    TruncateOffset,
+    DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogStoreReadItem, TruncateOffset,
 };
-use crate::sink::{LogSinker, Result, SinkError, SinkMetrics};
+use crate::sink::{LogSinker, Result, SinkError, SinkLogReader, SinkMetrics};
 
 #[async_trait]
 pub trait SinkWriter: Send + 'static {
@@ -67,6 +66,10 @@ pub trait AsyncTruncateSinkWriter: Send + 'static {
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> impl Future<Output = Result<()>> + Send + 'a;
+
+    fn barrier(&mut self, _is_checkpoint: bool) -> impl Future<Output = Result<()>> + Send + '_ {
+        async { Ok(()) }
+    }
 }
 
 /// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
@@ -123,7 +126,7 @@ impl<W> LogSinkerOf<W> {
 
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
-    async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         let mut sink_writer = self.writer;
         let sink_metrics = self.sink_metrics;
         #[derive(Debug)]
@@ -139,8 +142,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
         }
 
         let mut state = LogConsumerState::Uninitialized;
-
-        log_reader.init().await?;
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
@@ -243,8 +244,7 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
 
 #[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
-    async fn consume_log_and_sink(mut self, mut log_reader: impl LogReader) -> Result<()> {
-        log_reader.init().await?;
+    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<()> {
         loop {
             let select_result = drop_either_future(
                 select(
@@ -261,9 +261,8 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                             let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
                             self.writer.write_chunk(chunk, add_future).await?;
                         }
-                        LogStoreReadItem::Barrier {
-                            is_checkpoint: _is_checkpoint,
-                        } => {
+                        LogStoreReadItem::Barrier { is_checkpoint } => {
+                            self.writer.barrier(is_checkpoint).await?;
                             self.future_manager.add_barrier(epoch);
                         }
                         LogStoreReadItem::UpdateVnodeBitmap(_) => {}

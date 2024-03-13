@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use chrono::format::Parsed;
-use risingwave_common::types::{DataType, Date, Timestamp, Timestamptz};
-use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::{build_function, function, ExprError, Result};
+use risingwave_common::types::{Date, Timestamp, Timestamptz};
+use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::ChronoPattern;
@@ -67,7 +66,7 @@ fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
 }
 
 #[function(
-    "to_timestamp1(varchar, varchar) -> timestamp",
+    "char_to_timestamptz(varchar, varchar) -> timestamp",
     prebuild = "ChronoPattern::compile($1)",
     deprecated
 )]
@@ -82,7 +81,7 @@ pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
 }
 
 #[function(
-    "to_timestamp1(varchar, varchar, varchar) -> timestamptz",
+    "char_to_timestamptz(varchar, varchar, varchar) -> timestamptz",
     prebuild = "ChronoPattern::compile($1)"
 )]
 pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Timestamptz> {
@@ -94,13 +93,8 @@ pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Tim
     })
 }
 
-// Only to register this signature to function signature map.
-#[build_function("to_timestamp1(varchar, varchar) -> timestamptz")]
-fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "to_timestamp should have been rewritten to include timezone".into(),
-    ))
-}
+#[function("char_to_timestamptz(varchar, varchar) -> timestamptz", rewritten)]
+fn _to_timestamp1() {}
 
 #[function(
     "char_to_date(varchar, varchar) -> date",
@@ -108,7 +102,9 @@ fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Resul
 )]
 pub fn to_date(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
     let mut parsed = parse(s, tmpl)?;
-    if let Some(year) = &mut parsed.year && *year < 0 {
+    if let Some(year) = &mut parsed.year
+        && *year < 0
+    {
         *year += 1;
     }
     Ok(parsed.to_naive_date()?.into())

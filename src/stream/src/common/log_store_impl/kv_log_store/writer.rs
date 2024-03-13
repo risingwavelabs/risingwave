@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
-use bytes::Bytes;
+use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
@@ -23,7 +23,9 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_storage::store::{InitOptions, LocalStateStore};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
+use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
@@ -43,6 +45,12 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     tx: LogStoreBufferSender,
 
     metrics: KvLogStoreMetrics,
+
+    paused_notifier: watch::Sender<bool>,
+
+    is_paused: bool,
+
+    identity: String,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
@@ -52,6 +60,8 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         serde: LogStoreRowSerde,
         tx: LogStoreBufferSender,
         metrics: KvLogStoreMetrics,
+        paused_notifier: watch::Sender<bool>,
+        identity: String,
     ) -> Self {
         Self {
             _table_id: table_id,
@@ -60,21 +70,33 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             serde,
             tx,
             metrics,
+            paused_notifier,
+            identity,
+            is_paused: false,
         }
     }
 }
 
 impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
-    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
-        self.state_store
-            .init(InitOptions::new_with_epoch(epoch))
-            .await?;
+    async fn init(
+        &mut self,
+        epoch: EpochPair,
+        pause_read_on_bootstrap: bool,
+    ) -> LogStoreResult<()> {
+        self.state_store.init(InitOptions::new(epoch)).await?;
+        if pause_read_on_bootstrap {
+            self.pause()?;
+            info!("KvLogStore of {} paused on bootstrap", self.identity);
+        }
         self.seq_id = FIRST_SEQ_ID;
         self.tx.init(epoch.curr);
         Ok(())
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+        // No data is expected when the stream is paused.
+        assert!(!self.is_paused);
+
         if chunk.cardinality() == 0 {
             return Ok(());
         }
@@ -99,7 +121,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 self.state_store.insert(key, value, None)?;
             }
             flush_info.report(&self.metrics);
-            self.state_store.flush(Vec::new()).await?;
+            self.state_store.flush().await?;
 
             let vnode_bitmap = vnode_bitmap_builder.finish();
             self.tx
@@ -115,10 +137,15 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     ) -> LogStoreResult<()> {
         let epoch = self.state_store.epoch();
         let mut flush_info = FlushInfo::new();
-        for vnode in self.serde.vnodes().iter_vnodes() {
-            let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
-            flush_info.flush_one(key.estimated_size() + value.estimated_size());
-            self.state_store.insert(key, value, None)?;
+
+        // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
+        // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
+        if !self.is_paused {
+            for vnode in self.serde.vnodes().iter_vnodes() {
+                let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
+                flush_info.flush_one(key.estimated_size() + value.estimated_size());
+                self.state_store.insert(key, value, None)?;
+            }
         }
         self.tx
             .flush_all_unflushed(|chunk, epoch, start_seq_id, end_seq_id| {
@@ -131,19 +158,31 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 }
                 Ok(())
             })?;
-        flush_info.report(&self.metrics);
-        let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
-        if let Some(truncation_offset) = self.tx.pop_truncation(epoch) {
-            for vnode in self.serde.vnodes().iter_vnodes() {
-                let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
-                let range_end = self
-                    .serde
-                    .serialize_truncation_offset_watermark(vnode, truncation_offset);
-                delete_range.push((Included(range_begin), Excluded(range_end)));
-            }
+
+        // No data is expected when the stream is paused.
+        if self.is_paused {
+            assert_eq!(flush_info.flush_count, 0);
+            assert_eq!(flush_info.flush_size, 0);
+            assert!(!self.state_store.is_dirty());
         }
-        self.state_store.flush(delete_range).await?;
-        self.state_store.seal_current_epoch(next_epoch);
+        flush_info.report(&self.metrics);
+
+        let watermark = self.tx.pop_truncation(epoch).map(|truncation_offset| {
+            VnodeWatermark::new(
+                self.serde.vnodes().clone(),
+                self.serde
+                    .serialize_truncation_offset_watermark(truncation_offset),
+            )
+        });
+        self.state_store.flush().await?;
+        let watermark = watermark.into_iter().collect_vec();
+        self.state_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions {
+                table_watermarks: Some((WatermarkDirection::Ascending, watermark)),
+                switch_op_consistency_level: None,
+            },
+        );
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())
@@ -151,7 +190,26 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
 
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
+        self.state_store.update_vnode_bitmap(new_vnodes.clone());
         self.tx.update_vnode(self.state_store.epoch(), new_vnodes);
         Ok(())
+    }
+
+    fn pause(&mut self) -> LogStoreResult<()> {
+        info!("KvLogStore of {} is paused", self.identity);
+        assert!(!self.is_paused);
+        self.is_paused = true;
+        self.paused_notifier
+            .send(true)
+            .map_err(|_| anyhow!("unable to set pause"))
+    }
+
+    fn resume(&mut self) -> LogStoreResult<()> {
+        info!("KvLogStore of {} is resumed", self.identity);
+        assert!(self.is_paused);
+        self.is_paused = false;
+        self.paused_notifier
+            .send(false)
+            .map_err(|_| anyhow!("unable to set resume"))
     }
 }

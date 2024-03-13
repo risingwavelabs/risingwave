@@ -14,6 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -25,11 +26,11 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/MrCroxx/foyer", rev = "2261151" }
+foyer = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
-itertools = "0.11"
+itertools = "0.12"
 libc = "0.2"
 lz4 = "1.24.0"
 memcomparable = "0.2"
@@ -54,6 +55,7 @@ spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
 thiserror = "1"
+thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -67,15 +69,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-futures = { version = "0.2", features = ["futures-03"] }
-xorf = "0.10.2"
+xorf = "0.11.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.15", default-features = false }
+procfs = { version = "0.16", default-features = false }
 libc = "0.2"
-nix = { version = "0.27", features = ["fs", "mman"] }
+nix = { version = "0.28", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
@@ -86,8 +87,10 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { workspace = true, features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
+expect-test = "1"
 moka = { version = "0.12", features = ["future"] }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
@@ -134,6 +137,10 @@ harness = false
 
 [[bench]]
 name = "bench_row"
+harness = false
+
+[[bench]]
+name = "bench_imm_compact"
 harness = false
 
 [lints]

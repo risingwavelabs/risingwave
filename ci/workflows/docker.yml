@@ -46,18 +46,38 @@ steps:
             DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
-  - label: "pre build binary"
+  - label: "pre build binary: amd64"
+    if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
-          run: release-env
+      - docker-compose#v5.1.0:
+          run: release-env-x86
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           propagate-environment: true
           environment:
             - BINARY_NAME
             - GITHUB_TOKEN
+    retry: *auto-retry
+
+  - label: "pre build binary: aarch64 "
+    if: build.env("SKIP_TARGET_AARCH64") != "true"
+    command: "ci/scripts/release.sh"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v5.1.0:
+          run: release-env-arm
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          propagate-environment: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
+    agents:
+      queue: "linux-arm64"
     retry: *auto-retry

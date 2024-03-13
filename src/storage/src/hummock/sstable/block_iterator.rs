@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,9 @@ use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 
-use super::{KeyPrefix, LenType, RestartPoint};
+use super::{Block, KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
+use crate::monitor::LocalHitmap;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
@@ -39,10 +40,23 @@ pub struct BlockIterator {
 
     last_key_len_type: LenType,
     last_value_len_type: LenType,
+
+    /// NOTE:
+    ///
+    /// - `hitmap` is supposed to be updated each time accessing the block data in a new position.
+    /// - `hitmap` must be reported to the block hitmap before drop.
+    hitmap: LocalHitmap<{ Block::HITMAP_ELEMS }>,
+}
+
+impl Drop for BlockIterator {
+    fn drop(&mut self) {
+        self.block.hitmap().report(&mut self.hitmap);
+    }
 }
 
 impl BlockIterator {
     pub fn new(block: BlockHolder) -> Self {
+        let hitmap = LocalHitmap::default();
         Self {
             block,
             offset: usize::MAX,
@@ -52,6 +66,7 @@ impl BlockIterator {
             entry_len: 0,
             last_key_len_type: LenType::u8,
             last_value_len_type: LenType::u8,
+            hitmap,
         }
     }
 
@@ -81,7 +96,6 @@ impl BlockIterator {
 
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-
         FullKey::from_slice_without_table_id(self.table_id(), &self.key[..])
     }
 
@@ -105,13 +119,11 @@ impl BlockIterator {
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
         self.seek_restart_point_by_key(key);
-
         self.next_until_key(key);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
         self.seek_restart_point_by_key(key);
-
         self.next_until_key(key);
         if !self.is_valid() {
             self.seek_to_last();
@@ -171,6 +183,9 @@ impl BlockIterator {
         self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
+
+        self.hitmap
+            .fill_with_range(self.offset, self.value_range.end, self.block.len());
 
         true
     }
@@ -241,27 +256,41 @@ impl BlockIterator {
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
+    fn search_restart_point_index_by_key(&mut self, key: FullKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
-        self.block
+        let res = self
+            .block
             .search_restart_partition_point(
                 |&RestartPoint {
                      offset: probe,
                      key_len_type,
                      value_len_type,
                  }| {
-                    let prefix =
-                        self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
+                    let probe = probe as usize;
+                    let prefix = KeyPrefix::decode(
+                        &mut &self.block.data()[probe..],
+                        probe,
+                        key_len_type,
+                        value_len_type,
+                    );
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
                     let full_probe_key =
                         FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
+                    self.hitmap.fill_with_range(
+                        probe,
+                        prefix.diff_key_range().end,
+                        self.block.len(),
+                    );
                     match full_probe_key.cmp(&key) {
                         Ordering::Less | Ordering::Equal => true,
                         Ordering::Greater => false,
                     }
                 },
             )
-            .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
+            // Prevent from underflowing when given is smaller than the first.
+            .saturating_sub(1);
+
+        res
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
@@ -285,6 +314,9 @@ impl BlockIterator {
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         self.update_restart_point(index);
+
+        self.hitmap
+            .fill_with_range(self.offset, self.value_range.end, self.block.len());
     }
 
     fn update_restart_point(&mut self, index: usize) {
@@ -299,6 +331,7 @@ impl BlockIterator {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
@@ -306,10 +339,10 @@ mod tests {
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k01", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k02", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k04", 4), b"v04");
-        builder.add_for_test(construct_full_key_struct(0, b"k05", 5), b"v05");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k01", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k02", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k04", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k05", 5), b"v05");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(
@@ -322,7 +355,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
     }
 
@@ -331,49 +364,49 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
     #[test]
     fn test_seek_none_front() {
         let mut it = build_iterator_for_test();
-        it.seek(construct_full_key_struct(0, b"k00", 0));
+        it.seek(construct_full_key_struct_for_test(0, b"k00", 0));
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         let mut it = build_iterator_for_test();
 
-        it.seek_le(construct_full_key_struct(0, b"k00", 0));
+        it.seek_le(construct_full_key_struct_for_test(0, b"k00", 0));
         assert!(!it.is_valid());
     }
 
     #[test]
     fn test_seek_none_back() {
         let mut it = build_iterator_for_test();
-        it.seek(construct_full_key_struct(0, b"k06", 6));
+        it.seek(construct_full_key_struct_for_test(0, b"k06", 6));
         assert!(!it.is_valid());
 
         let mut it = build_iterator_for_test();
-        it.seek_le(construct_full_key_struct(0, b"k06", 6));
+        it.seek_le(construct_full_key_struct_for_test(0, b"k06", 6));
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
     #[test]
     fn bi_direction_seek() {
         let mut it = build_iterator_for_test();
-        it.seek(construct_full_key_struct(0, b"k03", 3));
+        it.seek(construct_full_key_struct_for_test(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
 
-        it.seek_le(construct_full_key_struct(0, b"k03", 3));
+        it.seek_le(construct_full_key_struct_for_test(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 2).as_bytes(), 2),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 2).as_bytes(), 2),
             it.key()
         );
     }
@@ -384,22 +417,22 @@ mod tests {
 
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k02", 2), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k04", 4), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.next();
@@ -412,22 +445,22 @@ mod tests {
 
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k04", 4), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k02", 2), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.prev();
@@ -438,30 +471,30 @@ mod tests {
     fn test_seek_forward_backward_iterate() {
         let mut it = build_iterator_for_test();
 
-        it.seek(construct_full_key_struct(0, b"k03", 3));
+        it.seek(construct_full_key_struct_for_test(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
 
         it.prev();
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 2).as_bytes(), 2),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 2).as_bytes(), 2),
             it.key()
         );
 
         it.next();
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct_for_test(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
     }
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
     ) -> FullKey<&[u8]> {
-        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(epoch))
     }
 }

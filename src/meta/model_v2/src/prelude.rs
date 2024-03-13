@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub use super::actor::Entity as Actor;
+pub use super::actor_dispatcher::Entity as ActorDispatcher;
+pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;
 pub use super::compaction_status::Entity as CompactionStatus;
@@ -23,6 +25,7 @@ pub use super::fragment::Entity as Fragment;
 pub use super::function::Entity as Function;
 pub use super::hummock_pinned_snapshot::Entity as HummockPinnedSnapshot;
 pub use super::hummock_pinned_version::Entity as HummockPinnedVersion;
+pub use super::hummock_sequence::Entity as HummockSequence;
 pub use super::hummock_version_delta::Entity as HummockVersionDelta;
 pub use super::hummock_version_stats::Entity as HummockVersionStats;
 pub use super::index::Entity as Index;
@@ -31,6 +34,8 @@ pub use super::object_dependency::Entity as ObjectDependency;
 pub use super::schema::Entity as Schema;
 pub use super::sink::Entity as Sink;
 pub use super::source::Entity as Source;
+pub use super::streaming_job::Entity as StreamingJob;
+pub use super::subscription::Entity as Subscription;
 pub use super::system_parameter::Entity as SystemParameter;
 pub use super::table::Entity as Table;
 pub use super::user::Entity as User;

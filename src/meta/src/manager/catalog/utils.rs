@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -107,6 +107,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
             stmt:
                 CreateSinkStatement {
                     sink_from: CreateSink::AsQuery(query),
+                    into_table_name: None,
                     ..
                 },
         } => {
@@ -117,9 +118,27 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
             stmt:
                 CreateSinkStatement {
                     sink_from: CreateSink::From(table_name),
+                    into_table_name: None,
                     ..
                 },
         } => replace_table_name(table_name, to),
+        Statement::CreateSink {
+            stmt: CreateSinkStatement {
+                sink_from,
+                into_table_name: Some(table_name),
+                ..
+            }
+        } => {
+            let idx = table_name.0.len() - 1;
+            if table_name.0[idx].real_value() == from {
+                table_name.0[idx] = Ident::new_unchecked(to);
+            } else {
+                match sink_from {
+                    CreateSink::From(table_name) => replace_table_name(table_name, to),
+                    CreateSink::AsQuery(query) => QueryRewriter::rewrite_query(query, from, to),
+                }
+            }
+        }
         _ => unreachable!(),
     };
     stmt.to_string()
@@ -307,6 +326,18 @@ impl QueryRewriter<'_> {
                 self.visit_expr(expr);
                 self.visit_expr(low);
                 self.visit_expr(high);
+            }
+            Expr::SimilarTo {
+                expr,
+                pat,
+                esc_text,
+                ..
+            } => {
+                self.visit_expr(expr);
+                self.visit_expr(pat);
+                if let Some(e) = esc_text {
+                    self.visit_expr(e);
+                }
             }
 
             Expr::IsDistinctFrom(expr1, expr2)

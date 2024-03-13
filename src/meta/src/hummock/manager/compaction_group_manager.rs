@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +18,14 @@ use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
-    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt, TableGroupInfo,
+    get_member_table_ids, try_get_compaction_group_id_by_table_id, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_meta_model_v2::compaction_config;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
@@ -33,22 +34,29 @@ use risingwave_pb::hummock::{
     compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
     GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
+use thiserror_ext::AsReport;
 use tokio::sync::{OnceCell, RwLock};
 use tracing::warn;
 
 use super::write_lock;
+use crate::controller::SqlMetaStore;
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
 };
 use crate::hummock::error::{Error, Result};
-use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
+use crate::hummock::manager::{
+    commit_multi_var, create_trx_wrapper, drop_sst, read_lock, HummockManager,
+};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::model::CompactionGroup;
-use crate::manager::{IdCategory, MetaSrvEnv};
+use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::manager::MetaSrvEnv;
 use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction,
+    BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
+    BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, ValTransaction,
 };
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::MetaStore;
+use crate::stream::CreateStreamingJobOption;
 
 impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
@@ -68,6 +76,7 @@ impl HummockManager {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
             default_config,
+            sql_meta_store: env.sql_meta_store(),
         });
         compaction_group_manager
             .write()
@@ -98,12 +107,8 @@ impl HummockManager {
         &self,
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
-        table_properties: &HashMap<String, String>,
+        create_stream_job_option: CreateStreamingJobOption,
     ) -> Result<Vec<StateTableId>> {
-        let is_independent_compaction_group = table_properties
-            .get("independent_compaction_group")
-            .map(|s| s == "1")
-            == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
             if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
@@ -112,7 +117,7 @@ impl HummockManager {
             // materialized_view
             pairs.push((
                 mv_table,
-                if is_independent_compaction_group {
+                if create_stream_job_option.new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
@@ -123,7 +128,7 @@ impl HummockManager {
         for table_id in internal_tables {
             pairs.push((
                 table_id,
-                if is_independent_compaction_group {
+                if create_stream_job_option.new_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
@@ -134,25 +139,26 @@ impl HummockManager {
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
+    #[cfg(test)]
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments_vec(
         &self,
-        table_fragments: &[TableFragments],
-    ) -> Result<()> {
-        self.unregister_table_ids(
+        table_fragments: &[crate::model::TableFragments],
+    ) {
+        self.unregister_table_ids_fail_fast(
             &table_fragments
                 .iter()
                 .flat_map(|t| t.all_table_ids())
                 .collect_vec(),
         )
-        .await
+        .await;
     }
 
     /// Unregisters stale members and groups
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
+    pub async fn purge(&self, valid_ids: &[u32]) {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -161,12 +167,9 @@ impl HummockManager {
             .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(&to_unregister).await?;
-        Ok(())
+        self.unregister_table_ids_fail_fast(&to_unregister).await;
     }
 
-    /// Prefer using `register_table_fragments`.
-    /// Use `register_table_ids` only when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn register_table_ids(
@@ -192,10 +195,14 @@ impl HummockManager {
         }
         // All NewCompactionGroup pairs are mapped to one new compaction group.
         let new_compaction_group_id: OnceCell<CompactionGroupId> = OnceCell::new();
-        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-            &mut versioning.hummock_version_deltas,
-            current_version.id + 1,
-            build_version_delta_after_version(current_version),
+        let mut new_version_delta = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapEntryTransactionWrapper,
+            BTreeMapEntryTransaction::new_insert(
+                &mut versioning.hummock_version_deltas,
+                current_version.id + 1,
+                build_version_delta_after_version(current_version),
+            )
         );
 
         for (table_id, raw_group_id) in pairs {
@@ -204,9 +211,7 @@ impl HummockManager {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
                     .get_or_try_init(|| async {
-                        self.env
-                            .id_gen_manager()
-                            .generate::<{ IdCategory::CompactionGroup }>()
+                        next_compaction_group_id(&self.env)
                             .await
                             .map(|new_group_id| {
                                 is_group_init = true;
@@ -253,36 +258,35 @@ impl HummockManager {
         let mut current_version = versioning.current_version.clone();
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
         assert!(sst_split_info.is_empty());
-
-        let mut trx = Transaction::default();
-        new_version_delta.apply_to_txn(&mut trx).await?;
-        self.env.meta_store().txn(trx).await?;
+        commit_multi_var!(
+            self.env.meta_store(),
+            self.sql_meta_store(),
+            new_version_delta
+        )?;
         versioning.current_version = current_version;
-        new_version_delta.commit();
 
         self.notify_last_version_delta(versioning);
 
         Ok(())
     }
 
-    /// Prefer using `unregister_table_fragments_vec`.
-    /// Only use `unregister_table_ids` when [`TableFragments`] is unavailable.
-    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     #[named]
-    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+    async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         if table_ids.is_empty() {
             return Ok(());
         }
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
-
-        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-            &mut versioning.hummock_version_deltas,
-            current_version.id + 1,
-            build_version_delta_after_version(current_version),
+        let mut new_version_delta = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapEntryTransactionWrapper,
+            BTreeMapEntryTransaction::new_insert(
+                &mut versioning.hummock_version_deltas,
+                current_version.id + 1,
+                build_version_delta_after_version(current_version),
+            )
         );
-
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
@@ -313,10 +317,17 @@ impl HummockManager {
                         .len() as u64
                         - 1,
                 );
+            new_version_delta
+                .removed_table_ids
+                .push(TableId::new(*table_id));
         }
 
         // Remove empty group, GC SSTs and remove metric.
-        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let mut branched_ssts = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.branched_ssts)
+        );
         let groups_to_remove = modified_groups
             .into_iter()
             .filter_map(|(group_id, member_count)| {
@@ -348,10 +359,12 @@ impl HummockManager {
         let mut current_version = versioning.current_version.clone();
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
         assert!(sst_split_info.is_empty());
+        commit_multi_var!(
+            self.env.meta_store(),
+            self.sql_meta_store(),
+            new_version_delta
+        )?;
 
-        let mut trx = Transaction::default();
-        new_version_delta.apply_to_txn(&mut trx).await?;
-        self.env.meta_store().txn(trx).await?;
         for group_id in &groups_to_remove {
             let max_level = versioning
                 .current_version
@@ -360,9 +373,7 @@ impl HummockManager {
                 .len();
             remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
         }
-
         versioning.current_version = current_version;
-        new_version_delta.commit();
         branched_ssts.commit_memory();
 
         self.notify_last_version_delta(versioning);
@@ -376,10 +387,17 @@ impl HummockManager {
                 HashSet::from_iter(get_compaction_group_ids(&versioning.current_version)),
                 self.env.meta_store(),
             )
-            .await
-            .inspect_err(|e| tracing::warn!("failed to purge stale compaction group config. {}", e))
-            .ok();
+            .await?;
         Ok(())
+    }
+
+    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
+    pub async fn unregister_table_ids_fail_fast(&self, table_ids: &[StateTableId]) {
+        self.unregister_table_ids(table_ids)
+            .await
+            .unwrap_or_else(|e| {
+                panic!("unregister table ids fail: {table_ids:?} {}", e.as_report())
+            });
     }
 
     pub async fn update_compaction_config(
@@ -403,6 +421,7 @@ impl HummockManager {
         {
             self.try_update_write_limits(compaction_group_ids).await;
         }
+
         Ok(result)
     }
 
@@ -440,23 +459,30 @@ impl HummockManager {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
-        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false, 0)
-            .await
+        let result = self
+            .move_state_table_to_compaction_group(parent_group_id, table_ids, None, 0)
+            .await?;
+        self.group_to_table_vnode_partition
+            .write()
+            .insert(result.0, result.1);
+
+        Ok(result.0)
     }
 
     /// move some table to another compaction-group. Create a new compaction group if it does not
     /// exist.
+    /// TODO: Move table_to_partition in result to compaction group
     #[named]
     pub async fn move_state_table_to_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
         target_group_id: Option<CompactionGroupId>,
-        allow_split_by_table: bool,
-        weight_split_by_vnode: u32,
-    ) -> Result<CompactionGroupId> {
+        partition_vnode_count: u32,
+    ) -> Result<(CompactionGroupId, BTreeMap<StateTableId, u32>)> {
+        let mut table_to_partition = BTreeMap::default();
         if table_ids.is_empty() {
-            return Ok(parent_group_id);
+            return Ok((parent_group_id, table_to_partition));
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
         let mut compaction_guard = write_lock!(self, compaction).await;
@@ -495,22 +521,23 @@ impl HummockManager {
                 )));
             }
         }
-
-        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-            &mut versioning.hummock_version_deltas,
-            current_version.id + 1,
-            build_version_delta_after_version(current_version),
-        );
-        let new_sst_start_id = self
-            .env
-            .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(
-                current_version.count_new_ssts_in_group_split(
-                    parent_group_id,
-                    HashSet::from_iter(table_ids.clone()),
-                ),
+        let mut new_version_delta = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapEntryTransactionWrapper,
+            BTreeMapEntryTransaction::new_insert(
+                &mut versioning.hummock_version_deltas,
+                current_version.id + 1,
+                build_version_delta_after_version(current_version),
             )
-            .await?;
+        );
+        let new_sst_start_id = next_sstable_object_id(
+            &self.env,
+            current_version.count_new_ssts_in_group_split(
+                parent_group_id,
+                HashSet::from_iter(table_ids.clone()),
+            ),
+        )
+        .await?;
         let mut new_group = None;
         let target_compaction_group_id = match target_group_id {
             Some(compaction_group_id) => {
@@ -550,19 +577,14 @@ impl HummockManager {
             }
             None => {
                 // All NewCompactionGroup pairs are mapped to one new compaction group.
-                let new_compaction_group_id = self
-                    .env
-                    .id_gen_manager()
-                    .generate::<{ IdCategory::CompactionGroup }>()
-                    .await?;
+                let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
                 // The new config will be persisted later.
                 let mut config = self
                     .compaction_group_manager
                     .read()
                     .await
                     .default_compaction_config();
-                config.split_by_state_table = allow_split_by_table;
-                config.split_weight_by_vnode = weight_split_by_vnode;
+                config.split_weight_by_vnode = partition_vnode_count;
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
@@ -599,24 +621,42 @@ impl HummockManager {
         let mut current_version = versioning.current_version.clone();
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
 
-        let mut branched_ssts = BTreeMapTransaction::<'_, _, _>::new(&mut versioning.branched_ssts);
-        let mut trx = Transaction::default();
-        new_version_delta.apply_to_txn(&mut trx).await?;
+        // `branched_ssts` only commit in memory, so `TXN` make no difference.
+        let mut branched_ssts = create_trx_wrapper!(
+            self.sql_meta_store(),
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut versioning.branched_ssts)
+        );
         if let Some((new_compaction_group_id, config)) = new_group {
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
-            let insert = BTreeMapEntryTransaction::new_insert(
-                &mut compaction_group_manager.compaction_groups,
-                new_compaction_group_id,
-                CompactionGroup {
-                    group_id: new_compaction_group_id,
-                    compaction_config: Arc::new(config),
-                },
+            let insert = create_trx_wrapper!(
+                self.sql_meta_store(),
+                BTreeMapEntryTransactionWrapper,
+                BTreeMapEntryTransaction::new_insert(
+                    &mut compaction_group_manager.compaction_groups,
+                    new_compaction_group_id,
+                    CompactionGroup {
+                        group_id: new_compaction_group_id,
+                        compaction_config: Arc::new(config),
+                    },
+                )
             );
-            insert.apply_to_txn(&mut trx).await?;
-            self.env.meta_store().txn(trx).await?;
-            insert.commit();
+            commit_multi_var!(
+                self.env.meta_store(),
+                self.sql_meta_store(),
+                new_version_delta,
+                insert
+            )?;
+            // Currently, only splitting out a single table_id is supported.
+            for table_id in table_ids {
+                table_to_partition.insert(table_id, partition_vnode_count);
+            }
         } else {
-            self.env.meta_store().txn(trx).await?;
+            commit_multi_var!(
+                self.env.meta_store(),
+                self.sql_meta_store(),
+                new_version_delta
+            )?;
         }
         versioning.current_version = current_version;
         // Updates SST split info
@@ -635,7 +675,6 @@ impl HummockManager {
                 }
             }
         }
-        new_version_delta.commit();
         branched_ssts.commit_memory();
         self.notify_last_version_delta(versioning);
         drop(versioning_guard);
@@ -688,7 +727,7 @@ impl HummockManager {
             .with_label_values(&[&parent_group_id.to_string()])
             .inc();
 
-        Ok(target_compaction_group_id)
+        Ok((target_compaction_group_id, table_to_partition))
     }
 
     #[named]
@@ -733,20 +772,32 @@ impl HummockManager {
 /// 1. initialize default static compaction group.
 /// 2. register new table to new compaction group.
 /// 3. move existent table to new compaction group.
-#[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     default_config: CompactionConfig,
+    sql_meta_store: Option<SqlMetaStore>,
 }
 
 impl CompactionGroupManager {
-    async fn init<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
+    async fn init<S: MetaStore>(&mut self, meta_store: Option<&S>) -> Result<()> {
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
-            CompactionGroup::list(meta_store)
-                .await?
-                .into_iter()
-                .map(|cg| (cg.group_id(), cg))
-                .collect();
+            match &self.sql_meta_store {
+                None => CompactionGroup::list(meta_store.unwrap())
+                    .await?
+                    .into_iter()
+                    .map(|cg| (cg.group_id(), cg))
+                    .collect(),
+                Some(sql_meta_store) => {
+                    use sea_orm::EntityTrait;
+                    compaction_config::Entity::find()
+                        .all(&sql_meta_store.conn)
+                        .await
+                        .map_err(MetadataModelError::from)?
+                        .into_iter()
+                        .map(|m| (m.compaction_group_id as CompactionGroupId, m.into()))
+                        .collect()
+                }
+            };
         if !loaded_compaction_groups.is_empty() {
             self.compaction_groups = loaded_compaction_groups;
         }
@@ -757,7 +808,7 @@ impl CompactionGroupManager {
     pub(super) async fn get_or_insert_compaction_group_config<S: MetaStore>(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<CompactionGroup> {
         let r = self
             .get_or_insert_compaction_group_configs(&[compaction_group_id], meta_store)
@@ -769,9 +820,13 @@ impl CompactionGroupManager {
     pub(super) async fn get_or_insert_compaction_group_configs<S: MetaStore>(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
-        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = create_trx_wrapper!(
+            self.sql_meta_store,
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut self.compaction_groups,)
+        );
         for id in compaction_group_ids {
             if compaction_groups.contains_key(id) {
                 continue;
@@ -779,10 +834,8 @@ impl CompactionGroupManager {
             let new_entry = CompactionGroup::new(*id, self.default_config.clone());
             compaction_groups.insert(*id, new_entry);
         }
-        let mut trx = Transaction::default();
-        compaction_groups.apply_to_txn(&mut trx).await?;
-        meta_store.txn(trx).await?;
-        compaction_groups.commit();
+        commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
+
         let r = compaction_group_ids
             .iter()
             .map(|id| (*id, self.compaction_groups[id].clone()))
@@ -806,9 +859,13 @@ impl CompactionGroupManager {
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<Vec<CompactionGroup>> {
-        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = create_trx_wrapper!(
+            self.sql_meta_store,
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut self.compaction_groups,)
+        );
         let mut result = Vec::with_capacity(compaction_group_ids.len());
         for compaction_group_id in compaction_group_ids.iter().unique() {
             let group = compaction_groups.get(compaction_group_id).ok_or_else(|| {
@@ -824,11 +881,7 @@ impl CompactionGroupManager {
             compaction_groups.insert(*compaction_group_id, new_group.clone());
             result.push(new_group);
         }
-
-        let mut trx = Transaction::default();
-        compaction_groups.apply_to_txn(&mut trx).await?;
-        meta_store.txn(trx).await?;
-        compaction_groups.commit();
+        commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
         Ok(result)
     }
 
@@ -838,20 +891,21 @@ impl CompactionGroupManager {
         &mut self,
         group_id: CompactionGroupId,
         config: CompactionConfig,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<()> {
-        let insert = BTreeMapEntryTransaction::new_insert(
-            &mut self.compaction_groups,
-            group_id,
-            CompactionGroup {
+        let insert = create_trx_wrapper!(
+            self.sql_meta_store,
+            BTreeMapEntryTransactionWrapper,
+            BTreeMapEntryTransaction::new_insert(
+                &mut self.compaction_groups,
                 group_id,
-                compaction_config: Arc::new(config),
-            },
+                CompactionGroup {
+                    group_id,
+                    compaction_config: Arc::new(config),
+                },
+            )
         );
-        let mut trx = Transaction::default();
-        insert.apply_to_txn(&mut trx).await?;
-        meta_store.txn(trx).await?;
-        insert.commit();
+        commit_multi_var!(meta_store, self.sql_meta_store, insert)?;
         Ok(())
     }
 
@@ -859,9 +913,13 @@ impl CompactionGroupManager {
     async fn purge<S: MetaStore>(
         &mut self,
         existing_groups: HashSet<CompactionGroupId>,
-        meta_store: &S,
+        meta_store: Option<&S>,
     ) -> Result<()> {
-        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = create_trx_wrapper!(
+            self.sql_meta_store,
+            BTreeMapTransactionWrapper,
+            BTreeMapTransaction::new(&mut self.compaction_groups,)
+        );
         let stale_group = compaction_groups
             .tree_ref()
             .keys()
@@ -874,10 +932,7 @@ impl CompactionGroupManager {
         for group in stale_group {
             compaction_groups.remove(group);
         }
-        let mut trx = Transaction::default();
-        compaction_groups.apply_to_txn(&mut trx).await?;
-        meta_store.txn(trx).await?;
-        compaction_groups.commit();
+        commit_multi_var!(meta_store, self.sql_meta_store, compaction_groups)?;
         Ok(())
     }
 }
@@ -936,17 +991,17 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::hummock::test_utils::setup_compute_env;
     use crate::hummock::HummockManager;
     use crate::model::TableFragments;
+    use crate::stream::CreateStreamingJobOption;
 
     #[tokio::test]
     async fn test_inner() {
@@ -1043,16 +1098,14 @@ mod tests {
         let group_number =
             || async { compaction_group_manager.list_compaction_group().await.len() };
         assert_eq!(registered_number().await, 0);
-        let mut table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETENTION_SECOND_KEY),
-            String::from("300"),
-        )]);
 
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                &table_properties,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: false,
+                },
             )
             .await
             .unwrap();
@@ -1061,7 +1114,9 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_2.table_id().table_id),
                 table_fragment_2.internal_table_ids(),
-                &table_properties,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: false,
+                },
             )
             .await
             .unwrap();
@@ -1070,30 +1125,27 @@ mod tests {
         // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1.clone()])
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 4);
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge(&table_fragment_2.all_table_ids().collect_vec())
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await.unwrap();
+        compaction_group_manager.purge(&[]).await;
         assert_eq!(registered_number().await, 0);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
         assert_eq!(group_number().await, 2);
-        table_properties.insert(
-            String::from("independent_compaction_group"),
-            String::from("1"),
-        );
+
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                &table_properties,
+                CreateStreamingJobOption {
+                    new_independent_compaction_group: true,
+                },
             )
             .await
             .unwrap();
@@ -1103,8 +1155,7 @@ mod tests {
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1])
-            .await
-            .unwrap();
+            .await;
         assert_eq!(registered_number().await, 0);
         assert_eq!(group_number().await, 2);
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -35,8 +34,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
@@ -57,25 +55,24 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
 
-        Ok(SimpleAggExecutor::new(AggExecutorArgs {
+        let exec = SimpleAggExecutor::new(AggExecutorArgs {
             version: node.version(),
 
             input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info.clone(),
 
-            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
+            extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
 
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,
             storages,
             intermediate_state_table,
             distinct_dedup_tables,
-            watermark_epoch: stream.get_watermark_epoch(),
-            metrics: params.executor_stats,
+            watermark_epoch: params.watermark_epoch,
             extra: SimpleAggExecutorExtraArgs {},
-        })?
-        .boxed())
+        })?;
+
+        Ok((params.info, exec).into())
     }
 }

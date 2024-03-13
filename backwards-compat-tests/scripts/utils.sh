@@ -49,6 +49,23 @@ kill_zookeeper() {
   wait_zookeeper_exit
 }
 
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
+        sleep 1
+    done
+}
+
+wait_all_process_exit() {
+  wait_for_process meta-node
+  wait_for_process compute-node
+  wait_for_process frontend
+  wait_for_process compactor
+  echo "All processes has exited."
+}
+
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
@@ -75,6 +92,7 @@ kill_cluster() {
 
   tmux kill-session -t risedev
   test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
+  wait_all_process_exit
 }
 
 run_sql () {
@@ -103,69 +121,93 @@ insert_json_kafka() {
   local JSON=$1
   echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
     --topic backwards_compat_test_kafka_source \
-    --bootstrap-server localhost:29092
+    --bootstrap-server localhost:29092 \
+    --property "parse.key=true" \
+    --property "key.separator=,"
 }
 
 seed_json_kafka() {
-  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 1, "page_id": 1, "action": "gtrgretrg"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 2, "page_id": 1, "action": "fsdfgerrg"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 3, "page_id": 1, "action": "sdfergtth"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 4, "page_id": 2, "action": "erwerhghj"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 5, "page_id": 2, "action": "kiku7ikkk"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 6, "page_id": 3, "action": "6786745ge"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 7, "page_id": 3, "action": "fgbgfnyyy"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 8, "page_id": 4, "action": "werwerwwe"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
+  insert_json_kafka '{"user_id": 1},{"timestamp": "2023-07-28 07:11:00", "user_id": 1, "page_id": 1, "action": "gtrgretrg"}'
+  insert_json_kafka '{"user_id": 2},{"timestamp": "2023-07-28 07:11:00", "user_id": 2, "page_id": 1, "action": "fsdfgerrg"}'
+  insert_json_kafka '{"user_id": 3},{"timestamp": "2023-07-28 07:11:00", "user_id": 3, "page_id": 1, "action": "sdfergtth"}'
+  insert_json_kafka '{"user_id": 4},{"timestamp": "2023-07-28 06:54:00", "user_id": 4, "page_id": 2, "action": "erwerhghj"}'
+  insert_json_kafka '{"user_id": 5},{"timestamp": "2023-07-28 06:54:00", "user_id": 5, "page_id": 2, "action": "kiku7ikkk"}'
+  insert_json_kafka '{"user_id": 6},{"timestamp": "2023-07-28 06:54:00", "user_id": 6, "page_id": 3, "action": "6786745ge"}'
+  insert_json_kafka '{"user_id": 7},{"timestamp": "2023-07-28 06:54:00", "user_id": 7, "page_id": 3, "action": "fgbgfnyyy"}'
+  insert_json_kafka '{"user_id": 8},{"timestamp": "2023-07-28 06:54:00", "user_id": 8, "page_id": 4, "action": "werwerwwe"}'
+  insert_json_kafka '{"user_id": 9},{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
+}
+
+# https://stackoverflow.com/a/4024263
+version_le() {
+    printf '%s\n' "$1" "$2" | sort -C -V
+}
+
+version_lt() {
+    ! version_le "$2" "$1"
 }
 
 ################################### Entry Points
 
-# Get $OLD_VERSION and $NEW_VERSION for Risingwave
-get_rw_versions() {
-  # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
-  # against the Nth latest release candidate, where N > 1. N can be larger,
-  # in case some old cluster did not upgrade.
-  local VERSION_OFFSET=4
+get_old_version() {
+   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
+   # against the Nth latest release candidate, where N > 1. N can be larger,
+   # in case some old cluster did not upgrade.
+   if [[ -z $VERSION_OFFSET ]]
+   then
+       local VERSION_OFFSET=1
+   fi
 
-  # First we obtain a list of versions from git branch names.
-  # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
-  echo "--- git branch origin output"
-  git branch -r | grep origin
+   # First we obtain a list of versions from git branch names.
+   # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
+   echo "--- git branch origin output"
+   git branch -r | grep origin
 
-  echo "--- VERSION BRANCHES"
-  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
-  echo "$branches"
+   # Extract X.Y.Z tags
+   echo "--- VERSION BRANCHES"
+   local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
+   echo "$tags"
 
-  # Then we sort them in descending order.
-  echo "--- VERSIONS"
-  local sorted_versions=$(echo -e "$branches" | sort -t '.' -n)
-  echo "$sorted_versions"
+   # Then we sort them in descending order.
+   echo "--- VERSIONS"
+   local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
+   echo "$sorted_versions"
 
-  # Then we take the Nth latest version.
-  # We set $OLD_VERSION to this.
-  OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+   # Then we take the Nth latest version.
+   # We set $OLD_VERSION to this.
+   OLD_VERSION=$(echo -e "$sorted_versions" | tail -n $VERSION_OFFSET | head -1)
+}
 
+get_new_version() {
   # Next, for $NEW_VERSION we just scrape it from `workspace.package.version`.
   NEW_VERSION=$(cat Cargo.toml | grep "\[workspace\.package\]" -A 5 | sed -n 's/version = \"\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' | tr -d ' ')
+}
 
-  # Then we assert that `$OLD_VERSION` < `$NEW_VERSION`.
-  local TOP=$(echo -e "$OLD_VERSION\n$NEW_VERSION" | sort -t '.' -n | tail -1)
-  if [[ "$TOP" != "$NEW_VERSION" ]]
-  then
-    echo "ERROR: $OLD_VERSION > $NEW_VERSION"
-    exit 1
-  else
-    echo "OLD_VERSION: $OLD_VERSION"
-    echo "NEW_VERSION: $NEW_VERSION"
-  fi
+# Get $OLD_VERSION and $NEW_VERSION for Risingwave
+get_rw_versions() {
+  get_old_version
+  get_new_version
+
+  # FIXME(kwannoel): This check does not always hold.
+  # The new/current version may not be up-to-date.
+  # The new version is derived from Cargo.toml, which may not be up-to-date.
+  # The old version are derived from git tags, which are up-to-date.
+  # Then we assert that `$OLD_VERSION` <= `$NEW_VERSION`.
+  #  if version_le "$OLD_VERSION" "$NEW_VERSION"
+  #  then
+  #    echo "OLD_VERSION: $OLD_VERSION"
+  #    echo "NEW_VERSION: $NEW_VERSION"
+  #  else
+  #    echo "ERROR: $OLD_VERSION >= $NEW_VERSION"
+  #    exit 1
+  #  fi
 }
 
 # Setup table and materialized view.
 # Run updates and deletes on the table.
 # Get the results.
-# TODO: Run nexmark, tpch queries
-# TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
+  echo "--- Start cluster on old_version: $OLD_VERSION"
   # Caller should make sure the test env has these.
   # They are called here because the current tests
   # may not be backwards compatible, so we need to call
@@ -203,12 +245,30 @@ seed_old_cluster() {
   create_kafka_topic
   seed_json_kafka
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
+  # use the old syntax for version at most 1.5.4
+  if version_le "$OLD_VERSION" "1.5.4" ; then
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/deprecate_upsert.slt"
+  else
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/include_key_as.slt"
+  fi
 
   echo "--- KAFKA TEST: wait 5s for kafka to process data"
   sleep 5
 
   echo "--- KAFKA TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_original.slt"
+
+  # Test invalid WITH options, if OLD_VERSION <= 1.5.0
+  if version_le "$OLD_VERSION" "1.5.0" ; then
+    echo "--- KAFKA TEST (invalid options): Seeding old cluster with data"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/seed.slt"
+
+    echo "--- KAFKA TEST (invalid options): wait 5s for kafka to process data"
+    sleep 5
+
+    echo "--- KAFKA TEST (invalid options): Validating old cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_original.slt"
+  fi
 
   echo "--- Killing cluster"
   kill_cluster
@@ -238,6 +298,12 @@ validate_new_cluster() {
 
   echo "--- KAFKA TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
+
+  # Test invalid WITH options, if OLD_VERSION <= 1.5.0
+  if version_le "$OLD_VERSION" "1.5.0" ; then
+    echo "--- KAFKA TEST (invalid options): Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_restart.slt"
+  fi
 
   kill_cluster
 }

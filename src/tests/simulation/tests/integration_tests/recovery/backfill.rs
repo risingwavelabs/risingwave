@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ async fn test_snapshot_mv() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
         ])
         .await?;
 
@@ -124,7 +124,7 @@ async fn test_backfill_mv() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
         ])
         .await?;
 
@@ -175,7 +175,10 @@ async fn test_index_backfill() -> Result<()> {
     assert_eq!(results.lines().collect_vec().len(), 256);
 
     let fragment = cluster
-        .locate_one_fragment([identity_contains("index"), no_identity_contains("chain")])
+        .locate_one_fragment([
+            identity_contains("index"),
+            no_identity_contains("StreamTableScan"),
+        ])
         .await?;
 
     let id = fragment.id();

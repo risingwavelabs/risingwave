@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
@@ -24,8 +23,11 @@ use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprRewriter};
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::error::Result;
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::{utils, ToLocalBatch};
+use crate::optimizer::plan_visitor::DistributedDmlVisitor;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchUpdate` implements [`super::LogicalUpdate`]
@@ -37,9 +39,9 @@ pub struct BatchUpdate {
 
 impl BatchUpdate {
     pub fn new(core: generic::Update<PlanRef>, schema: Schema) -> Self {
-        assert_eq!(core.input.distribution(), &Distribution::Single);
         let ctx = core.input.ctx();
-        let base = PlanBase::new_batch(ctx, schema, Distribution::Single, Order::any());
+        let base =
+            PlanBase::new_batch(ctx, schema, core.input.distribution().clone(), Order::any());
         Self { base, core }
     }
 }
@@ -61,9 +63,23 @@ impl_distill_by_unit!(BatchUpdate, core, "BatchUpdate");
 
 impl ToDistributedBatch for BatchUpdate {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = RequiredDist::single()
+        if DistributedDmlVisitor::dml_should_run_in_distributed(self.input()) {
+            // Add an hash shuffle between the update and its input.
+            let new_input = RequiredDist::PhysicalDist(Distribution::HashShard(
+                (0..self.input().schema().len()).collect(),
+            ))
             .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
-        Ok(self.clone_with_input(new_input).into())
+            let new_update: PlanRef = self.clone_with_input(new_input).into();
+            if self.core.returning {
+                Ok(new_update)
+            } else {
+                utils::sum_affected_row(new_update)
+            }
+        } else {
+            let new_input = RequiredDist::single()
+                .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
+            Ok(self.clone_with_input(new_input).into())
+        }
     }
 }
 
@@ -83,6 +99,7 @@ impl ToBatchPb for BatchUpdate {
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
             update_column_indices,
+            session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
 }
@@ -104,5 +121,11 @@ impl ExprRewritable for BatchUpdate {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.schema().clone()).into()
+    }
+}
+
+impl ExprVisitable for BatchUpdate {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

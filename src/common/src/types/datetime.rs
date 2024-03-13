@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 //! Date, time, and timestamp types.
 
+use std::error::Error;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::io::Write;
@@ -21,13 +22,13 @@ use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
-use postgres_types::{ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use thiserror::Error;
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
-use crate::array::ArrayResult;
+use crate::array::{ArrayError, ArrayResult};
 use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
@@ -69,6 +70,57 @@ macro_rules! impl_chrono_wrapper {
 impl_chrono_wrapper!(Date, NaiveDate);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime);
 impl_chrono_wrapper!(Time, NaiveTime);
+
+impl ToSql for Date {
+    accepts!(DATE);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl ToSql for Time {
+    accepts!(TIME);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
+impl ToSql for Timestamp {
+    accepts!(TIMESTAMP);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
 
 /// Parse a date from varchar.
 ///
@@ -254,6 +306,12 @@ impl InvalidParamsError {
     }
 }
 
+impl From<InvalidParamsError> for ArrayError {
+    fn from(e: InvalidParamsError) -> Self {
+        ArrayError::internal(e)
+    }
+}
+
 type Result<T> = std::result::Result<T, InvalidParamsError>;
 
 impl ToText for Date {
@@ -270,17 +328,15 @@ impl ToText for Date {
     /// ```
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         let (ce, year) = self.0.year_ce();
-        if ce {
-            write!(f, "{}", self.0)
-        } else {
-            write!(
-                f,
-                "{:04}-{:02}-{:02} BC",
-                year,
-                self.0.month(),
-                self.0.day()
-            )
-        }
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -306,7 +362,17 @@ impl ToText for Time {
 
 impl ToText for Timestamp {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        let (ce, year) = self.0.year_ce();
+        let suffix = if ce { "" } else { " BC" };
+        write!(
+            f,
+            "{:04}-{:02}-{:02} {}{}",
+            year,
+            self.0.month(),
+            self.0.day(),
+            self.0.time(),
+            suffix
+        )
     }
 
     fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
@@ -318,7 +384,7 @@ impl ToText for Timestamp {
 }
 
 impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Date => {
                 let mut output = BytesMut::new();
@@ -331,7 +397,7 @@ impl ToBinary for Date {
 }
 
 impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Time => {
                 let mut output = BytesMut::new();
@@ -344,7 +410,7 @@ impl ToBinary for Time {
 }
 
 impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Timestamp => {
                 let mut output = BytesMut::new();
@@ -476,6 +542,12 @@ impl Timestamp {
 
     pub fn get_timestamp_nanos(&self) -> i64 {
         self.0.timestamp_nanos_opt().unwrap()
+    }
+
+    pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
+        let secs = timestamp_millis.div_euclid(1_000);
+        let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
+        Self::with_secs_nsecs(secs, nsecs as u32)
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {

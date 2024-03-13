@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ impl Rule for ExpandToProjectRule {
             return None;
         }
         assert!(column_subsets.len() == 1);
-        let column_subset = column_subsets.get(0).unwrap();
+        let column_subset = column_subsets.first().unwrap();
 
         // if `column_subsets` len equals 1, convert it into a project
         let mut exprs = Vec::with_capacity(expand.base.schema().len());

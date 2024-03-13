@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,8 @@ use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -146,5 +147,12 @@ impl ExprRewritable for StreamHopWindow {
                 .collect(),
         )
         .into()
+    }
+}
+
+impl ExprVisitable for StreamHopWindow {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.window_start_exprs.iter().for_each(|e| v.visit_expr(e));
+        self.window_end_exprs.iter().for_each(|e| v.visit_expr(e));
     }
 }

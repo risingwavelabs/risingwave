@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,13 @@ async fn create_executor<S: StateStore>(
         OrderType::ascending(),
     ];
 
-    let output_pk_indices = vec![2];
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
 
     let state_table = StateTable::new_without_distribution_inconsistent_op(
         store,
@@ -56,12 +62,14 @@ async fn create_executor<S: StateStore>(
     )
     .await;
 
-    let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_pk_indices.clone());
     let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
-        input: source.boxed(),
-        actor_ctx: ActorContext::create(123),
-        pk_indices: output_pk_indices,
-        executor_id: 1,
+        actor_ctx: ActorContext::for_test(123),
+
+        input: source,
+
+        schema: output_schema,
         calls,
         partition_key_indices,
         order_key_index,
@@ -186,13 +194,17 @@ async fn test_over_window_aggregate() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-- !barrier 1
-- !chunk |2
-      I T  I   i
-    + 1 p1 100 10
-    + 1 p1 101 16
-    + 4 p1 102 20
-"###,
+        - !barrier 1
+        - !chunk |2
+              I T  I   i
+            + 1 p1 100 10
+            + 1 p1 101 16
+            + 4 p1 102 20
+        - !chunk |2
+              I T  I   i
+            + 2 p1 103 30
+            + 6 p1 104 11
+        "###,
         expect![[r#"
             - input: !barrier 1
               output:
@@ -208,6 +220,17 @@ async fn test_over_window_aggregate() {
                 +---+---+----+-----+----+----+
                 | + | 1 | p1 | 100 | 10 | 26 |
                 | + | 1 | p1 | 101 | 16 | 46 |
+                +---+---+----+-----+----+----+
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 2 | p1 | 103 | 30 |
+                | + | 6 | p1 | 104 | 11 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+----+
+                | + | 4 | p1 | 102 | 20 | 66 |
+                | + | 2 | p1 | 103 | 30 | 61 |
                 +---+---+----+-----+----+----+
         "#]],
         SnapshotOptions::default(),

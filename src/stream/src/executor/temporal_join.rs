@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,17 @@
 use std::alloc::Global;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
 use futures::stream::{self, PollNext};
 use futures::{pin_mut, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -39,30 +38,31 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
-use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
+use super::join::{JoinType, JoinTypePrimitive};
+use super::{
+    Barrier, Execute, ExecutorInfo, Message, MessageStream, StreamExecutorError,
+    StreamExecutorResult,
+};
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
-use crate::common::JoinStreamChunkBuilder;
+use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices, Watermark,
-};
+use crate::executor::{ActorContextRef, Executor, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
-    left: BoxedExecutor,
-    right: BoxedExecutor,
+    #[allow(dead_code)]
+    info: ExecutorInfo,
+    left: Executor,
+    right: Executor,
     right_table: TemporalSide<K, S>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
-    pk_indices: PkIndices,
-    schema: Schema,
     chunk_size: usize,
-    identity: String,
     // TODO: update metrics
     #[allow(dead_code)]
     metrics: Arc<StreamingMetrics>,
@@ -108,99 +108,84 @@ impl JoinEntry {
     }
 }
 
-struct JoinEntryWrapper(Option<JoinEntry>);
-
-impl EstimateSize for JoinEntryWrapper {
-    fn estimated_heap_size(&self) -> usize {
-        self.0.estimated_heap_size()
-    }
-}
-
-impl JoinEntryWrapper {
-    const MESSAGE: &'static str = "the state should always be `Some`";
-
-    /// Take the value out of the wrapper. Panic if the value is `None`.
-    pub fn take(&mut self) -> JoinEntry {
-        self.0.take().expect(Self::MESSAGE)
-    }
-}
-
-impl Deref for JoinEntryWrapper {
-    type Target = JoinEntry;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().expect(Self::MESSAGE)
-    }
-}
-
-impl DerefMut for JoinEntryWrapper {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().expect(Self::MESSAGE)
-    }
-}
-
 struct TemporalSide<K: HashKey, S: StateStore> {
     source: StorageTable<S>,
     table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
-    cache: ManagedLruCache<K, JoinEntryWrapper, DefaultHasher, SharedStatsAlloc<Global>>,
+    cache: ManagedLruCache<K, JoinEntry, DefaultHasher, SharedStatsAlloc<Global>>,
     ctx: ActorContextRef,
     join_key_data_types: Vec<DataType>,
 }
 
 impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
-    /// Lookup the temporal side table and return a `JoinEntry` which could be empty if there are no
-    /// matched records.
-    async fn lookup(&mut self, key: &K, epoch: HummockEpoch) -> StreamExecutorResult<JoinEntry> {
+    /// Fetch records from temporal side table and ensure the entry in the cache.
+    /// If already exists, the entry will be promoted.
+    async fn fetch_or_promote_keys(
+        &mut self,
+        keys: impl Iterator<Item = &K>,
+        epoch: HummockEpoch,
+    ) -> StreamExecutorResult<()> {
         let table_id_str = self.source.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.id.to_string();
-        self.ctx
-            .streaming_metrics
-            .temporal_join_total_query_cache_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-            .inc();
 
-        let res = if self.cache.contains(key) {
-            let mut state = self.cache.peek_mut(key).unwrap();
-            state.take()
-        } else {
-            // cache miss
+        let mut futs = Vec::with_capacity(keys.size_hint().1.unwrap_or(0));
+        for key in keys {
             self.ctx
                 .streaming_metrics
-                .temporal_join_cache_miss_count
+                .temporal_join_total_query_cache_count
                 .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
 
-            let pk_prefix = key.deserialize(&self.join_key_data_types)?;
+            if self.cache.get(key).is_none() {
+                self.ctx
+                    .streaming_metrics
+                    .temporal_join_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    .inc();
 
-            let iter = self
-                .source
-                .batch_iter_with_pk_bounds(
-                    HummockReadEpoch::NoWait(epoch),
-                    &pk_prefix,
-                    ..,
-                    false,
-                    PrefetchOptions::new_for_exhaust_iter(),
-                )
-                .await?;
+                futs.push(async {
+                    let pk_prefix = key.deserialize(&self.join_key_data_types)?;
 
-            let mut entry = JoinEntry::default();
+                    let iter = self
+                        .source
+                        .batch_iter_with_pk_bounds(
+                            HummockReadEpoch::NoWait(epoch),
+                            &pk_prefix,
+                            ..,
+                            false,
+                            PrefetchOptions::default(),
+                        )
+                        .await?;
 
-            pin_mut!(iter);
-            while let Some(row) = iter.next_row().await? {
-                entry.insert(
-                    row.as_ref()
-                        .project(&self.table_stream_key_indices)
-                        .into_owned_row(),
-                    row.project(&self.table_output_indices).into_owned_row(),
-                );
+                    let mut entry = JoinEntry::default();
+
+                    pin_mut!(iter);
+                    while let Some(row) = iter.next_row().await? {
+                        entry.insert(
+                            row.as_ref()
+                                .project(&self.table_stream_key_indices)
+                                .into_owned_row(),
+                            row.project(&self.table_output_indices).into_owned_row(),
+                        );
+                    }
+                    let key = key.clone();
+                    Ok((key, entry)) as StreamExecutorResult<_>
+                });
             }
+        }
 
-            entry
-        };
+        #[for_await]
+        for res in stream::iter(futs).buffered(16) {
+            let (key, entry) = res?;
+            self.cache.put(key, entry);
+        }
 
-        Ok(res)
+        Ok(())
+    }
+
+    fn force_peek(&self, key: &K) -> &JoinEntry {
+        self.cache.peek(key).expect("key should exists")
     }
 
     fn update(
@@ -210,7 +195,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         right_stream_key_indices: &[usize],
     ) -> StreamExecutorResult<()> {
         for chunk in chunks {
-            let keys = K::build(join_keys, chunk.data_chunk())?;
+            let keys = K::build_many(join_keys, chunk.data_chunk());
             for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
                 let Some((op, row)) = r else {
                     continue;
@@ -229,10 +214,6 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
             }
         }
         Ok(())
-    }
-
-    pub fn insert_back(&mut self, key: K, state: JoinEntry) {
-        self.cache.put(key, JoinEntryWrapper(Some(state)));
     }
 }
 
@@ -281,7 +262,7 @@ async fn internal_messages_until_barrier(stream: impl MessageStream, expected_ba
 // any number of `InternalMessage::Chunk(left_chunk)` and followed by
 // `InternalMessage::Barrier(right_chunks, barrier)`.
 #[try_stream(ok = InternalMessage, error = StreamExecutorError)]
-async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
+async fn align_input(left: Executor, right: Executor) {
     let mut left = pin!(left.execute());
     let mut right = pin!(right.execute());
     // Keep producing intervals until stream exhaustion or errors.
@@ -328,34 +309,190 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
     }
 }
 
+mod phase1 {
+    use futures_async_stream::try_stream;
+    use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::hash::{HashKey, NullBitmap};
+    use risingwave_common::row::{self, Row, RowExt};
+    use risingwave_common::types::{DataType, DatumRef};
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_storage::StateStore;
+
+    use super::{StreamExecutorError, TemporalSide};
+
+    pub(super) trait Phase1Evaluation {
+        /// Called when a matched row is found.
+        #[must_use = "consume chunk if produced"]
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk>;
+
+        /// Called when all matched rows of a join key are appended.
+        #[must_use = "consume chunk if produced"]
+        fn match_end(
+            builder: &mut StreamChunkBuilder,
+            op: Op,
+            left_row: impl Row,
+            right_size: usize,
+            matched: bool,
+        ) -> Option<StreamChunk>;
+    }
+
+    pub(super) struct Inner;
+    pub(super) struct LeftOuter;
+    pub(super) struct LeftOuterWithCond;
+
+    impl Phase1Evaluation for Inner {
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk> {
+            builder.append_row(op, left_row.chain(right_row))
+        }
+
+        fn match_end(
+            _builder: &mut StreamChunkBuilder,
+            _op: Op,
+            _left_row: impl Row,
+            _right_size: usize,
+            _matched: bool,
+        ) -> Option<StreamChunk> {
+            None
+        }
+    }
+
+    impl Phase1Evaluation for LeftOuter {
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk> {
+            builder.append_row(op, left_row.chain(right_row))
+        }
+
+        fn match_end(
+            builder: &mut StreamChunkBuilder,
+            op: Op,
+            left_row: impl Row,
+            right_size: usize,
+            matched: bool,
+        ) -> Option<StreamChunk> {
+            if !matched {
+                // If no rows matched, a marker row should be inserted.
+                builder.append_row(
+                    op,
+                    left_row.chain(row::repeat_n(DatumRef::None, right_size)),
+                )
+            } else {
+                None
+            }
+        }
+    }
+
+    impl Phase1Evaluation for LeftOuterWithCond {
+        fn append_matched_row(
+            op: Op,
+            builder: &mut StreamChunkBuilder,
+            left_row: impl Row,
+            right_row: impl Row,
+        ) -> Option<StreamChunk> {
+            builder.append_row(op, left_row.chain(right_row))
+        }
+
+        fn match_end(
+            builder: &mut StreamChunkBuilder,
+            op: Op,
+            left_row: impl Row,
+            right_size: usize,
+            _matched: bool,
+        ) -> Option<StreamChunk> {
+            // A marker row should always be inserted and mark as invisible for non-lookup filters evaluation.
+            // The row will be converted to visible in the further steps if no rows matched after all filters evaluated.
+            builder.append_row_invisible(
+                op,
+                left_row.chain(row::repeat_n(DatumRef::None, right_size)),
+            )
+        }
+    }
+
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn handle_chunk<'a, K: HashKey, S: StateStore, E: Phase1Evaluation>(
+        chunk_size: usize,
+        right_size: usize,
+        full_schema: Vec<DataType>,
+        epoch: HummockEpoch,
+        left_join_keys: &'a [usize],
+        right_table: &'a mut TemporalSide<K, S>,
+        null_matched: &'a K::Bitmap,
+        chunk: StreamChunk,
+    ) {
+        let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
+        let keys = K::build_many(left_join_keys, chunk.data_chunk());
+        let to_fetch_keys = chunk
+            .visibility()
+            .iter()
+            .zip_eq_debug(keys.iter())
+            .filter_map(|(vis, key)| if vis { Some(key) } else { None });
+        right_table
+            .fetch_or_promote_keys(to_fetch_keys, epoch)
+            .await?;
+        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+            let Some((op, left_row)) = r else {
+                continue;
+            };
+            let mut matched = false;
+            if key.null_bitmap().is_subset(null_matched)
+                && let join_entry = right_table.force_peek(&key)
+                && !join_entry.is_empty()
+            {
+                matched = true;
+                for right_row in join_entry.cached.values() {
+                    if let Some(chunk) =
+                        E::append_matched_row(op, &mut builder, left_row, right_row)
+                    {
+                        yield chunk;
+                    }
+                }
+            }
+            if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
+                yield chunk;
+            }
+        }
+        if let Some(chunk) = builder.take() {
+            yield chunk;
+        }
+    }
+}
+
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<K, S, T> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        left: BoxedExecutor,
-        right: BoxedExecutor,
+        info: ExecutorInfo,
+        left: Executor,
+        right: Executor,
         table: StorageTable<S>,
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
         condition: Option<NonStrictExpression>,
-        pk_indices: PkIndices,
         output_indices: Vec<usize>,
         table_output_indices: Vec<usize>,
         table_stream_key_indices: Vec<usize>,
-        executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
     ) -> Self {
-        let schema_fields = [left.schema().fields.clone(), right.schema().fields.clone()].concat();
-
-        let schema: Schema = output_indices
-            .iter()
-            .map(|&idx| schema_fields[idx].clone())
-            .collect();
-
         let alloc = StatsAlloc::new(Global).shared();
 
         let metrics_info = MetricsInfo::new(
@@ -374,6 +511,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
         Self {
             ctx: ctx.clone(),
+            info,
             left,
             right,
             right_table: TemporalSide {
@@ -389,20 +527,30 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             null_safe,
             condition,
             output_indices,
-            schema,
             chunk_size,
-            pk_indices,
-            identity: format!("TemporalJoinExecutor {:X}", executor_id),
             metrics,
         }
     }
 
+    fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> StreamChunk {
+        let (data_chunk, ops) = chunk.into_parts();
+        let (columns, vis) = data_chunk.into_parts();
+        let output_columns = indices
+            .iter()
+            .cloned()
+            .map(|idx| columns[idx].clone())
+            .collect();
+        StreamChunk::with_visibility(ops, output_columns, vis)
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
-        let (left_map, right_map) = JoinStreamChunkBuilder::get_i2o_mapping(
+        let right_size = self.right.schema().len();
+
+        let (left_map, _right_map) = JoinStreamChunkBuilder::get_i2o_mapping(
             &self.output_indices,
             self.left.schema().len(),
-            self.right.schema().len(),
+            right_size,
         );
 
         let left_to_output: HashMap<usize, usize> = HashMap::from_iter(left_map.iter().cloned());
@@ -416,6 +564,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         let table_id_str = self.right_table.source.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
+        let full_schema: Vec<_> = self
+            .left
+            .schema()
+            .data_types()
+            .into_iter()
+            .chain(self.right.schema().data_types().into_iter())
+            .collect();
+
         #[for_await]
         for msg in align_input(self.left, self.right) {
             self.right_table.cache.evict();
@@ -430,49 +586,106 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    let mut builder = JoinStreamChunkBuilder::new(
-                        self.chunk_size,
-                        self.schema.data_types(),
-                        left_map.clone(),
-                        right_map.clone(),
-                    );
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
-                    let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
-                    for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
-                        let Some((op, left_row)) = r else {
-                            continue;
-                        };
-                        if key.null_bitmap().is_subset(&null_matched)
-                            && let join_entry = self.right_table.lookup(&key, epoch).await?
-                            && !join_entry.is_empty() {
-                            for right_row in join_entry.cached.values() {
-                                // check join condition
-                                let ok = if let Some(ref mut cond) = self.condition {
-                                    let concat_row = left_row.chain(&right_row).into_owned_row();
-                                    cond.eval_row_infallible(&concat_row)
-                                        .await
-                                        .map(|s| *s.as_bool())
-                                        .unwrap_or(false)
-                                } else {
-                                    true
-                                };
 
-                                if ok {
-                                    if let Some(chunk) = builder.append_row(op, left_row, right_row) {
-                                        yield Message::Chunk(chunk);
-                                    }
-                                }
-                            }
-                            // Insert back the state taken from ht.
-                            self.right_table.insert_back(key.clone(), join_entry);
-                        } else if T == JoinType::LeftOuter {
-                            if let Some(chunk) = builder.append_row_update(op, left_row) {
-                                yield Message::Chunk(chunk);
-                            }
+                    let full_schema = full_schema.clone();
+
+                    if T == JoinType::Inner {
+                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner>(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            epoch,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &null_matched,
+                            chunk,
+                        );
+                        #[for_await]
+                        for chunk in st1 {
+                            let chunk = chunk?;
+                            let new_chunk = if let Some(ref cond) = self.condition {
+                                let (data_chunk, ops) = chunk.into_parts();
+                                let passed_bitmap = cond.eval_infallible(&data_chunk).await;
+                                let passed_bitmap =
+                                    Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
+                                let (columns, vis) = data_chunk.into_parts();
+                                let new_vis = vis & passed_bitmap;
+                                StreamChunk::with_visibility(ops, columns, new_vis)
+                            } else {
+                                chunk
+                            };
+                            let new_chunk =
+                                Self::apply_indices_map(new_chunk, &self.output_indices);
+                            yield Message::Chunk(new_chunk);
                         }
-                    }
-                    if let Some(chunk) = builder.take() {
-                        yield Message::Chunk(chunk);
+                    } else if let Some(ref cond) = self.condition {
+                        // Joined result without evaluating non-lookup conditions.
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond>(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            epoch,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &null_matched,
+                            chunk,
+                        );
+                        let mut matched_count = 0usize;
+                        #[for_await]
+                        for chunk in st1 {
+                            let chunk = chunk?;
+                            let (data_chunk, ops) = chunk.into_parts();
+                            let passed_bitmap = cond.eval_infallible(&data_chunk).await;
+                            let passed_bitmap =
+                                Arc::unwrap_or_clone(passed_bitmap).into_bool().to_bitmap();
+                            let (columns, vis) = data_chunk.into_parts();
+                            let mut new_vis = BitmapBuilder::with_capacity(vis.len());
+                            for (passed, not_match_end) in
+                                passed_bitmap.iter().zip_eq_debug(vis.iter())
+                            {
+                                let is_match_end = !not_match_end;
+                                let vis = if is_match_end && matched_count == 0 {
+                                    // Nothing is matched, so the marker row should be visible.
+                                    true
+                                } else if is_match_end {
+                                    // reset the count
+                                    matched_count = 0;
+                                    // rows found, so the marker row should be invisible.
+                                    false
+                                } else {
+                                    if passed {
+                                        matched_count += 1;
+                                    }
+                                    passed
+                                };
+                                new_vis.append(vis);
+                            }
+                            let new_chunk = Self::apply_indices_map(
+                                StreamChunk::with_visibility(ops, columns, new_vis.finish()),
+                                &self.output_indices,
+                            );
+                            yield Message::Chunk(new_chunk);
+                        }
+                        // The last row should always be marker row,
+                        assert_eq!(matched_count, 0);
+                    } else {
+                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter>(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            epoch,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &null_matched,
+                            chunk,
+                        );
+                        #[for_await]
+                        for chunk in st1 {
+                            let chunk = chunk?;
+                            let new_chunk = Self::apply_indices_map(chunk, &self.output_indices);
+                            yield Message::Chunk(new_chunk);
+                        }
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
@@ -497,22 +710,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor
+impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Execute
     for TemporalJoinExecutor<K, S, T>
 {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        self.identity.as_str()
     }
 }

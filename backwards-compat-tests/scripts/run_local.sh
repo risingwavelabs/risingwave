@@ -37,9 +37,6 @@ ENABLE_KAFKA=true
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=true
 
-# Ensure it will link the all-in-one binary from our release.
-ENABLE_ALL_IN_ONE=true
-
 # ENABLE_RELEASE_PROFILE=true
 EOF
 }
@@ -47,7 +44,7 @@ EOF
 setup_old_cluster() {
   echo "--- Setting up old cluster"
   LATEST_BRANCH=$(git branch --show-current)
-  git checkout "v${OLD_VERSION}-rc"
+  git checkout "v${OLD_VERSION}"
 }
 
 setup_new_cluster() {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -28,10 +27,7 @@ use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
-use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
-    StreamExecutorResult, Watermark,
-};
+use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult, Watermark};
 use crate::common::StreamChunkBuilder;
 
 const PROJ_ROW_ID_OFFSET: usize = 1;
@@ -40,13 +36,13 @@ const PROJ_ROW_ID_OFFSET: usize = 1;
 /// and returns a new data chunk. And then, `ProjectSetExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectSetExecutor {
-    input: BoxedExecutor,
+    input: Executor,
     inner: Inner,
 }
 
 struct Inner {
-    info: ExecutorInfo,
     _ctx: ActorContextRef,
+
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
@@ -61,29 +57,13 @@ impl ProjectSetExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        pk_indices: PkIndices,
+        input: Executor,
         select_list: Vec<ProjectSetSelectItem>,
-        executor_id: u64,
         chunk_size: usize,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
     ) -> Self {
-        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
-        fields.extend(
-            select_list
-                .iter()
-                .map(|expr| Field::unnamed(expr.return_type())),
-        );
-
-        let info = ExecutorInfo {
-            schema: Schema { fields },
-            pk_indices,
-            identity: format!("ProjectSet {:X}", executor_id),
-        };
-
         let inner = Inner {
-            info,
             _ctx: ctx,
             select_list,
             chunk_size,
@@ -103,27 +83,15 @@ impl Debug for ProjectSetExecutor {
     }
 }
 
-impl Executor for ProjectSetExecutor {
+impl Execute for ProjectSetExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.inner.execute(self.input).boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
 impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute(self, input: BoxedExecutor) {
+    async fn execute(self, input: Executor) {
         assert!(!self.select_list.is_empty());
         // First column will be `projected_row_id`, which represents the index in the
         // output table
@@ -189,11 +157,15 @@ impl Inner {
                             // for each column
                             for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                                 *value = match item {
-                                    Either::Left(state) => if let Some((i, value)) = state.peek() && i == row_idx {
-                                        valid = true;
-                                        value
-                                    } else {
-                                        None
+                                    Either::Left(state) => {
+                                        if let Some((i, value)) = state.peek()
+                                            && i == row_idx
+                                        {
+                                            valid = true;
+                                            value
+                                        } else {
+                                            None
+                                        }
                                     }
                                     Either::Right(array) => array.value_at(row_idx),
                                 };
@@ -211,7 +183,9 @@ impl Inner {
                             }
                             // move to the next row
                             for item in &mut results {
-                                if let Either::Left(state) = item && matches!(state.peek(), Some((i, _)) if i == row_idx) {
+                                if let Either::Left(state) = item
+                                    && matches!(state.peek(), Some((i, _)) if i == row_idx)
+                                {
                                     state.next().await?;
                                 }
                             }
@@ -277,8 +251,8 @@ impl Inner {
                 ret.push(derived_watermark);
             } else {
                 warn!(
-                    "{} derive a NULL watermark with the expression {}!",
-                    self.info.identity, expr_idx
+                    "a NULL watermark is derived with the expression {}!",
+                    expr_idx
                 );
             }
         }

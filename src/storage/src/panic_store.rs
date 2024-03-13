@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::Stream;
+use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -31,7 +30,7 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type IterStream = PanicStateStoreStream;
+    type Iter = PanicStateStoreStream;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -49,14 +48,13 @@ impl StateStoreRead for PanicStateStore {
         _key_range: TableKeyRange,
         _epoch: u64,
         _read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream> {
+    ) -> StorageResult<Self::Iter> {
         panic!("should not read from the state store!");
     }
 }
 
 impl StateStoreWrite for PanicStateStore {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         _kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -67,7 +65,7 @@ impl StateStoreWrite for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
-    type IterStream<'a> = PanicStateStoreStream;
+    type Iter<'a> = PanicStateStoreStream;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -92,7 +90,7 @@ impl LocalStateStore for PanicStateStore {
         &self,
         _key_range: TableKeyRange,
         _read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream<'_>> {
+    ) -> StorageResult<Self::Iter<'_>> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -110,10 +108,7 @@ impl LocalStateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn flush(
-        &mut self,
-        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
+    async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");
     }
 
@@ -130,8 +125,17 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn seal_current_epoch(&mut self, _next_epoch: u64) {
+    fn seal_current_epoch(&mut self, _next_epoch: u64, _opts: SealCurrentEpochOptions) {
         panic!("should not operate on the panic state store!")
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn try_flush(&mut self) -> StorageResult<()> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn update_vnode_bitmap(&mut self, _vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        panic!("should not operate on the panic state store!");
     }
 }
 
@@ -153,7 +157,7 @@ impl StateStore for PanicStateStore {
     }
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         panic!("should not clear shared buffer from the panic state store!");
     }
 
@@ -167,12 +171,10 @@ impl StateStore for PanicStateStore {
     }
 }
 
-pub struct PanicStateStoreStream {}
+pub struct PanicStateStoreStream;
 
-impl Stream for PanicStateStoreStream {
-    type Item = StorageResult<StateStoreIterItem>;
-
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+impl StateStoreIter for PanicStateStoreStream {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
         panic!("should not call next on panic state store stream")
     }
 }

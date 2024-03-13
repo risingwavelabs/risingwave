@@ -29,12 +29,12 @@ env_scripts = [
 set_env ENABLE_TELEMETRY "false"
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
-is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 is_hdfs_backend = get_env ENABLE_HDFS
 is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
+is_python_udf_enabled = get_env ENABLE_PYTHON_UDF
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -45,13 +45,8 @@ else
   set_env RISEDEV_BUILD_TARGET_DIR ""
 end
 
-if ${is_all_in_one_enabled}
-  set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
-  set_env RISEDEV_CTL_RUN_CMD "-- risectl"
-else
-  set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
-  set_env RISEDEV_CTL_RUN_CMD "--bin risectl --"
-end
+set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
+set_env RISEDEV_CTL_RUN_CMD "-- risectl"
 
 if ${is_hdfs_backend}
   set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
@@ -63,6 +58,11 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_python_udf_enabled}
+  flags = get_env RISINGWAVE_FEATURE_FLAGS
+  set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features embedded-python-udf"
 end
 
 if ${is_hummock_trace}
@@ -245,7 +245,7 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 3000 )) ; then
     echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
@@ -262,31 +262,10 @@ set -e
 python -mwebbrowser file://$(pwd)/target/doc/index.html
 '''
 
-[tasks.link-standalone-binaries]
-private = true
-category = "RiseDev - Build"
-description = "Link standalone cmds to RiseDev bin"
-condition = { env_not_set = ["ENABLE_ALL_IN_ONE"] }
-script = '''
-#!/usr/bin/env bash
-set -e
-rm -f "${PREFIX_BIN}/compute-node"
-rm -f "${PREFIX_BIN}/meta-node"
-rm -f "${PREFIX_BIN}/frontend"
-rm -f "${PREFIX_BIN}/compactor"
-rm -f "${PREFIX_BIN}/risectl"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend" "${PREFIX_BIN}/frontend"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${PREFIX_BIN}/compactor"
-ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risectl" "${PREFIX_BIN}/risectl"
-'''
-
 [tasks.link-all-in-one-binaries]
 private = true
 category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
-condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
 #!/usr/bin/env bash
 set -e
@@ -333,13 +312,7 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
-binaries=()
-
-if [[ "$ENABLE_ALL_IN_ONE" == "true" ]]; then
-  binaries=("risingwave")
-else
-  binaries=("meta-node" "compute-node" "frontend" "compactor")
-fi
+binaries=("risingwave")
 
 set -ex
 echo -n "${binaries[*]}" | parallel -d ' ' \
@@ -350,7 +323,6 @@ echo -n "${binaries[*]}" | parallel -d ' ' \
 private = true
 category = "RiseDev - Build"
 description = "Link all binaries to .bin"
-condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
 #!/usr/bin/env bash
 set -e
@@ -369,7 +341,6 @@ category = "RiseDev - Build"
 description = "Copy RisngWave binaries to bin"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 dependencies = [
-  "link-standalone-binaries",
   "link-all-in-one-binaries",
   "link-user-bin",
   "codesign-binaries",
@@ -621,6 +592,25 @@ if [ ! -f "${RC_ENV_FILE}" ]; then
 fi
 '''
 
+[tasks.psql-env]
+category = "RiseDev - Start/Stop"
+description = "Dump env configuration for psql"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+cat <<EOF > "${PREFIX_CONFIG}/psql-env"
+export PGHOST=$RW_FRONTEND_LISTEN_ADDRESS
+export PGPORT=$RW_FRONTEND_PORT
+export PGUSER=root
+export PGDATABASE=dev
+EOF
+
+echo "psql environment file is created at ${PREFIX_CONFIG}/psql-env"
+echo "You can source this file to use psql with default connection parameters."
+echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
+'''
+
 [tasks.psql]
 category = "RiseDev - Start/Stop"
 description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
@@ -757,10 +747,10 @@ tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
 if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
 then
   echo "kill kafka"
-  kill_kafka
+  kill_kafka || true
 
   echo "kill zookeeper"
-  kill_zookeeper
+  kill_zookeeper || true
 
   # Kill their tmux sessions
   tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
@@ -804,17 +794,12 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
-
-# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
-echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
-cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
-echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
@@ -882,9 +867,9 @@ dependencies = ["prepare"]
 condition = { env_set = [
   "ENABLE_BUILD_RW_CONNECTOR",
 ], files_modified = { input = [
-  "./java/connector-node/**/*.java",
+  "./java/connector-node/**/*",
 ], output = [
-  "./java/connector-node/assembly/target/*",
+  "./java/connector-node/assembly/target/**/*",
 ] } }
 description = "Build RisingWave Connector from source"
 script = '''
@@ -924,10 +909,10 @@ cargo build \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
+  -p risingwave_dml \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -949,10 +934,10 @@ cargo nextest run \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
+  -p risingwave_dml \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -1005,10 +990,10 @@ cargo check \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
+  -p risingwave_dml \
   -p risingwave_frontend \
   -p risingwave_meta \
   -p risingwave_object_store \
-  -p risingwave_source \
   -p risingwave_storage \
   -p risingwave_stream \
   -p pgwire \
@@ -1226,7 +1211,7 @@ script = """
 scripts/check/check-trailing-spaces.sh --fix
 """
 
-[tasks.check]
+[tasks.check-fast]
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
@@ -1235,9 +1220,12 @@ dependencies = [
   "check-fmt",
   "check-trailing-spaces",
   "check-typos",
-  "check-clippy",
-  "check-java",
 ]
+description = "Perform part of the pre-CI checks that are fast to run"
+
+[tasks.check]
+category = "RiseDev - Check"
+dependencies = ["check-fast", "check-clippy", "check-java"]
 script = """
 #!/usr/bin/env bash
 
@@ -1253,11 +1241,7 @@ alias = "check"
 category = "RiseDev - Check"
 dependencies = [
   "warn-on-missing-tools",
-  "check-hakari",
-  "check-dep-sort",
-  "check-fmt",
-  "check-trailing-spaces",
-  "check-typos",
+  "check-fast",
   "check-clippy-fix",
   "check-java-fix",
 ]
@@ -1311,6 +1295,11 @@ command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
+[tasks.ci-kill-no-dump-logs]
+category = "RiseDev - CI"
+dependencies = ["k", "check-logs", "wait-processes-exit"]
+description = "Kill cluster and check logs, do not dump logs"
+
 [tasks.ci-kill]
 category = "RiseDev - CI"
 dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
@@ -1338,7 +1327,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.17.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.19.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
@@ -1435,11 +1424,15 @@ private = true
 category = "Misc"
 description = "Generate default config and write to src/config/example.toml"
 script = '''
-cat << EOF > src/config/example.toml
-# This file is generated by ./risedev generate-example-config
-# Check detailed comments in src/common/src/config.rs
-EOF
-cargo run -p risingwave_common --bin example-config >> src/config/example.toml
+UPDATE_EXPECT=1 cargo test --package risingwave_common --lib -- config::tests::test_example_up_to_date
+'''
+
+[tasks.generate-with-options]
+private = true
+category = "Misc"
+description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
+script = '''
+UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
 '''
 
 [tasks.backwards-compat-test]

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(register_tool)]
+#![register_tool(rw)]
+#![allow(rw::format_error)] // test code
+
 use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
 use risingwave_sqlsmith::print_function_table;
-use risingwave_sqlsmith::runner::{generate, run, run_differential_testing};
+use risingwave_sqlsmith::test_runners::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
 
 #[derive(ClapParser, Debug, Clone)]

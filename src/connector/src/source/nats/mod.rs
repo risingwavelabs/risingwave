@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
+use with_options::WithOptions;
 
 use crate::common::NatsCommon;
 use crate::source::nats::enumerator::NatsSplitEnumerator;
@@ -25,7 +28,7 @@ use crate::source::SourceProperties;
 
 pub const NATS_CONNECTOR: &str = "nats";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,
@@ -33,14 +36,18 @@ pub struct NatsProperties {
     #[serde(rename = "scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "scan.startup.timestamp_millis")]
+    #[serde(
+        rename = "scan.startup.timestamp.millis",
+        alias = "scan.startup.timestamp_millis"
+    )]
     pub start_time: Option<String>,
 
     #[serde(rename = "stream")]
     pub stream: String,
-}
 
-impl NatsProperties {}
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
 
 impl SourceProperties for NatsProperties {
     type Split = NatsSplit;
@@ -48,4 +55,10 @@ impl SourceProperties for NatsProperties {
     type SplitReader = NatsSplitReader;
 
     const SOURCE_NAME: &'static str = NATS_CONNECTOR;
+}
+
+impl crate::source::UnknownFields for NatsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,10 +123,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_decode(&mut self, context: SqlGeneratorContext) -> Expr {
-        let input_string = self.gen_expr(&DataType::Varchar, context);
+        let input_string = self.gen_expr(&DataType::Bytea, context);
         let encoding = &["base64", "hex", "escape"].choose(&mut self.rng).unwrap();
         let args = vec![
             input_string,
+            Expr::Value(Value::SingleQuotedString(encoding.to_string())),
+        ];
+        let encoded_string = Expr::Function(make_simple_func("encode", &args));
+        let args = vec![
+            encoded_string,
             Expr::Value(Value::SingleQuotedString(encoding.to_string())),
         ];
         Expr::Function(make_simple_func("decode", &args))
@@ -253,6 +258,7 @@ pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     Function {
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
+        variadic: false,
         over: None,
         distinct: false,
         order_by: vec![],

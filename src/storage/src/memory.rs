@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -197,7 +197,9 @@ pub mod sled {
 
         use bytes::Bytes;
         use risingwave_common::catalog::TableId;
+        use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
         use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+        use risingwave_hummock_sdk::EpochWithGap;
 
         use crate::memory::sled::SledRangeKv;
         use crate::memory::RangeKv;
@@ -216,7 +218,7 @@ pub mod sled {
                     table_id,
                     table_key: TableKey(Bytes::from(table_key.to_vec())),
                 },
-                epoch,
+                epoch_with_gap: EpochWithGap::new_from_epoch(epoch & !EPOCH_SPILL_TIME_MASK),
             };
 
             let left_full_key = to_full_key(&left_table_key[..]);
@@ -319,10 +321,10 @@ mod batched_iter {
                 .collect_vec();
 
             if let Some((last_key, _)) = batch.last() {
-                let full_key = FullKey::new(
+                let full_key = FullKey::new_with_gap_epoch(
                     last_key.user_key.table_id,
                     TableKey(last_key.user_key.table_key.0.clone()),
-                    last_key.epoch,
+                    last_key.epoch_with_gap,
                 );
                 self.range.0 = Bound::Excluded(full_key);
             }
@@ -515,7 +517,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
             .inner
             .range(to_full_key_range(table_id, key_range), None)?
         {
-            if key.epoch > epoch {
+            if key.epoch_with_gap.pure_epoch() > epoch {
                 continue;
             }
             if Some(&key.user_key) != last_user_key.as_ref() {
@@ -524,7 +526,9 @@ impl<R: RangeKv> RangeKvStateStore<R> {
                 }
                 last_user_key = Some(key.user_key.clone());
             }
-            if let Some(limit) = limit && data.len() >= limit {
+            if let Some(limit) = limit
+                && data.len() >= limit
+            {
                 break;
             }
         }
@@ -533,7 +537,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
-    type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
+    type Iter = RangeKvStateStoreIter<R>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -559,21 +563,19 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream> {
+    ) -> StorageResult<Self::Iter> {
         Ok(RangeKvStateStoreIter::new(
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(read_options.table_id, key_range),
             ),
             epoch,
-        )
-        .into_stream())
+        ))
     }
 }
 
 impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    #[allow(clippy::unused_async)]
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -633,7 +635,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
         unimplemented!("recovery not supported")
     }
 
@@ -654,8 +656,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     last_key: Option<UserKey<Bytes>>,
 
-    /// For supporting semantic of `Fuse`
-    stopped: bool,
+    item_buffer: Option<StateStoreIterItem>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -664,36 +665,28 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
             inner,
             epoch,
             last_key: None,
-            stopped: false,
+            item_buffer: None,
         }
     }
 }
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
-    type Item = StateStoreIterItem;
-
     #[allow(clippy::unused_async)]
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
-        if self.stopped {
-            Ok(None)
-        } else {
-            let ret = self.next_inner();
-            match &ret {
-                Err(_) | Ok(None) => {
-                    self.stopped = true;
-                }
-                _ => {}
-            }
-
-            ret
-        }
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        let ret = self.next_inner();
+        let item = ret?;
+        self.item_buffer = item;
+        Ok(self
+            .item_buffer
+            .as_ref()
+            .map(|(key, value)| (key.to_ref(), value.as_ref())))
     }
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
     fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
-            if key.epoch > self.epoch {
+            if key.epoch_with_gap.pure_epoch() > self.epoch {
                 continue;
             }
             if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {
@@ -709,6 +702,9 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 
 #[cfg(test)]
 mod tests {
+
+    use risingwave_common::util::epoch::test_epoch;
+
     use super::*;
     use crate::memory::sled::SledStateStore;
 
@@ -744,7 +740,6 @@ mod tests {
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         state_store
             .ingest_batch(
@@ -760,11 +755,10 @@ mod tests {
                 ],
                 vec![],
                 WriteOptions {
-                    epoch: 1,
+                    epoch: test_epoch(1),
                     table_id: Default::default(),
                 },
             )
-            .await
             .unwrap();
         assert_eq!(
             state_store
@@ -819,13 +813,13 @@ mod tests {
                         Bound::Included(TableKey(Bytes::from("a"))),
                         Bound::Included(TableKey(Bytes::from("b"))),
                     ),
-                    1,
+                    test_epoch(1),
                     TableId::default(),
                     None,
                 )
                 .unwrap(),
             vec![(
-                FullKey::for_test(Default::default(), b"a".to_vec(), 1)
+                FullKey::for_test(Default::default(), b"a".to_vec(), test_epoch(1))
                     .encode()
                     .into(),
                 b"v2".to_vec().into()
@@ -864,7 +858,7 @@ mod tests {
             state_store
                 .get(
                     TableKey(Bytes::copy_from_slice(b"a")),
-                    1,
+                    test_epoch(1),
                     ReadOptions::default(),
                 )
                 .await
@@ -873,14 +867,22 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("b")), 1, ReadOptions::default(),)
+                .get(
+                    TableKey(Bytes::from("b")),
+                    test_epoch(1),
+                    ReadOptions::default(),
+                )
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("c")), 1, ReadOptions::default())
+                .get(
+                    TableKey(Bytes::from("c")),
+                    test_epoch(1),
+                    ReadOptions::default()
+                )
                 .await
                 .unwrap(),
             None

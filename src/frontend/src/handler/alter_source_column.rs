@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
@@ -25,6 +24,7 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::Binder;
 
 // Note for future drop column:
@@ -41,7 +41,7 @@ pub async fn handle_alter_source_column(
     let db_name = session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -58,25 +58,34 @@ pub async fn handle_alter_source_column(
         (db.id(), schema.id(), (**source).clone())
     };
 
+    if catalog.associated_table_id.is_some() {
+        Err(ErrorCode::NotSupported(
+            "alter table with connector with ALTER SOURCE statement".to_string(),
+            "try to use ALTER TABLE instead".to_string(),
+        ))?
+    };
+
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter source with schema registry".into(),
-                None.into(),
-            )));
+            return Err(ErrorCode::NotSupported(
+                "alter source with schema registry".to_string(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter source with schema registry".into(),
-                None.into(),
-            )));
+            return Err(ErrorCode::NotSupported(
+                "alter source with schema registry".to_string(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
         SourceEncode::Invalid | SourceEncode::Native => {
             return Err(RwError::from(ErrorCode::NotSupported(
-                format!("Alter source with encode {:?}", encode),
-                "Alter source with encode JSON | BYTES | CSV".into(),
+                format!("alter source with encode {:?}", encode),
+                "alter source with encode JSON | BYTES | CSV".into(),
             )));
         }
         _ => {}

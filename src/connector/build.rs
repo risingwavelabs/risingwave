@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,4 +26,10 @@ fn main() {
         .out_dir("./src/parser/protobuf")
         .compile_protos(&protos, &Vec::<String>::new())
         .unwrap();
+
+    let proto_include_path = protobuf_src::include();
+    println!(
+        "cargo:rustc-env=PROTO_INCLUDE={}",
+        proto_include_path.to_str().unwrap()
+    );
 }

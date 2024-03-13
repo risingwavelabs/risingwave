@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,13 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
+
+use crate::error::{ErrorCode, Result as RwResult};
 
 mod agg_call;
 mod correlated_input_ref;
@@ -58,16 +59,16 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
-pub use now::{InlineNowProcTime, Now};
+pub use now::{InlineNowProcTime, Now, NowProcTimeFinder};
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
-pub use session_timezone::SessionTimezone;
+pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, least_restrictive,
-    CastContext, CastSig, FuncSign,
+    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, infer_type_name,
+    infer_type_with_sigmap, least_restrictive, CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
@@ -165,6 +166,12 @@ impl ExprImpl {
         Literal::new(None, element_type).into()
     }
 
+    /// A literal jsonb value.
+    #[inline(always)]
+    pub fn literal_jsonb(v: JsonbVal) -> Self {
+        Literal::new(Some(v.into()), DataType::Jsonb).into()
+    }
+
     /// A literal list value.
     #[inline(always)]
     pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
@@ -215,7 +222,8 @@ impl ExprImpl {
     /// Count `Now`s in the expression.
     pub fn count_nows(&self) -> usize {
         let mut visitor = CountNow::default();
-        visitor.visit_expr(self)
+        visitor.visit_expr(self);
+        visitor.count()
     }
 
     /// Check whether self is literal NULL.
@@ -255,6 +263,26 @@ impl ExprImpl {
     /// Shorthand to inplace cast expr to `target` type in explicit context.
     pub fn cast_explicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Explicit)
+    }
+
+    /// Casting to Regclass type means getting the oid of expr.
+    /// See <https://www.postgresql.org/docs/current/datatype-oid.html>
+    pub fn cast_to_regclass(self) -> Result<ExprImpl, CastError> {
+        match self.return_type() {
+            DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                FunctionCall::new_unchecked(ExprType::CastRegclass, vec![self], DataType::Int32),
+            ))),
+            DataType::Int32 => Ok(self),
+            dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
+            _ => Err(CastError("Unsupported input type".to_string())),
+        }
+    }
+
+    /// Shorthand to inplace cast expr to `regclass` type.
+    pub fn cast_to_regclass_mut(&mut self) -> Result<(), CastError> {
+        let owned = std::mem::replace(self, ExprImpl::literal_bool(false));
+        *self = owned.cast_to_regclass()?;
+        Ok(())
     }
 
     /// Ensure the return type of this expression is an array of some type.
@@ -311,7 +339,7 @@ impl ExprImpl {
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
+    pub async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         Ok(backend_expr.eval_row(input).await?)
     }
@@ -349,23 +377,17 @@ macro_rules! impl_has_variant {
             impl ExprImpl {
                 $(
                     pub fn [<has_ $variant:snake>](&self) -> bool {
-                        struct Has {}
+                        struct Has { has: bool }
 
                         impl ExprVisitor for Has {
-
-                            type Result = bool;
-
-                            fn merge(a: bool, b: bool) -> bool {
-                                a | b
-                            }
-
-                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) -> bool {
-                                true
+                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) {
+                                self.has = true;
                             }
                         }
 
-                        let mut visitor = Has {};
-                        visitor.visit_expr(self)
+                        let mut visitor = Has { has: false };
+                        visitor.visit_expr(self);
+                        visitor.has
                     }
                 )*
             }
@@ -422,110 +444,96 @@ impl ExprImpl {
     pub fn has_correlated_input_ref_by_depth(&self, depth: Depth) -> bool {
         struct Has {
             depth: usize,
+            has: bool,
         }
 
         impl ExprVisitor for Has {
-            type Result = bool;
-
-            fn merge(a: bool, b: bool) -> bool {
-                a | b
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.depth() == self.depth {
+                    self.has = true;
+                }
             }
 
-            fn visit_correlated_input_ref(
-                &mut self,
-                correlated_input_ref: &CorrelatedInputRef,
-            ) -> bool {
-                correlated_input_ref.depth() == self.depth
-            }
-
-            fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
+            fn visit_subquery(&mut self, subquery: &Subquery) {
                 self.depth += 1;
-                let has = self.visit_bound_set_expr(&subquery.query.body);
+                self.visit_bound_set_expr(&subquery.query.body);
                 self.depth -= 1;
-
-                has
             }
         }
 
         impl Has {
-            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
-                let mut has = false;
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) {
                 match set_expr {
                     BoundSetExpr::Select(select) => {
-                        select.exprs().for_each(|expr| has |= self.visit_expr(expr));
-                        has |= match select.from.as_ref() {
+                        select.exprs().for_each(|expr| self.visit_expr(expr));
+                        match select.from.as_ref() {
                             Some(from) => from.is_correlated(self.depth),
                             None => false,
                         };
                     }
                     BoundSetExpr::Values(values) => {
-                        values.exprs().for_each(|expr| has |= self.visit_expr(expr))
+                        values.exprs().for_each(|expr| self.visit_expr(expr))
                     }
                     BoundSetExpr::Query(query) => {
                         self.depth += 1;
-                        has = self.visit_bound_set_expr(&query.body);
+                        self.visit_bound_set_expr(&query.body);
                         self.depth -= 1;
                     }
                     BoundSetExpr::SetOperation { left, right, .. } => {
-                        has |= self.visit_bound_set_expr(left);
-                        has |= self.visit_bound_set_expr(right);
+                        self.visit_bound_set_expr(left);
+                        self.visit_bound_set_expr(right);
                     }
                 };
-                has
             }
         }
 
-        let mut visitor = Has { depth };
-        visitor.visit_expr(self)
+        let mut visitor = Has { depth, has: false };
+        visitor.visit_expr(self);
+        visitor.has
     }
 
     pub fn has_correlated_input_ref_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
         struct Has {
             correlated_id: CorrelatedId,
+            has: bool,
         }
 
         impl ExprVisitor for Has {
-            type Result = bool;
-
-            fn merge(a: bool, b: bool) -> bool {
-                a | b
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.correlated_id() == self.correlated_id {
+                    self.has = true;
+                }
             }
 
-            fn visit_correlated_input_ref(
-                &mut self,
-                correlated_input_ref: &CorrelatedInputRef,
-            ) -> bool {
-                correlated_input_ref.correlated_id() == self.correlated_id
-            }
-
-            fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
-                self.visit_bound_set_expr(&subquery.query.body)
+            fn visit_subquery(&mut self, subquery: &Subquery) {
+                self.visit_bound_set_expr(&subquery.query.body);
             }
         }
 
         impl Has {
-            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) {
                 match set_expr {
-                    BoundSetExpr::Select(select) => select
-                        .exprs()
-                        .map(|expr| self.visit_expr(expr))
-                        .reduce(Self::merge)
-                        .unwrap_or_default(),
-                    BoundSetExpr::Values(values) => values
-                        .exprs()
-                        .map(|expr| self.visit_expr(expr))
-                        .reduce(Self::merge)
-                        .unwrap_or_default(),
+                    BoundSetExpr::Select(select) => {
+                        select.exprs().for_each(|expr| self.visit_expr(expr))
+                    }
+                    BoundSetExpr::Values(values) => {
+                        values.exprs().for_each(|expr| self.visit_expr(expr));
+                    }
                     BoundSetExpr::Query(query) => self.visit_bound_set_expr(&query.body),
                     BoundSetExpr::SetOperation { left, right, .. } => {
-                        self.visit_bound_set_expr(left) | self.visit_bound_set_expr(right)
+                        self.visit_bound_set_expr(left);
+                        self.visit_bound_set_expr(right);
                     }
                 }
             }
         }
 
-        let mut visitor = Has { correlated_id };
-        visitor.visit_expr(self)
+        let mut visitor = Has {
+            correlated_id,
+            has: false,
+        };
+        visitor.visit_expr(self);
+        visitor.has
     }
 
     /// Collect `CorrelatedInputRef`s in `ExprImpl` by relative `depth`, return their indices, and
@@ -607,10 +615,6 @@ impl ExprImpl {
                 has_others: bool,
             }
             impl ExprVisitor for HasOthers {
-                type Result = ();
-
-                fn merge(_: (), _: ()) {}
-
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {
                         ExprImpl::CorrelatedInputRef(_)
@@ -740,6 +744,16 @@ impl ExprImpl {
                         None
                     }
                 }
+                ty @ ExprType::Equal => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             }
         } else {
@@ -822,13 +836,19 @@ impl ExprImpl {
                 match expr_type {
                     ExprType::Add | ExprType::Subtract => {
                         let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
-                        if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
+                        if let ExprImpl::InputRef(input_ref) = &lhs
+                            && rhs.is_const()
+                        {
                             // Currently we will return `None` for non-literal because the result of the expression might be '1 day'. However, there will definitely exist false positives such as '1 second + 1 second'.
                             // We will treat the expression as an input offset when rhs is `null`.
-                            if rhs.return_type() == DataType::Interval && rhs.as_literal().map_or(true, |literal| literal.get_data().as_ref().map_or(false, |scalar| {
-                                let interval = scalar.as_interval();
-                                interval.months() != 0 || interval.days() != 0
-                            })) {
+                            if rhs.return_type() == DataType::Interval
+                                && rhs.as_literal().map_or(true, |literal| {
+                                    literal.get_data().as_ref().map_or(false, |scalar| {
+                                        let interval = scalar.as_interval();
+                                        interval.months() != 0 || interval.days() != 0
+                                    })
+                                })
+                            {
                                 None
                             } else {
                                 Some((input_ref.index(), Some((expr_type, rhs))))

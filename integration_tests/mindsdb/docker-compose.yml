@@ -1,0 +1,63 @@
+---
+version: "3"
+services:
+  risingwave-standalone:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: risingwave-standalone
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+
+  # === MindsDB ===
+  mindsdb:
+    image: mindsdb/mindsdb:23.9.3.0
+    command: bash -c "python3 -m mindsdb --config=/root/mindsdb_config.json --api=http,postgres"
+    ports:
+      - 47334:47334 # http
+      - 55432:55432 # postgres
+    volumes:
+      - "./mdb_config.json:/root/mindsdb_config.json"
+    container_name: mindsdb
+
+  prepare_data:
+    image: postgres
+    depends_on:
+      - risingwave-standalone
+      - mindsdb
+    command:
+      - /bin/sh
+      - -c
+      - /prepare_data.sh
+    volumes:
+      - "./prepare_risingwave.sql:/prepare_risingwave.sql"
+      - "./prepare_mindsdb.sql:/prepare_mindsdb.sql"
+      - "./prepare_data.sh:/prepare_data.sh"
+    container_name: prepare_data
+    restart: on-failure
+
+volumes:
+  risingwave-standalone:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

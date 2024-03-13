@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
-    StreamExecutorError,
-};
+use super::{ActorContextRef, Barrier, BoxedMessageStream, Execute, Message, StreamExecutorError};
 use crate::task::CreateMviewProgress;
 
 const DEFAULT_CHUNK_SIZE: usize = 1024;
@@ -36,43 +33,39 @@ const DEFAULT_CHUNK_SIZE: usize = 1024;
 /// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
     ctx: ActorContextRef,
+
+    schema: Schema,
     // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgress,
 
     rows: vec::IntoIter<Vec<NonStrictExpression>>,
-    pk_indices: PkIndices,
-    identity: String,
-    schema: Schema,
 }
 
 impl ValuesExecutor {
     /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
         ctx: ActorContextRef,
+        schema: Schema,
         progress: CreateMviewProgress,
         rows: Vec<Vec<NonStrictExpression>>,
-        schema: Schema,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        executor_id: u64,
     ) -> Self {
         Self {
             ctx,
+            schema,
             progress,
             barrier_receiver,
             rows: rows.into_iter(),
-            pk_indices: vec![schema.len() - 1], // the last one column is pk
-            identity: format!("ValuesExecutor {:X}", executor_id),
-            schema,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(self) {
+    async fn execute_inner(self) {
         let Self {
+            schema,
             mut progress,
             mut barrier_receiver,
-            schema,
             mut rows,
             ..
         } = self;
@@ -139,27 +132,14 @@ impl ValuesExecutor {
     }
 }
 
-impl Executor for ValuesExecutor {
+impl Execute for ValuesExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.into_stream().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        self.identity.as_str()
+        self.execute_inner().boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use risingwave_common::array::{
@@ -167,19 +147,19 @@ mod tests {
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl, StructType};
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression, NonStrictExpression};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;
     use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::{ActorContext, Barrier, Executor, Mutation};
+    use crate::executor::{ActorContext, AddMutation, Barrier, Execute, Mutation};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_values() {
         let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let progress = CreateMviewProgress::for_test(barrier_manager);
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
@@ -208,30 +188,30 @@ mod tests {
                 Some(ScalarImpl::Int64(0)),
             )),
         ];
-        let fields = exprs
+        let schema = exprs
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
-            .collect::<Vec<Field>>();
+            .collect::<Schema>();
         let values_executor_struct = ValuesExecutor::new(
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
+            schema,
             progress,
             vec![exprs
                 .into_iter()
                 .map(NonStrictExpression::for_test)
                 .collect()],
-            Schema { fields },
             barrier_receiver,
-            10005,
         );
         let mut values_executor = Box::new(values_executor_struct).execute();
 
         // Init barrier
-        let first_message = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
-            adds: Default::default(),
-            added_actors: maplit::hashset! {actor_id},
-            splits: Default::default(),
-            pause: false,
-        });
+        let first_message =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: Default::default(),
+                added_actors: maplit::hashset! {actor_id},
+                splits: Default::default(),
+                pause: false,
+            }));
         tx.send(first_message).unwrap();
 
         assert!(matches!(
@@ -267,14 +247,14 @@ mod tests {
         assert_eq!(*result.column_at(4), I64Array::from_iter([0]).into_ref());
 
         // ValueExecutor should simply forward following barriers
-        tx.send(Barrier::new_test_barrier(2)).unwrap();
+        tx.send(Barrier::new_test_barrier(test_epoch(2))).unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),
             Barrier { .. }
         ));
 
-        tx.send(Barrier::new_test_barrier(3)).unwrap();
+        tx.send(Barrier::new_test_barrier(test_epoch(3))).unwrap();
 
         assert!(matches!(
             values_executor.next_unwrap_ready_barrier().unwrap(),

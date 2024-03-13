@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,38 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
-use thiserror::Error;
+use risingwave_common::error::v2::def_anyhow_newtype;
+use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::RpcError;
 
-#[derive(Error, Debug)]
-pub enum ConnectorError {
-    #[error("Parse error: {0}")]
-    Parse(&'static str),
+use crate::parser::AccessError;
+use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
+use crate::schema::InvalidOptionError;
+use crate::sink::SinkError;
 
-    #[error("Invalid parameter {name}: {reason}")]
-    InvalidParam { name: &'static str, reason: String },
+def_anyhow_newtype! {
+    pub ConnectorError,
 
-    #[error("Kafka error: {0}")]
-    Kafka(#[from] rdkafka::error::KafkaError),
+    // Common errors
+    std::io::Error => transparent,
 
-    #[error("Config error: {0}")]
-    Config(anyhow::Error),
+    // Fine-grained connector errors
+    AccessError => transparent,
+    WireFormatError => transparent,
+    ConcurrentRequestError => transparent,
+    InvalidOptionError => transparent,
+    SinkError => transparent,
+    PbFieldNotFound => transparent,
 
-    #[error("Connection error: {0}")]
-    Connection(anyhow::Error),
+    // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
 
-    #[error("MySQL error: {0}")]
-    MySql(#[from] mysql_async::Error),
+    // Parsing errors
+    url::ParseError => "failed to parse url",
+    serde_json::Error => "failed to parse json",
+    csv::Error => "failed to parse csv",
 
-    #[error("Pulsar error: {0}")]
-    Pulsar(anyhow::Error),
+    // Connector errors
+    opendal::Error => transparent, // believed to be self-explanatory
 
-    #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    mysql_async::Error => "MySQL error",
+    tokio_postgres::Error => "Postgres error",
+    apache_avro::Error => "Avro error",
+    rdkafka::error::KafkaError => "Kafka error",
+    pulsar::Error => "Pulsar error",
+    async_nats::jetstream::consumer::StreamError => "Nats error",
+    async_nats::jetstream::consumer::pull::MessagesError => "Nats error",
+    async_nats::jetstream::context::CreateStreamError => "Nats error",
+    async_nats::jetstream::stream::ConsumerError => "Nats error",
+    icelake::Error => "Iceberg error",
+    redis::RedisError => "Redis error",
+    arrow_schema::ArrowError => "Arrow error",
+    google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
+    tokio_rustls::rustls::Error => "TLS error",
+    rumqttc::v5::ClientError => "MQTT error",
+    rumqttc::v5::OptionError => "MQTT error",
 }
 
-impl From<ConnectorError> for RwError {
-    fn from(s: ConnectorError) -> Self {
-        ErrorCode::ConnectorError(Box::new(s)).into()
+pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
+
+impl From<ConnectorError> for RpcError {
+    fn from(value: ConnectorError) -> Self {
+        RpcError::Internal(value.0)
     }
 }

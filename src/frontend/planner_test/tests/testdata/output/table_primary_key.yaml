@@ -31,8 +31,8 @@
   - create_table_t2
   sql: |
     select _row_id from t2;
-  binder_error: |-
-    Bind error: failed to bind expression: _row_id
+  binder_error: |
+    Failed to bind expression: _row_id
 
     Caused by:
       Item not found: Invalid column: _row_id

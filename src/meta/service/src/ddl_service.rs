@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,34 +16,28 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use rand::Rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::source::cdc::CdcSourceType;
-use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
+use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, PbSource, PbTable};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
-    IdCategoryType, MetaSrvEnv, StreamingJob,
-};
+use crate::manager::{ConnectionId, MetaSrvEnv, StreamingJob};
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
+use crate::rpc::ddl_controller::{
+    DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
+};
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -51,7 +45,7 @@ use crate::{MetaError, MetaResult};
 pub struct DdlServiceImpl {
     env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef,
+    metadata_manager: MetadataManager,
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
@@ -62,32 +56,57 @@ impl DdlServiceImpl {
     pub async fn new(
         env: MetaSrvEnv,
         aws_client: Option<AwsEc2Client>,
-        catalog_manager: CatalogManagerRef,
+        metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
-        cluster_manager: ClusterManagerRef,
-        fragment_manager: FragmentManagerRef,
         barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
             env.clone(),
-            catalog_manager.clone(),
+            metadata_manager.clone(),
             stream_manager,
             source_manager,
-            cluster_manager,
-            fragment_manager,
             barrier_manager,
             aws_cli_ref.clone(),
         )
         .await;
         Self {
             env,
-            catalog_manager,
+            metadata_manager,
             ddl_controller,
             aws_client: aws_cli_ref,
             sink_manager,
+        }
+    }
+
+    fn extract_replace_table_info(change: ReplaceTablePlan) -> ReplaceTableInfo {
+        let mut source = change.source;
+        let mut fragment_graph = change.fragment_graph.unwrap();
+        let mut table = change.table.unwrap();
+        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+            table.optional_associated_source_id
+        {
+            source.as_mut().unwrap().id = source_id;
+            fill_table_stream_graph_info(
+                &mut source,
+                &mut table,
+                TableJobType::General,
+                &mut fragment_graph,
+            );
+        }
+        let table_col_index_mapping = change
+            .table_col_index_mapping
+            .as_ref()
+            .map(ColIndexMapping::from_protobuf);
+
+        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
+
+        ReplaceTableInfo {
+            streaming_job: stream_job,
+            fragment_graph,
+            col_index_mapping: table_col_index_mapping,
         }
     }
 }
@@ -99,9 +118,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateDatabaseRequest>,
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
         let req = request.into_inner();
-        let id = self.gen_unique_id::<{ IdCategory::Database }>().await?;
-        let mut database = req.get_db()?.clone();
-        database.id = id;
+        let database = req.get_db()?.clone();
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateDatabase(database))
@@ -109,7 +126,6 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(CreateDatabaseResponse {
             status: None,
-            database_id: id,
             version,
         }))
     }
@@ -137,9 +153,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
         let req = request.into_inner();
-        let id = self.gen_unique_id::<{ IdCategory::Schema }>().await?;
-        let mut schema = req.get_schema()?.clone();
-        schema.id = id;
+        let schema = req.get_schema()?.clone();
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateSchema(schema))
@@ -147,7 +161,6 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(CreateSchemaResponse {
             status: None,
-            schema_id: id,
             version,
         }))
     }
@@ -172,25 +185,43 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let mut source = request.into_inner().get_source()?.clone();
+        let req = request.into_inner();
+        let source = req.get_source()?.clone();
 
         // validate connection before starting the DDL procedure
         if let Some(connection_id) = source.connection_id {
             self.validate_connection(connection_id).await?;
         }
 
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        source.id = id;
-
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::CreateSource(source))
-            .await?;
-        Ok(Response::new(CreateSourceResponse {
-            status: None,
-            source_id: id,
-            version,
-        }))
+        match req.fragment_graph {
+            None => {
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateSource(source))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    version,
+                }))
+            }
+            Some(fragment_graph) => {
+                // The id of stream job has been set above
+                let stream_job = StreamingJob::Source(source);
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateStreamingJob(
+                        stream_job,
+                        fragment_graph,
+                        CreateType::Foreground,
+                        None,
+                    ))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    version,
+                }))
+            }
+        }
     }
 
     async fn drop_source(
@@ -218,30 +249,36 @@ impl DdlService for DdlServiceImpl {
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
+
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let affected_table_change = req.get_affected_table_change().cloned().ok();
 
         // validate connection before starting the DDL procedure
         if let Some(connection_id) = sink.connection_id {
             self.validate_connection(connection_id).await?;
         }
 
-        let mut stream_job = StreamingJob::Sink(sink);
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
+        let stream_job = match &affected_table_change {
+            None => StreamingJob::Sink(sink, None),
+            Some(change) => {
+                let table = change.table.clone().unwrap();
+                let source = change.source.clone();
+                StreamingJob::Sink(sink, Some((table, source)))
+            }
+        };
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(
-                stream_job,
-                fragment_graph,
-                CreateType::Foreground,
-            ))
-            .await?;
+        let command = DdlCommand::CreateStreamingJob(
+            stream_job,
+            fragment_graph,
+            CreateType::Foreground,
+            affected_table_change.map(Self::extract_replace_table_info),
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(CreateSinkResponse {
             status: None,
-            sink_id: id,
             version,
         }))
     }
@@ -253,19 +290,72 @@ impl DdlService for DdlServiceImpl {
         let request = request.into_inner();
         let sink_id = request.sink_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::DropStreamingJob(
-                StreamingJobId::Sink(sink_id),
-                drop_mode,
-            ))
-            .await?;
+
+        let command = DdlCommand::DropStreamingJob(
+            StreamingJobId::Sink(sink_id),
+            drop_mode,
+            request
+                .affected_table_change
+                .map(Self::extract_replace_table_info),
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         self.sink_manager
             .stop_sink_coordinator(SinkId::from(sink_id))
             .await;
 
         Ok(Response::new(DropSinkResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn create_subscription(
+        &self,
+        request: Request<CreateSubscriptionRequest>,
+    ) -> Result<Response<CreateSubscriptionResponse>, Status> {
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+
+        let subscription = req.get_subscription()?.clone();
+        let fragment_graph = req.get_fragment_graph()?.clone();
+
+        let stream_job = StreamingJob::Subscription(subscription);
+
+        let command = DdlCommand::CreateStreamingJob(
+            stream_job,
+            fragment_graph,
+            CreateType::Foreground,
+            None,
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
+
+        Ok(Response::new(CreateSubscriptionResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn drop_subscription(
+        &self,
+        request: Request<DropSubscriptionRequest>,
+    ) -> Result<Response<DropSubscriptionResponse>, Status> {
+        let request = request.into_inner();
+        let subscription_id = request.subscription_id;
+        let drop_mode = DropMode::from_request_setting(request.cascade);
+
+        let command = DdlCommand::DropStreamingJob(
+            StreamingJobId::Subscription(subscription_id),
+            drop_mode,
+            None,
+        );
+
+        let version = self.ddl_controller.run_command(command).await?;
+
+        Ok(Response::new(DropSubscriptionResponse {
             status: None,
             version,
         }))
@@ -282,22 +372,19 @@ impl DdlService for DdlServiceImpl {
         let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let fragment_graph = req.get_fragment_graph()?.clone();
 
-        let mut stream_job = StreamingJob::MaterializedView(mview);
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
-
+        let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
                 create_type,
+                None,
             ))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
-            table_id: id,
             version,
         }))
     }
@@ -317,6 +404,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::MaterializedView(table_id),
                 drop_mode,
+                None,
             ))
             .await?;
 
@@ -337,22 +425,19 @@ impl DdlService for DdlServiceImpl {
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
 
-        let mut stream_job = StreamingJob::Index(index, index_table);
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
-
+        let stream_job = StreamingJob::Index(index, index_table);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
                 CreateType::Foreground,
+                None,
             ))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
             status: None,
-            index_id: id,
             version,
         }))
     }
@@ -371,6 +456,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::Index(index_id),
                 drop_mode,
+                None,
             ))
             .await?;
 
@@ -385,9 +471,8 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateFunctionRequest>,
     ) -> Result<Response<CreateFunctionResponse>, Status> {
         let req = request.into_inner();
-        let id = self.gen_unique_id::<{ IdCategory::Function }>().await?;
-        let mut function = req.get_function()?.clone();
-        function.id = id;
+        let function = req.get_function()?.clone();
+
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateFunction(function))
@@ -395,7 +480,6 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(CreateFunctionResponse {
             status: None,
-            function_id: id,
             version,
         }))
     }
@@ -422,43 +506,24 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateTableRequest>,
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
-        let mut source = request.source;
-        let mut mview = request.materialized_view.unwrap();
-        let mut fragment_graph = request.fragment_graph.unwrap();
-        let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        // If we're creating a table with connector, we should additionally fill its ID first.
-        if let Some(source) = &mut source {
-            // Generate source id.
-            let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
-            fill_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
+        let job_type = request.get_job_type().unwrap_or_default();
+        let source = request.source;
+        let mview = request.materialized_view.unwrap();
+        let fragment_graph = request.fragment_graph.unwrap();
 
-            // Modify properties for cdc sources if needed
-            if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
-                if matches!(
-                    CdcSourceType::from(connector.as_str()),
-                    CdcSourceType::Mysql
-                ) {
-                    fill_cdc_mysql_server_id(&mut fragment_graph);
-                }
-            }
-        }
-
-        let mut stream_job = StreamingJob::Table(source, mview);
-
-        stream_job.set_id(table_id);
-
+        let stream_job = StreamingJob::Table(source, mview, job_type);
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
                 CreateType::Foreground,
+                None,
             ))
             .await?;
 
         Ok(Response::new(CreateTableResponse {
             status: None,
-            table_id,
             version,
         }))
     }
@@ -477,6 +542,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob(
                 StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
                 drop_mode,
+                None,
             ))
             .await?;
 
@@ -491,9 +557,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateViewRequest>,
     ) -> Result<Response<CreateViewResponse>, Status> {
         let req = request.into_inner();
-        let mut view = req.get_view()?.clone();
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        view.id = id;
+        let view = req.get_view()?.clone();
 
         let version = self
             .ddl_controller
@@ -502,7 +566,6 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(CreateViewResponse {
             status: None,
-            view_id: id,
             version,
         }))
     }
@@ -528,7 +591,10 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        let tables = self.catalog_manager.list_tables().await;
+        let tables = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_tables().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_all_state_tables().await?,
+        };
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
@@ -536,29 +602,13 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<ReplaceTablePlanRequest>,
     ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
-        let req = request.into_inner();
-
-        let mut source = req.source;
-        let mut fragment_graph = req.fragment_graph.unwrap();
-        let mut table = req.table.unwrap();
-        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-            table.optional_associated_source_id
-        {
-            let source = source.as_mut().unwrap();
-            let table_id = table.id;
-            fill_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
-        }
-        let table_col_index_mapping =
-            ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
-        let stream_job = StreamingJob::Table(source, table);
+        let req = request.into_inner().get_plan().cloned()?;
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::ReplaceTable(
-                stream_job,
-                fragment_graph,
-                table_col_index_mapping,
-            ))
+            .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
+                req,
+            )))
             .await?;
 
         Ok(Response::new(ReplaceTablePlanResponse {
@@ -572,35 +622,44 @@ impl DdlService for DdlServiceImpl {
         request: Request<GetTableRequest>,
     ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
-        let database = self
-            .catalog_manager
-            .list_databases()
-            .await
-            .into_iter()
-            .find(|db| db.name == req.database_name);
-        if let Some(db) = database {
-            let table = self
-                .catalog_manager
-                .list_tables()
-                .await
-                .into_iter()
-                .find(|t| t.name == req.table_name && t.database_id == db.id);
-            Ok(Response::new(GetTableResponse { table }))
-        } else {
-            Ok(Response::new(GetTableResponse { table: None }))
-        }
+        let table = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                let database = mgr
+                    .catalog_manager
+                    .list_databases()
+                    .await
+                    .into_iter()
+                    .find(|db| db.name == req.database_name);
+                if let Some(db) = database {
+                    mgr.catalog_manager
+                        .list_tables()
+                        .await
+                        .into_iter()
+                        .find(|t| t.name == req.table_name && t.database_id == db.id)
+                } else {
+                    None
+                }
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_name(&req.database_name, &req.table_name)
+                    .await?
+            }
+        };
+
+        Ok(Response::new(GetTableResponse { table }))
     }
 
-    async fn alter_relation_name(
+    async fn alter_name(
         &self,
-        request: Request<AlterRelationNameRequest>,
-    ) -> Result<Response<AlterRelationNameResponse>, Status> {
-        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        request: Request<AlterNameRequest>,
+    ) -> Result<Response<AlterNameResponse>, Status> {
+        let AlterNameRequest { object, new_name } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .run_command(DdlCommand::AlterName(object.unwrap(), new_name))
             .await?;
-        Ok(Response::new(AlterRelationNameResponse {
+        Ok(Response::new(AlterNameResponse {
             status: None,
             version,
         }))
@@ -616,6 +675,39 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
             .await?;
         Ok(Response::new(AlterSourceResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_owner(
+        &self,
+        request: Request<AlterOwnerRequest>,
+    ) -> Result<Response<AlterOwnerResponse>, Status> {
+        let AlterOwnerRequest { object, owner_id } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterObjectOwner(object.unwrap(), owner_id))
+            .await?;
+        Ok(Response::new(AlterOwnerResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_set_schema(
+        &self,
+        request: Request<AlterSetSchemaRequest>,
+    ) -> Result<Response<AlterSetSchemaResponse>, Status> {
+        let AlterSetSchemaRequest {
+            object,
+            new_schema_id,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
+            .await?;
+        Ok(Response::new(AlterSetSchemaResponse {
             status: None,
             version,
         }))
@@ -671,7 +763,7 @@ impl DdlService for DdlServiceImpl {
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
-                                "AWS client is not configured".into(),
+                                "AWS client is not configured",
                             )));
                         }
                     }
@@ -679,9 +771,8 @@ impl DdlService for DdlServiceImpl {
                         return Err(Status::invalid_argument("Privatelink provider unspecified"));
                     }
                 };
-                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
                 let connection = Connection {
-                    id,
+                    id: 0,
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
@@ -695,10 +786,7 @@ impl DdlService for DdlServiceImpl {
                     .run_command(DdlCommand::CreateConnection(connection))
                     .await?;
 
-                Ok(Response::new(CreateConnectionResponse {
-                    connection_id: id,
-                    version,
-                }))
+                Ok(Response::new(CreateConnectionResponse { version }))
             }
         }
     }
@@ -707,7 +795,11 @@ impl DdlService for DdlServiceImpl {
         &self,
         _request: Request<ListConnectionsRequest>,
     ) -> Result<Response<ListConnectionsResponse>, Status> {
-        let conns = self.catalog_manager.list_connections().await;
+        let conns = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_connections().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_connections().await?,
+        };
+
         Ok(Response::new(ListConnectionsResponse {
             connections: conns,
         }))
@@ -759,10 +851,26 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<GetTablesRequest>,
     ) -> Result<Response<GetTablesResponse>, Status> {
-        let ret = self
-            .catalog_manager
-            .get_tables(&request.into_inner().table_ids)
-            .await;
+        let ret = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
+                    .get_tables(&request.into_inner().table_ids)
+                    .await
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_table_by_ids(
+                        request
+                            .into_inner()
+                            .table_ids
+                            .into_iter()
+                            .map(|id| id as _)
+                            .collect(),
+                    )
+                    .await?
+            }
+        };
+
         let mut tables = HashMap::default();
         for table in ret {
             tables.insert(table.id, table);
@@ -774,19 +882,39 @@ impl DdlService for DdlServiceImpl {
         self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
     }
+
+    async fn alter_parallelism(
+        &self,
+        request: Request<AlterParallelismRequest>,
+    ) -> Result<Response<AlterParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let table_id = req.get_table_id();
+        let parallelism = req.get_parallelism()?.clone();
+        let deferred = req.get_deferred();
+
+        self.ddl_controller
+            .alter_parallelism(table_id, parallelism, deferred)
+            .await?;
+
+        Ok(Response::new(AlterParallelismResponse {}))
+    }
 }
 
 impl DdlServiceImpl {
-    async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
-        let id = self.env.id_gen_manager().generate::<C>().await? as u32;
-        Ok(id)
-    }
-
     async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
-        let connection = self
-            .catalog_manager
-            .get_connection_by_id(connection_id)
-            .await?;
+        let connection = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => {
+                mgr.catalog_manager
+                    .get_connection_by_id(connection_id)
+                    .await?
+            }
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .get_connection_by_id(connection_id as _)
+                    .await?
+            }
+        };
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
             // skip all checks for mock connection
             if svc.get_provider()? == PrivateLinkProvider::Mock {
@@ -804,55 +932,5 @@ impl DdlServiceImpl {
             }
         }
         Ok(())
-    }
-}
-
-fn fill_table_source(
-    source: &mut PbSource,
-    source_id: u32,
-    table: &mut PbTable,
-    table_id: u32,
-    fragment_graph: &mut PbStreamFragmentGraph,
-) {
-    // If we're creating a table with connector, we should additionally fill its ID first.
-    source.id = source_id;
-
-    let mut source_count = 0;
-    for fragment in fragment_graph.fragments.values_mut() {
-        visit_fragment(fragment, |node_body| {
-            if let NodeBody::Source(source_node) = node_body {
-                // TODO: Refactor using source id.
-                source_node.source_inner.as_mut().unwrap().source_id = source_id;
-                source_count += 1;
-            }
-        });
-    }
-    assert_eq!(
-        source_count, 1,
-        "require exactly 1 external stream source when creating table with a connector"
-    );
-
-    // Fill in the correct table id for source.
-    source.optional_associated_table_id =
-        Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
-
-    // Fill in the correct source id for mview.
-    table.optional_associated_source_id =
-        Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
-}
-
-// `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-// group (that is, different from any other server id being used by any master or slave)
-fn fill_cdc_mysql_server_id(fragment_graph: &mut PbStreamFragmentGraph) {
-    for fragment in fragment_graph.fragments.values_mut() {
-        visit_fragment(fragment, |node_body| {
-            if let NodeBody::Source(source_node) = node_body {
-                let props = &mut source_node.source_inner.as_mut().unwrap().properties;
-                let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
-                props
-                    .entry("server.id".to_string())
-                    .or_insert(rand_server_id.to_string());
-            }
-        });
     }
 }

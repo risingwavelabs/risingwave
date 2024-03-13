@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,7 @@ use risingwave_storage::store::{InitOptions, LocalStateStore};
 
 pub trait LocalStateStoreTestExt: LocalStateStore {
     fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        self.init(InitOptions::new_with_epoch(EpochPair::new_test_epoch(
-            epoch,
-        )))
+        self.init(InitOptions::new(EpochPair::new_test_epoch(epoch)))
     }
 }
 impl<T: LocalStateStore> LocalStateStoreTestExt for T {}

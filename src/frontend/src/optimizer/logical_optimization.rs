@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,16 +13,22 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 
 use super::plan_node::RewriteExprsRecursive;
-use crate::expr::InlineNowProcTime;
+use super::plan_visitor::has_logical_max_one_row;
+use crate::error::Result;
+use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
+};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
-use crate::optimizer::plan_visitor::{has_logical_apply, HasMaxOneRowApply, PlanVisitor};
+use crate::optimizer::plan_visitor::{
+    has_logical_apply, HasMaxOneRowApply, PlanCheckApplyEliminationExt, PlanVisitor,
+};
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -47,6 +53,7 @@ impl PlanRef {
             ctx.trace(format!("{}", stats));
             ctx.trace(plan.explain_to_string());
         }
+        ctx.add_rule_applied(stats.total_applied());
 
         plan
     }
@@ -71,6 +78,7 @@ impl PlanRef {
                 ctx.trace(format!("{}", stats));
                 ctx.trace(output_plan.explain_to_string());
             }
+            ctx.add_rule_applied(stats.total_applied());
 
             if !stats.has_applied_rule() {
                 return output_plan;
@@ -118,6 +126,14 @@ static TABLE_FUNCTION_TO_PROJECT_SET: LazyLock<OptimizationStage> = LazyLock::ne
     )
 });
 
+static VALUES_EXTRACT_PROJECT: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Values Extract Project",
+        vec![ValuesExtractProjectRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simple Unnesting",
@@ -128,6 +144,7 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
             ApplyToJoinRule::create(),
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
+            PullUpCorrelatedPredicateAggRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
@@ -224,7 +241,11 @@ static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Push down filter with now into a left semijoin",
-        vec![FilterWithNowToJoinRule::create()],
+        vec![
+            SplitNowAndRule::create(),
+            SplitNowOrRule::create(),
+            FilterWithNowToJoinRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -313,6 +334,14 @@ static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
             OverWindowToAggAndJoinRule::create(),
             OverWindowToTopNRule::create(),
         ],
+        ApplyOrder::TopDown,
+    )
+});
+
+static MERGE_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Merge Over Window",
+        vec![OverWindowMergeRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -410,19 +439,18 @@ impl LogicalOptimizer {
         explain_trace: bool,
         ctx: &OptimizerContextRef,
     ) -> Result<PlanRef> {
+        // Bail our if no apply operators.
+        if !has_logical_apply(plan.clone()) {
+            return Ok(plan);
+        }
         // Simple Unnesting.
         plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
+        debug_assert!(!HasMaxOneRowApply().visit(plan.clone()));
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = Self::predicate_pushdown(plan, explain_trace, ctx);
-        // In order to unnest a table function, we need to convert it into a `project_set` first.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
+        // In order to unnest values with correlated input ref, we need to extract project first.
+        plan = plan.optimize_by_rules(&VALUES_EXTRACT_PROJECT);
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
@@ -432,9 +460,10 @@ impl LogicalOptimizer {
             plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
         };
         plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
+
+        // Check if all `Apply`s are eliminated and the subquery is unnested.
+        plan.check_apply_elimination()?;
+
         Ok(plan)
     }
 
@@ -465,10 +494,17 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        // TODO: if there's no `NOW()` or `PROCTIME()`, we don't need to acquire snapshot.
-        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
+        // If now() and proctime() are not found, bail out.
+        let mut v = NowProcTimeFinder::default();
+        plan.visit_exprs_recursive(&mut v);
+        if !v.has() {
+            return plan;
+        }
 
-        let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
+        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
+        let mut v = InlineNowProcTime::new(epoch);
+
+        let plan = plan.rewrite_exprs_recursive(&mut v);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");
@@ -494,7 +530,7 @@ impl LogicalOptimizer {
         // If share plan is disable, we need to remove all the share operator generated by the
         // binder, e.g. CTE and View. However, we still need to share source to ensure self
         // source join can return correct result.
-        let enable_share_plan = ctx.session_ctx().config().get_enable_share_plan();
+        let enable_share_plan = ctx.session_ctx().config().enable_share_plan();
         if enable_share_plan {
             // Common sub-plan sharing.
             plan = plan.common_subplan_sharing();
@@ -517,13 +553,21 @@ impl LogicalOptimizer {
         }
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+        // In order to unnest a table function, we need to convert it into a `project_set` first.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
+        if has_logical_max_one_row(plan.clone()) {
+            // `MaxOneRow` is currently only used for the runtime check of
+            // scalar subqueries, while it's not supported in streaming mode, so
+            // we raise a precise error here.
+            bail!("Scalar subquery might produce more than one row.");
+        }
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        if plan.ctx().session_ctx().config().get_enable_join_ordering() {
+        if plan.ctx().session_ctx().config().enable_join_ordering() {
             // Merge inner joins and intermediate filters into multijoin
             // This rule assumes that filters have already been pushed down near to
             // their relevant joins.
@@ -534,7 +578,7 @@ impl LogicalOptimizer {
                 .ctx()
                 .session_ctx()
                 .config()
-                .get_streaming_enable_bushy_join()
+                .streaming_enable_bushy_join()
             {
                 plan = plan.optimize_by_rules(&BUSHY_TREE_JOIN_ORDERING);
             } else {
@@ -557,8 +601,9 @@ impl LogicalOptimizer {
         // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
 
-        let force_split_distinct_agg = ctx.session_ctx().config().get_force_split_distinct_agg();
+        let force_split_distinct_agg = ctx.session_ctx().config().force_split_distinct_agg();
         // TODO: better naming of the OptimizationStage
         // Convert distinct aggregates.
         plan = if force_split_distinct_agg {
@@ -609,13 +654,16 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
+        // In order to unnest a table function, we need to convert it into a `project_set` first.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
         // Predicate Push-down
+        let mut last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        if plan.ctx().session_ctx().config().get_enable_join_ordering() {
+        if plan.ctx().session_ctx().config().enable_join_ordering() {
             // Merge inner joins and intermediate filters into multijoin
             // This rule assumes that filters have already been pushed down near to
             // their relevant joins.
@@ -627,7 +675,10 @@ impl LogicalOptimizer {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
+            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        }
 
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
@@ -635,8 +686,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW);
         // Must push down predicates again after split over window so that OverWindow can be
         // optimized to TopN.
-        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
+            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        }
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
@@ -647,7 +702,11 @@ impl LogicalOptimizer {
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
-        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
+            #[allow(unused_assignments)]
+            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        }
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 

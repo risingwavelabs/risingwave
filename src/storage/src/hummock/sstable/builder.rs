@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_common::util::epoch::{is_compatibility_max_epoch, is_max_epoch};
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -192,23 +193,29 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     /// Add kv pair to sstable.
-    pub fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) {
+    pub fn add_monotonic_delete(&mut self, mut event: MonotonicDeleteEvent) {
         let table_id = event.event_key.left_user_key.table_id.table_id();
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             self.table_ids.insert(table_id);
         }
-        if event.new_epoch == HummockEpoch::MAX
+        if is_max_epoch(event.new_epoch)
             && self.monotonic_deletes.last().map_or(true, |last| {
-                last.new_epoch == HummockEpoch::MAX
-                    && last.event_key.left_user_key.table_id
-                        == event.event_key.left_user_key.table_id
+                last.event_key.left_user_key.table_id != event.event_key.left_user_key.table_id
+                    || is_max_epoch(last.new_epoch)
             })
         {
-            // This range would never delete any key so we can merge it with last range.
+            // There are two case we shall skip the right end of delete-range.
+            //   1, it belongs the same table-id with the last event, and the last event is also right-end of some delete-range so we can merge them into one point.
+            //   2, this point does not belong the same table-id with the last event. It means that the left end of this delete-range may be dropped, so we can not add it.
             return;
         }
-        if event.new_epoch != HummockEpoch::MAX {
+        if !is_max_epoch(event.new_epoch) {
             self.epoch_set.insert(event.new_epoch);
+        }
+        if is_compatibility_max_epoch(event.new_epoch) {
+            // It is dangerous to mix two different max value in data, so rewrite it to keep same format with main branch.
+            // See bug description in https://github.com/risingwavelabs/risingwave/issues/13717
+            event.new_epoch = HummockEpoch::MAX;
         }
         self.range_tombstone_size += event.encoded_size();
         self.monotonic_deletes.push(event);
@@ -233,6 +240,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.add(full_key, value).await
     }
 
+    pub fn current_block_size(&self) -> usize {
+        self.block_builder.approximate_len()
+    }
+
     /// Add raw data of block to sstable. return false means fallback
     pub async fn add_raw_block(
         &mut self,
@@ -255,8 +266,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
                 iter.seek_to_first();
                 while iter.is_valid() {
-                    let value = HummockValue::from_slice(iter.value())
-                        .expect("decode failed for fast compact");
+                    let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
+                        panic!(
+                            "decode failed for fast compact sst_id {} block_idx {} last_table_id {:?}",
+                            self.sstable_id, self.block_metas.len(), self.last_table_id
+                        )
+                    });
                     self.add_impl(iter.key(), value, false).await?;
                     iter.next();
                 }
@@ -265,7 +280,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.build_block().await?;
         }
         self.last_full_key = largest_key;
-        assert_eq!(meta.len as usize, buf.len());
+        assert_eq!(
+            meta.len as usize,
+            buf.len(),
+            "meta {} buf {} last_table_id {:?}",
+            meta.len,
+            buf.len(),
+            self.last_table_id
+        );
         meta.offset = self.writer.data_len() as u32;
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
@@ -293,13 +315,24 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
 
         let table_key_len = full_key.user_key.table_key.as_ref().len();
-        if table_key_len >= LARGE_KEY_LEN {
+        let table_value_len = match &value {
+            HummockValue::Put(t) => t.len(),
+            HummockValue::Delete => 0,
+        };
+        let large_value_len = self.options.max_sst_size as usize / 10;
+        let large_key_value_len = self.options.max_sst_size as usize / 2;
+        if table_key_len >= LARGE_KEY_LEN
+            || table_value_len > large_value_len
+            || table_key_len + table_value_len > large_key_value_len
+        {
             let table_id = full_key.user_key.table_id.table_id();
             tracing::warn!(
-                "A large key (table_id={}, len={}, epoch={}) is added to block",
+                "A large key/value (table_id={}, key len={}, value len={}, epoch={}, spill offset={}) is added to block",
                 table_id,
                 table_key_len,
-                full_key.epoch
+                table_value_len,
+                full_key.epoch_with_gap.pure_epoch(),
+                full_key.epoch_with_gap.offset(),
             );
         }
 
@@ -310,27 +343,42 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             || !user_key(&self.raw_key).eq(user_key(&self.last_full_key));
         let table_id = full_key.user_key.table_id.table_id();
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
+        let current_block_size = self.current_block_size();
+        let is_block_full = current_block_size >= self.options.block_capacity
+            || (current_block_size > self.options.block_capacity / 4 * 3
+                && current_block_size + self.raw_value.len() + self.raw_key.len()
+                    > self.options.block_capacity);
+
         if is_new_table {
-            assert!(could_switch_block);
+            assert!(
+                could_switch_block,
+                "is_new_user_key {} sst_id {} block_idx {} table_id {} last_table_id {:?} full_key {:?}",
+                is_new_user_key, self.sstable_id, self.block_metas.len(), table_id, self.last_table_id, full_key
+            );
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
-        } else if is_new_user_key
-            && self.block_builder.approximate_len() >= self.options.block_capacity
-            && could_switch_block
-        {
+        } else if is_block_full && could_switch_block {
             self.build_block().await?;
         }
         self.last_table_stats.total_key_count += 1;
-        self.epoch_set.insert(full_key.epoch);
+        self.epoch_set.insert(full_key.epoch_with_gap.pure_epoch());
 
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
-                offset: utils::checked_into_u32(self.writer.data_len()),
+                offset: utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
+                    panic!(
+                        "WARN overflow can't convert writer_data_len {} into u32 sst_id {} block_idx {} tables {:?}",
+                        self.writer.data_len(),
+                        self.sstable_id,
+                        self.block_metas.len(),
+                        self.table_ids,
+                    )
+                }),
                 len: 0,
                 smallest_key: full_key.encode(),
                 uncompressed_size: 0,
@@ -384,10 +432,24 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
+        // Each DeleteRange generates at least two Events to indicate the left and right boundaries
+        assert_ne!(
+            1,
+            self.monotonic_deletes.len(),
+            "delete_event {:?} table_id {:?} table_ids {:?}",
+            self.monotonic_deletes.first().unwrap(),
+            self.last_table_id,
+            self.table_ids,
+        );
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
+            assert!(
+                is_max_epoch(monotonic_delete.new_epoch),
+                "delete_event {:?} table_id {:?} table_ids {:?}",
+                monotonic_delete,
+                self.last_table_id,
+                self.table_ids
+            );
             if monotonic_delete.event_key.is_exclude_left_key {
                 if largest_key.is_empty()
                     || !KeyComparator::encoded_greater_than_unencoded(
@@ -419,7 +481,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
-            assert_ne!(monotonic_delete.new_epoch, HummockEpoch::MAX);
+            assert!(
+                !is_max_epoch(monotonic_delete.new_epoch),
+                "delete_event {:?} table_ids {:?} table_ids {:?}",
+                monotonic_delete,
+                self.last_table_id,
+                self.table_ids
+            );
             if smallest_key.is_empty()
                 || !KeyComparator::encoded_less_than_unencoded(
                     user_key(&smallest_key),
@@ -465,7 +533,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             block_metas: self.block_metas,
             bloom_filter,
             estimated_size: 0,
-            key_count: utils::checked_into_u32(total_key_count),
+            key_count: utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert total_key_count {} into u32 tables {:?}",
+                    total_key_count, self.table_ids,
+                )
+            }),
             smallest_key,
             largest_key,
             version: VERSION,
@@ -473,17 +546,35 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             monotonic_tombstone_events: self.monotonic_deletes,
         };
 
-        let encoded_size_u32 = utils::checked_into_u32(meta.encoded_size());
-        let meta_offset_u32 = utils::checked_into_u32(meta_offset);
-        meta.estimated_size = encoded_size_u32.checked_add(meta_offset_u32).unwrap();
+        let meta_encode_size = meta.encoded_size();
+        let encoded_size_u32 = utils::checked_into_u32(meta_encode_size).unwrap_or_else(|_| {
+            panic!(
+                "WARN overflow can't convert meta_encoded_size {} into u32 tables {:?}",
+                meta_encode_size, self.table_ids,
+            )
+        });
+        let meta_offset_u32 = utils::checked_into_u32(meta_offset).unwrap_or_else(|_| {
+            panic!(
+                "WARN overflow can't convert meta_offset {} into u32 tables {:?}",
+                meta_offset, self.table_ids,
+            )
+        });
+        meta.estimated_size = encoded_size_u32
+            .checked_add(meta_offset_u32)
+            .unwrap_or_else(|| {
+                panic!(
+                    "WARN overflow encoded_size_u32 {} meta_offset_u32 {} table_id {:?} table_ids {:?}",
+                    encoded_size_u32, meta_offset_u32, self.last_table_id, self.table_ids
+                )
+            });
 
         // Expand the epoch of the whole sst by tombstone epoch
         let (tombstone_min_epoch, tombstone_max_epoch) = {
-            let mut tombstone_min_epoch = u64::MAX;
+            let mut tombstone_min_epoch = HummockEpoch::MAX;
             let mut tombstone_max_epoch = u64::MIN;
 
             for monotonic_delete in &meta.monotonic_tombstone_events {
-                if monotonic_delete.new_epoch != HummockEpoch::MAX {
+                if !is_max_epoch(monotonic_delete.new_epoch) {
                     tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.new_epoch);
                     tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.new_epoch);
                 }
@@ -525,7 +616,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let (min_epoch, max_epoch) = {
             if self.epoch_set.is_empty() {
-                (u64::MAX, u64::MIN)
+                (HummockEpoch::MAX, u64::MIN)
             } else {
                 (
                     *self.epoch_set.first().unwrap(),
@@ -583,26 +674,48 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             + self.range_tombstone_size
     }
 
-    async fn build_block(&mut self) -> HummockResult<()> {
+    pub async fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());
         }
 
         let block_meta = self.block_metas.last_mut().unwrap();
-        block_meta.uncompressed_size =
-            utils::checked_into_u32(self.block_builder.uncompressed_block_size());
+        let uncompressed_block_size = self.block_builder.uncompressed_block_size();
+        block_meta.uncompressed_size = utils::checked_into_u32(uncompressed_block_size)
+            .unwrap_or_else(|_| {
+                panic!(
+                    "WARN overflow can't convert uncompressed_block_size {} into u32 table {:?}",
+                    uncompressed_block_size,
+                    self.block_builder.table_id(),
+                )
+            });
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.filter_builder
             .switch_block(self.memory_limiter.clone());
-        let data_len = utils::checked_into_u32(self.writer.data_len());
+        let data_len = utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
+            panic!(
+                "WARN overflow can't convert writer_data_len {} into u32 table {:?}",
+                self.writer.data_len(),
+                self.block_builder.table_id(),
+            )
+        });
         block_meta.len = data_len.checked_sub(block_meta.offset).unwrap_or_else(|| {
             panic!(
                 "data_len should >= meta_offset, found data_len={}, meta_offset={}",
                 data_len, block_meta.offset
             )
         });
+
+        if data_len as usize > self.options.capacity * 2 {
+            tracing::warn!(
+                "WARN unexpected block size {} table {:?}",
+                data_len,
+                self.block_builder.table_id()
+            );
+        }
+
         self.block_builder.clear();
         Ok(())
     }
@@ -614,10 +727,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         self.approximate_len() >= self.options.capacity
-    }
-
-    pub fn reach_max_sst_size(&self) -> bool {
-        self.approximate_len() as u64 >= self.options.max_sst_size
     }
 
     fn finalize_last_table_stats(&mut self) {
@@ -637,6 +746,7 @@ pub(super) mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::UserKey;
 
     use super::*;
@@ -754,14 +864,14 @@ pub(super) mod tests {
             .await
             .unwrap();
 
-        assert_eq!(table.value().has_bloom_filter(), with_blooms);
+        assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            if table.value().has_bloom_filter() {
+            if table.has_bloom_filter() {
                 let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
                 let key_ref = full_key.user_key.as_ref();
                 assert!(
-                    table.value().may_match_hash(
+                    table.may_match_hash(
                         &(Bound::Included(key_ref), Bound::Included(key_ref)),
                         hash
                     ),
@@ -821,7 +931,10 @@ pub(super) mod tests {
                 let k = UserKey::for_test(TableId::new(table_id), table_key.as_ref());
                 let v = test_value_of(idx);
                 builder
-                    .add(FullKey::from_user_key(k, 1), HummockValue::put(v.as_ref()))
+                    .add(
+                        FullKey::from_user_key(k, test_epoch(1)),
+                        HummockValue::put(v.as_ref()),
+                    )
                     .await
                     .unwrap();
             }
@@ -840,9 +953,9 @@ pub(super) mod tests {
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
             let hash = Sstable::hash_for_bloom_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
-            assert!(table
-                .value()
-                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+            assert!(
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            );
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
+use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
+
+use crate::error::ConnectorResult as Result;
 
 const PERSISTENT_DOMAIN: &str = "persistent";
 const NON_PERSISTENT_DOMAIN: &str = "non-persistent";
@@ -32,9 +35,10 @@ pub struct Topic {
     pub partition_index: Option<i32>,
 }
 
-impl ToString for Topic {
-    fn to_string(&self) -> String {
-        format!(
+impl std::fmt::Display for Topic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "{}://{}/{}/{}",
             self.domain, self.tenant, self.namespace, self.topic
         )
@@ -58,7 +62,7 @@ impl Topic {
 
     pub fn sub_topic(&self, partition: i32) -> Result<Topic> {
         if partition < 0 {
-            return Err(anyhow!("invalid partition index number"));
+            bail!("invalid partition index number");
         }
 
         if self.topic.contains(PARTITIONED_TOPIC_SUFFIX) {
@@ -118,11 +122,11 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
             ),
             3 => format!("{}://{}", PERSISTENT_DOMAIN, topic),
             _ => {
-                return Err(anyhow!(
+                bail!(
                     "Invalid short topic name '{}', \
                 it should be in the format of <tenant>/<namespace>/<topic> or <topic>",
                     topic
-                ));
+                );
             }
         };
     }
@@ -132,10 +136,10 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     let domain = match parts[0] {
         PERSISTENT_DOMAIN | NON_PERSISTENT_DOMAIN => parts[0],
         _ => {
-            return Err(anyhow!(
+            bail!(
                 "The domain only can be specified as 'persistent' or 'non-persistent'. Input domain is '{}'",
                 parts[0]
-            ));
+            );
         }
     };
 
@@ -143,10 +147,10 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     let parts: Vec<&str> = rest.splitn(3, '/').collect();
 
     if parts.len() != 3 {
-        return Err(anyhow!(
+        bail!(
             "invalid topic name '{}', it should be in the format of <tenant>/<namespace>/<topic>",
             rest
-        ));
+        );
     }
 
     let parsed_topic = Topic {
@@ -158,7 +162,7 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     };
 
     if parsed_topic.topic.is_empty() {
-        return Err(anyhow!("topic name cannot be empty".to_string(),));
+        bail!("topic name cannot be empty".to_string());
     }
 
     Ok(parsed_topic)

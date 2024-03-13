@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,18 +17,19 @@ use std::sync::{Arc, OnceLock};
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericGauge};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Gauge, IntGauge, IntGaugeVec, Opts, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, IntGauge,
+    Opts, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledHistogramVec,
+    RelabeledHistogramVec, RelabeledMetricVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
 };
+use thiserror_ext::AsReport;
 use tracing::warn;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -38,8 +39,8 @@ use tracing::warn;
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
 #[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
-    pub bloom_filter_true_negative_counts: RelabeledCounterVec,
-    pub bloom_filter_check_counts: RelabeledCounterVec,
+    pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec<2>,
+    pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec<2>,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec<2>,
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec<2>,
@@ -75,8 +76,10 @@ pub struct HummockStateStoreMetrics {
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
 
     // memory
-    pub mem_table_memory_size: IntGaugeVec,
-    pub mem_table_item_count: IntGaugeVec,
+    pub mem_table_spill_counts: RelabeledCounterVec,
+
+    // block statistics
+    pub block_efficiency_histogram: RelabeledHistogramVec,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -95,27 +98,27 @@ impl HummockStateStoreMetrics {
         // 1ms - 100s
         let state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
 
-        let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
+        let bloom_filter_true_negative_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let bloom_filter_true_negative_counts = RelabeledCounterVec::with_metric_level(
+        let bloom_filter_true_negative_counts = RelabeledMetricVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_true_negative_counts,
             metric_level,
         );
 
-        let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
+        let bloom_filter_check_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let bloom_filter_check_counts = RelabeledCounterVec::with_metric_level(
+        let bloom_filter_check_counts = RelabeledMetricVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_check_counts,
             metric_level,
@@ -288,11 +291,6 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let spill_task_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            spill_task_counts,
-            metric_level,
-        );
 
         let spill_task_size = register_int_counter_vec_with_registry!(
             "state_store_spill_task_size",
@@ -301,11 +299,6 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-        let spill_task_size = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            spill_task_size,
-            metric_level,
-        );
 
         let uploader_uploading_task_size = GenericGauge::new(
             "state_store_uploader_uploading_task_size",
@@ -324,10 +317,11 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
         let read_req_bloom_filter_positive_counts =
-            RelabeledGuardedIntCounterVec::with_metric_level(
+            RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
                 MetricLevel::Info,
                 read_req_bloom_filter_positive_counts,
                 metric_level,
+                1,
             );
 
         let read_req_positive_but_non_exist_counts = register_guarded_int_counter_vec_with_registry!(
@@ -358,21 +352,32 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
-        let mem_table_memory_size = register_int_gauge_vec_with_registry!(
-            "state_store_mem_table_memory_size",
-            "Memory usage of mem_table",
-            &["table_id", "instance_id"],
+        let mem_table_spill_counts = register_int_counter_vec_with_registry!(
+            "state_store_mem_table_spill_counts",
+            "Total number of mem table spill occurs for one table",
+            &["table_id"],
             registry
         )
         .unwrap();
 
-        let mem_table_item_count = register_int_gauge_vec_with_registry!(
-            "state_store_mem_table_item_count",
-            "Item counts in mem_table",
-            &["table_id", "instance_id"],
-            registry
-        )
-        .unwrap();
+        let mem_table_spill_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            mem_table_spill_counts,
+            metric_level,
+        );
+
+        let opts = histogram_opts!(
+            "block_efficiency_histogram",
+            "Access ratio of in-memory block.",
+            exponential_buckets(0.001, 2.0, 11).unwrap(),
+        );
+        let block_efficiency_histogram =
+            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            block_efficiency_histogram,
+            metric_level,
+        );
 
         Self {
             bloom_filter_true_negative_counts,
@@ -398,8 +403,9 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
-            mem_table_memory_size,
-            mem_table_item_count,
+            mem_table_spill_counts,
+
+            block_efficiency_histogram,
         }
     }
 
@@ -520,8 +526,8 @@ pub fn monitor_cache(memory_collector: Arc<dyn MemoryCollector>) {
     let collector = Box::new(StateStoreCollector::new(memory_collector));
     if let Err(e) = GLOBAL_METRICS_REGISTRY.register(collector) {
         warn!(
-            "unable to monitor cache. May have been registered if in all-in-one deployment: {:?}",
-            e
+            "unable to monitor cache. May have been registered if in all-in-one deployment: {}",
+            e.as_report()
         );
     }
 }

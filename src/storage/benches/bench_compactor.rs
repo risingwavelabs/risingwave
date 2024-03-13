@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,19 +18,25 @@ use std::sync::Arc;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::DataType;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::ValueRowSerializer;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::{compact_task, SstableInfo};
+use risingwave_pb::hummock::{compact_task, SstableInfo, TableSchema};
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -39,25 +45,33 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
+    CachePolicy, CompactionDeleteRangeIterator, FileCache, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableStore, SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
-use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
+use risingwave_storage::monitor::{
+    global_hummock_state_store_metrics, CompactorMetrics, StoreLocalStatistic,
+};
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
+    let store = InMemObjectStore::new().monitored(
+        Arc::new(ObjectStoreMetrics::unused()),
+        ObjectStoreConfig::default(),
+    );
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    Arc::new(SstableStore::new(
+    Arc::new(SstableStore::new(SstableStoreConfig {
         store,
         path,
-        64 << 20,
-        128 << 20,
-        0,
-        FileCache::none(),
-        FileCache::none(),
-        None,
-    ))
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 128 << 20,
+        high_priority_ratio: 0,
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        data_file_cache: FileCache::none(),
+        meta_file_cache: FileCache::none(),
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+    }))
 }
 
 pub fn default_writer_opts() -> SstableWriterOptions {
@@ -68,9 +82,9 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     }
 }
 
-pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
+pub fn test_key_of(idx: usize, epoch: u64, table_id: TableId) -> FullKey<Vec<u8>> {
     FullKey::for_test(
-        TableId::default(),
+        table_id,
         [
             VirtualNode::ZERO.to_be_bytes().as_slice(),
             format!("key_test_{:08}", idx * 2).as_bytes(),
@@ -80,7 +94,8 @@ pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
     )
 }
 
-const MAX_KEY_COUNT: usize = 128 * 1024;
+/// 8M keys.
+const MAX_KEY_COUNT: usize = 8 * 1024 * 1024;
 
 async fn build_table(
     sstable_store: SstableStoreRef,
@@ -106,7 +121,7 @@ async fn build_table(
     let mut builder =
         SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
     let value = b"1234567890123456789";
-    let mut full_key = test_key_of(0, epoch);
+    let mut full_key = test_key_of(0, epoch, TableId::new(0));
     let table_key_len = full_key.user_key.table_key.len();
     for i in range {
         let start = (i % 8) as usize;
@@ -114,6 +129,63 @@ async fn build_table(
         full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
             .add_for_test(full_key.to_ref(), HummockValue::put(&value[start..end]))
+            .await
+            .unwrap();
+    }
+    let output = builder.finish().await.unwrap();
+    let handle = output.writer_output;
+    let sst = output.sst_info.sst_info;
+    handle.await.unwrap().unwrap();
+    sst
+}
+
+async fn build_table_2(
+    sstable_store: SstableStoreRef,
+    sstable_object_id: u64,
+    range: Range<u64>,
+    epoch: u64,
+    table_id: u32,
+    column_num: usize,
+) -> SstableInfo {
+    let opt = SstableBuilderOptions {
+        capacity: 32 * 1024 * 1024,
+        block_capacity: 16 * 1024,
+        restart_interval: 16,
+        bloom_false_positive: 0.001,
+        ..Default::default()
+    };
+    let writer = sstable_store.create_sst_writer(
+        sstable_object_id,
+        SstableWriterOptions {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::Fill(CachePriority::High),
+        },
+    );
+    let mut builder =
+        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
+    let mut full_key = test_key_of(0, epoch, TableId::new(table_id));
+    let table_key_len = full_key.user_key.table_key.len();
+
+    let schema = vec![DataType::Int64; column_num];
+    let column_ids = (0..column_num as i32).map(ColumnId::new);
+    use risingwave_common::types::ScalarImpl;
+    let row = OwnedRow::new(vec![Some(ScalarImpl::Int64(5)); column_num]);
+    let table_columns: Vec<_> = column_ids
+        .clone()
+        .map(|id| ColumnDesc::unnamed(id, schema.get(id.get_id() as usize).unwrap().clone()))
+        .collect();
+    use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
+    let serializer = ColumnAwareSerde::new(
+        Arc::from_iter(column_ids.map(|id| id.get_id() as usize)),
+        table_columns.into(),
+    );
+    let row_bytes = serializer.serialize(row);
+
+    for i in range {
+        full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
+        builder
+            .add_for_test(full_key.to_ref(), HummockValue::put(&row_bytes))
             .await
             .unwrap();
     }
@@ -167,12 +239,16 @@ fn bench_table_scan(c: &mut Criterion) {
 
     c.bench_function("bench_table_iterator", |b| {
         let info1 = info.clone();
-        b.to_async(FuturesExecutor)
+        b.to_async(&runtime)
             .iter(|| scan_all_table(&info1, sstable_store.clone()));
     });
 }
 
-async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store: SstableStoreRef) {
+async fn compact<I: HummockIterator<Direction = Forward>>(
+    iter: I,
+    sstable_store: SstableStoreRef,
+    task_config: Option<TaskConfig>,
+) {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 64 * 1024,
@@ -183,25 +259,23 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
     let mut builder =
         CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(32, sstable_store, opt));
 
-    let task_config = TaskConfig {
+    let task_config = task_config.unwrap_or_else(|| TaskConfig {
         key_range: KeyRange::inf(),
         cache_policy: CachePolicy::Disable,
         gc_delete_keys: false,
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
-        split_weight_by_vnode: 0,
         use_block_based_filter: true,
         ..Default::default()
-    };
+    });
     compact_and_build_sst(
         &mut builder,
-        Arc::new(CompactionDeleteRanges::default()),
+        CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(HummockEpoch::MAX)),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        None,
     )
     .await
     .unwrap();
@@ -214,19 +288,35 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let sstable_store = mock_sstable_store();
     let test_key_size = 256 * 1024;
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size, 1).await });
-    let info2 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 2, 0..test_key_size, 1).await });
+        .block_on(async { build_table(sstable_store.clone(), 1, 0..test_key_size / 2, 1).await });
+    let info2 = runtime.block_on(async {
+        build_table(
+            sstable_store.clone(),
+            2,
+            test_key_size / 2..test_key_size,
+            1,
+        )
+        .await
+    });
     let level1 = vec![info1, info2];
 
     let info1 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size, 2).await });
-    let info2 = runtime
-        .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
+        .block_on(async { build_table(sstable_store.clone(), 3, 0..test_key_size / 2, 2).await });
+    let info2 = runtime.block_on(async {
+        build_table(
+            sstable_store.clone(),
+            4,
+            test_key_size / 2..test_key_size,
+            2,
+        )
+        .await
+    });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
+        max_preload_retry_times: 0,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {
@@ -235,8 +325,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
                 ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
-            async move { compact(iter, sstable_store1).await }
+            let iter = MergeIterator::for_compactor(sub_iters);
+            async move { compact(iter, sstable_store1, None).await }
         });
     });
     c.bench_function("bench_merge_iterator", |b| {
@@ -259,17 +349,193 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
+            let iter = MergeIterator::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();
-            async move { compact(iter, sstable_store1).await }
+            async move { compact(iter, sstable_store1, None).await }
         });
     });
+}
+
+fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let sstable_store = mock_sstable_store();
+    let test_key_size = 256 * 1024;
+    let info1 = runtime.block_on(async {
+        build_table_2(
+            sstable_store.clone(),
+            1,
+            0..test_key_size,
+            1,
+            10,
+            column_num,
+        )
+        .await
+    });
+    let info2 = runtime.block_on(async {
+        build_table_2(
+            sstable_store.clone(),
+            2,
+            0..test_key_size,
+            1,
+            11,
+            column_num,
+        )
+        .await
+    });
+    let level1 = vec![info1, info2];
+
+    let info1 = runtime.block_on(async {
+        build_table_2(
+            sstable_store.clone(),
+            3,
+            0..test_key_size,
+            2,
+            10,
+            column_num,
+        )
+        .await
+    });
+    let info2 = runtime.block_on(async {
+        build_table_2(
+            sstable_store.clone(),
+            4,
+            0..test_key_size,
+            2,
+            11,
+            column_num,
+        )
+        .await
+    });
+    let level2 = vec![info1, info2];
+
+    let task_config_no_schema = TaskConfig {
+        key_range: KeyRange::inf(),
+        cache_policy: CachePolicy::Disable,
+        gc_delete_keys: false,
+        watermark: 0,
+        stats_target_table_ids: None,
+        task_type: compact_task::TaskType::Dynamic,
+        use_block_based_filter: true,
+        table_schemas: vec![].into_iter().collect(),
+        ..Default::default()
+    };
+
+    let mut task_config_schema = task_config_no_schema.clone();
+    task_config_schema.table_schemas.insert(
+        10,
+        TableSchema {
+            column_ids: (0..column_num as i32).collect(),
+        },
+    );
+    task_config_schema.table_schemas.insert(
+        11,
+        TableSchema {
+            column_ids: (0..column_num as i32).collect(),
+        },
+    );
+
+    let mut task_config_schema_cause_drop = task_config_no_schema.clone();
+    task_config_schema_cause_drop.table_schemas.insert(
+        10,
+        TableSchema {
+            column_ids: (0..column_num as i32 / 2).collect(),
+        },
+    );
+    task_config_schema_cause_drop.table_schemas.insert(
+        11,
+        TableSchema {
+            column_ids: (0..column_num as i32 / 2).collect(),
+        },
+    );
+
+    let get_iter = || {
+        let sub_iters = vec![
+            ConcatSstableIterator::new(
+                vec![10, 11],
+                level1.clone(),
+                KeyRange::inf(),
+                sstable_store.clone(),
+                Arc::new(TaskProgress::default()),
+                0,
+            ),
+            ConcatSstableIterator::new(
+                vec![10, 11],
+                level2.clone(),
+                KeyRange::inf(),
+                sstable_store.clone(),
+                Arc::new(TaskProgress::default()),
+                0,
+            ),
+        ];
+        MergeIterator::for_compactor(sub_iters)
+    };
+
+    c.bench_function(
+        &format!("bench_drop_column_compaction_baseline_c{column_num}"),
+        |b| {
+            b.to_async(&runtime).iter(|| {
+                let iter = get_iter();
+                let sstable_store1 = sstable_store.clone();
+                let task_config_clone = task_config_no_schema.clone();
+                async move { compact(iter, sstable_store1, Some(task_config_clone)).await }
+            });
+        },
+    );
+
+    c.bench_function(
+        &format!("bench_drop_column_compaction_without_drop_c{column_num}"),
+        |b| {
+            b.to_async(&runtime).iter(|| {
+                let iter = get_iter();
+                let sstable_store1 = sstable_store.clone();
+                let task_config_clone = task_config_schema.clone();
+                async move { compact(iter, sstable_store1, Some(task_config_clone)).await }
+            });
+        },
+    );
+
+    c.bench_function(
+        &format!("bench_drop_column_compaction_without_drop_disable_optimization_c{column_num}"),
+        |b| {
+            b.to_async(&runtime).iter(|| {
+                let iter = get_iter();
+                let sstable_store1 = sstable_store.clone();
+                let mut task_config_clone = task_config_schema.clone();
+                task_config_clone.disable_drop_column_optimization = true;
+                async move { compact(iter, sstable_store1, Some(task_config_clone)).await }
+            });
+        },
+    );
+
+    c.bench_function(
+        &format!("bench_drop_column_compaction_with_drop_c{column_num}"),
+        |b| {
+            b.to_async(&runtime).iter(|| {
+                let iter = get_iter();
+                let sstable_store1 = sstable_store.clone();
+                let task_config_clone = task_config_schema_cause_drop.clone();
+                async move { compact(iter, sstable_store1, Some(task_config_clone)).await }
+            });
+        },
+    );
+}
+
+fn bench_drop_column_compaction_small(c: &mut Criterion) {
+    bench_drop_column_compaction_impl(c, 10);
+}
+
+fn bench_drop_column_compaction_large(c: &mut Criterion) {
+    bench_drop_column_compaction_impl(c, 100);
 }
 
 criterion_group!(
     benches,
     bench_table_build,
     bench_table_scan,
-    bench_merge_iterator_compactor
+    bench_merge_iterator_compactor,
+    bench_drop_column_compaction_small,
+    bench_drop_column_compaction_large
 );
 criterion_main!(benches);

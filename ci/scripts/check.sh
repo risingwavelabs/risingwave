@@ -30,6 +30,10 @@ sccache --zero-stats
 echo "--- Run clippy check (release)"
 cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
 
+echo "--- Run cargo check on building the release binary (release)"
+cargo check -p risingwave_cmd_all --features "rw-static-link" --profile release
+cargo check -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
+
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
@@ -47,7 +51,3 @@ RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
-
-echo "--- Run audit check"
-cargo audit \
-  --ignore RUSTSEC-2023-0052 # https://github.com/risingwavelabs/risingwave/issues/11842

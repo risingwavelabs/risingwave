@@ -27,6 +27,7 @@ message SinkParam {
   string db_name = 5;
   string sink_from_name = 6;
   catalog.SinkFormatDesc format_desc = 7;
+  string sink_name = 8;
 }
 
 enum SinkPayloadFormat {
@@ -39,10 +40,7 @@ message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
     SinkPayloadFormat format = 2;
-  }
-
-  message BeginEpoch {
-    uint64 epoch = 1;
+    TableSchema payload_schema = 3;
   }
 
   message WriteBatch {
@@ -61,6 +59,10 @@ message SinkWriterStreamRequest {
     oneof payload {
       JsonPayload json_payload = 1;
       StreamChunkPayload stream_chunk_payload = 2;
+      // This is a reference pointer to a StreamChunk. The StreamChunk is owned
+      // by the JniSinkWriterStreamRequest, which should handle the release of StreamChunk.
+      // Index set to 5 because 3 and 4 have been occupied by `batch_id` and `epoch`
+      int64 stream_chunk_ref_pointer = 5;
     }
 
     uint64 batch_id = 3;
@@ -72,9 +74,13 @@ message SinkWriterStreamRequest {
     bool is_checkpoint = 2;
   }
 
+  // reserve for previous BeginEpoch to avoid protobuf breaking change
+  // though there is no harm.
+  reserved 2;
+  reserved "begin_epoch";
+
   oneof request {
     StartSink start = 1;
-    BeginEpoch begin_epoch = 2;
     WriteBatch write_batch = 3;
     Barrier barrier = 4;
   }
@@ -88,9 +94,15 @@ message SinkWriterStreamResponse {
     SinkMetadata metadata = 2;
   }
 
+  message BatchWrittenResponse {
+    uint64 epoch = 1;
+    uint64 batch_id = 2;
+  }
+
   oneof response {
     StartResponse start = 1;
     CommitResponse commit = 2;
+    BatchWrittenResponse batch = 3;
   }
 }
 
@@ -145,9 +157,15 @@ message SinkCoordinatorStreamResponse {
 /* Source Service */
 
 message CdcMessage {
+  // The value of the Debezium message
   string payload = 1;
   string partition = 2;
   string offset = 3;
+  string full_table_name = 4;
+  int64 source_ts_ms = 5;
+  bool is_transaction_meta = 6;
+  // The key of the Debezium message, which only used by `mongodb-cdc` connector.
+  string key = 7;
 }
 
 enum SourceType {
@@ -155,6 +173,7 @@ enum SourceType {
   MYSQL = 1;
   POSTGRES = 2;
   CITUS = 3;
+  MONGODB = 4;
 }
 
 message GetEventStreamRequest {
@@ -163,11 +182,16 @@ message GetEventStreamRequest {
   string start_offset = 3;
   map<string, string> properties = 4;
   bool snapshot_done = 5;
+  bool is_source_job = 6;
 }
 
 message GetEventStreamResponse {
+  message ControlInfo {
+    bool handshake_ok = 1;
+  }
   uint64 source_id = 1;
   repeated CdcMessage events = 2;
+  ControlInfo control = 3;
 }
 
 message ValidateSourceRequest {
@@ -175,6 +199,8 @@ message ValidateSourceRequest {
   SourceType source_type = 2;
   map<string, string> properties = 3;
   TableSchema table_schema = 4;
+  bool is_source_job = 5;
+  bool is_backfill_table = 6;
 }
 
 message ValidateSourceResponse {

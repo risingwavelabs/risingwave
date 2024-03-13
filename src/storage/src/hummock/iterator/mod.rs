@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
+use more_asserts::assert_gt;
+
 use super::{HummockResult, HummockValue};
 
 mod forward_concat;
@@ -25,29 +27,38 @@ mod concat_inner;
 pub use backward_concat::*;
 pub use concat_inner::ConcatIteratorInner;
 mod backward_merge;
-pub use backward_merge::*;
+
 mod backward_user;
 pub use backward_user::*;
 mod forward_merge;
-pub use forward_merge::*;
+
 pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
-pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
-use risingwave_hummock_sdk::key::FullKey;
+pub use merge_inner::MergeIterator;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
+mod skip_watermark;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-
 pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
+use risingwave_common::catalog::TableId;
+pub use skip_watermark::*;
 
 use crate::monitor::StoreLocalStatistic;
+
+#[derive(Default)]
+pub struct ValueMeta {
+    pub object_id: Option<u64>,
+    pub block_id: Option<u64>,
+}
 
 /// `HummockIterator` defines the interface of all iterators, including `SstableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
@@ -55,17 +66,8 @@ use crate::monitor::StoreLocalStatistic;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + 'static {
+pub trait HummockIterator: Send + Sync {
     type Direction: HummockIteratorDirection;
-    type NextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    type RewindFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    type SeekFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
     /// Moves a valid iterator to the next key.
     ///
     /// Note:
@@ -77,7 +79,7 @@ pub trait HummockIterator: Send + 'static {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
-    fn next(&mut self) -> Self::NextFuture<'_>;
+    fn next(&mut self) -> impl Future<Output = HummockResult<()>> + Send + '_;
 
     /// Retrieves the current key.
     ///
@@ -113,7 +115,7 @@ pub trait HummockIterator: Send + 'static {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn rewind(&mut self) -> Self::RewindFuture<'_>;
+    fn rewind(&mut self) -> impl Future<Output = HummockResult<()>> + Send + '_;
 
     /// Resets iterator and seeks to the first position where the key >= provided key, or key <=
     /// provided key if this is a backward iterator.
@@ -122,10 +124,16 @@ pub trait HummockIterator: Send + 'static {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a>;
+    fn seek<'a>(
+        &'a mut self,
+        key: FullKey<&'a [u8]>,
+    ) -> impl Future<Output = HummockResult<()>> + Send + '_;
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+
+    /// Returns value meta.
+    fn value_meta(&self) -> ValueMeta;
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -136,12 +144,8 @@ pub struct PhantomHummockIterator<D: HummockIteratorDirection> {
 impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> {
     type Direction = D;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async { unreachable!() }
+    async fn next(&mut self) -> HummockResult<()> {
+        unreachable!()
     }
 
     fn key(&self) -> FullKey<&[u8]> {
@@ -156,15 +160,19 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         unreachable!()
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async { unreachable!() }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        unreachable!()
     }
 
-    fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async { unreachable!() }
+    async fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        unreachable!()
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        unreachable!()
+    }
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -202,18 +210,12 @@ impl<
 {
     type Direction = D;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            match self {
-                First(iter) => iter.next().await,
-                Second(iter) => iter.next().await,
-                Third(iter) => iter.next().await,
-                Fourth(iter) => iter.next().await,
-            }
+    async fn next(&mut self) -> HummockResult<()> {
+        match self {
+            First(iter) => iter.next().await,
+            Second(iter) => iter.next().await,
+            Third(iter) => iter.next().await,
+            Fourth(iter) => iter.next().await,
         }
     }
 
@@ -244,25 +246,21 @@ impl<
         }
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            match self {
-                First(iter) => iter.rewind().await,
-                Second(iter) => iter.rewind().await,
-                Third(iter) => iter.rewind().await,
-                Fourth(iter) => iter.rewind().await,
-            }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        match self {
+            First(iter) => iter.rewind().await,
+            Second(iter) => iter.rewind().await,
+            Third(iter) => iter.rewind().await,
+            Fourth(iter) => iter.rewind().await,
         }
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            match self {
-                First(iter) => iter.seek(key).await,
-                Second(iter) => iter.seek(key).await,
-                Third(iter) => iter.seek(key).await,
-                Fourth(iter) => iter.seek(key).await,
-            }
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        match self {
+            First(iter) => iter.seek(key).await,
+            Second(iter) => iter.seek(key).await,
+            Third(iter) => iter.seek(key).await,
+            Fourth(iter) => iter.seek(key).await,
         }
     }
 
@@ -274,17 +272,22 @@ impl<
             Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        match self {
+            First(iter) => iter.value_meta(),
+            Second(iter) => iter.value_meta(),
+            Third(iter) => iter.value_meta(),
+            Fourth(iter) => iter.value_meta(),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
     type Direction = I::Direction;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        (*self).deref_mut().next()
+    async fn next(&mut self) -> HummockResult<()> {
+        (*self).deref_mut().next().await
     }
 
     fn key(&self) -> FullKey<&[u8]> {
@@ -299,16 +302,172 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
         (*self).deref().is_valid()
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        (*self).deref_mut().rewind()
+    async fn rewind(&mut self) -> HummockResult<()> {
+        (*self).deref_mut().rewind().await
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        (*self).deref_mut().seek(key)
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        (*self).deref_mut().seek(key).await
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         (*self).deref().collect_local_statistic(stats);
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        (*self).deref().value_meta()
+    }
+}
+
+pub enum RustIteratorOfBuilder<'a, B: RustIteratorBuilder> {
+    Seek(B::SeekIter<'a>),
+    Rewind(B::RewindIter<'a>),
+}
+
+impl<'a, B: RustIteratorBuilder> Iterator for RustIteratorOfBuilder<'a, B> {
+    type Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            RustIteratorOfBuilder::Seek(i) => i.next(),
+            RustIteratorOfBuilder::Rewind(i) => i.next(),
+        }
+    }
+}
+
+pub trait RustIteratorBuilder: Send + Sync + 'static {
+    type Iterable: Send + Sync;
+    type RewindIter<'a>: Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)>
+        + Send
+        + Sync
+        + 'a;
+    type SeekIter<'a>: Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)>
+        + Send
+        + Sync
+        + 'a;
+
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a>;
+    fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_>;
+}
+
+pub struct FromRustIterator<'a, B: RustIteratorBuilder> {
+    inner: &'a B::Iterable,
+    #[expect(clippy::type_complexity)]
+    iter: Option<(
+        RustIteratorOfBuilder<'a, B>,
+        TableKey<&'a [u8]>,
+        HummockValue<&'a [u8]>,
+    )>,
+    epoch: EpochWithGap,
+    table_id: TableId,
+}
+
+impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
+    pub fn new(inner: &'a B::Iterable, epoch: EpochWithGap, table_id: TableId) -> Self {
+        Self {
+            inner,
+            iter: None,
+            epoch,
+            table_id,
+        }
+    }
+}
+
+impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
+    type Direction = Forward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        let (iter, key, value) = self.iter.as_mut().expect("should be valid");
+        if let Some((new_key, new_value)) = iter.next() {
+            *key = new_key;
+            *value = new_value;
+        } else {
+            self.iter = None;
+        }
+        Ok(())
+    }
+
+    fn key(&self) -> FullKey<&[u8]> {
+        let (_, key, _) = self.iter.as_ref().expect("should be valid");
+        FullKey {
+            epoch_with_gap: self.epoch,
+            user_key: UserKey {
+                table_id: self.table_id,
+                table_key: *key,
+            },
+        }
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        let (_, _, value) = self.iter.as_ref().expect("should be valid");
+        *value
+    }
+
+    fn is_valid(&self) -> bool {
+        self.iter.is_some()
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        let mut iter = B::rewind(self.inner);
+        if let Some((key, value)) = iter.next() {
+            self.iter = Some((RustIteratorOfBuilder::Rewind(iter), key, value));
+        } else {
+            self.iter = None;
+        }
+        Ok(())
+    }
+
+    async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        if self.table_id < key.user_key.table_id {
+            // returns None when the range of self.table_id must not include the given key
+            self.iter = None;
+            return Ok(());
+        }
+        if self.table_id > key.user_key.table_id {
+            return self.rewind().await;
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                let first_full_key = FullKey {
+                    epoch_with_gap: self.epoch,
+                    user_key: UserKey {
+                        table_id: self.table_id,
+                        table_key: first_key,
+                    },
+                };
+                if first_full_key < key {
+                    // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` >= table_id of `key`.
+                    // Therefore, when `first_full_key` < `key`, the only possibility is that
+                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
+                    // the `self.epoch` < epoch of `key`.
+                    assert_eq!(first_key, key.user_key.table_key);
+                    match iter.next() {
+                        Some((next_key, next_value)) => {
+                            assert_gt!(next_key, first_key);
+                            self.iter =
+                                Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
+                        }
+                        None => {
+                            self.iter = None;
+                        }
+                    }
+                } else {
+                    self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+                }
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta::default()
     }
 }
 

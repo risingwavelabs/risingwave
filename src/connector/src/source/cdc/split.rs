@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 
 use std::marker::PhantomData;
 
-use anyhow::anyhow;
+use anyhow::Context;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
-use crate::source::cdc::CdcSourceTypeTrait;
-use crate::source::external::DebeziumOffset;
+use crate::error::ConnectorResult;
+use crate::source::cdc::external::DebeziumOffset;
+use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait};
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -41,6 +42,13 @@ impl CdcSplitBase {
     }
 }
 
+trait CdcSplitTrait: Send + Sync {
+    fn split_id(&self) -> u32;
+    fn start_offset(&self) -> &Option<String>;
+    fn is_snapshot_done(&self) -> bool;
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()>;
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct MySqlCdcSplit {
     pub inner: CdcSplitBase,
@@ -53,27 +61,45 @@ pub struct PostgresCdcSplit {
     pub server_addr: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
+pub struct MongoDbCdcSplit {
+    pub inner: CdcSplitBase,
+}
+
 impl MySqlCdcSplit {
-    pub fn new(split_id: u32, start_offset: String) -> MySqlCdcSplit {
+    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
         let split = CdcSplitBase {
             split_id,
-            start_offset: Some(start_offset),
+            start_offset,
             snapshot_done: false,
         };
         Self { inner: split }
     }
+}
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+impl CdcSplitTrait for MySqlCdcSplit {
+    fn split_id(&self) -> u32 {
+        self.inner.split_id
+    }
+
+    fn start_offset(&self) -> &Option<String> {
+        &self.inner.start_offset
+    }
+
+    fn is_snapshot_done(&self) -> bool {
+        self.inner.snapshot_done
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid mysql offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid mysql offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {
@@ -91,29 +117,42 @@ impl MySqlCdcSplit {
 }
 
 impl PostgresCdcSplit {
-    pub fn new(split_id: u32, start_offset: String) -> PostgresCdcSplit {
+    pub fn new(split_id: u32, start_offset: Option<String>, server_addr: Option<String>) -> Self {
         let split = CdcSplitBase {
             split_id,
-            start_offset: Some(start_offset),
+            start_offset,
             snapshot_done: false,
         };
         Self {
             inner: split,
-            server_addr: None,
+            server_addr,
         }
     }
+}
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+impl CdcSplitTrait for PostgresCdcSplit {
+    fn split_id(&self) -> u32 {
+        self.inner.split_id
+    }
+
+    fn start_offset(&self) -> &Option<String> {
+        &self.inner.start_offset
+    }
+
+    fn is_snapshot_done(&self) -> bool {
+        self.inner.snapshot_done
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let mut snapshot_done = self.inner.snapshot_done;
         if !snapshot_done {
-            let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset).map_err(|e| {
-                anyhow!(
-                    "invalid postgres offset: {}, error: {}, split: {}",
-                    start_offset,
-                    e,
-                    self.inner.split_id
-                )
-            })?;
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid postgres offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
 
             // heartbeat event should not update the `snapshot_done` flag
             if !dbz_offset.is_heartbeat {
@@ -130,91 +169,164 @@ impl PostgresCdcSplit {
     }
 }
 
+impl MongoDbCdcSplit {
+    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
+        let split = CdcSplitBase {
+            split_id,
+            start_offset,
+            snapshot_done: false,
+        };
+        Self { inner: split }
+    }
+}
+
+impl CdcSplitTrait for MongoDbCdcSplit {
+    fn split_id(&self) -> u32 {
+        self.inner.split_id
+    }
+
+    fn start_offset(&self) -> &Option<String> {
+        &self.inner.start_offset
+    }
+
+    fn is_snapshot_done(&self) -> bool {
+        self.inner.snapshot_done
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
+        let mut snapshot_done = self.inner.snapshot_done;
+        // extract snapshot state from debezium offset
+        if !snapshot_done {
+            let dbz_offset: DebeziumOffset =
+                serde_json::from_str(&start_offset).with_context(|| {
+                    format!(
+                        "invalid mongodb offset: {}, split: {}",
+                        start_offset, self.inner.split_id
+                    )
+                })?;
+
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = match dbz_offset.source_offset.snapshot {
+                    Some(val) => !val,
+                    None => true,
+                };
+            }
+        }
+
+        self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it will remain true
+        self.inner.snapshot_done = snapshot_done;
+        Ok(())
+    }
+}
+
+/// We use this struct to wrap the specific split, which act as an interface to other modules
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
-    pub pg_split: Option<PostgresCdcSplit>,
+
+    #[serde(rename = "pg_split")] // backward compatibility
+    pub postgres_split: Option<PostgresCdcSplit>,
+    pub citus_split: Option<PostgresCdcSplit>,
+    pub mongodb_split: Option<MongoDbCdcSplit>,
 
     #[serde(skip)]
     pub _phantom: PhantomData<T>,
 }
 
+macro_rules! dispatch_cdc_split_inner {
+    ($dbz_split:expr, $as_type:tt, {$($cdc_source_type:tt),*}, $body:expr) => {
+        match T::source_type() {
+            $(
+                CdcSourceType::$cdc_source_type => {
+                    $crate::paste! {
+                        $dbz_split.[<$cdc_source_type:lower _split>]
+                            .[<as_ $as_type>]()
+                            .expect(concat!(stringify!([<$cdc_source_type:lower>]), " split must exist"))
+                            .$body
+                    }
+                }
+            )*
+            CdcSourceType::Unspecified => {
+                unreachable!("invalid debezium split");
+            }
+        }
+    }
+}
+
+// call corresponding split method of the specific cdc source type
+macro_rules! dispatch_cdc_split {
+    ($dbz_split:expr, $as_type:tt, $body:expr) => {
+      dispatch_cdc_split_inner!($dbz_split, $as_type, {Mysql, Postgres, Citus, Mongodb}, $body)
+    }
+}
+
 impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn id(&self) -> SplitId {
-        // TODO: may check T to get the specific cdc type
-        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
-        if let Some(split) = &self.mysql_split {
-            return format!("{}", split.inner.split_id).into();
-        }
-        if let Some(split) = &self.pg_split {
-            return format!("{}", split.inner.split_id).into();
-        }
-        unreachable!("invalid split")
+        format!("{}", self.split_id()).into()
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        // TODO: may check T to get the specific cdc type
-        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
-        if let Some(split) = &mut self.mysql_split {
-            split.update_with_offset(start_offset)?
-        } else if let Some(split) = &mut self.pg_split {
-            split.update_with_offset(start_offset)?
-        }
-        Ok(())
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
+        self.update_with_offset(start_offset)
     }
 }
 
 impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
-    pub fn new(mysql_split: Option<MySqlCdcSplit>, pg_split: Option<PostgresCdcSplit>) -> Self {
-        Self {
-            mysql_split,
-            pg_split,
+    pub fn new(split_id: u32, start_offset: Option<String>, server_addr: Option<String>) -> Self {
+        let mut ret = Self {
+            mysql_split: None,
+            postgres_split: None,
+            citus_split: None,
+            mongodb_split: None,
             _phantom: PhantomData,
+        };
+        match T::source_type() {
+            CdcSourceType::Mysql => {
+                let split = MySqlCdcSplit::new(split_id, start_offset);
+                ret.mysql_split = Some(split);
+            }
+            CdcSourceType::Postgres => {
+                let split = PostgresCdcSplit::new(split_id, start_offset, None);
+                ret.postgres_split = Some(split);
+            }
+            CdcSourceType::Citus => {
+                let split = PostgresCdcSplit::new(split_id, start_offset, server_addr);
+                ret.citus_split = Some(split);
+            }
+            CdcSourceType::Mongodb => {
+                let split = MongoDbCdcSplit::new(split_id, start_offset);
+                ret.mongodb_split = Some(split);
+            }
+            CdcSourceType::Unspecified => {
+                unreachable!("invalid debezium split")
+            }
         }
+        ret
     }
 
     pub fn split_id(&self) -> u32 {
-        if let Some(split) = &self.mysql_split {
-            return split.inner.split_id;
-        }
-        if let Some(split) = &self.pg_split {
-            return split.inner.split_id;
-        }
-        unreachable!("invalid debezium split")
+        dispatch_cdc_split!(self, ref, split_id())
     }
 
     pub fn start_offset(&self) -> &Option<String> {
-        if let Some(split) = &self.mysql_split {
-            return &split.inner.start_offset;
-        }
-        if let Some(split) = &self.pg_split {
-            return &split.inner.start_offset;
-        }
-        unreachable!("invalid debezium split")
+        dispatch_cdc_split!(self, ref, start_offset())
     }
 
     pub fn snapshot_done(&self) -> bool {
-        if let Some(split) = &self.mysql_split {
-            return split.inner.snapshot_done;
-        }
-        if let Some(split) = &self.pg_split {
-            return split.inner.snapshot_done;
-        }
-        unreachable!("invalid debezium split")
+        dispatch_cdc_split!(self, ref, is_snapshot_done())
     }
 
-    pub fn server_addr(&self) -> &Option<String> {
-        if let Some(split) = &self.pg_split {
-            return &split.server_addr;
-        }
-        unreachable!("invalid debezium split")
+    pub fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
+        dispatch_cdc_split!(self, mut, update_with_offset(start_offset)?);
+        Ok(())
     }
 }

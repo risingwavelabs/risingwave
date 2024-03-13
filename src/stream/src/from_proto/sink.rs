@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,37 +15,101 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
-    SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
+use risingwave_pb::catalog::Table;
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_storage::dispatch_state_store;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
+use crate::common::log_store_impl::kv_log_store::{
+    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+};
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
-#[async_trait::async_trait]
+fn resolve_pk_info(
+    input_schema: &Schema,
+    log_store_table: &Table,
+) -> StreamResult<&'static KvLogStorePkInfo> {
+    let predefined_column_len = log_store_table.columns.len() - input_schema.fields.len();
+
+    #[expect(deprecated)]
+    let info = match predefined_column_len {
+        len if len
+            == crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO
+                .predefined_column_len() =>
+        {
+            Ok(&crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V1_INFO)
+        }
+        len if len == KV_LOG_STORE_V2_INFO.predefined_column_len() => Ok(&KV_LOG_STORE_V2_INFO),
+        other_len => Err(anyhow!(
+            "invalid log store predefined len {}. log store table: {:?}, input_schema: {:?}",
+            other_len,
+            log_store_table,
+            input_schema
+        )),
+    }?;
+    validate_payload_schema(
+        &log_store_table.columns[predefined_column_len..],
+        input_schema,
+    )?;
+    Ok(info)
+}
+
+fn validate_payload_schema(
+    log_store_payload_schema: &[PbColumnCatalog],
+    input_schema: &Schema,
+) -> StreamResult<()> {
+    if log_store_payload_schema
+        .iter()
+        .zip_eq(input_schema.fields.iter())
+        .map(|(log_store_col, input_field)| {
+            let log_store_col_type = DataType::from(
+                log_store_col
+                    .column_desc
+                    .as_ref()
+                    .unwrap()
+                    .column_type
+                    .as_ref()
+                    .unwrap(),
+            );
+            log_store_col_type.equals_datatype(&input_field.data_type)
+        })
+        .all(|equal| equal)
+    {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "mismatch schema: log store: {:?}, input: {:?}",
+            log_store_payload_schema,
+            input_schema
+        )
+        .into())
+    }
+}
+
 impl ExecutorBuilder for SinkExecutorBuilder {
     type Node = SinkNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
-        _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor> {
+        state_store: impl StateStore,
+    ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id = sink_desc.get_id().into();
+        let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
@@ -91,6 +155,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_param = SinkParam {
             sink_id,
+            sink_name,
             properties,
             columns: columns
                 .iter()
@@ -104,11 +169,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_from_name,
         };
 
-        let identity = format!("SinkExecutor {:X?}", params.executor_id);
         let sink_id_str = format!("{}", sink_id.sink_id);
 
-        let sink_metrics = stream.streaming_metrics.new_sink_metrics(
-            identity.as_str(),
+        let sink_metrics = params.executor_stats.new_sink_metrics(
+            &params.info.identity,
             sink_id_str.as_str(),
             connector,
         );
@@ -117,27 +181,32 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             connector_params: params.env.connector_params(),
             executor_id: params.executor_id,
             vnode_bitmap: params.vnode_bitmap.clone(),
-            meta_client: params.env.meta_client(),
+            meta_client: params.env.meta_client().map(SinkMetaClient::MetaClient),
             sink_metrics,
+            extra_partition_col_idx: sink_desc.extra_partition_col_idx.map(|v| v as usize),
         };
 
-        match node.log_store_type() {
+        let log_store_identity = format!(
+            "sink[{}]-[{}]-executor[{}]",
+            connector, sink_id.sink_id, params.executor_id
+        );
+
+        let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
             SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
                 let factory = BoundedInMemLogStoreFactory::new(1);
-                Ok(Box::new(
-                    SinkExecutor::new(
-                        input_executor,
-                        sink_write_param,
-                        sink_param,
-                        columns,
-                        params.actor_context,
-                        factory,
-                        params.pk_indices,
-                    )
-                    .await?,
-                ))
+                SinkExecutor::new(
+                    params.actor_context,
+                    params.info.clone(),
+                    input_executor,
+                    sink_write_param,
+                    sink_param,
+                    columns,
+                    factory,
+                )
+                .await?
+                .boxed()
             }
             SinkLogStoreType::KvLogStore => {
                 let metrics = KvLogStoreMetrics::new(
@@ -146,30 +215,36 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     &sink_param,
                     connector,
                 );
-                // TODO: support setting max row count in config
-                dispatch_state_store!(params.env.state_store(), state_store, {
-                    let factory = KvLogStoreFactory::new(
-                        state_store,
-                        node.table.as_ref().unwrap().clone(),
-                        params.vnode_bitmap.clone().map(Arc::new),
-                        65536,
-                        metrics,
-                    );
 
-                    Ok(Box::new(
-                        SinkExecutor::new(
-                            input_executor,
-                            sink_write_param,
-                            sink_param,
-                            columns,
-                            params.actor_context,
-                            factory,
-                            params.pk_indices,
-                        )
-                        .await?,
-                    ))
-                })
+                let table = node.table.as_ref().unwrap().clone();
+                let input_schema = input_executor.schema();
+                let pk_info = resolve_pk_info(input_schema, &table)?;
+
+                // TODO: support setting max row count in config
+                let factory = KvLogStoreFactory::new(
+                    state_store,
+                    table,
+                    params.vnode_bitmap.clone().map(Arc::new),
+                    65536,
+                    metrics,
+                    log_store_identity,
+                    pk_info,
+                );
+
+                SinkExecutor::new(
+                    params.actor_context,
+                    params.info.clone(),
+                    input_executor,
+                    sink_write_param,
+                    sink_param,
+                    columns,
+                    factory,
+                )
+                .await?
+                .boxed()
             }
-        }
+        };
+
+        Ok((params.info, exec).into())
     }
 }

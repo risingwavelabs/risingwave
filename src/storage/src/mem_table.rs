@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,26 +16,34 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
+use thiserror_ext::AsReport;
+use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
-    cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
 };
+use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-
 pub type ImmutableMemtable = SharedBufferBatch;
 
 pub type ImmId = SharedBufferBatchId;
@@ -51,8 +59,8 @@ pub enum KeyOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    pub(crate) buffer: BTreeMap<TableKey<Bytes>, KeyOp>,
-    pub(crate) is_consistent_op: bool,
+    pub(crate) buffer: MemTableStore,
+    pub(crate) op_consistency_level: OpConsistencyLevel,
     pub(crate) kv_size: KvSize,
 }
 
@@ -68,18 +76,54 @@ pub enum MemTableError {
 
 type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
+pub type MemTableStore = BTreeMap<TableKey<Bytes>, KeyOp>;
+pub struct MemTableIteratorBuilder;
+
+fn map_to_hummock_value<'a>(
+    (key, op): (&'a TableKey<Bytes>, &'a KeyOp),
+) -> (TableKey<&'a [u8]>, HummockValue<&'a [u8]>) {
+    (
+        TableKey(key.0.as_ref()),
+        match op {
+            KeyOp::Insert(value) | KeyOp::Update((_, value)) => HummockValue::Put(value),
+            KeyOp::Delete(_) => HummockValue::Delete,
+        },
+    )
+}
+
+impl RustIteratorBuilder for MemTableIteratorBuilder {
+    type Iterable = MemTableStore;
+
+    type RewindIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+    type SeekIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
+        iterable
+            .range::<[u8], _>((Included(seek_key.0), Unbounded))
+            .map(map_to_hummock_value)
+    }
+
+    fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_> {
+        iterable.iter().map(map_to_hummock_value)
+    }
+}
+
+pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
+
 impl MemTable {
-    pub fn new(is_consistent_op: bool) -> Self {
+    pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
         Self {
             buffer: BTreeMap::new(),
-            is_consistent_op,
+            op_consistency_level,
             kv_size: KvSize::new(),
         }
     }
 
     pub fn drain(&mut self) -> Self {
         self.kv_size.set(0);
-        std::mem::replace(self, Self::new(self.is_consistent_op))
+        std::mem::replace(self, Self::new(self.op_consistency_level.clone()))
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -88,7 +132,7 @@ impl MemTable {
 
     /// write methods
     pub fn insert(&mut self, pk: TableKey<Bytes>, value: Bytes) -> Result<()> {
-        if !self.is_consistent_op {
+        if let OpConsistencyLevel::Inconsistent = &self.op_consistency_level {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
             let insert_value = KeyOp::Insert(value);
             self.kv_size.add(&pk, &insert_value);
@@ -96,7 +140,7 @@ impl MemTable {
             self.sub_origin_size(origin_value, key_len);
 
             return Ok(());
-        }
+        };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -131,13 +175,14 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: TableKey<Bytes>, old_value: Bytes) -> Result<()> {
         let key_len = std::mem::size_of::<Bytes>() + pk.len();
-        if !self.is_consistent_op {
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        else {
             let delete_value = KeyOp::Delete(old_value);
             self.kv_size.add(&pk, &delete_value);
             let origin_value = self.buffer.insert(pk, delete_value);
             self.sub_origin_size(origin_value, key_len);
             return Ok(());
-        }
+        };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -151,7 +196,7 @@ impl MemTable {
                 self.kv_size.sub_val(origin_value);
                 match origin_value {
                     KeyOp::Insert(original_value) => {
-                        if ENABLE_SANITY_CHECK && original_value != &old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -195,7 +240,8 @@ impl MemTable {
         old_value: Bytes,
         new_value: Bytes,
     ) -> Result<()> {
-        if !self.is_consistent_op {
+        let OpConsistencyLevel::ConsistentOldValue(value_checker) = &self.op_consistency_level
+        else {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
             let update_value = KeyOp::Update((old_value, new_value));
@@ -203,7 +249,7 @@ impl MemTable {
             let origin_value = self.buffer.insert(pk, update_value);
             self.sub_origin_size(origin_value, key_len);
             return Ok(());
-        }
+        };
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -217,7 +263,7 @@ impl MemTable {
                 self.kv_size.sub_val(origin_value);
                 match origin_value {
                     KeyOp::Insert(original_new_value) => {
-                        if ENABLE_SANITY_CHECK && original_new_value != &old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -230,7 +276,7 @@ impl MemTable {
                         Ok(())
                     }
                     KeyOp::Update((origin_old_value, original_new_value)) => {
-                        if ENABLE_SANITY_CHECK && original_new_value != &old_value {
+                        if ENABLE_SANITY_CHECK && !value_checker(original_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
@@ -304,7 +350,7 @@ impl KeyOp {
 #[try_stream(ok = StateStoreIterItem, error = StorageError)]
 pub(crate) async fn merge_stream<'a>(
     mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
-    inner_stream: impl StateStoreReadIterStream,
+    inner_stream: impl Stream<Item = StorageResult<StateStoreIterItem>> + 'static,
     table_id: TableId,
     epoch: u64,
 ) {
@@ -388,19 +434,21 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     epoch: Option<u64>,
 
     table_id: TableId,
-    is_consistent_op: bool,
+    op_consistency_level: OpConsistencyLevel,
     table_option: TableOption,
+    vnodes: Arc<Bitmap>,
 }
 
 impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     pub fn new(inner: S, option: NewLocalOptions) -> Self {
         Self {
             inner,
-            mem_table: MemTable::new(option.is_consistent_op),
+            mem_table: MemTable::new(option.op_consistency_level.clone()),
             epoch: None,
             table_id: option.table_id,
-            is_consistent_op: option.is_consistent_op,
+            op_consistency_level: option.op_consistency_level,
             table_option: option.table_option,
+            vnodes: option.vnodes,
         }
     }
 
@@ -410,7 +458,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 }
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -440,18 +488,18 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         async move {
-            let stream = self
+            let iter = self
                 .inner
                 .iter(key_range.clone(), self.epoch(), read_options)
                 .await?;
-            Ok(merge_stream(
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
                 self.mem_table.iter(key_range),
-                stream,
+                iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
-            ))
+            ))))
         }
     }
 
@@ -472,59 +520,55 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    async fn flush(
-        &mut self,
-        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> StorageResult<usize> {
-        debug_assert!(delete_ranges
-            .iter()
-            .map(|(key, _)| key)
-            .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
+    async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
         let mut kv_pairs = Vec::with_capacity(buffer.len());
-        for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter()) {
+        for (key, key_op) in buffer {
             match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As
                 // a workaround you may call disable the check by initializing the
-                // state store with `is_consistent_op=false`.
+                // state store with `op_consistency_level=Inconsistent`.
                 KeyOp::Insert(value) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_insert_sanity_check(
-                            key.clone(),
-                            value.clone(),
+                            &key,
+                            &value,
                             &self.inner,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_put(value)));
                 }
                 KeyOp::Delete(old_value) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_delete_sanity_check(
-                            key.clone(),
-                            old_value,
+                            &key,
+                            &old_value,
                             &self.inner,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }
                 KeyOp::Update((old_value, new_value)) => {
-                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                    if ENABLE_SANITY_CHECK {
                         do_update_sanity_check(
-                            key.clone(),
-                            old_value,
-                            new_value.clone(),
+                            &key,
+                            &old_value,
+                            &new_value,
                             &self.inner,
                             self.epoch(),
                             self.table_id,
                             self.table_option,
+                            &self.op_consistency_level,
                         )
                         .await?;
                     }
@@ -532,16 +576,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 }
             }
         }
-        self.inner
-            .ingest_batch(
-                kv_pairs,
-                delete_ranges,
-                WriteOptions {
-                    epoch: self.epoch(),
-                    table_id: self.table_id,
-                },
-            )
-            .await
+        self.inner.ingest_batch(
+            kv_pairs,
+            vec![],
+            WriteOptions {
+                epoch: self.epoch(),
+                table_id: self.table_id,
+            },
+        )
     }
 
     fn epoch(&self) -> u64 {
@@ -556,14 +598,18 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert!(
             self.epoch.replace(options.epoch.curr).is_none(),
-            "local state store of table id {:?} is init for more than once",
+            "epoch in local state store of table id {:?} is init for more than once",
             self.table_id
         );
+
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
+        if let Some(value_checker) = opts.switch_op_consistency_level {
+            self.mem_table.op_consistency_level.update(&value_checker);
+        }
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
@@ -574,19 +620,72 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+        if let Some((direction, watermarks)) = opts.table_watermarks {
+            let delete_ranges = watermarks
+                .iter()
+                .flat_map(|vnode_watermark| {
+                    let inner_range = match direction {
+                        WatermarkDirection::Ascending => {
+                            (Unbounded, Excluded(vnode_watermark.watermark().clone()))
+                        }
+                        WatermarkDirection::Descending => {
+                            (Excluded(vnode_watermark.watermark().clone()), Unbounded)
+                        }
+                    };
+                    vnode_watermark
+                        .vnode_bitmap()
+                        .iter_vnodes()
+                        .map(move |vnode| {
+                            let (start, end) =
+                                prefixed_range_with_vnode(inner_range.clone(), vnode);
+                            (start.map(|key| key.0.clone()), end.map(|key| key.0.clone()))
+                        })
+                })
+                .collect_vec();
+            if let Err(e) = self.inner.ingest_batch(
+                Vec::new(),
+                delete_ranges,
+                WriteOptions {
+                    epoch: self.epoch(),
+                    table_id: self.table_id,
+                },
+            ) {
+                error!(error = %e.as_report(), "failed to write delete ranges of table watermark");
+            }
+        }
+    }
+
+    async fn try_flush(&mut self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        std::mem::replace(&mut self.vnodes, vnodes)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use risingwave_hummock_sdk::key::TableKey;
+    use bytes::{BufMut, Bytes, BytesMut};
+    use itertools::Itertools;
+    use rand::seq::SliceRandom;
+    use rand::{thread_rng, Rng};
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use risingwave_hummock_sdk::EpochWithGap;
 
-    use crate::mem_table::{KeyOp, MemTable};
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::value::HummockValue;
+    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
+    use crate::store::{OpConsistencyLevel, CHECK_BYTES_EQUAL};
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
-        let mut mem_table = MemTable::new(true);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
+            CHECK_BYTES_EQUAL.clone(),
+        ));
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -696,7 +795,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size_not_consistent_op() {
-        let mut mem_table = MemTable::new(false);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::Inconsistent);
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -751,5 +850,154 @@ mod tests {
                 + Bytes::from("value44").len()
                 + Bytes::from("value4444").len()
         );
+    }
+
+    #[tokio::test]
+    async fn test_mem_table_hummock_iterator() {
+        let mut rng = thread_rng();
+
+        fn get_key(i: usize) -> TableKey<Bytes> {
+            let mut bytes = BytesMut::new();
+            bytes.put(&VirtualNode::ZERO.to_be_bytes()[..]);
+            bytes.put(format!("key_{:20}", i).as_bytes());
+            TableKey(bytes.freeze())
+        }
+
+        let ordered_test_data = (0..10000)
+            .map(|i| {
+                let key_op = match rng.gen::<usize>() % 3 {
+                    0 => KeyOp::Insert(Bytes::from("insert")),
+                    1 => KeyOp::Delete(Bytes::from("delete")),
+                    2 => KeyOp::Update((Bytes::from("old_value"), Bytes::from("new_value"))),
+                    _ => unreachable!(),
+                };
+                (get_key(i), key_op)
+            })
+            .collect_vec();
+
+        let mut test_data = ordered_test_data.clone();
+
+        test_data.shuffle(&mut rng);
+        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue(
+            CHECK_BYTES_EQUAL.clone(),
+        ));
+        for (key, op) in test_data {
+            match op {
+                KeyOp::Insert(value) => {
+                    mem_table.insert(key, value).unwrap();
+                }
+                KeyOp::Delete(value) => mem_table.delete(key, value).unwrap(),
+                KeyOp::Update((old_value, new_value)) => {
+                    mem_table.update(key, old_value, new_value).unwrap();
+                }
+            }
+        }
+
+        const TEST_TABLE_ID: TableId = TableId::new(233);
+        const TEST_EPOCH: u64 = test_epoch(10);
+
+        async fn check_data(
+            iter: &mut MemTableHummockIterator<'_>,
+            test_data: &[(TableKey<Bytes>, KeyOp)],
+        ) {
+            let mut idx = 0;
+            while iter.is_valid() {
+                let key = iter.key();
+                let value = iter.value();
+
+                let (expected_key, expected_value) = test_data[idx].clone();
+                assert_eq!(key.epoch_with_gap, EpochWithGap::new_from_epoch(TEST_EPOCH));
+                assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
+                assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
+                match expected_value {
+                    KeyOp::Insert(expected_value) | KeyOp::Update((_, expected_value)) => {
+                        assert_eq!(value, HummockValue::Put(expected_value.as_ref()));
+                    }
+                    KeyOp::Delete(_) => {
+                        assert_eq!(value, HummockValue::Delete);
+                    }
+                }
+
+                idx += 1;
+                iter.next().await.unwrap();
+            }
+            assert_eq!(idx, test_data.len());
+        }
+
+        let mut iter = MemTableHummockIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
+
+        // Test rewind
+        iter.rewind().await.unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a later epoch, the first key is not skipped
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.next_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data[seek_idx..]).await;
+
+        // Test seek with a earlier epoch, the first key is skipped
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.prev_epoch());
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data[seek_idx + 1..]).await;
+
+        // Test seek to over the end
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
+
+        // Test seek with a smaller table id
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: smaller_table_id,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a greater table id
+        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: greater_table_id,
+                table_key: TableKey(&get_key(0)),
+            },
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
     }
 }

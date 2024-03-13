@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,18 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
-use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, Level};
+use risingwave_pb::hummock::PbLevel;
 use risingwave_rpc_client::HummockMetaClient;
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
@@ -76,6 +77,7 @@ impl Drop for PinnedVersionGuard {
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+    table_watermark_index: Arc<HashMap<TableId, TableWatermarksIndex>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -86,10 +88,12 @@ impl PinnedVersion {
     ) -> Self {
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
+        let table_watermark_index = version.build_table_watermarks_index();
 
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
+            table_watermark_index: Arc::new(table_watermark_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
@@ -101,6 +105,10 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
+    pub fn table_watermark_index(&self) -> &Arc<HashMap<TableId, TableWatermarksIndex>> {
+        &self.table_watermark_index
+    }
+
     pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id >= self.version.id,
@@ -110,9 +118,12 @@ impl PinnedVersion {
         );
         let version_id = version.id;
         let compaction_group_index = version.build_compaction_group_info();
+        let table_watermark_index = version.build_table_watermarks_index();
+
         PinnedVersion {
             version: Arc::new(version),
             compaction_group_index: Arc::new(compaction_group_index),
+            table_watermark_index: Arc::new(table_watermark_index),
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
@@ -132,7 +143,7 @@ impl PinnedVersion {
         self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &PbLevel> {
         #[auto_enum(Iterator)]
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => {
@@ -159,14 +170,15 @@ impl PinnedVersion {
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> HummockVersion {
-        self.version.deref().clone()
+    pub fn version(&self) -> &HummockVersion {
+        &self.version
     }
 }
 
 pub(crate) async fn start_pinned_version_worker(
     mut rx: UnboundedReceiver<PinVersionAction>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    max_version_pinning_duration_sec: u64,
 ) {
     let min_execute_interval = Duration::from_millis(1000);
     let max_retry_interval = Duration::from_secs(10);
@@ -180,21 +192,36 @@ pub(crate) async fn start_pinned_version_worker(
     min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut need_unpin = false;
 
-    let mut version_ids_in_use: BTreeMap<u64, usize> = BTreeMap::new();
-
+    let mut version_ids_in_use: BTreeMap<u64, (usize, Instant)> = BTreeMap::new();
+    let max_version_pinning_duration_sec = Duration::from_secs(max_version_pinning_duration_sec);
     // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
     loop {
         min_execute_interval_tick.tick().await;
+        // 0. Expire versions.
+        while version_ids_in_use.len() > 1
+            && let Some(e) = version_ids_in_use.first_entry()
+        {
+            if e.get().1.elapsed() < max_version_pinning_duration_sec {
+                break;
+            }
+            need_unpin = true;
+            e.remove();
+        }
+
         // 1. Collect new versions to unpin.
         let mut versions_to_unpin = vec![];
+        let inst = Instant::now();
         'collect: loop {
             match rx.try_recv() {
                 Ok(version_action) => match version_action {
                     PinVersionAction::Pin(version_id) => {
                         version_ids_in_use
                             .entry(version_id)
-                            .and_modify(|counter| *counter += 1)
-                            .or_insert(1);
+                            .and_modify(|e| {
+                                e.0 += 1;
+                                e.1 = inst;
+                            })
+                            .or_insert((1, inst));
                     }
                     PinVersionAction::Unpin(version_id) => {
                         versions_to_unpin.push(version_id);
@@ -220,13 +247,16 @@ pub(crate) async fn start_pinned_version_worker(
 
         for version in &versions_to_unpin {
             match version_ids_in_use.get_mut(version) {
-                Some(counter) => {
+                Some((counter, _)) => {
                     *counter -= 1;
                     if *counter == 0 {
                         version_ids_in_use.remove(version);
                     }
                 }
-                None => tracing::warn!("version {} to unpin dose not exist", version),
+                None => tracing::warn!(
+                    "version {} to unpin does not exist, may already be unpinned due to expiration",
+                    version
+                ),
             }
         }
 
@@ -245,8 +275,8 @@ pub(crate) async fn start_pinned_version_worker(
                     Err(err) => {
                         let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                         tracing::warn!(
-                            "Failed to unpin version {:?}. Will retry after about {} milliseconds",
-                            err,
+                            error = %err.as_report(),
+                            "Failed to unpin version. Will retry after about {} milliseconds",
                             retry_after.as_millis()
                         );
                         tokio::time::sleep(retry_after).await;

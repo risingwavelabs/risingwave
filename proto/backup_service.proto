@@ -16,7 +16,9 @@ enum BackupJobStatus {
   NOT_FOUND = 3;
   FAILED = 4;
 }
-message BackupMetaRequest {}
+message BackupMetaRequest {
+  optional string remarks = 1;
+}
 message BackupMetaResponse {
   uint64 job_id = 1;
 }
@@ -45,6 +47,8 @@ message MetaSnapshotMetadata {
   uint64 hummock_version_id = 2;
   uint64 max_committed_epoch = 3;
   uint64 safe_epoch = 4;
+  optional uint32 format_version = 5;
+  optional string remarks = 6;
 }
 
 service BackupService {

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +18,13 @@ use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::dml_manager::DmlManagerRef;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -44,6 +44,7 @@ pub struct DeleteExecutor {
     identity: String,
     returning: bool,
     txn_id: TxnId,
+    session_id: u32,
 }
 
 impl DeleteExecutor {
@@ -55,6 +56,7 @@ impl DeleteExecutor {
         chunk_size: usize,
         identity: String,
         returning: bool,
+        session_id: u32,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -74,6 +76,7 @@ impl DeleteExecutor {
             identity,
             returning,
             txn_id,
+            session_id,
         }
     }
 }
@@ -93,7 +96,7 @@ impl Executor for DeleteExecutor {
 }
 
 impl DeleteExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
@@ -110,7 +113,7 @@ impl DeleteExecutor {
             self.child.schema().data_types(),
             "bad delete schema"
         );
-        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
+        let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;
 
@@ -182,6 +185,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             delete_node.returning,
+            delete_node.session_id,
         )))
     }
 }
@@ -197,7 +201,7 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_source::dml_manager::DmlManager;
+    use risingwave_dml::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -247,6 +251,7 @@ mod tests {
             1024,
             "DeleteExecutor".to_string(),
             false,
+            0,
         ));
 
         let handle = tokio::spawn(async move {

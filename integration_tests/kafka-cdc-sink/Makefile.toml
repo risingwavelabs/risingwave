@@ -5,52 +5,37 @@ dependencies = ["clean-all"]
 [tasks.start-cluster]
 script = """
 docker compose up -d;
-sleep 20
+sleep 10
 """
 dependencies = ["build-image"]
 
-[tasks.setup-kafka]
+[tasks.setup-prepare]
 script = """
-docker compose exec message_queue \
-    /usr/bin/rpk topic create -p 2 counts
-"""
-dependencies = ["start-cluster"]
-
-[tasks.setup-pg]
-script = """
-PGPASSWORD=123456 psql -h localhost -p 5432 -d mydb -U myuser -f pg.sql
+bash ./prepare.sh
 """
 dependencies = ["start-cluster"]
 
 [tasks.setup-risingwave]
 script = """
-psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
+psql -h localhost -p 4566 -d dev -U root -f create_source.sql
+psql -h localhost -p 4566 -d dev -U root -f create_mv.sql
+psql -h localhost -p 4566 -d dev -U root -f create_sink.sql
 """
-dependencies = ["setup-kafka"]
-
-[tasks.setup-flink]
-script = """
-docker compose run flink-sql-client /opt/flink/bin/sql-client.sh -f /tmp/flink.sql
-"""
-dependencies = ["setup-kafka", "setup-pg"]
+dependencies = ["setup-prepare"]
 
 [tasks.setup-connect]
 script = '''
-curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @jsons/pg-sink.json
 curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @jsons/mysql-sink.json
 sleep 1
 '''
-dependencies = ["setup-flink"]
+dependencies = ["setup-risingwave"]
 
 [tasks.setup]
 dependencies = [
     "clean-all",
     "build-image",
     "start-cluster",
-    "setup-pg",
-    "setup-kafka",
     "setup-risingwave",
-    "setup-flink",
     "setup-connect"
 ]
 
@@ -90,3 +75,13 @@ dependencies = [
     "check-mysql",
     "check-flink-pg"
 ]
+
+[tasks.check-com-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from types"'
+'''
+
+[tasks.check-flink-com-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from flink_types"'
+'''

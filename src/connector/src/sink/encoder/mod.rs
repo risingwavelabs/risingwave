@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use risingwave_common::catalog::Schema;
@@ -82,6 +82,14 @@ impl<T> SerTo<T> for T {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum DateHandlingMode {
+    #[default]
+    FromCe,
+    FromEpoch,
+    String,
+}
+
 /// Useful for both json and protobuf
 #[derive(Clone, Copy)]
 pub enum TimestampHandlingMode {
@@ -89,9 +97,55 @@ pub enum TimestampHandlingMode {
     String,
 }
 
+#[derive(Clone, Copy)]
+pub enum TimeHandlingMode {
+    Milli,
+    String,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum TimestamptzHandlingMode {
+    #[default]
+    UtcString,
+    UtcWithoutSuffix,
+    Micro,
+    Milli,
+}
+
+impl TimestamptzHandlingMode {
+    pub const FRONTEND_DEFAULT: &'static str = "utc_string";
+    pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
+
+    pub fn from_options(options: &BTreeMap<String, String>) -> Result<Self> {
+        match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
+            Some(Self::FRONTEND_DEFAULT) => Ok(Self::UtcString),
+            Some("utc_without_suffix") => Ok(Self::UtcWithoutSuffix),
+            Some("micro") => Ok(Self::Micro),
+            Some("milli") => Ok(Self::Milli),
+            Some(v) => Err(super::SinkError::Config(anyhow::anyhow!(
+                "unrecognized {} value {}",
+                Self::OPTION_KEY,
+                v
+            ))),
+            // This is not a good default. We just have to select it when no option is provided
+            // for compatibility with old version.
+            None => Ok(Self::UtcWithoutSuffix),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum CustomJsonType {
+    // Doris's json need date is string.
+    // The internal order of the struct should follow the insertion order.
+    // The decimal needs verification and calibration.
     Doris(HashMap<String, (u8, u8)>),
+    // Es's json need jsonb is struct
+    Es,
+    // starrocks' need jsonb is struct
+    StarRocks(HashMap<String, (u8, u8)>),
+    // bigquery need null array -> []
+    BigQuery,
     None,
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_database(
@@ -59,9 +59,7 @@ pub async fn handle_drop_database(
         }
     };
 
-    if session.user_id() != database.owner() {
-        return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
-    }
+    session.check_privilege_for_drop_alter_db_schema(&database)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_database(database.id()).await?;

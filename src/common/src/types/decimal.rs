@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
-use postgres_types::{ToSql, Type};
+use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
@@ -28,14 +28,11 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result as RwResult;
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::ZeroHeapSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
-#[derive(
-    Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
-)]
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -46,6 +43,8 @@ pub enum Decimal {
     #[display("NaN")]
     NaN,
 }
+
+impl ZeroHeapSize for Decimal {}
 
 impl ToText for Decimal {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
@@ -79,44 +78,70 @@ impl Decimal {
         let decimal = RustDecimal::from_scientific(value).ok()?;
         Some(Normalized(decimal))
     }
+
+    pub fn from_str_radix(s: &str, radix: u32) -> rust_decimal::Result<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
+            s => RustDecimal::from_str_radix(s, radix).map(Decimal::Normalized),
+        }
+    }
 }
 
 impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();
-                match self {
-                    Decimal::Normalized(d) => {
-                        d.to_sql(&Type::ANY, &mut output).unwrap();
-                        return Ok(Some(output.freeze()));
-                    }
-                    Decimal::NaN => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xC000);
-                        output.put_i16(0);
-                    }
-                    Decimal::PositiveInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xD000);
-                        output.put_i16(0);
-                    }
-                    Decimal::NegativeInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xF000);
-                        output.put_i16(0);
-                    }
-                };
+                self.to_sql(&Type::NUMERIC, &mut output).unwrap();
                 Ok(Some(output.freeze()))
             }
             _ => unreachable!(),
         }
+    }
+}
+
+impl ToSql for Decimal {
+    accepts!(NUMERIC);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        match self {
+            Decimal::Normalized(d) => {
+                return d.to_sql(ty, out);
+            }
+            Decimal::NaN => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xC000);
+                out.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xD000);
+                out.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                out.reserve(8);
+                out.put_u16(0);
+                out.put_i16(0);
+                out.put_u16(0xF000);
+                out.put_i16(0);
+            }
+        }
+        Ok(IsNull::No)
     }
 }
 
@@ -772,6 +797,7 @@ mod tests {
     use itertools::Itertools as _;
 
     use super::*;
+    use crate::estimate_size::EstimateSize;
     use crate::util::iter_util::ZipEqFast;
 
     fn check(lhs: f32, rhs: f32) -> bool {
