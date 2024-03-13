@@ -17,43 +17,15 @@ use std::iter::once;
 use std::pin::pin;
 use std::task::Poll;
 
-use assert_matches::assert_matches;
-use futures::future::join_all;
-use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_pb::stream_service::{streaming_control_stream_request, InjectBarrierRequest};
 use tokio::sync::mpsc::unbounded_channel;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::*;
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {
-    let actor_op_tx = LocalBarrierManager::spawn_for_test();
-
-    let (request_tx, request_rx) = unbounded_channel();
-    let (response_tx, mut response_rx) = unbounded_channel();
-
-    actor_op_tx.send_event(LocalActorOperation::NewControlStream {
-        handle: ControlStreamHandle::new(
-            response_tx,
-            UnboundedReceiverStream::new(request_rx).boxed(),
-        ),
-        init_request: InitRequest { prev_epoch: 0 },
-    });
-
-    assert_matches!(
-        response_rx.recv().await.unwrap().unwrap().response.unwrap(),
-        streaming_control_stream_response::Response::Init(_)
-    );
-
-    let context = actor_op_tx
-        .send_and_await(LocalActorOperation::GetCurrentSharedContext)
-        .await
-        .unwrap();
-
-    let manager = &context.local_barrier_manager;
+    let (actor_op_tx, manager) = LocalBarrierManager::spawn_for_test().await;
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -75,35 +47,21 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    request_tx
-        .send(Ok(StreamingControlStreamRequest {
-            request: Some(streaming_control_stream_request::Request::InjectBarrier(
-                InjectBarrierRequest {
-                    request_id: "".to_string(),
-                    barrier: Some(barrier.to_protobuf()),
-                    actor_ids_to_send: actor_ids.clone(),
-                    actor_ids_to_collect: actor_ids,
-                },
-            )),
-        }))
+    actor_op_tx
+        .send_barrier(barrier.clone(), actor_ids.clone(), actor_ids)
+        .await
         .unwrap();
-
     // Collect barriers from actors
-    let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {
-        let barrier = rx.recv().await.unwrap();
-        assert_eq!(barrier.epoch.prev, epoch);
-        (*actor_id, barrier)
-    }))
-    .await;
+    let collected_barriers = rxs
+        .iter_mut()
+        .map(|(actor_id, rx)| {
+            let barrier = rx.try_recv().unwrap();
+            assert_eq!(barrier.epoch.prev, epoch);
+            (*actor_id, barrier)
+        })
+        .collect_vec();
 
-    let mut await_epoch_future = pin!(response_rx.recv().map(|result| {
-        let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
-        let resp = resp.response.unwrap();
-        match resp {
-            streaming_control_stream_response::Response::CompleteBarrier(_complete_barrier) => {}
-            _ => unreachable!(),
-        }
-    }));
+    let mut await_epoch_future = pin!(actor_op_tx.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
@@ -119,30 +77,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
 #[tokio::test]
 async fn test_managed_barrier_collection_before_send_request() -> StreamResult<()> {
-    let actor_op_tx = LocalBarrierManager::spawn_for_test();
-
-    let (request_tx, request_rx) = unbounded_channel();
-    let (response_tx, mut response_rx) = unbounded_channel();
-
-    actor_op_tx.send_event(LocalActorOperation::NewControlStream {
-        handle: ControlStreamHandle::new(
-            response_tx,
-            UnboundedReceiverStream::new(request_rx).boxed(),
-        ),
-        init_request: InitRequest { prev_epoch: 0 },
-    });
-
-    assert_matches!(
-        response_rx.recv().await.unwrap().unwrap().response.unwrap(),
-        streaming_control_stream_response::Response::Init(_)
-    );
-
-    let context = actor_op_tx
-        .send_and_await(LocalActorOperation::GetCurrentSharedContext)
-        .await
-        .unwrap();
-
-    let manager = &context.local_barrier_manager;
+    let (actor_op_tx, manager) = LocalBarrierManager::spawn_for_test().await;
 
     let register_sender = |actor_id: u32| {
         let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -174,35 +109,23 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     // Collect a barrier before sending
     manager.collect(extra_actor_id, &barrier);
 
-    request_tx
-        .send(Ok(StreamingControlStreamRequest {
-            request: Some(streaming_control_stream_request::Request::InjectBarrier(
-                InjectBarrierRequest {
-                    request_id: "".to_string(),
-                    barrier: Some(barrier.to_protobuf()),
-                    actor_ids_to_send,
-                    actor_ids_to_collect,
-                },
-            )),
-        }))
+    // Send the barrier to all actors
+    actor_op_tx
+        .send_barrier(barrier.clone(), actor_ids_to_send, actor_ids_to_collect)
+        .await
         .unwrap();
 
     // Collect barriers from actors
-    let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {
-        let barrier = rx.recv().await.unwrap();
-        assert_eq!(barrier.epoch.prev, epoch);
-        (*actor_id, barrier)
-    }))
-    .await;
+    let collected_barriers = rxs
+        .iter_mut()
+        .map(|(actor_id, rx)| {
+            let barrier = rx.try_recv().unwrap();
+            assert_eq!(barrier.epoch.prev, epoch);
+            (*actor_id, barrier)
+        })
+        .collect_vec();
 
-    let mut await_epoch_future = pin!(response_rx.recv().map(|result| {
-        let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
-        let resp = resp.response.unwrap();
-        match resp {
-            streaming_control_stream_response::Response::CompleteBarrier(_complete_barrier) => {}
-            _ => unreachable!(),
-        }
-    }));
+    let mut await_epoch_future = pin!(actor_op_tx.await_epoch_completed(epoch));
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {

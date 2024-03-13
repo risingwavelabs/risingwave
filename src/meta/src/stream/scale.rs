@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use futures::future::{try_join_all, BoxFuture};
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
@@ -2651,33 +2651,9 @@ impl GlobalStreamManager {
 
         tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
 
-        let up_down_stream_fragment: HashSet<_> = reschedule_fragment
-            .iter()
-            .flat_map(|(_, reschedule)| {
-                reschedule
-                    .upstream_fragment_dispatcher_ids
-                    .iter()
-                    .map(|(fragment_id, _)| *fragment_id)
-                    .chain(reschedule.downstream_fragment_ids.iter().cloned())
-            })
-            .collect();
-
-        let fragment_actors =
-            try_join_all(up_down_stream_fragment.iter().map(|fragment_id| async {
-                let actor_ids = self
-                    .metadata_manager
-                    .get_running_actors_of_fragment(*fragment_id)
-                    .await?;
-                Result::<_, MetaError>::Ok((*fragment_id, actor_ids))
-            }))
-            .await?
-            .into_iter()
-            .collect();
-
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
             table_parallelism: table_parallelism.unwrap_or_default(),
-            fragment_actors,
         };
 
         match &self.metadata_manager {
