@@ -16,13 +16,10 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
-use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, FunctionCall,
-};
-use crate::expr::ExprType;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
-use crate::optimizer::rule::{Rule, BoxedRule};
+use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 
 pub struct StreamFilterExpressionSimplifyRule {}
@@ -39,7 +36,10 @@ impl Rule for StreamFilterExpressionSimplifyRule {
         let share: &LogicalShare = logical_share_plan.as_logical_share()?;
         let input = share.input().rewrite_exprs(&mut rewriter);
         share.replace_input(input);
-        Some(LogicalFilter::create(share.clone().into(), filter.predicate().clone()))
+        Some(LogicalFilter::create(
+            share.clone().into(),
+            filter.predicate().clone(),
+        ))
     }
 }
 
@@ -146,8 +146,20 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
             return None;
         };
         match op {
-            ExprType::Or => if scalar == ScalarImpl::Bool(true) { Some(true) } else { None }
-            ExprType::And => if scalar == ScalarImpl::Bool(false) { Some(false) } else { None }
+            ExprType::Or => {
+                if scalar == ScalarImpl::Bool(true) {
+                    Some(true)
+                } else {
+                    None
+                }
+            }
+            ExprType::And => {
+                if scalar == ScalarImpl::Bool(false) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
