@@ -14,21 +14,19 @@
 
 pub mod gcs;
 pub mod s3;
-use std::collections::HashMap;
+
 use std::sync::Arc;
 
-use arrow_schema::{
-    DataType as ArrowDataType, Field as ArrowField, Fields, Schema as ArrowSchema, SchemaRef,
-};
+
 use async_trait::async_trait;
 use opendal::Writer as OpendalWriter;
 use parquet::arrow::async_writer::AsyncArrowWriter;
 use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use serde_json::Value;
 
-use crate::sink::encoder::{JsonEncoder, RowEncoder};
+
+use crate::sink::encoder::{RowEncoder};
 use crate::sink::{Result, SinkWriter};
 
 pub const GCS_SINK: &str = "gcs";
@@ -100,7 +98,7 @@ impl OpenDalSinkWriter {
 }
 
 fn change_schema_to_arrow_schema(
-    schema: risingwave_common::catalog::Schema,
+    _schema: risingwave_common::catalog::Schema,
 ) -> arrow_schema::Schema {
     todo!()
 }
