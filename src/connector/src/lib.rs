@@ -14,6 +14,7 @@
 
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
