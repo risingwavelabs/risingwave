@@ -14,7 +14,8 @@
 
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::{Bound, Deref, DerefMut};
 
 use more_asserts::assert_gt;
 
@@ -36,7 +37,7 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::MergeIterator;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
@@ -470,6 +471,78 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
 
     fn value_meta(&self) -> ValueMeta {
         ValueMeta::default()
+    }
+}
+
+pub struct UserKeyEndBoundedIterator<I: HummockIterator<Direction = Forward>> {
+    inner: I,
+    end_bound: Bound<UserKey<KeyPayloadType>>,
+    is_valid: bool,
+}
+
+impl<I: HummockIterator<Direction = Forward>> UserKeyEndBoundedIterator<I> {
+    fn new(inner: I, end_bound: Bound<UserKey<KeyPayloadType>>) -> Self {
+        Self {
+            inner,
+            end_bound,
+            is_valid: false,
+        }
+    }
+
+    fn key_out_of_range(&self, key: UserKey<&[u8]>) -> bool {
+        match &self.end_bound {
+            Included(end_key) => key > end_key.as_ref(),
+            Excluded(end_key) => key >= end_key.as_ref(),
+            Unbounded => false,
+        }
+    }
+
+    fn check_is_valid(&mut self) {
+        self.is_valid = self.inner.is_valid() && !self.key_out_of_range(self.inner.key().user_key);
+    }
+}
+
+impl<I: HummockIterator<Direction = Forward>> HummockIterator for UserKeyEndBoundedIterator<I> {
+    type Direction = Forward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        self.inner.next().await?;
+        self.check_is_valid();
+        Ok(())
+    }
+
+    fn key(&self) -> FullKey<&[u8]> {
+        debug_assert!(self.is_valid);
+        self.inner.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        debug_assert!(self.is_valid);
+        self.inner.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.is_valid
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.inner.rewind().await?;
+        self.check_is_valid();
+        Ok(())
+    }
+
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        self.inner.seek(key).await?;
+        self.check_is_valid();
+        Ok(())
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.inner.value_meta()
     }
 }
 
