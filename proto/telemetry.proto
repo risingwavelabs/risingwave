@@ -91,7 +91,7 @@ message MetaReport {
 }
 
 enum TableOptimization {
-    TABLE_OPTIMIZATION_UNSPECIFIED = 0;
+  TABLE_OPTIMIZATION_UNSPECIFIED = 0;
 }
 
 message StreamJobDesc {
