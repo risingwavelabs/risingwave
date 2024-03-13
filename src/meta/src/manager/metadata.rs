@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -688,36 +687,12 @@ impl MetadataManager {
 
     pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
         match self {
-            MetadataManager::V1(mgr) => {
-                let tables = mgr.catalog_manager.list_tables().await;
-                let sources = mgr.catalog_manager.list_sources().await;
-
-                let mut res = Vec::with_capacity(tables.len());
-                for table_def in tables {
-                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-                        table_def.optional_associated_source_id
-                    {
-                        let source = sources.iter().find(|s| s.id == source_id);
-                        let connector_name = source
-                            .map(|s| s.with_properties.get("connector").map(|c| c.to_lowercase()))
-                            .unwrap()
-                            .unwrap();
-                        res.push(MetaTelemetryJobDesc {
-                            table_id: table_def.id as i32,
-                            connector: Some(connector_name),
-                            optimization: vec![],
-                        });
-                    } else {
-                        res.push(MetaTelemetryJobDesc {
-                            table_id: table_def.id as i32,
-                            connector: None,
-                            optimization: vec![],
-                        });
-                    }
-                }
-                Ok(res)
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_stream_job_for_telemetry().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .list_stream_job_desc_for_telemetry()
+                    .await
             }
-            MetadataManager::V2(mgr) => mgr.catalog_controller.list_stream_job_desc().await,
         }
     }
 

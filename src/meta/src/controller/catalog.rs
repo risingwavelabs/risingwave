@@ -29,8 +29,8 @@ use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SinkId,
-    SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
+    SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -69,6 +69,7 @@ use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
 pub type CatalogControllerRef = Arc<CatalogController>;
@@ -2393,6 +2394,35 @@ impl CatalogController {
             .await;
 
         Ok(version)
+    }
+
+    pub async fn list_stream_job_desc_for_telemetry(
+        &self,
+    ) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        let inner = self.inner.read().await;
+        let info: Vec<(TableId, Property)> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .column(source::Column::WithProperties)
+            .join(JoinType::InnerJoin, table::Relation::Source.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(info
+            .into_iter()
+            .map(|(table_id, properties)| {
+                let connector_info = properties
+                    .inner_ref()
+                    .get("connector")
+                    .map(|v| v.to_lowercase());
+                MetaTelemetryJobDesc {
+                    table_id,
+                    connector: connector_info,
+                    optimization: vec![],
+                }
+            })
+            .collect())
     }
 
     pub async fn alter_source_column(

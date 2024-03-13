@@ -241,6 +241,7 @@ mod test {
                 version: "version".to_owned(),
                 git_sha: "git_sha".to_owned(),
             },
+            job_desc: vec![],
         };
 
         let pb_bytes = report.to_pb_bytes();

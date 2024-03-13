@@ -21,13 +21,11 @@ use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::fragment::StreamNode;
-use risingwave_meta_model_v2::prelude::{
-    Actor, ActorDispatcher, Fragment, Sink, StreamingJob, Table,
-};
+use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model_v2::{
-    actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
-    ConnectorSplits, ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId,
-    Property, SinkId, SourceId, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ConnectorSplits,
+    ExprContext, FragmentId, FragmentVnodeMapping, I32Array, JobStatus, ObjectId, SinkId, SourceId,
+    StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::meta::subscribe_response::{
@@ -59,7 +57,6 @@ use crate::controller::utils::{
 use crate::manager::{ActorInfos, LocalNotification};
 use crate::model::TableParallelism;
 use crate::stream::SplitAssignment;
-use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
 impl CatalogControllerInner {
@@ -656,33 +653,6 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(job_states)
-    }
-
-    pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
-        let inner = self.inner.read().await;
-        let info: Vec<(TableId, Property)> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .column(source::Column::WithProperties)
-            .join(JoinType::InnerJoin, table::Relation::Source.def())
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        Ok(info
-            .into_iter()
-            .map(|(table_id, properties)| {
-                let connector_info = properties
-                    .inner_ref()
-                    .get("connector")
-                    .map(|v| v.to_lowercase());
-                MetaTelemetryJobDesc {
-                    table_id,
-                    connector: connector_info,
-                    optimization: vec![],
-                }
-            })
-            .collect())
     }
 
     /// Get all actor ids in the target streaming jobs.
