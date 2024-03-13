@@ -27,6 +27,7 @@ use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use thiserror_ext::AsReport;
+use tracing::warn;
 use with_options::WithOptions;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
@@ -670,15 +671,16 @@ impl ClickHouseFieldWithNull {
                 let d = if let Decimal::Normalized(d) = d {
                     let scale =
                         clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
-
                     if scale < 0 {
                         d.mantissa() / 10_i128.pow(scale.unsigned_abs())
                     } else {
                         d.mantissa() * 10_i128.pow(scale as u32)
                     }
                 } else if clickhouse_schema_feature.can_null {
+                    warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse null!");
                     return Ok(vec![ClickHouseFieldWithNull::None]);
                 } else {
+                    warn!("Inf, -Inf, Nan in RW decimal is converted into clickhouse 0!");
                     0_i128
                 };
                 if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {

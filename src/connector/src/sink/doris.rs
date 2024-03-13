@@ -493,11 +493,9 @@ pub struct DorisField {
     aggregation_type: String,
 }
 impl DorisField {
-    pub fn get_decimal_pre_scale(&self) -> Option<(u8, u8)> {
+    pub fn get_decimal_pre_scale(&self) -> Option<u8> {
         if self.r#type.contains("DECIMAL") {
-            let a = self.precision.clone().unwrap().parse::<u8>().unwrap();
-            let b = self.scale.clone().unwrap().parse::<u8>().unwrap();
-            Some((a, b))
+            Some(self.scale.clone().unwrap().parse::<u8>().unwrap())
         } else {
             None
         }
