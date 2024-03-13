@@ -28,7 +28,7 @@ use foyer::memory::{
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::config::StorageMemoryConfig;
+use risingwave_common::config::{EvictionConfig, StorageMemoryConfig};
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
@@ -43,8 +43,7 @@ use zstd::zstd_safe::WriteBuf;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockCacheConfig, BlockMeta, BlockResponse, CachedBlock, CachedSstable,
-    EvictionConfig, FileCache, RecentFilter, Sstable, SstableBlockIndex, SstableMeta,
-    SstableWriter,
+    FileCache, RecentFilter, Sstable, SstableBlockIndex, SstableMeta, SstableWriter,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -197,7 +196,7 @@ pub struct SstableStoreConfig {
     pub path: String,
     pub block_cache_capacity: usize,
     pub meta_cache_capacity: usize,
-    pub high_priority_ratio: usize,
+    pub eviction: EvictionConfig,
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
     pub data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
@@ -235,19 +234,17 @@ impl SstableStore {
             meta_cache_shard_bits -= 1;
         }
 
-        // TODO(MrCroxx): support other cache algorithm
         let block_cache = BlockCache::new(BlockCacheConfig {
             capacity: config.block_cache_capacity,
             max_shard_bits: MAX_CACHE_SHARD_BITS,
-            eviction: EvictionConfig::Lru(LruConfig {
-                high_priority_pool_ratio: config.high_priority_ratio as f64 / 100.0,
-            }),
+            eviction: config.eviction,
             listener: BlockCacheEventListener::new(
                 config.data_file_cache.clone(),
                 config.state_store_metrics.clone(),
             ),
         });
-        // TODO(MrCroxx): support other cache algorithm
+
+        // TODO(MrCroxx): support other cache algorithm?
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: config.meta_cache_capacity,
             shards: 1 << meta_cache_shard_bits,
@@ -282,7 +279,6 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        // TODO(MrCroxx): support other cache algorithm
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: meta_cache_capacity,
             shards: 1,
@@ -296,7 +292,6 @@ impl SstableStore {
         Self {
             path,
             store,
-            // TODO(MrCroxx): support other cache algorithm
             block_cache: BlockCache::new(BlockCacheConfig {
                 capacity: block_cache_capacity,
                 max_shard_bits: 0,

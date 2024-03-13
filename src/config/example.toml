@@ -130,6 +130,9 @@ compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
 mem_table_spill_threshold = 4194304
 
+[storage.cache.eviction]
+algorithm = "Lru"
+
 [storage.data_file_cache]
 dir = ""
 capacity_mb = 1024

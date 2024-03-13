@@ -19,7 +19,7 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use foyer::memory::CacheContext;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
@@ -64,7 +64,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         path,
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 128 << 20,
-        high_priority_ratio: 0,
+        eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),

@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
+use foyer::memory::{LfuConfig, LruConfig};
+use risingwave_common::config::{
+    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
+};
 use risingwave_common::util::pretty_bytes::convert;
 
 /// The minimal memory requirement of computing tasks in megabytes.
@@ -32,7 +35,6 @@ const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
-const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
@@ -65,30 +67,58 @@ pub fn storage_memory_config(
     } else {
         (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)
     };
-    let mut block_cache_capacity_mb = storage_config.block_cache_capacity_mb.unwrap_or(
+    let mut block_cache_capacity_mb = storage_config.cache.block_cache_capacity_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64
             * storage_memory_proportion
             * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION)
             .ceil() as usize)
             >> 20,
     );
-    let high_priority_ratio_in_percent = storage_config
-        .high_priority_ratio_in_percent
-        .unwrap_or(STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO);
     let default_meta_cache_capacity = (non_reserved_memory_bytes as f64
         * storage_memory_proportion
         * STORAGE_META_CACHE_MEMORY_PROPORTION)
         .ceil() as usize;
-    let meta_cache_capacity_mb = storage_config
-        .meta_cache_capacity_mb
-        .unwrap_or(std::cmp::min(
-            default_meta_cache_capacity >> 20,
-            STORAGE_META_CACHE_MAX_MEMORY_MB,
-        ));
+    let meta_cache_capacity_mb =
+        storage_config
+            .cache
+            .meta_cache_capacity_mb
+            .unwrap_or(std::cmp::min(
+                default_meta_cache_capacity >> 20,
+                STORAGE_META_CACHE_MAX_MEMORY_MB,
+            ));
 
     let prefetch_buffer_capacity_mb = storage_config
         .prefetch_buffer_capacity_mb
         .unwrap_or(block_cache_capacity_mb);
+    let cache_eviction_config = match &storage_config.cache.eviction {
+        CacheEvictionConfig::Lru {
+            high_priority_ratio_in_percent,
+        } => EvictionConfig::Lru(LruConfig {
+            high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                risingwave_common::config::default::storage::high_priority_ratio_in_percent(),
+            ) as f64
+                / 100.0,
+        }),
+        CacheEvictionConfig::Lfu {
+            window_capacity_ratio_in_percent,
+            protected_capacity_ratio_in_percent,
+            cmsketch_eps,
+            cmsketch_confidence,
+        } => EvictionConfig::Lfu(LfuConfig {
+            window_capacity_ratio: window_capacity_ratio_in_percent.unwrap_or(
+                risingwave_common::config::default::storage::window_capacity_ratio_in_percent(),
+            ) as f64
+                / 100.0,
+            protected_capacity_ratio: protected_capacity_ratio_in_percent.unwrap_or(
+                risingwave_common::config::default::storage::protected_capacity_ratio_in_percent(),
+            ) as f64
+                / 100.0,
+            cmsketch_eps: cmsketch_eps
+                .unwrap_or(risingwave_common::config::default::storage::cmsketch_eps()),
+            cmsketch_confidence: cmsketch_confidence
+                .unwrap_or(risingwave_common::config::default::storage::cmsketch_confidence()),
+        }),
+    };
 
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
@@ -143,7 +173,7 @@ pub fn storage_memory_config(
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
-        high_priority_ratio_in_percent,
+        cache_eviction_config,
     }
 }
 
@@ -192,8 +222,8 @@ mod tests {
         assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
-        storage_config.block_cache_capacity_mb = Some(512);
-        storage_config.meta_cache_capacity_mb = Some(128);
+        storage_config.cache.block_cache_capacity_mb = Some(512);
+        storage_config.cache.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
         storage_config.compactor_memory_limit_mb = Some(512);
         let memory_config = storage_memory_config(0, true, &storage_config);

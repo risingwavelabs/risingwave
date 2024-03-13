@@ -25,7 +25,8 @@ use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
+    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
+    RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -213,7 +214,7 @@ async fn compaction_test(
         path: system_params.data_directory().to_string(),
         block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
         meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
-        high_priority_ratio: 0,
+        eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         data_file_cache: FileCache::none(),

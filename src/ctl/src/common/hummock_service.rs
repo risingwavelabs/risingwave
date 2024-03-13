@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -167,7 +167,7 @@ impl HummockServiceOpts {
             path: opts.data_directory,
             block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
             meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
-            high_priority_ratio: 0,
+            eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
             max_prefetch_block_number: opts.max_prefetch_block_number,
             data_file_cache: FileCache::none(),

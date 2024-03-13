@@ -18,7 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{prefix_slice_with_vnode, FullKey, TableKey, UserKey};
@@ -70,7 +70,7 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         path,
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 64 << 20,
-        high_priority_ratio: 0,
+        eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),
