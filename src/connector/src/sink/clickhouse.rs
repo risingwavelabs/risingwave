@@ -667,27 +667,26 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_string()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(d) => {
-                if let Decimal::Normalized(d) = d {
+                let d = if let Decimal::Normalized(d) = d {
                     let scale =
                         clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
 
-                    let scale = if scale < 0 {
+                    if scale < 0 {
                         d.mantissa() / 10_i128.pow(scale.unsigned_abs())
                     } else {
                         d.mantissa() * 10_i128.pow(scale as u32)
-                    };
-
-                    if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
-                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(scale as i32))
-                    } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
-                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(scale as i64))
-                    } else {
-                        ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(scale))
                     }
+                } else if clickhouse_schema_feature.can_null {
+                    return Ok(vec![ClickHouseFieldWithNull::None]);
                 } else {
-                    return Err(SinkError::ClickHouse(
-                        "clickhouse can not support Decimal NAN,-INF and INF".to_string(),
-                    ));
+                    0_i128
+                };
+                if clickhouse_schema_feature.accuracy_decimal.0 <= 9 {
+                    ClickHouseField::Decimal(ClickHouseDecimal::Decimal32(d as i32))
+                } else if clickhouse_schema_feature.accuracy_decimal.0 <= 18 {
+                    ClickHouseField::Decimal(ClickHouseDecimal::Decimal64(d as i64))
+                } else {
+                    ClickHouseField::Decimal(ClickHouseDecimal::Decimal128(d))
                 }
             }
             ScalarRefImpl::Interval(_) => {
