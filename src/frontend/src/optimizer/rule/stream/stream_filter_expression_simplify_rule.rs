@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
 use crate::expr::{
@@ -27,8 +28,10 @@ use crate::optimizer::PlanRef;
 pub struct StreamFilterExpressionSimplifyRule {}
 impl Rule for StreamFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
-    /// 1. (NOT (e)) OR (e) => True | (NOT (e)) AND (e) => False
-    /// TODO(Zihao): 2. (NOT (e1) AND NOT (e2)) OR (e1 OR e2) => True
+    /// 1. (NOT (e)) OR (e) => True
+    /// 2. (NOT (e)) AND (e) => False
+    /// NOTE: `e` should only contain at most a single column
+    /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let mut rewriter = StreamFilterExpressionSimplifyRewriter {};
@@ -52,7 +55,7 @@ fn is_null_or_not_null(func_type: ExprType) -> bool {
 
 /// Simply extract every possible `InputRef` out from the input `expr`
 fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
-    match expr {
+    match expr.clone() {
         ExprImpl::FunctionCall(func_call) => {
             // `IsNotNull( ... )` or `IsNull( ... )` will be ignored
             if is_null_or_not_null(func_call.func_type()) {
@@ -63,7 +66,10 @@ fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
             }
         }
         ExprImpl::InputRef(_) => {
-            columns.push(expr);
+            if !columns.contains(&expr) {
+                // only add the column if not exists
+                columns.push(expr);
+            }
         }
         _ => (),
     }
@@ -71,38 +77,27 @@ fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
 
 /// If ever `Not (e)` and `(e)` appear together
 /// First return value indicates if the optimizable pattern exist
-/// Second return value indicates if the term `e` is either `IsNotNull` or `IsNull`
+/// Second return value indicates if the term `e` should be converted to either `IsNotNull` or `IsNull`
 /// If so, it will contain the actual wrapper `ExprImpl` for that; otherwise it will be `None`
-fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
-    /// Try wrapping inner expression with `IsNotNull`
-    /// Note: only columns (i.e., `InputRef`) will be extracted and connected via `AND`
+fn check_optimizable_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
+    /// Try wrapping inner *column* with `IsNotNull`
     fn try_wrap_inner_expression(expr: ExprImpl) -> Option<ExprImpl> {
         let mut columns = vec![];
 
         extract_column(expr, &mut columns);
+
+        assert!(columns.len() <= 1, "should only contain a single column");
+
         if columns.is_empty() {
             return None;
         }
 
-        let mut inputs: Vec<ExprImpl> = vec![];
-        // From [`c1`, `c2`, ... , `cn`] to [`IsNotNull(c1)`, ... , `IsNotNull(cn)`]
-        for column in columns {
-            let Ok(expr) = FunctionCall::new(ExprType::IsNotNull, vec![column]) else {
-                return None;
-            };
-            inputs.push(expr.into());
-        }
+        // From `c1` to `IsNotNull(c1)`
+        let Ok(expr) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
+            return None;
+        };
 
-        // Connect them with `AND` if multiple columns are involved
-        // i.e., AND [`IsNotNull(c1)`, ... , `IsNotNull(cn)`]
-        if inputs.len() > 1 {
-            let Ok(expr) = FunctionCall::new(ExprType::And, inputs) else {
-                return None;
-            };
-            Some(expr.into())
-        } else {
-            Some(inputs[0].clone())
-        }
+        Some(expr.into())
     }
 
     // Due to constant folding, we only need to consider `FunctionCall` here (presumably)
@@ -112,9 +107,12 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
     let ExprImpl::FunctionCall(e2_func) = e2.clone() else {
         return (false, None);
     };
+
+    // No chance to optimize
     if e1_func.func_type() != ExprType::Not && e2_func.func_type() != ExprType::Not {
         return (false, None);
     }
+
     if e1_func.func_type() != ExprType::Not {
         // (e1) [op] (Not (e2))
         if e2_func.inputs().len() != 1 {
@@ -137,25 +135,62 @@ fn check_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprImpl>) {
     }
 }
 
+/// 1. True or (...) | (...) or True => True
+/// 2. False and (...) | (...) and False => False
+/// NOTE: the `True` and `False` here not only represent a single `ExprImpl::Literal`
+/// but represent every `ExprImpl` that can be *evaluated* to `ScalarImpl::Bool`
+/// during optimization phase as well
+fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<bool> {
+    fn check_special_pattern_inner(e: ExprImpl, op: ExprType) -> Option<bool> {
+        let Some(Ok(Some(scalar))) = e.try_fold_const() else {
+            return None;
+        };
+        match op {
+            ExprType::Or => if scalar == ScalarImpl::Bool(true) { Some(true) } else { None }
+            ExprType::And => if scalar == ScalarImpl::Bool(false) { Some(false) } else { None }
+            _ => None,
+        }
+    }
+
+    if e1.is_const() {
+        if let Some(res) = check_special_pattern_inner(e1, op) {
+            return Some(res);
+        }
+    }
+
+    if e2.is_literal() {
+        if let Some(res) = check_special_pattern_inner(e2, op) {
+            return Some(res);
+        }
+    }
+
+    None
+}
+
 struct StreamFilterExpressionSimplifyRewriter {}
 impl ExprRewriter for StreamFilterExpressionSimplifyRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         // Check if the input expression is *definitely* null
         let mut columns = vec![];
         extract_column(expr.clone(), &mut columns);
-        let max_col_index = columns
-            .iter()
-            .map(|e| {
-                let ExprImpl::InputRef(input_ref) = e else {
-                    return 0;
-                };
-                input_ref.index()
-            })
-            .max()
-            .unwrap_or(0);
-        let fixedbitset = FixedBitSet::with_capacity(max_col_index);
-        if Strong::is_null(&expr, fixedbitset) {
-            return ExprImpl::literal_bool(false);
+
+        // NOTE: we do NOT optimize cases that involve multiple columns
+        // for detailed reference: <https://github.com/risingwavelabs/risingwave/pull/15275#issuecomment-1975783856>
+        if columns.len() > 1 {
+            return expr;
+        }
+
+        // Eliminate the case where the current expression
+        // will definitely return null by using `Strong::is_null`
+        if !columns.is_empty() {
+            let ExprImpl::InputRef(input_ref) = columns[0].clone() else {
+                return expr;
+            };
+            let index = input_ref.index();
+            let fixedbitset = FixedBitSet::with_capacity(index);
+            if Strong::is_null(&expr, fixedbitset) {
+                return ExprImpl::literal_bool(false);
+            }
         }
 
         let ExprImpl::FunctionCall(func_call) = expr.clone() else {
@@ -165,17 +200,27 @@ impl ExprRewriter for StreamFilterExpressionSimplifyRewriter {
             return expr;
         }
         assert_eq!(func_call.return_type(), DataType::Boolean);
-        // Currently just optimize the first rule
+        // Sanity check, the inputs should only contain two branches
         if func_call.inputs().len() != 2 {
             return expr;
         }
+
         let inputs = func_call.inputs();
-        let (optimizable_flag, columns) = check_pattern(inputs[0].clone(), inputs[1].clone());
+        let e1 = inputs[0].clone();
+        let e2 = inputs[1].clone();
+
+        // Eliminate special pattern
+        if let Some(res) = check_special_pattern(e1.clone(), e2.clone(), func_call.func_type()) {
+            return ExprImpl::literal_bool(res);
+        }
+
+        let (optimizable_flag, column) = check_optimizable_pattern(e1, e2);
         if optimizable_flag {
             match func_call.func_type() {
                 ExprType::Or => {
-                    if let Some(columns) = columns {
-                        columns
+                    if let Some(column) = column {
+                        // IsNotNull(col)
+                        column
                     } else {
                         ExprImpl::literal_bool(true)
                     }
