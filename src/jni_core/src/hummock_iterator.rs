@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -82,7 +82,7 @@ impl HummockJavaBindingIterator {
             path: read_plan.data_dir,
             block_cache_capacity: 1 << 10,
             meta_cache_capacity: 1 << 10,
-            high_priority_ratio: 0,
+            eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: 1 << 10,
             max_prefetch_block_number: 16,
             data_file_cache: FileCache::none(),

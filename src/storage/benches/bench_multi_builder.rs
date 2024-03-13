@@ -23,7 +23,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
@@ -146,7 +146,7 @@ fn bench_builder(
         path: "test".to_string(),
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 128 << 20,
-        high_priority_ratio: 0,
+        eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),

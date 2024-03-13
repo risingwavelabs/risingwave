@@ -25,6 +25,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
+use foyer::memory::{LfuConfig, LruConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -567,6 +568,44 @@ impl PartialOrd for MetricLevel {
     }
 }
 
+/// the section `[storage.cache]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct CacheConfig {
+    /// Capacity of sstable block cache.
+    #[serde(default)]
+    pub block_cache_capacity_mb: Option<usize>,
+
+    /// Capacity of sstable meta cache.
+    #[serde(default)]
+    pub meta_cache_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub eviction: CacheEvictionConfig,
+}
+
+/// the section `[storage.cache.eviction]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "algorithm")]
+pub enum CacheEvictionConfig {
+    Lru {
+        high_priority_ratio_in_percent: Option<usize>,
+    },
+    Lfu {
+        window_capacity_ratio_in_percent: Option<usize>,
+        protected_capacity_ratio_in_percent: Option<usize>,
+        cmsketch_eps: Option<f64>,
+        cmsketch_confidence: Option<f64>,
+    },
+}
+
+impl Default for CacheEvictionConfig {
+    fn default() -> Self {
+        Self::Lru {
+            high_priority_ratio_in_percent: None,
+        }
+    }
+}
+
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
@@ -597,16 +636,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
 
-    /// Capacity of sstable block cache.
     #[serde(default)]
-    pub block_cache_capacity_mb: Option<usize>,
-
-    #[serde(default)]
-    pub high_priority_ratio_in_percent: Option<usize>,
-
-    /// Capacity of sstable meta cache.
-    #[serde(default)]
-    pub meta_cache_capacity_mb: Option<usize>,
+    pub cache: CacheConfig,
 
     /// max memory usage for large query
     #[serde(default)]
@@ -1215,6 +1246,19 @@ pub mod default {
             70
         }
 
+        pub fn window_capacity_ratio_in_percent() -> usize {
+            10
+        }
+        pub fn protected_capacity_ratio_in_percent() -> usize {
+            80
+        }
+        pub fn cmsketch_eps() -> f64 {
+            0.002
+        }
+        pub fn cmsketch_confidence() -> f64 {
+            0.95
+        }
+
         pub fn meta_cache_capacity_mb() -> usize {
             128
         }
@@ -1642,6 +1686,20 @@ pub mod default {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum EvictionConfig {
+    Lru(LruConfig),
+    Lfu(LfuConfig),
+}
+
+impl EvictionConfig {
+    pub fn for_test() -> Self {
+        Self::Lru(LruConfig {
+            high_priority_pool_ratio: 0.0,
+        })
+    }
+}
+
 pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub meta_cache_capacity_mb: usize,
@@ -1650,16 +1708,18 @@ pub struct StorageMemoryConfig {
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
-    pub high_priority_ratio_in_percent: usize,
+    pub cache_eviction_config: EvictionConfig,
 }
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s
         .storage
+        .cache
         .block_cache_capacity_mb
         .unwrap_or(default::storage::block_cache_capacity_mb());
     let meta_cache_capacity_mb = s
         .storage
+        .cache
         .meta_cache_capacity_mb
         .unwrap_or(default::storage::meta_cache_capacity_mb());
     let shared_buffer_capacity_mb = s
@@ -1672,14 +1732,47 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
-    let high_priority_ratio_in_percent = s
-        .storage
-        .high_priority_ratio_in_percent
-        .unwrap_or(default::storage::high_priority_ratio_in_percent());
-    let prefetch_buffer_capacity_mb = s
-        .storage
-        .shared_buffer_capacity_mb
-        .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
+
+    let cache_eviction_config = match s.storage.cache.eviction {
+        CacheEvictionConfig::Lru {
+            high_priority_ratio_in_percent,
+        } => EvictionConfig::Lru(LruConfig {
+            high_priority_pool_ratio: high_priority_ratio_in_percent
+                .unwrap_or(default::storage::high_priority_ratio_in_percent())
+                as f64
+                / 100.0,
+        }),
+        CacheEvictionConfig::Lfu {
+            window_capacity_ratio_in_percent,
+            protected_capacity_ratio_in_percent,
+            cmsketch_eps,
+            cmsketch_confidence,
+        } => EvictionConfig::Lfu(LfuConfig {
+            window_capacity_ratio: window_capacity_ratio_in_percent
+                .unwrap_or(default::storage::window_capacity_ratio_in_percent())
+                as f64
+                / 100.0,
+            protected_capacity_ratio: protected_capacity_ratio_in_percent
+                .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
+                as f64
+                / 100.0,
+            cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
+            cmsketch_confidence: cmsketch_confidence
+                .unwrap_or(default::storage::cmsketch_confidence()),
+        }),
+    };
+
+    let prefetch_buffer_capacity_mb =
+        s.storage
+            .shared_buffer_capacity_mb
+            .unwrap_or(match &cache_eviction_config {
+                EvictionConfig::Lru(lru) => {
+                    ((1.0 - lru.high_priority_pool_ratio) * block_cache_capacity_mb as f64) as usize
+                }
+                EvictionConfig::Lfu(lfu) => {
+                    ((1.0 - lfu.protected_capacity_ratio) * block_cache_capacity_mb as f64) as usize
+                }
+            });
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
@@ -1689,7 +1782,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
-        high_priority_ratio_in_percent,
+        cache_eviction_config,
     }
 }
 

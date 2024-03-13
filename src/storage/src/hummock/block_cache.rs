@@ -18,10 +18,10 @@ use std::sync::Arc;
 use ahash::RandomState;
 use await_tree::InstrumentAwait;
 use foyer::memory::{
-    Cache, CacheContext, CacheEntry, Entry, EntryState, LfuCacheConfig, LfuConfig, LruCacheConfig,
-    LruConfig,
+    Cache, CacheContext, CacheEntry, Entry, EntryState, LfuCacheConfig, LruCacheConfig,
 };
 use futures::Future;
+use risingwave_common::config::EvictionConfig;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use super::{Block, BlockCacheEventListener, HummockResult};
@@ -86,12 +86,6 @@ pub struct BlockCacheConfig {
     pub max_shard_bits: usize,
     pub eviction: EvictionConfig,
     pub listener: BlockCacheEventListener,
-}
-
-#[derive(Debug)]
-pub enum EvictionConfig {
-    Lru(LruConfig),
-    Lfu(LfuConfig),
 }
 
 #[derive(Clone)]
