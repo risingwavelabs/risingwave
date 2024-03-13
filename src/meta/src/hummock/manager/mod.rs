@@ -1056,11 +1056,10 @@ impl HummockManager {
         } else {
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
-            if group_config.compaction_config.split_weight_by_vnode > 0 {
+            if compact_task.existing_table_ids.len() == 1 {
+                table_to_vnode_partition.clear();
                 for table_id in &compact_task.existing_table_ids {
-                    table_to_vnode_partition
-                        .entry(*table_id)
-                        .or_insert(vnode_partition_count);
+                    table_to_vnode_partition.insert(*table_id, vnode_partition_count);
                 }
             }
 
