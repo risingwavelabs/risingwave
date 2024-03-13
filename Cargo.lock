@@ -9716,6 +9716,7 @@ dependencies = [
  "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
+ "risingwave_meta_dashboard",
  "risingwave_meta_model_migration",
  "risingwave_meta_model_v2",
  "risingwave_object_store",

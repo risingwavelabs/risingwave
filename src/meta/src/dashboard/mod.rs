@@ -416,27 +416,7 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-
-        let dashboard_router = if let Some(ui_path) = ui_path {
-            get_service(ServeDir::new(ui_path))
-                .handle_error(|e| async move { match e {} })
-                .boxed_clone()
-        } else {
-            let cache = Arc::new(Mutex::new(HashMap::new()));
-            tower::service_fn(move |req: Request<Body>| {
-                let cache = cache.clone();
-                async move {
-                    proxy::proxy(req, cache).await.or_else(|err| {
-                        Ok((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            err.context("Unhandled internal error").to_report_string(),
-                        )
-                            .into_response())
-                    })
-                }
-            })
-            .boxed_clone()
-        };
+        let dashboard_router = risingwave_meta_dashboard::router();
 
         let app = Router::new()
             .fallback_service(dashboard_router)
