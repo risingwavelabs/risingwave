@@ -90,6 +90,7 @@ mod test {
     use crate::telemetry::{CompactorTelemetryReport, TELEMETRY_COMPACTOR_REPORT_TYPE};
 
     // It is ok to use `TELEMETRY_REPORT_URL` here because we mark it as test and will not write to the database.
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_compactor_telemetry_report() {
         let mut report = CompactorTelemetryReport::new(

@@ -100,7 +100,9 @@ mod tests {
     use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
     use risingwave_common::telemetry::{post_telemetry_report_pb, TELEMETRY_REPORT_URL};
 
-    // It is ok to use `TELEMETRY_REPORT_URL` here because we mark it as test and will not write to the database.
+    // It is ok to
+    // use `TELEMETRY_REPORT_URL` here because we mark it as test and will not write to the database.
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_frontend_telemetry_report() {
         let mut report = super::FrontendTelemetryReport::new(

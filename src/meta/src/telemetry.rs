@@ -171,6 +171,7 @@ mod test {
 
     use crate::telemetry::{MetaTelemetryReport, NodeCount, RwVersion};
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_meta_telemetry_report() {
         use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
