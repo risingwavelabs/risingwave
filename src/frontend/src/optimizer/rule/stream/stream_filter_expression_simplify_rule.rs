@@ -38,8 +38,8 @@ impl Rule for StreamFilterExpressionSimplifyRule {
         let logical_share_plan = filter.input();
         let share: &LogicalShare = logical_share_plan.as_logical_share()?;
         let input = share.input().rewrite_exprs(&mut rewriter);
-        let share = LogicalShare::new(input);
-        Some(LogicalFilter::create(share.into(), filter.predicate().clone()))
+        share.replace_input(input);
+        Some(LogicalFilter::create(share.clone().into(), filter.predicate().clone()))
     }
 }
 
