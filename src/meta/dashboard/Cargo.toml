@@ -1,0 +1,25 @@
+[package]
+name = "risingwave_meta_dashboard"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = "0.6"
+rust-embed = { version = "8", features = ["interpolate-folder-path", "mime-guess"] }
+
+[dev-dependencies]
+
+[build-dependencies]
+anyhow = "1"
+cargo-emit = "0.2"
+dircpy = "0.3"
+npm_rs = "1"
+
+[lints]
+workspace = true
