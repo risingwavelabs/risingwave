@@ -9749,10 +9749,18 @@ version = "1.7.0-alpha"
 dependencies = [
  "anyhow",
  "axum",
+ "bytes",
  "cargo-emit",
  "dircpy",
+ "hyper",
+ "mime_guess",
  "npm_rs",
+ "reqwest",
  "rust-embed",
+ "thiserror-ext",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
