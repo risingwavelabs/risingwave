@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
-use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -34,32 +33,25 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
-use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
-use risingwave_pb::stream_service::{
-    StreamingControlStreamRequest, StreamingControlStreamResponse,
-};
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tonic::Status;
 
-use super::{unique_executor_id, unique_operator_id};
+use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Executor, ExecutorInfo,
-    WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, Barrier, DispatchExecutor, DispatcherImpl, Executor,
+    ExecutorInfo, WrapperExecutor,
 };
 use crate::from_proto::create_executor;
-use crate::task::barrier_manager::{
-    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
-};
+use crate::task::barrier_manager::{EventSender, LocalActorOperation, LocalBarrierWorker};
 use crate::task::{
     ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
     StreamActorManagerState, StreamEnvironment, UpDownActorIds,
@@ -207,19 +199,22 @@ impl LocalStreamManager {
         }
     }
 
-    /// Receive a new control stream request from meta. Notify the barrier worker to reset the CN and use the new control stream
-    /// to receive control message from meta
-    pub fn handle_new_control_stream(
+    /// Broadcast a barrier to all senders. Save a receiver in barrier manager
+    pub async fn send_barrier(
         &self,
-        sender: UnboundedSender<Result<StreamingControlStreamResponse, Status>>,
-        request_stream: BoxStream<'static, Result<StreamingControlStreamRequest, Status>>,
-        init_request: InitRequest,
-    ) {
+        barrier: Barrier,
+        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
+    ) -> StreamResult<()> {
         self.actor_op_tx
-            .send_event(LocalActorOperation::NewControlStream {
-                handle: ControlStreamHandle::new(sender, request_stream),
-                init_request,
-            })
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
+            .await
+    }
+
+    /// Use `epoch` to find collect rx. And wait for all actor to be collected before
+    /// returning.
+    pub async fn collect_barrier(&self, prev_epoch: u64) -> StreamResult<BarrierCompleteResult> {
+        self.actor_op_tx.await_epoch_completed(prev_epoch).await
     }
 
     /// Drop the resources of the given actors.
@@ -230,6 +225,17 @@ impl LocalStreamManager {
                 result_sender,
             })
             .await
+    }
+
+    /// Force stop all actors on this worker, and then drop their resources.
+    pub async fn reset(&self, prev_epoch: u64) {
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::Reset {
+                result_sender,
+                prev_epoch,
+            })
+            .await
+            .expect("should receive reset")
     }
 
     pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {
