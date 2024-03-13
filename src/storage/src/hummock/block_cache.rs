@@ -18,7 +18,8 @@ use std::sync::Arc;
 use ahash::RandomState;
 use await_tree::InstrumentAwait;
 use foyer::memory::{
-    Cache, CacheContext, CacheEntry, Entry, EntryState, LruCacheConfig, LruConfig,
+    Cache, CacheContext, CacheEntry, Entry, EntryState, LfuCacheConfig, LfuConfig, LruCacheConfig,
+    LruConfig,
 };
 use futures::Future;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -79,6 +80,20 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
+#[derive(Debug)]
+pub struct BlockCacheConfig {
+    pub capacity: usize,
+    pub max_shard_bits: usize,
+    pub eviction: EvictionConfig,
+    pub listener: BlockCacheEventListener,
+}
+
+#[derive(Debug)]
+pub enum EvictionConfig {
+    Lru(LruConfig),
+    Lfu(LfuConfig),
+}
+
 #[derive(Clone)]
 pub struct BlockCache {
     inner: Cache<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>,
@@ -110,33 +125,42 @@ impl BlockResponse {
 }
 
 impl BlockCache {
-    // TODO(MrCroxx): support other cache algorithm
-    pub fn new(
-        capacity: usize,
-        mut max_shard_bits: usize,
-        high_priority_ratio: usize,
-        event_listener: BlockCacheEventListener,
-    ) -> Self {
-        if capacity == 0 {
-            panic!("block cache capacity == 0");
-        }
-        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-            max_shard_bits -= 1;
-        }
-        let shards = 1 << max_shard_bits;
+    pub fn new(config: BlockCacheConfig) -> Self {
+        assert!(
+            config.capacity > 0,
+            "Block cache capacity must be positive."
+        );
 
-        let cache = Cache::lru(LruCacheConfig {
-            capacity,
-            shards,
-            eviction_config: LruConfig {
-                high_priority_pool_ratio: high_priority_ratio as f64 / 100.0,
-            },
-            object_pool_capacity: shards * 1024,
-            hash_builder: RandomState::default(),
-            event_listener,
-        });
+        let capacity = config.capacity;
+        let mut shard_bits = config.max_shard_bits;
+        while (capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        let shards = 1 << shard_bits;
+        let object_pool_capacity = shards * 1024;
+        let hash_builder = RandomState::default();
+        let event_listener = config.listener;
 
-        Self { inner: cache }
+        let inner = match config.eviction {
+            EvictionConfig::Lru(eviction_config) => Cache::lru(LruCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }),
+            EvictionConfig::Lfu(eviction_config) => Cache::lfu(LfuCacheConfig {
+                capacity,
+                shards,
+                eviction_config,
+                object_pool_capacity,
+                hash_builder,
+                event_listener,
+            }),
+        };
+
+        Self { inner }
     }
 
     pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
