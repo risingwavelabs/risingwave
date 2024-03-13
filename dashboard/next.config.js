@@ -23,7 +23,7 @@ const nextConfig = {
   trailingSlash: true,
   eslint: {
     // We have a separate step for running ESLint in CI.
-    // Ignore during build to skip the development dependency on `eslint`.
+    // Ignore to skip the development dependency on `eslint` for production builds.
     ignoreDuringBuilds: true,
   }
 }

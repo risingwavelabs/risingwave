@@ -1,3 +1,17 @@
+// Copyright 2024 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::path::{Path, PathBuf};
 
 use cargo_emit::{rerun_if_changed, rustc_cfg};
@@ -23,7 +37,9 @@ fn dest_dir() -> PathBuf {
 }
 
 fn build() -> anyhow::Result<()> {
-    rerun_if_changed!(format!("{DASHBOARD_DIR}/components")); // TODO
+    // TODO(bugen): we should include all files and subdirectories under `DASHBOARD_DIR`
+    // while excluding the `out` directory. There's no elegant way to do this.
+    rerun_if_changed!(format!("{DASHBOARD_DIR}/components"));
 
     let exit_status = NpmEnv::default()
         .with_node_env(&NodeEnv::Production)
@@ -50,8 +66,11 @@ fn main() -> anyhow::Result<()> {
 
     if should_build {
         build()?;
+        // Once build succeeded, set a cfg flag to indicate that the embedded assets
+        // are ready to be used.
         rustc_cfg!("dashboard_built");
     } else {
+        // If we're not to build, create the destination directory but keep it empty.
         std::fs::create_dir_all(dest_dir())?;
     }
 

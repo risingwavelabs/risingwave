@@ -100,6 +100,7 @@ async fn proxy(
     Ok(resp.into_response())
 }
 
+/// Router for proxying requests to GitHub static files, requiring internet access.
 pub(crate) fn router() -> Router {
     let cache = Arc::new(Mutex::new(HashMap::new()));
 
