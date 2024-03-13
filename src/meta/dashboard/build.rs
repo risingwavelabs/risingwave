@@ -55,7 +55,7 @@ fn build() -> anyhow::Result<()> {
 
     let dest = dest_dir();
     let src = Path::new(DASHBOARD_DIR).join("out");
-    dircpy::copy_dir(&src, &dest)?;
+    dircpy::copy_dir(src, dest)?;
 
     Ok(())
 }

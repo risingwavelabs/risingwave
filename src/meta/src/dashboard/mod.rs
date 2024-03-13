@@ -14,22 +14,18 @@
 
 mod prometheus;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::{boxed, Body};
+use axum::body::boxed;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, get_service};
 use axum::Router;
-use hyper::Request;
-use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use thiserror_ext::AsReport;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
