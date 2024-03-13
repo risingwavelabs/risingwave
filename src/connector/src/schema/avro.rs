@@ -16,33 +16,14 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use apache_avro::Schema as AvroSchema;
-use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 
-use super::schema_registry::{
-    get_subject_by_strategy, handle_sr_list, name_strategy_from_str, Client, ConfluentSchema,
-    SchemaRegistryAuth,
-};
-use super::{
-    invalid_option_error, InvalidOptionError, SchemaFetchError, KEY_MESSAGE_NAME_KEY,
-    MESSAGE_NAME_KEY, NAME_STRATEGY_KEY, SCHEMA_REGISTRY_KEY,
-};
+use super::loader::{LoadedSchema, SchemaLoader};
+use super::schema_registry::Subject;
+use super::SchemaFetchError;
 
 pub struct SchemaWithId {
     pub schema: Arc<AvroSchema>,
     pub id: i32,
-}
-
-impl TryFrom<ConfluentSchema> for SchemaWithId {
-    type Error = SchemaFetchError;
-
-    fn try_from(fetched: ConfluentSchema) -> Result<Self, Self::Error> {
-        let parsed = AvroSchema::parse_str(&fetched.content)
-            .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))?;
-        Ok(Self {
-            schema: Arc::new(parsed),
-            id: fetched.id,
-        })
-    }
 }
 
 /// Schema registry only
@@ -50,55 +31,26 @@ pub async fn fetch_schema(
     format_options: &BTreeMap<String, String>,
     topic: &str,
 ) -> Result<(SchemaWithId, SchemaWithId), SchemaFetchError> {
-    let schema_location = format_options
-        .get(SCHEMA_REGISTRY_KEY)
-        .ok_or_else(|| invalid_option_error!("{SCHEMA_REGISTRY_KEY} required"))?
-        .clone();
-    let client_config = format_options.into();
-    let name_strategy = format_options
-        .get(NAME_STRATEGY_KEY)
-        .map(|s| {
-            name_strategy_from_str(s)
-                .ok_or_else(|| invalid_option_error!("unrecognized strategy {s}"))
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let key_record_name = format_options
-        .get(KEY_MESSAGE_NAME_KEY)
-        .map(std::ops::Deref::deref);
-    let val_record_name = format_options
-        .get(MESSAGE_NAME_KEY)
-        .map(std::ops::Deref::deref);
+    let loader = SchemaLoader::from_format_options(topic, format_options)?;
 
-    let (key_schema, val_schema) = fetch_schema_inner(
-        &schema_location,
-        &client_config,
-        &name_strategy,
-        topic,
-        key_record_name,
-        val_record_name,
-    )
-    .await?;
+    let (key_id, key_avro) = loader.load_key_schema().await?;
+    let (val_id, val_avro) = loader.load_val_schema().await?;
 
-    Ok((key_schema.try_into()?, val_schema.try_into()?))
+    Ok((
+        SchemaWithId {
+            id: key_id,
+            schema: Arc::new(key_avro),
+        },
+        SchemaWithId {
+            id: val_id,
+            schema: Arc::new(val_avro),
+        },
+    ))
 }
 
-async fn fetch_schema_inner(
-    schema_location: &str,
-    client_config: &SchemaRegistryAuth,
-    name_strategy: &PbSchemaRegistryNameStrategy,
-    topic: &str,
-    key_record_name: Option<&str>,
-    val_record_name: Option<&str>,
-) -> Result<(ConfluentSchema, ConfluentSchema), SchemaFetchError> {
-    let urls = handle_sr_list(schema_location)?;
-    let client = Client::new(urls, client_config)?;
-
-    let key_subject = get_subject_by_strategy(name_strategy, topic, key_record_name, true)?;
-    let key_schema = client.get_schema_by_subject(&key_subject).await?;
-
-    let val_subject = get_subject_by_strategy(name_strategy, topic, val_record_name, false)?;
-    let val_schema = client.get_schema_by_subject(&val_subject).await?;
-
-    Ok((key_schema, val_schema))
+impl LoadedSchema for AvroSchema {
+    fn compile(primary: Subject, _: Vec<Subject>) -> Result<Self, SchemaFetchError> {
+        AvroSchema::parse_str(&primary.schema.content)
+            .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))
+    }
 }

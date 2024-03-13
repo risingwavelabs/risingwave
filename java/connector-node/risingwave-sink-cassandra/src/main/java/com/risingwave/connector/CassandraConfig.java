@@ -42,6 +42,12 @@ public class CassandraConfig extends CommonSinkConfig {
     @JsonProperty(value = "cassandra.password")
     private String password;
 
+    @JsonProperty(value = "cassandra.max_batch_rows")
+    private Integer maxBatchRows = 512;
+
+    @JsonProperty(value = "cassandra.request_timeout_ms")
+    private Integer requestTimeoutMs = 2000;
+
     @JsonCreator
     public CassandraConfig(
             @JsonProperty(value = "cassandra.url") String url,
@@ -91,6 +97,32 @@ public class CassandraConfig extends CommonSinkConfig {
 
     public CassandraConfig withPassword(String password) {
         this.password = password;
+        return this;
+    }
+
+    public Integer getMaxBatchRows() {
+        return maxBatchRows;
+    }
+
+    public CassandraConfig withMaxBatchRows(Integer maxBatchRows) {
+        if (maxBatchRows > 65536 || maxBatchRows < 1) {
+            throw new IllegalArgumentException(
+                    "Cassandra sink option: maxBatchRows must be <= 65535 and >= 1");
+        }
+        this.maxBatchRows = maxBatchRows;
+        return this;
+    }
+
+    public Integer getRequestTimeoutMs() {
+        return requestTimeoutMs;
+    }
+
+    public CassandraConfig withRequestTimeoutMs(Integer requestTimeoutMs) {
+        if (requestTimeoutMs < 1) {
+            throw new IllegalArgumentException(
+                    "Cassandra sink option: requestTimeoutMs must be >= 1");
+        }
+        this.requestTimeoutMs = requestTimeoutMs;
         return this;
     }
 }

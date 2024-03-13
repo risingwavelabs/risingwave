@@ -51,8 +51,7 @@ public class JniDbzSourceHandler {
         // userProps extracted from request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
         mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
-        var commonParam = request.getCommonParam();
-        boolean isMultiTableShared = commonParam.getIsMultiTableShared();
+        boolean isCdcSourceJob = request.getIsSourceJob();
 
         if (request.getSourceType() == POSTGRES) {
             DbzSourceUtils.createPostgresPublicationIfNeeded(
@@ -66,7 +65,7 @@ public class JniDbzSourceHandler {
                         request.getStartOffset(),
                         mutableUserProps,
                         request.getSnapshotDone(),
-                        isMultiTableShared);
+                        isCdcSourceJob);
         JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
         handler.start(channelPtr);
     }

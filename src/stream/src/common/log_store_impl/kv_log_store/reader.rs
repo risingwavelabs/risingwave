@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{try_join_all, BoxFuture};
-use futures::stream::select_all;
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -27,6 +26,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
+use risingwave_common::util::epoch::EpochExt;
 use risingwave_connector::sink::log_store::{
     ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
 };
@@ -112,7 +112,7 @@ pub struct KvLogStoreReader<S: StateStore> {
     first_write_epoch: Option<u64>,
 
     /// `Some` means consuming historical log data
-    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>,
+    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::Iter>>>>,
 
     /// Store the future that attempts to read a flushed stream chunk.
     /// This is for cancellation safety. Since it is possible that the future of `next_item`
@@ -183,13 +183,13 @@ impl<S: StateStore> KvLogStoreReader<S> {
     fn read_persisted_log_store(
         &self,
         last_persisted_epoch: Option<u64>,
-    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>> + Send
+    ) -> impl Future<Output = LogStoreResult<Pin<Box<LogStoreItemMergeStream<S::Iter>>>>> + Send
     {
         let range_start = if let Some(last_persisted_epoch) = last_persisted_epoch {
             // start from the next epoch of last_persisted_epoch
             Included(
                 self.serde
-                    .serialize_pk_epoch_prefix(last_persisted_epoch + 1),
+                    .serialize_pk_epoch_prefix(last_persisted_epoch.next_epoch()),
             )
         } else {
             Unbounded
@@ -340,7 +340,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     let table_id = self.table_id;
                     let read_metrics = self.metrics.flushed_buffer_read_metrics.clone();
                     async move {
-                        let streams = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+                        let iters = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                             let range_start =
                                 serde.serialize_log_store_pk(vnode, item_epoch, Some(start_seq_id));
                             let range_end =
@@ -350,7 +350,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                             // Use MAX EPOCH here because the epoch to consume may be below the safe
                             // epoch
                             async move {
-                                Ok::<_, anyhow::Error>(Box::pin(
+                                Ok::<_, anyhow::Error>(
                                     state_store
                                         .iter(
                                             (Included(range_start), Included(range_end)),
@@ -364,15 +364,14 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             },
                                         )
                                         .await?,
-                                ))
+                                )
                             }
                         }))
                         .await?;
-                        let combined_stream = select_all(streams);
 
                         let chunk = serde
                             .deserialize_stream_chunk(
-                                combined_stream,
+                                iters,
                                 start_seq_id,
                                 end_seq_id,
                                 item_epoch,
@@ -477,7 +476,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             let persisted_epoch =
                 self.truncate_offset
                     .map(|truncate_offset| match truncate_offset {
-                        TruncateOffset::Chunk { epoch, .. } => epoch - 1,
+                        TruncateOffset::Chunk { epoch, .. } => epoch.prev_epoch(),
                         TruncateOffset::Barrier { epoch } => epoch,
                     });
             self.state_store_stream = Some(self.read_persisted_log_store(persisted_epoch).await?);

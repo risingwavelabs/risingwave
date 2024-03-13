@@ -23,7 +23,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
@@ -44,7 +43,7 @@ use risingwave_storage::monitor::{
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::{StateStore, StateStoreImpl};
+use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
@@ -603,8 +602,7 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType =
-    Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::IterStream>>;
+type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
@@ -661,8 +659,6 @@ pub async fn check_compaction_results(
         let mut expect_cnt = 0;
         let mut actual_cnt = 0;
 
-        futures::pin_mut!(expect_iter);
-        futures::pin_mut!(actual_iter);
         while let Some(kv_expect) = expect_iter.try_next().await? {
             expect_cnt += 1;
             let ret = actual_iter.try_next().await?;

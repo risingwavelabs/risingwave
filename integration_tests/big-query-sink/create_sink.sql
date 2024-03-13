@@ -23,7 +23,7 @@ FROM
     -- bigquery.dataset= '${dataset_id}',
     -- bigquery.table= '${table_id}',
     -- access_key = '${aws_access_key}',
-    -- secret_access = '${aws_secret_access}',
+    -- secret_key = '${aws_secret_key}',
     -- region = '${aws_region}',
     -- force_append_only='true',
 -- );

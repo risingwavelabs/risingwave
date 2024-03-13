@@ -17,7 +17,7 @@ create source mysql_mytest with (
  connector = 'mysql-cdc',
  hostname = '${MYSQL_HOST:localhost}',
  port = '${MYSQL_TCP_PORT:8306}',
- username = 'dbz',
+ username = 'rwcdc',
  password = '${MYSQL_PWD:}',
  database.name = 'mytest',
  server.id = '5601'

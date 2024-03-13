@@ -132,6 +132,13 @@ select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
 2 2
 NULL 0
 
+query II
+select a, (select array_agg(t1.a) filter (where t1.a is distinct from 1) from t1 where t1.a <> t.b) from t1 as t order by 1;
+----
+1 NULL
+2 {2}
+NULL NULL
+
 statement ok
 drop table t1;
 

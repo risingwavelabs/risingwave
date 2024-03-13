@@ -97,8 +97,8 @@ install_all() {
   promql --version
 
   echo ">>> Installing Kafka"
-  wget https://downloads.apache.org/kafka/3.4.1/kafka_2.13-3.4.1.tgz
-  tar -zxvf kafka_2.13-3.4.1.tgz
+  wget $(get_latest_kafka_download_url) -O kafka_latest.tgz
+  tar -zxvf kafka_latest.tgz
 
   echo ">>> Installing nexmark bench"
   buildkite-agent artifact download nexmark-server /usr/local/bin
