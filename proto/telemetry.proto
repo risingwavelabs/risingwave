@@ -82,6 +82,19 @@ message MetaReport {
   // This field represents the "number of running streaming jobs"
   // and is used to indicate whether the cluster is active.
   uint32 stream_job_count = 5;
+  // stream_jobs is the list of running streaming jobs
+  // and is used to collect the table_id, connector_name and table_optimizations
+  repeated StreamJobDesc stream_jobs = 6;
+}
+
+enum TableOptimization {
+    TABLE_OPTIMIZATION_UNSPECIFIED = 0;
+}
+
+message StreamJobDesc {
+  int32 table_id = 1;
+  optional string connector_name = 2;
+  repeated TableOptimization table_optimizations = 3;
 }
 
 message ComputeReport {

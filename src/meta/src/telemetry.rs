@@ -42,6 +42,19 @@ struct RwVersion {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum TableOptimization {
+    // todo: add optimization applied to each job
+    Placeholder,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetaTelemetryJobDesc {
+    pub table_id: i32,
+    pub connector: Option<String>,
+    pub optimization: Vec<TableOptimization>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
@@ -50,6 +63,25 @@ pub struct MetaTelemetryReport {
     // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
     rw_version: RwVersion,
+    job_desc: Vec<MetaTelemetryJobDesc>,
+}
+
+impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
+    fn from(val: MetaTelemetryJobDesc) -> Self {
+        risingwave_pb::telemetry::StreamJobDesc {
+            table_id: val.table_id,
+            connector_name: val.connector,
+            table_optimizations: val
+                .optimization
+                .iter()
+                .map(|opt| match opt {
+                    TableOptimization::Placeholder => {
+                        risingwave_pb::telemetry::TableOptimization::Unspecified as i32
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 impl TelemetryToProtobuf for MetaTelemetryReport {
@@ -72,6 +104,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
                 git_sha: self.rw_version.git_sha,
             }),
             stream_job_count: self.streaming_job_count as u32,
+            stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
         };
         pb_report.encode_to_vec()
     }
@@ -129,6 +162,11 @@ impl TelemetryReportCreator for MetaReportCreator {
             .count_streaming_job()
             .await
             .map_err(|err| err.as_report().to_string())? as u64;
+        let stream_job_desc = self
+            .metadata_manager
+            .list_stream_job_desc()
+            .await
+            .map_err(|err| err.as_report().to_string())?;
 
         Ok(MetaTelemetryReport {
             rw_version: RwVersion {
@@ -151,6 +189,7 @@ impl TelemetryReportCreator for MetaReportCreator {
             },
             streaming_job_count,
             meta_backend: self.meta_backend,
+            job_desc: stream_job_desc,
         })
     }
 
