@@ -86,9 +86,9 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        if source.is_shared_cdc_source() {
+        if source.is_backfillable_cdc_connector() {
             Err(ErrorCode::InternalError(
-                "Should not create MATERIALIZED VIEW directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
+                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
             .into())
         } else {

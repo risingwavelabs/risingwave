@@ -54,7 +54,7 @@ pub struct BoundSource {
 }
 
 impl BoundSource {
-    pub fn is_shared_cdc_source(&self) -> bool {
+    pub fn is_backfillable_cdc_connector(&self) -> bool {
         self.catalog.with_properties.is_backfillable_cdc_connector()
     }
 }
