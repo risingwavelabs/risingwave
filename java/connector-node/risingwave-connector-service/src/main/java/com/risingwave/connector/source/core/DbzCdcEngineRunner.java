@@ -84,7 +84,9 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                             message,
                                             error);
                                     String errorMsg =
-                                            (error != null ? error.getMessage() : message);
+                                            (error != null && error.getMessage() != null
+                                                    ? error.getMessage()
+                                                    : message);
                                     if (!Binding.sendCdcSourceErrorToChannel(
                                             channelPtr, errorMsg)) {
                                         LOG.warn(
