@@ -23,6 +23,17 @@ mod proxy;
 ///
 /// Based on the configuration, it will either serve the assets embedded in the binary,
 /// or proxy all requests to the latest static files built and hosted on GitHub.
+///
+/// - For development and CI builds, the requests to the dashboard will be proxied. This
+///   is to reduce the build time and eliminate the dependency on `node`, so that the
+///   developer experience can be better.
+///
+/// - For release builds, the assets will built in the build script and embedded in the
+///   binary. This is to make the deployment easier and the dashboard more reliable
+///   without relying on external or remote resources.
+///
+/// If you're going to develop with the dashboard, see `dashboard/README.md` for more
+/// details.
 pub fn router() -> Router {
     // We use `cfg!` instead of `#[cfg]` here to ensure both branches can be checked
     // by the compiler no matter which one is actually used.
