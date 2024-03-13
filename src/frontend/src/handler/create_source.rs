@@ -1306,7 +1306,7 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let create_cdc_source_job = with_properties.is_shared_cdc_source();
+    let create_cdc_source_job = with_properties.is_backfillable_cdc_connector();
 
     let (columns_from_resolve_source, source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?
