@@ -219,15 +219,21 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
 
             tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, ?current_pk_pos, "start cdc backfill loop");
-            'backfill_loop: loop {
-                let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+            let snapshot_read_limit: usize = 10000;
 
+            // the buffer will be drained when a barrier comes
+            let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+            'backfill_loop: loop {
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
+                let mut snapshot_read_row_cnt: usize = 0;
                 let args = SnapshotReadArgs::new_for_cdc(current_pk_pos.clone(), self.chunk_size);
 
-                let (right_snapshot, valve) =
-                    pausable(upstream_table_reader.snapshot_read(args).map(Either::Right));
+                let (right_snapshot, valve) = pausable(
+                    upstream_table_reader
+                        .snapshot_read(args.clone(), snapshot_read_limit as u32)
+                        .map(Either::Right),
+                );
 
                 if paused {
                     valve.pause();
@@ -386,29 +392,46 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         upstream_table_id,
                                         ?last_binlog_offset,
                                         ?current_pk_pos,
-                                        "snapshot read stream ends"
+                                        ?snapshot_read_row_cnt,
+                                        "snapshot stream gets None"
                                     );
-                                    // End of the snapshot read stream.
-                                    // We should not mark the chunk anymore,
-                                    // otherwise, we will ignore some rows
-                                    // in the buffer. Here we choose to never mark the chunk.
-                                    // Consume with the renaming stream buffer chunk without mark.
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        yield Message::Chunk(mapping_chunk(
-                                            chunk,
-                                            &self.output_indices,
-                                        ));
-                                    }
 
-                                    state_impl
-                                        .mutate_state(
-                                            current_pk_pos,
-                                            last_binlog_offset.clone(),
-                                            total_snapshot_row_count,
-                                            true,
-                                        )
-                                        .await?;
-                                    break 'backfill_loop;
+                                    if snapshot_read_row_cnt < snapshot_read_limit {
+                                        tracing::info!(
+                                            upstream_table_id,
+                                            ?last_binlog_offset,
+                                            ?current_pk_pos,
+                                            "snapshot read stream ends"
+                                        );
+                                        // If the snapshot read stream ends with less than `limit` rows,
+                                        // it means the snapshot read stream has been finished.
+                                        // We should not mark the chunk anymore,
+                                        // otherwise, we will ignore some rows in the buffer.
+                                        // Here we choose to never mark the chunk.
+                                        // Consume with the renaming stream buffer chunk without mark.
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            yield Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                        }
+
+                                        state_impl
+                                            .mutate_state(
+                                                current_pk_pos.clone(),
+                                                last_binlog_offset.clone(),
+                                                total_snapshot_row_count,
+                                                true,
+                                            )
+                                            .await?;
+
+                                        // exit backfill
+                                        break 'backfill_loop;
+                                    } else {
+                                        // break the for loop to reconstruct a new snapshot with pk offset
+                                        // to ensure we load all historical data
+                                        break;
+                                    }
                                 }
                                 Some(chunk) => {
                                     // Raise the current position.
@@ -425,6 +448,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                     total_snapshot_row_count += chunk_cardinality;
+                                    // count the number of rows in the snapshot
+                                    snapshot_read_row_cnt += chunk.cardinality();
                                     yield Message::Chunk(mapping_chunk(
                                         chunk,
                                         &self.output_indices,

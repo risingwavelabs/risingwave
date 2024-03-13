@@ -110,8 +110,13 @@ impl ExternalTableReader for PostgresExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+    }
+
+    fn get_stat(&self) -> usize {
+        0
     }
 }
 
@@ -168,23 +173,26 @@ impl PostgresExternalTableReader {
         table_name: SchemaTableName,
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let order_key = primary_keys.iter().join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT {}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
-                order_key
+                order_key,
+                limit
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
-                order_key
+                order_key,
+                limit
             )
         };
 
@@ -305,6 +313,7 @@ mod tests {
             },
             Some(start_pk),
             vec!["v1".to_string(), "v2".to_string()],
+            1000,
         );
 
         pin_mut!(stream);

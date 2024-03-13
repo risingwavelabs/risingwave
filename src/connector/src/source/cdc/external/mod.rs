@@ -16,6 +16,7 @@ pub mod mock_external_table;
 mod postgres;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -214,7 +215,10 @@ pub trait ExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
+
+    fn get_stat(&self) -> usize;
 }
 
 #[derive(Debug)]
@@ -229,6 +233,7 @@ pub struct MySqlExternalTableReader {
     config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
+    row_cnt: AtomicUsize,
     // use mutex to provide shared mutable access to the connection
     conn: tokio::sync::Mutex<mysql_async::Conn>,
 }
@@ -276,8 +281,13 @@ impl ExternalTableReader for MySqlExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+    }
+
+    fn get_stat(&self) -> usize {
+        self.row_cnt.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -311,6 +321,7 @@ impl MySqlExternalTableReader {
             config,
             rw_schema,
             field_names,
+            row_cnt: AtomicUsize::new(0),
             conn: tokio::sync::Mutex::new(conn),
         })
     }
@@ -329,6 +340,7 @@ impl MySqlExternalTableReader {
         table_name: SchemaTableName,
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let order_key = primary_keys
             .iter()
@@ -336,19 +348,19 @@ impl MySqlExternalTableReader {
             .join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
-                order_key
+                order_key,
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
-                order_key
+                order_key,
             )
         };
 
@@ -358,21 +370,20 @@ impl MySqlExternalTableReader {
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
         if start_pk_row.is_none() {
-            let mut result_set = conn.query_iter(sql).await?;
-            let rs_stream = result_set.stream::<mysql_async::Row>().await?;
-            if let Some(rs_stream) = rs_stream {
-                let row_stream = rs_stream.map(|row| {
-                    // convert mysql row into OwnedRow
-                    let mut row = row?;
-                    Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-                });
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
 
-                pin_mut!(row_stream);
-                #[for_await]
-                for row in row_stream {
-                    let row = row?;
-                    yield row;
-                }
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                self.row_cnt
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                yield row;
             }
         } else {
             let field_map = self
@@ -424,6 +435,8 @@ impl MySqlExternalTableReader {
             #[for_await]
             for row in row_stream {
                 let row = row?;
+                self.row_cnt
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 yield row;
             }
         };
@@ -494,8 +507,17 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+    }
+
+    fn get_stat(&self) -> usize {
+        match self {
+            ExternalTableReaderImpl::MySql(mysql) => mysql.get_stat(),
+            ExternalTableReaderImpl::Postgres(postgres) => postgres.get_stat(),
+            ExternalTableReaderImpl::Mock(mock) => mock.get_stat(),
+        }
     }
 }
 
@@ -516,16 +538,17 @@ impl ExternalTableReaderImpl {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let stream = match self {
             ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.snapshot_read(table_name, start_pk, primary_keys)
+                mysql.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
-                postgres.snapshot_read(table_name, start_pk, primary_keys)
+                postgres.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Mock(mock) => {
-                mock.snapshot_read(table_name, start_pk, primary_keys)
+                mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
         };
 
@@ -557,7 +580,7 @@ mod tests {
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(`id` > :id)");
 
-        let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        let cols = vec!["aa".to_string(), "bb".to_string()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
@@ -621,7 +644,7 @@ mod tests {
             table_name: "t1".to_string(),
         };
 
-        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()]);
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()], 1000);
         pin_mut!(stream);
         #[for_await]
         for row in stream {

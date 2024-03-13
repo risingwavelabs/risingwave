@@ -30,6 +30,7 @@ pub trait UpstreamTableRead {
     fn snapshot_read(
         &self,
         args: SnapshotReadArgs,
+        limit: u32,
     ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_;
 
     fn current_binlog_offset(
@@ -37,7 +38,7 @@ pub trait UpstreamTableRead {
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SnapshotReadArgs {
     pub epoch: u64,
     pub current_pos: Option<OwnedRow>,
@@ -75,7 +76,7 @@ impl<T> UpstreamTableReader<T> {
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(&self, args: SnapshotReadArgs) {
+    async fn snapshot_read(&self, args: SnapshotReadArgs, limit: u32) {
         let primary_keys = self
             .inner
             .pk_indices()
@@ -96,6 +97,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             self.inner.schema_table_name(),
             args.current_pos,
             primary_keys,
+            limit,
         );
 
         pin_mut!(row_stream);
@@ -106,6 +108,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         for chunk in chunk_stream {
             yield Some(chunk?);
         }
+
+        tracing::info!(
+            "snapshot_read done, row count: {}",
+            self.inner.table_reader().get_stat()
+        );
         yield None;
     }
 
