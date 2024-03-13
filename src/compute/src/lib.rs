@@ -76,10 +76,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: MetaAddressStrategy,
 
-    /// Endpoint of the connector node
-    #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
-
     /// Payload format of connector sink rpc
     #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
     pub connector_rpc_sink_payload_format: Option<String>,

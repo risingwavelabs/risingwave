@@ -92,12 +92,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
     pub prometheus_selector: Option<String>,
 
-    // TODO(eric): remove me
-    /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
-    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
-
     /// Default tag for the endpoint created when creating a privatelink connection.
     /// Will be appended to the tags specified in the `tags` field in with clause in `create
     /// connection`.
@@ -318,7 +312,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
-                connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta

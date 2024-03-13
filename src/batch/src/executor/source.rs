@@ -173,7 +173,6 @@ impl SourceExecutor {
             u32::MAX,
             self.metrics,
             self.source_ctrl_opts.clone(),
-            None,
             ConnectorProperties::default(),
             "NA".to_owned(), // source name was not passed in batch plan
         ));

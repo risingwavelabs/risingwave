@@ -319,14 +319,11 @@ pub async fn compute_node_serve(
     );
 
     info!(
-        "connector param: {:?} {:?}",
-        opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
+        "connector param: payload_format={:?}",
+        opts.connector_rpc_sink_payload_format
     );
 
-    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
-
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_client,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
             None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
             Some("json") => SinkPayloadFormat::Json,
