@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
@@ -2400,7 +2401,7 @@ impl CatalogController {
         &self,
     ) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
         let inner = self.inner.read().await;
-        let info: Vec<(TableId, Property)> = Table::find()
+        let info: Vec<(TableId, Option<Property>)> = Table::find()
             .select_only()
             .column(table::Column::TableId)
             .column(source::Column::WithProperties)
@@ -2417,10 +2418,14 @@ impl CatalogController {
         Ok(info
             .into_iter()
             .map(|(table_id, properties)| {
-                let connector_info = properties
-                    .inner_ref()
-                    .get("connector")
-                    .map(|v| v.to_lowercase());
+                let connector_info = if let Some(inner_props) = properties {
+                    inner_props
+                        .inner_ref()
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .map(|v| v.to_lowercase())
+                } else {
+                    None
+                };
                 MetaTelemetryJobDesc {
                     table_id,
                     connector: connector_info,
