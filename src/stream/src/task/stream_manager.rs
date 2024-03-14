@@ -68,7 +68,7 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 /// `LocalStreamManager` manages all stream executors in this project.
 #[derive(Clone)]
 pub struct LocalStreamManager {
-    actor_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
     barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 
     pub env: StreamEnvironment,
@@ -153,7 +153,7 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        let actor_await_tree_reg = await_tree_config
+        let await_tree_reg = await_tree_config
             .clone()
             .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
         let barrier_await_tree_reg =
@@ -164,13 +164,13 @@ impl LocalStreamManager {
         let _join_handle = LocalBarrierWorker::spawn(
             env.clone(),
             streaming_metrics,
-            actor_await_tree_reg.clone(),
+            await_tree_reg.clone(),
             barrier_await_tree_reg.clone(),
             watermark_epoch,
             actor_op_rx,
         );
         Self {
-            actor_await_tree_reg,
+            await_tree_reg,
             barrier_await_tree_reg,
             env,
             actor_op_tx: EventSender(actor_op_tx),
@@ -185,7 +185,7 @@ impl LocalStreamManager {
                 let mut o = std::io::stdout().lock();
 
                 for (k, trace) in self
-                    .actor_await_tree_reg
+                    .await_tree_reg
                     .as_ref()
                     .expect("async stack trace not enabled")
                     .lock()
@@ -209,7 +209,7 @@ impl LocalStreamManager {
 
     /// Get await-tree contexts for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
-        match &self.actor_await_tree_reg.as_ref() {
+        match &self.await_tree_reg.as_ref() {
             Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }
@@ -331,10 +331,7 @@ impl LocalBarrierWorker {
             assert!(result.is_ok() || result.err().unwrap().is_cancelled());
         }
         self.actor_manager_state.clear_state();
-        if let Some(m) = self.actor_manager.actor_await_tree_reg.as_ref() {
-            m.lock().clear();
-        }
-        if let Some(m) = self.state.barrier_await_tree_reg.as_ref() {
+        if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.lock().clear();
         }
         dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
@@ -634,7 +631,7 @@ impl LocalBarrierWorker {
                         barrier_manager.notify_failure(actor_id, err);
                     }
                 });
-                let traced = match &self.actor_manager.actor_await_tree_reg {
+                let traced = match &self.actor_manager.await_tree_reg {
                     Some(m) => m
                         .lock()
                         .register(actor_id, trace_span)

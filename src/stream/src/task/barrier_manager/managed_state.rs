@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
-use std::future::{poll_fn, Future};
+use std::future::Future;
 use std::iter::once;
 use std::mem::replace;
 use std::ops::Sub;
 use std::sync::Arc;
-use std::task::Poll;
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
@@ -42,70 +41,6 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
-fn pending_for_once() -> impl Future<Output = ()> + Unpin + 'static {
-    let mut polled = false;
-    poll_fn(move |_cx| {
-        if polled {
-            Poll::Ready(())
-        } else {
-            polled = true;
-            Poll::Pending
-        }
-    })
-}
-
-fn instrument_barrier(
-    barrier_await_tree_reg: &Option<Arc<Mutex<await_tree::Registry<u64>>>>,
-    barrier: &Barrier,
-) -> Option<InflightBarrierInstrumented> {
-    barrier_await_tree_reg.as_ref().map(|r| {
-        let mut ret = InflightBarrierInstrumented(
-            r.lock()
-                .register(
-                    barrier.epoch.prev,
-                    format!(
-                        "Inflight Barrier prev = {}, curr = {}",
-                        barrier.epoch.prev, barrier.epoch.curr
-                    ),
-                )
-                .instrument(async {
-                    pending_for_once()
-                        .instrument_await("AwaitBarrierCollected")
-                        .await;
-                    pending_for_once().instrument_await("AwaitSync").await;
-                })
-                .boxed(),
-        );
-        ret.next();
-        ret
-    })
-}
-
-type InflightBarrierInstrumentedInner = impl Future<Output = ()> + Send + Unpin + 'static;
-struct InflightBarrierInstrumented(InflightBarrierInstrumentedInner);
-
-impl Debug for InflightBarrierInstrumented {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InflightBarrierInstrumented").finish()
-    }
-}
-
-impl InflightBarrierInstrumented {
-    fn next(&mut self) {
-        assert!(poll_fn(|cx| Poll::Ready(self.0.poll_unpin(cx)))
-            .now_or_never()
-            .expect("should not pending")
-            .is_pending());
-    }
-
-    fn finish(mut self) {
-        assert!(poll_fn(|cx| Poll::Ready(self.0.poll_unpin(cx)))
-            .now_or_never()
-            .expect("should not pending")
-            .is_ready());
-    }
-}
-
 /// The state machine of local barrier manager.
 #[derive(Debug)]
 enum ManagedBarrierStateInner {
@@ -122,12 +57,10 @@ enum ManagedBarrierStateInner {
         remaining_actors: HashSet<ActorId>,
 
         barrier_inflight_latency: HistogramTimer,
-
-        instrumented_inflight_barrier: Option<InflightBarrierInstrumented>,
     },
 
     /// The barrier has been collected by all remaining actors
-    AllCollected(Option<InflightBarrierInstrumented>),
+    AllCollected,
 
     /// The barrier has been completed, which means the barrier has been collected by all actors and
     /// synced in state store
@@ -191,7 +124,7 @@ fn sync_epoch(
     }
 }
 
-pub(crate) struct ManagedBarrierState {
+pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
     /// The key is prev_epoch, and the first value is curr_epoch
@@ -208,7 +141,7 @@ pub(crate) struct ManagedBarrierState {
     await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
 
     /// Manages the await-trees of all barriers.
-    pub(crate) barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 }
 
 impl ManagedBarrierState {
@@ -237,6 +170,15 @@ impl ManagedBarrierState {
         }
     }
 
+    pub(super) fn reset_and_take_barrier_await_tree_reg(
+        &mut self,
+    ) -> Option<Arc<Mutex<await_tree::Registry<u64>>>> {
+        if let Some(reg) = &self.barrier_await_tree_reg {
+            reg.lock().clear();
+        }
+        self.barrier_await_tree_reg.take()
+    }
+
     /// This method is called when barrier state is modified in either `Issued` or `Stashed`
     /// to transform the state to `AllCollected` and start state store `sync` when the barrier
     /// has been collected from all actors for an `Issued` barrier.
@@ -252,8 +194,7 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::Issued {
                     remaining_actors, ..
                 } if remaining_actors.is_empty() => {}
-                ManagedBarrierStateInner::AllCollected(_)
-                | ManagedBarrierStateInner::Completed(_) => {
+                ManagedBarrierStateInner::AllCollected | ManagedBarrierStateInner::Completed(_) => {
                     continue;
                 }
                 ManagedBarrierStateInner::Stashed { .. }
@@ -264,23 +205,15 @@ impl ManagedBarrierState {
 
             let prev_state = replace(
                 &mut barrier_state.inner,
-                ManagedBarrierStateInner::AllCollected(None),
+                ManagedBarrierStateInner::AllCollected,
             );
 
-            let instrumented_inflight_barrier = must_match!(prev_state, ManagedBarrierStateInner::Issued {
+            must_match!(prev_state, ManagedBarrierStateInner::Issued {
                 barrier_inflight_latency: timer,
-                mut instrumented_inflight_barrier,
                 ..
             } => {
                 timer.observe_duration();
-                if let Some(instrumented) = &mut instrumented_inflight_barrier {
-                    instrumented.next();
-                }
-                instrumented_inflight_barrier
             });
-
-            barrier_state.inner =
-                ManagedBarrierStateInner::AllCollected(instrumented_inflight_barrier);
 
             let create_mview_progress = self
                 .create_mview_progress
@@ -315,19 +248,28 @@ impl ManagedBarrierState {
                 }
             }
 
-            self.await_epoch_completed_futures.push_back(
-                sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
-                    move |result| {
-                        (
-                            prev_epoch,
-                            result.map(move |sync_result| BarrierCompleteResult {
-                                sync_result,
-                                create_mview_progress,
-                            }),
-                        )
-                    },
-                ),
-            );
+            self.await_epoch_completed_futures.push_back({
+                let future =
+                    sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
+                        move |result| {
+                            (
+                                prev_epoch,
+                                result.map(move |sync_result| BarrierCompleteResult {
+                                    sync_result,
+                                    create_mview_progress,
+                                }),
+                            )
+                        },
+                    );
+                if let Some(reg) = &self.barrier_await_tree_reg {
+                    reg.lock()
+                        .register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
+                        .instrument(future)
+                        .left_future()
+                } else {
+                    future.right_future()
+                }
+            });
         }
     }
 
@@ -449,10 +391,6 @@ impl ManagedBarrierState {
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
                     barrier_inflight_latency: timer,
-                    instrumented_inflight_barrier: instrument_barrier(
-                        &self.barrier_await_tree_reg,
-                        barrier,
-                    ),
                 }
             }
             Some(BarrierState { ref inner, .. }) => {
@@ -464,10 +402,6 @@ impl ManagedBarrierState {
             None => ManagedBarrierStateInner::Issued {
                 remaining_actors: actor_ids_to_collect,
                 barrier_inflight_latency: timer,
-                instrumented_inflight_barrier: instrument_barrier(
-                    &self.barrier_await_tree_reg,
-                    barrier,
-                ),
             },
         };
         self.epoch_barrier_state_map.insert(
@@ -488,16 +422,9 @@ impl ManagedBarrierState {
                 .epoch_barrier_state_map
                 .get_mut(&prev_epoch)
                 .expect("should exist");
-            let prev_state = replace(
-                &mut state.inner,
-                ManagedBarrierStateInner::Completed(result),
-            );
             // sanity check on barrier state
-            must_match!(prev_state, ManagedBarrierStateInner::AllCollected(instrumented) => {
-                if let Some(instrumented) = instrumented {
-                    instrumented.finish();
-                }
-            });
+            assert_matches!(&state.inner, ManagedBarrierStateInner::AllCollected);
+            state.inner = ManagedBarrierStateInner::Completed(result);
             prev_epoch
         })
     }
@@ -551,15 +478,11 @@ impl ManagedBarrierState {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::sync::Arc;
 
-    use await_tree::Config;
-    use itertools::Itertools;
-    use parking_lot::Mutex;
     use risingwave_common::util::epoch::test_epoch;
 
     use crate::executor::Barrier;
-    use crate::task::barrier_manager::managed_state::{instrument_barrier, ManagedBarrierState};
+    use crate::task::barrier_manager::managed_state::ManagedBarrierState;
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {
@@ -746,38 +669,5 @@ mod tests {
             test_epoch(2)
         );
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_instrumented_barrier() {
-        let registry = Some(Arc::new(Mutex::new(await_tree::Registry::new(
-            Config::default(),
-        ))));
-        let barrier = Barrier::new_test_barrier(test_epoch(233));
-        let mut instrumented = instrument_barrier(&registry, &barrier).unwrap();
-        let get_registry_output = || {
-            registry
-                .as_ref()
-                .unwrap()
-                .lock()
-                .iter()
-                .map(|(epoch, ctx)| (*epoch, format!("{}", ctx)))
-                .collect_vec()
-        };
-        let output = get_registry_output();
-        assert_eq!(1, output.len());
-        let (epoch, output) = &output[0];
-        assert_eq!(*epoch, barrier.epoch.prev);
-        assert!(output.contains("AwaitBarrierCollected"));
-
-        instrumented.next();
-        let output = get_registry_output();
-        assert_eq!(1, output.len());
-        let (epoch, output) = &output[0];
-        assert_eq!(*epoch, barrier.epoch.prev);
-        assert!(output.contains("AwaitSync"));
-
-        instrumented.finish();
-        assert!(get_registry_output().is_empty());
     }
 }

@@ -175,7 +175,7 @@ pub(crate) struct StreamActorManager {
     pub(super) watermark_epoch: AtomicU64Ref,
 
     /// Manages the await-trees of all actors.
-    pub(super) actor_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
@@ -189,7 +189,7 @@ pub(super) struct LocalBarrierWorker {
     barrier_senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
     /// Current barrier collection state.
-    pub(crate) state: ManagedBarrierState,
+    state: ManagedBarrierState,
 
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
@@ -530,7 +530,7 @@ impl LocalBarrierWorker {
     pub(super) fn reset_state(&mut self) {
         *self = Self::new(
             self.actor_manager.clone(),
-            self.state.barrier_await_tree_reg.clone(),
+            self.state.reset_and_take_barrier_await_tree_reg(),
         );
     }
 
@@ -592,7 +592,7 @@ impl LocalBarrierWorker {
     pub fn spawn(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
-        actor_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+        await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
         barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
@@ -613,7 +613,7 @@ impl LocalBarrierWorker {
             env: env.clone(),
             streaming_metrics,
             watermark_epoch,
-            actor_await_tree_reg,
+            await_tree_reg,
             runtime: runtime.into(),
         });
         let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
