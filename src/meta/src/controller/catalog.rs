@@ -2404,7 +2404,12 @@ impl CatalogController {
             .select_only()
             .column(table::Column::TableId)
             .column(source::Column::WithProperties)
-            .join(JoinType::InnerJoin, table::Relation::Source.def())
+            .join(JoinType::LeftJoin, table::Relation::Source.def())
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Table)
+                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+            )
             .into_tuple()
             .all(&inner.db)
             .await?;
