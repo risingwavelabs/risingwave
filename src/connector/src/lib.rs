@@ -14,6 +14,7 @@
 
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
@@ -52,10 +53,12 @@ pub mod sink;
 pub mod source;
 
 pub mod common;
+pub mod mqtt_common;
 
 pub use paste::paste;
 
 mod with_options;
+pub use with_options::WithPropertiesExt;
 
 #[cfg(test)]
 mod with_options_test;

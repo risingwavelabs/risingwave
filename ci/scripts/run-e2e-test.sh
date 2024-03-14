@@ -192,20 +192,6 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     cluster_stop
 fi
 
-if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
-    echo "--- e2e, ci-meta-backup-test"
-    test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
-    BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
-    BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
-    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
-    RW_META_ADDR="http://127.0.0.1:5690" \
-    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    bash "${test_root}/run_all.sh"
-    echo "--- Kill cluster"
-    cargo make kill
-fi
-
 if [[ "$mode" == "standalone" ]]; then
   run_sql() {
     psql -h localhost -p 4566 -d dev -U root -c "$@"

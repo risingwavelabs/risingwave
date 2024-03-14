@@ -33,7 +33,6 @@ use crate::common::{
 use crate::error::ConnectorResult;
 use crate::source::kafka::stats::RdKafkaStats;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
-use crate::source::KAFKA_CONNECTOR;
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
 pub const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -203,16 +202,6 @@ fn get_property_required(
         .map(|s| s.to_lowercase())
         .with_context(|| format!("Required property \"{property}\" is not provided"))
         .map_err(Into::into)
-}
-
-#[inline(always)]
-fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
 }
 
 pub fn insert_privatelink_broker_rewrite_map(
