@@ -296,6 +296,26 @@ metrics_level = "Disabled"
             ..Default::default()
         }
     }
+
+    pub fn disable_arrangement_backfill() -> Self {
+      let config_path = {
+          let mut file =
+              tempfile::NamedTempFile::new().expect("failed to create temp config file");
+          file.write_all(include_bytes!("disable_arrangement_backfill.toml"))
+              .expect("failed to write config file");
+          file.into_temp_path()
+      };
+      Configuration {
+          config_path: ConfigPath::Temp(config_path.into()),
+          frontend_nodes: 1,
+          compute_nodes: 1,
+          meta_nodes: 1,
+          compactor_nodes: 1,
+          compute_node_cores: 1,
+          per_session_queries: vec![].into(),
+          ..Default::default()
+      }
+    }
 }
 
 /// A risingwave cluster.
