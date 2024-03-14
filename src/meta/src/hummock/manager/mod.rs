@@ -1007,14 +1007,14 @@ impl HummockManager {
                     compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
                     target_sub_level_id: compact_task.input.target_sub_level_id,
                     task_type: compact_task.compaction_task_type as i32,
-                    split_weight_by_vnode: compact_task.input.vnode_partition_count,
+                    split_weight_by_vnode,
                     ..Default::default()
                 };
 
                 let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
                 let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
                 if is_trivial_reclaim || (is_trivial_move && can_trivial_move) {
-                    let log_tabel = if is_trivial_reclaim {
+                    let log_label = if is_trivial_reclaim {
                         "TrivialReclaim"
                     } else {
                         "TrivialMove"
@@ -1027,7 +1027,7 @@ impl HummockManager {
 
                     tracing::debug!(
                         "{} for compaction group {}: input: {:?}, cost time: {:?}",
-                        log_tabel,
+                        log_label,
                         compact_task.compaction_group_id,
                         compact_task.input_ssts,
                         start_time.elapsed()
@@ -1072,12 +1072,29 @@ impl HummockManager {
                         for table_id in &compact_task.existing_table_ids {
                             compact_task
                                 .table_vnode_partition
-                                .entry(*table_id)
-                                .or_insert(vnode_partition_count);
+                                .insert(*table_id, vnode_partition_count);
                         }
                     }
                     compact_task.table_watermarks = current_version
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
+
+                    if self.env.opts.enable_dropped_column_reclaim {
+                        compact_task.table_schemas = match self.metadata_manager() {
+                            MetadataManager::V1(mgr) => mgr
+                                .catalog_manager
+                                .get_versioned_table_schemas(&compact_task.existing_table_ids)
+                                .await
+                                .into_iter()
+                                .map(|(table_id, column_ids)| {
+                                    (table_id, TableSchema { column_ids })
+                                })
+                                .collect(),
+                            MetadataManager::V2(_) => {
+                                // TODO #13952: support V2
+                                BTreeMap::default()
+                            }
+                        };
+                    }
 
                     compact_task_assignment.insert(
                         compact_task.task_id,
@@ -1196,6 +1213,7 @@ impl HummockManager {
 
         #[cfg(test)]
         {
+            drop(versioning_guard);
             drop(compaction_guard);
             self.check_state_consistency().await;
         }
