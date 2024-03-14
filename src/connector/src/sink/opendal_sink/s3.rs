@@ -12,26 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
-use opendal::{Operator, Writer as OpendalWriter};
-use parquet::arrow::async_writer::AsyncArrowWriter;
+use opendal::Operator;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
-use crate::sink::opendal_sink::{change_schema_to_arrow_schema, OpenDalSinkWriter};
+use crate::sink::opendal_sink::OpenDalSinkWriter;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY,
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-
-const S3_WRITE_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct S3Common {
@@ -163,22 +159,9 @@ impl Sink for S3Sink {
     ) -> Result<Self::LogSinker> {
         let op = Self::new_s3_sink(self.config.clone())?;
         let path = self.config.common.path.as_ref();
-        let s3_writer = op
-            .writer_with(path)
-            .concurrent(8)
-            .buffer(S3_WRITE_BUFFER_SIZE)
-            .await?;
-
-        let arrow_schema = change_schema_to_arrow_schema(self.schema.clone());
-        let sink_writer: AsyncArrowWriter<OpendalWriter> = AsyncArrowWriter::try_new(
-            s3_writer,
-            Arc::new(arrow_schema),
-            S3_WRITE_BUFFER_SIZE,
-            None,
-        )?;
-
         Ok(OpenDalSinkWriter::new(
-            sink_writer,
+            op,
+            path,
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
