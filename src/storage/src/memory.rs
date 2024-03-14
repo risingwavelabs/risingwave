@@ -768,6 +768,7 @@ impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for RangeKvStateStoreChan
             ) {
                 (None, None) => {
                     self.item_buffer = None;
+                    break;
                 }
                 (Some((key, new_value)), None) => {
                     self.item_buffer = Some((
@@ -794,13 +795,15 @@ impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for RangeKvStateStoreChan
                         }
                         Ordering::Greater => {
                             self.item_buffer = Some((
-                                new_value_key.user_key.table_key.clone(),
+                                old_value_key.user_key.table_key.clone(),
                                 ChangeLogValue::Delete(old_value.clone()),
                             ));
                             self.old_value_iter.next_inner()?;
                         }
                         Ordering::Equal => {
                             if new_value == old_value {
+                                self.new_value_iter.next_inner()?;
+                                self.old_value_iter.next_inner()?;
                                 continue;
                             }
                             self.item_buffer = Some((
@@ -827,10 +830,12 @@ impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for RangeKvStateStoreChan
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_table_key_of, iterator_test_value_of,
+    };
     use crate::memory::sled::SledStateStore;
 
     #[tokio::test]
@@ -1012,5 +1017,146 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn test_iter_log_memory() {
+        let state_store = MemoryStateStore::new();
+        test_iter_log_inner(state_store).await;
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_iter_log_sled() {
+        let state_store = SledStateStore::new_temp();
+        test_iter_log_inner(state_store).await;
+    }
+
+    async fn test_iter_log_inner(state_store: RangeKvStateStore<impl RangeKv>) {
+        let table_id = TableId::new(233);
+        let epoch1 = test_epoch(1);
+        let key_idx = [1, 2, 4];
+        let make_key = |i| TableKey(Bytes::from(iterator_test_table_key_of(i)));
+        let make_value = |i| Bytes::from(iterator_test_value_of(i));
+        state_store
+            .ingest_batch(
+                key_idx
+                    .iter()
+                    .map(|i| (make_key(*i), StorageValue::new_put(make_value(*i))))
+                    .collect(),
+                vec![],
+                WriteOptions {
+                    epoch: epoch1,
+                    table_id,
+                },
+            )
+            .unwrap();
+        {
+            let mut iter = state_store
+                .iter_log(
+                    (epoch1, epoch1),
+                    (Unbounded, Unbounded),
+                    ReadLogOptions { table_id },
+                )
+                .await
+                .unwrap();
+            for i in key_idx {
+                let (iter_key, change_value) = iter.try_next().await.unwrap().unwrap();
+                assert_eq!(make_key(i).to_ref(), iter_key);
+                assert_eq!(change_value, ChangeLogValue::Insert(make_value(i).as_ref()));
+            }
+            assert!(iter.try_next().await.unwrap().is_none());
+        }
+
+        let epoch2 = test_epoch(2);
+        state_store
+            .ingest_batch(
+                vec![
+                    (make_key(1), StorageValue::new_put(make_value(12))), // update
+                    (make_key(2), StorageValue::new_delete()),            // delete
+                    (make_key(3), StorageValue::new_put(make_value(3))),
+                ],
+                vec![],
+                WriteOptions {
+                    epoch: epoch2,
+                    table_id,
+                },
+            )
+            .unwrap();
+
+        // check iter log between two epoch
+        {
+            let expected = vec![
+                (
+                    make_key(1),
+                    ChangeLogValue::Update {
+                        new_value: make_value(12),
+                        old_value: make_value(1),
+                    },
+                ),
+                (make_key(2), ChangeLogValue::Delete(make_value(2))),
+                (make_key(3), ChangeLogValue::Insert(make_value(3))),
+            ];
+            let mut iter = state_store
+                .iter_log(
+                    (epoch2, epoch2),
+                    (Unbounded, Unbounded),
+                    ReadLogOptions { table_id },
+                )
+                .await
+                .unwrap();
+            for (key, change_log_value) in expected {
+                let (iter_key, iter_value) = iter.try_next().await.unwrap().unwrap();
+                assert_eq!(
+                    key.to_ref(),
+                    iter_key,
+                    "{:?} {:?}",
+                    change_log_value.to_ref(),
+                    iter_value
+                );
+                assert_eq!(change_log_value.to_ref(), iter_value);
+            }
+            assert!(iter.try_next().await.unwrap().is_none());
+        }
+        // check iter log on the original old epoch
+        {
+            let mut iter = state_store
+                .iter_log(
+                    (epoch1, epoch1),
+                    (Unbounded, Unbounded),
+                    ReadLogOptions { table_id },
+                )
+                .await
+                .unwrap();
+            for i in key_idx {
+                let (iter_key, change_value) = iter.try_next().await.unwrap().unwrap();
+                assert_eq!(make_key(i).to_ref(), iter_key);
+                assert_eq!(change_value, ChangeLogValue::Insert(make_value(i).as_ref()));
+            }
+            assert!(iter.try_next().await.unwrap().is_none());
+        }
+        // check iter on merging the two epochs
+        {
+            let mut iter = state_store
+                .iter_log(
+                    (epoch1, epoch2),
+                    (Unbounded, Unbounded),
+                    ReadLogOptions { table_id },
+                )
+                .await
+                .unwrap();
+            let (iter_key, change_value) = iter.try_next().await.unwrap().unwrap();
+            assert_eq!(make_key(1).to_ref(), iter_key);
+            assert_eq!(
+                change_value,
+                ChangeLogValue::Insert(make_value(12).as_ref())
+            );
+            for i in [3, 4] {
+                let (iter_key, change_value) = iter.try_next().await.unwrap().unwrap();
+                assert_eq!(make_key(i).to_ref(), iter_key);
+                assert_eq!(change_value, ChangeLogValue::Insert(make_value(i).as_ref()));
+            }
+            assert!(iter.try_next().await.unwrap().is_none());
+        }
     }
 }
