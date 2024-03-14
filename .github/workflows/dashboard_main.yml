@@ -22,7 +22,6 @@ jobs:
           npm install
           npm run lint
           npm run build
-          npm run build-static
       - name: Deploy
         uses: s0/git-publish-subdir-action@develop
         env:

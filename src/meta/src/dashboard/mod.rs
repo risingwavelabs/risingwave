@@ -13,24 +13,19 @@
 // limitations under the License.
 
 mod prometheus;
-mod proxy;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::{boxed, Body};
+use axum::body::boxed;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, get_service};
 use axum::Router;
-use hyper::Request;
-use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use thiserror_ext::AsReport;
 use tower::{ServiceBuilder, ServiceExt};
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
@@ -416,26 +411,13 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-
         let dashboard_router = if let Some(ui_path) = ui_path {
+            // TODO(bugen): remove `ui_path` and all in the embedded `risingwave_meta_dashboard`.
             get_service(ServeDir::new(ui_path))
                 .handle_error(|e| async move { match e {} })
                 .boxed_clone()
         } else {
-            let cache = Arc::new(Mutex::new(HashMap::new()));
-            tower::service_fn(move |req: Request<Body>| {
-                let cache = cache.clone();
-                async move {
-                    proxy::proxy(req, cache).await.or_else(|err| {
-                        Ok((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            err.context("Unhandled internal error").to_report_string(),
-                        )
-                            .into_response())
-                    })
-                }
-            })
-            .boxed_clone()
+            risingwave_meta_dashboard::router().boxed_clone()
         };
 
         let app = Router::new()
