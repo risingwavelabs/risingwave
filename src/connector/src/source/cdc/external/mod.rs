@@ -260,7 +260,7 @@ pub enum SslMode {
 
 impl Default for SslMode {
     fn default() -> Self {
-        Self::Disable
+        Self::Prefer
     }
 }
 
