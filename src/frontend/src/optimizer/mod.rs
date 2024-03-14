@@ -380,7 +380,7 @@ impl PlanRoot {
             .ctx()
             .session_ctx()
             .config()
-            .streaming_enable_arrangement_backfill()
+            .streaming_use_arrangement_backfill()
         {
             StreamScanType::ArrangementBackfill
         } else {
@@ -827,7 +827,7 @@ impl PlanRoot {
             .ctx()
             .session_ctx()
             .config()
-            .streaming_enable_arrangement_backfill()
+            .streaming_use_arrangement_backfill()
         {
             StreamScanType::ArrangementBackfill
         } else {

@@ -869,9 +869,7 @@ impl Session {
     }
 
     pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
-        let result = self
-            .run("show streaming_enable_arrangement_backfill")
-            .await?;
+        let result = self.run("show streaming_use_arrangement_backfill").await?;
         Ok(result == "true")
     }
 }
