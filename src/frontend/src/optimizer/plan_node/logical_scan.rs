@@ -258,7 +258,7 @@ impl LogicalScan {
         (scan_without_predicate, predicate, project_expr)
     }
 
-    fn clone_with_predicate(&self, predicate: Condition) -> Self {
+    pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::Scan::new_inner(
             self.table_name().to_string(),
             self.output_col_idx().to_vec(),

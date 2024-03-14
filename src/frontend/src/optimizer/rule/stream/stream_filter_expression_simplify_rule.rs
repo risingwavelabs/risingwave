@@ -32,7 +32,7 @@ impl Rule for StreamFilterExpressionSimplifyRule {
     /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        let mut rewriter = StreamFilterExpressionSimplifyRewriter {};
+        let mut rewriter = ExpressionSimplifyRewriter {};
         let logical_share_plan = filter.input();
         let share: &LogicalShare = logical_share_plan.as_logical_share()?;
         let input = share.input().rewrite_exprs(&mut rewriter);
@@ -180,8 +180,8 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
     None
 }
 
-struct StreamFilterExpressionSimplifyRewriter {}
-impl ExprRewriter for StreamFilterExpressionSimplifyRewriter {
+pub struct ExpressionSimplifyRewriter {}
+impl ExprRewriter for ExpressionSimplifyRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         // Check if the input expression is *definitely* null
         let mut columns = vec![];

@@ -136,6 +136,14 @@
     ├─LogicalScan { table: t1, columns: [v1] }
     └─LogicalScan { table: t2, columns: [v2] }
 
+    Batch Filter Expression Simplify:
+
+    apply BatchFilterExpressionSimplifyRule 2 time(s)
+
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1] }
+    └─LogicalScan { table: t2, columns: [v2] }
+
 - sql: |
     explain (logical) create table t1(v1 int);
   explain_output: |

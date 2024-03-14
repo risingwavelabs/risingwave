@@ -424,6 +424,15 @@ static STREAM_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock
     )
 });
 
+static BATCH_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Batch Filter Expression Simplify",
+        vec![BatchFilterExpressionSimplifyRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -727,6 +736,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
+
+        plan = plan.optimize_by_rules(&BATCH_FILTER_EXPRESSION_SIMPLIFY);
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
