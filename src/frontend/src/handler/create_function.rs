@@ -306,19 +306,19 @@ async fn download_binary_from_link(link: &str) -> Result<Bytes> {
 /// Convert a v0.1 function identifier to v0.2 format.
 ///
 /// In arrow-udf v0.1 format, struct type is inline in the identifier. e.g.
-/// 
+///
 /// ```text
 /// keyvalue(varchar,varchar)->struct<key:varchar,value:varchar>
 /// ```
-/// 
+///
 /// However, since arrow-udf v0.2, struct type is no longer inline.
 /// The above identifier is divided into a function and a type.
-/// 
+///
 /// ```text
 /// keyvalue(varchar,varchar)->struct KeyValue
 /// KeyValue=key:varchar,value:varchar
 /// ```
-/// 
+///
 /// For compatibility, we should call `find_wasm_identifier_v2` to
 /// convert v0.1 identifiers to v0.2 format before looking up the function.
 fn find_wasm_identifier_v2(
