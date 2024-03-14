@@ -54,7 +54,7 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
         LocalResult::None => {
             (input.0 - chrono::Duration::hours(3))
                 .and_local_timezone(time_zone)
-                .latest()
+                .single()
                 .ok_or_else(|| ExprError::InvalidParam {
                     name: "local timestamp",
                     reason: format!(
@@ -249,6 +249,11 @@ mod tests {
         // [02:00. 02:30) are invalid
         test("2023-10-01 02:00:00", "Australia/Lord_Howe", "2023-09-30 15:30:00+00:00");
         test("2023-10-01 02:30:00", "Australia/Lord_Howe", "2023-09-30 15:30:00+00:00");
+        // FIXME: the jump should be        1981-12-31 23:29:59 to 1982-01-01 00:00:00,
+        //        but the actual jump is    1981-12-31 15:59:59 to 1981-12-31 16:30:00
+        // an arbitrary one-off change in Singapore jumping from 1981-12-31 23:29:59 to 1982-01-01 00:00:00
+        // test("1981-12-31 23:30:00", "Asia/Singapore", "1981-12-31 16:00:00+00:00");
+        // test("1982-01-01 00:00:00", "Asia/Singapore", "1981-12-31 16:00:00+00:00");
 
         #[track_caller]
         fn test(local: &str, zone: &str, instant: &str) {
