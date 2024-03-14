@@ -285,6 +285,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             };
                                             match msg? {
                                                 None => {
+                                                    tracing::info!(
+                                                        upstream_table_id,
+                                                        ?last_binlog_offset,
+                                                        ?current_pk_pos,
+                                                        "snapshot read stream ends"
+                                                    );
                                                     // End of the snapshot read stream.
                                                     // Consume the buffered upstream chunk without filtering by `binlog_low`.
                                                     for chunk in upstream_chunk_buffer.drain(..) {
@@ -460,13 +466,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         Either::Right(msg) => {
                             match msg? {
                                 None => {
-                                    tracing::info!(
-                                        upstream_table_id,
-                                        ?current_pk_pos,
-                                        ?snapshot_read_row_cnt,
-                                        "snapshot stream gets None"
-                                    );
-
                                     if snapshot_read_row_cnt < snapshot_read_limit {
                                         tracing::info!(
                                             upstream_table_id,
@@ -475,7 +474,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             "snapshot read stream ends"
                                         );
                                         // If the snapshot read stream ends with less than `limit` rows,
-                                        // it means the snapshot read stream has been finished.
+                                        // it means all historical data has been loaded.
                                         // We should not mark the chunk anymore,
                                         // otherwise, we will ignore some rows in the buffer.
                                         // Here we choose to never mark the chunk.
@@ -499,6 +498,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         // exit backfill
                                         break 'backfill_loop;
                                     } else {
+                                        tracing::info!(
+                                            upstream_table_id,
+                                            ?current_pk_pos,
+                                            ?snapshot_read_row_cnt,
+                                            "snapshot stream will contiune"
+                                        );
+
                                         // break the for loop to reconstruct a new snapshot with pk offset
                                         // to ensure we load all historical data
                                         break;

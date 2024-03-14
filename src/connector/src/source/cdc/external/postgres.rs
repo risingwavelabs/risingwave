@@ -174,21 +174,19 @@ impl PostgresExternalTableReader {
         let order_key = primary_keys.iter().join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {} LIMIT {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 order_key,
-                limit
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
                 order_key,
-                limit
             )
         };
 
