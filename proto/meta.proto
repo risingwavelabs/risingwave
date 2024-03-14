@@ -585,7 +585,7 @@ service SystemParamsService {
 message GetSessionParamsRequest {}
 
 message GetSessionParamsResponse {
-  String params = 1;
+  string params = 1;
 }
 
 message SetSessionParamRequest {

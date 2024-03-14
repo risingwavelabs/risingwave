@@ -362,6 +362,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .enable_check_task_level_overlap,
             },
             config.system.into_init_system_params(),
+            config.session,
         )
         .await
         .unwrap();

@@ -75,7 +75,7 @@ pub struct MetaSrvEnv {
     system_params_controller: Option<SystemParamsControllerRef>,
 
     /// Session param
-    session_param: SessionConfig,
+    session_config: SessionConfig,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -286,6 +286,7 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         init_system_params: SystemParams,
+        init_session_config: SessionConfig,
         meta_store: Option<MetaStoreRef>,
         meta_store_sql: Option<SqlMetaStore>,
     ) -> MetaResult<Self> {
@@ -371,6 +372,7 @@ impl MetaSrvEnv {
             connector_client,
             opts: opts.into(),
             hummock_seq,
+            session_config: init_session_config,
         })
     }
 
@@ -536,6 +538,7 @@ impl MetaSrvEnv {
             connector_client: None,
             opts,
             hummock_seq,
+            session_config: Default::default(),
         }
     }
 }

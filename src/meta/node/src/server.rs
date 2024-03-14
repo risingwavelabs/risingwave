@@ -24,6 +24,7 @@ use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
+use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -116,6 +117,7 @@ pub async fn rpc_serve(
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
+    init_session_config: SessionConfig,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -159,6 +161,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
                 init_system_params,
+                init_session_config,
             )
         }
         MetaStoreBackend::Mem => {
@@ -172,6 +175,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
                 init_system_params,
+                init_session_config,
             )
         }
         MetaStoreBackend::Sql { endpoint } => {
@@ -217,6 +221,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
                 init_system_params,
+                init_session_config,
             )
         }
     }
@@ -232,6 +237,7 @@ pub fn rpc_serve_with_store(
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
+    init_session_config: SessionConfig,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     let (svc_shutdown_tx, svc_shutdown_rx) = watch::channel(());
 
@@ -313,6 +319,7 @@ pub fn rpc_serve_with_store(
             max_cluster_heartbeat_interval,
             opts,
             init_system_params,
+            init_session_config,
             election_client,
             svc_shutdown_rx,
         )
@@ -385,6 +392,7 @@ pub async fn start_service_as_election_leader(
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
+    init_session_config: SessionConfig,
     election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
@@ -399,6 +407,7 @@ pub async fn start_service_as_election_leader(
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
+        init_session_config,
         meta_store.clone(),
         meta_store_sql.clone(),
     )
