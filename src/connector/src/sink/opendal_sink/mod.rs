@@ -152,16 +152,16 @@ fn convert_rw_schema_to_arrow_schema(
         // This assert is to make sure there is no duplicate field name in the schema.
         assert!(res.is_none())
     });
-    let mut arrow_fileds = vec![];
+    let mut arrow_fields = vec![];
     for rw_field in &rw_schema.fields {
         let converted_arrow_data_type =
             ArrowDataType::try_from(rw_field.data_type.clone()).map_err(|e| anyhow!(e))?;
-        arrow_fileds.push(ArrowField::new(
+        arrow_fields.push(ArrowField::new(
             rw_field.name.clone(),
             converted_arrow_data_type,
             false,
         ));
     }
 
-    Ok(arrow_schema::Schema::new(arrow_fileds))
+    Ok(arrow_schema::Schema::new(arrow_fields))
 }
