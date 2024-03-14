@@ -362,8 +362,13 @@ pub struct ColIndexMultiMapping {
 
 impl ColIndexMultiMapping {
     pub fn new(map: Vec<Vec<usize>>, target_size: usize) -> Self {
-        if let Some(target_max) = map.iter().flatten().max_by_key(|x| *x) {
-            assert!(*target_max < target_size)
+        if let Some(target_max) = map.iter().flatten().max() {
+            assert!(
+                *target_max < target_size,
+                "target_max: {} should be less than target_size: {}",
+                target_max,
+                target_size
+            )
         };
         Self { map }
     }

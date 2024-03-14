@@ -391,13 +391,6 @@ where
             StateTableWatermarkCache::new(0)
         };
 
-        // Get info for replicated state table.
-        let output_column_ids_to_input_idx = output_column_ids
-            .iter()
-            .enumerate()
-            .map(|(pos, id)| (*id, pos))
-            .collect::<HashMap<_, _>>();
-
         // Compute column descriptions
         let columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -405,14 +398,22 @@ where
             .map(|c| c.column_desc.as_ref().unwrap().into())
             .collect_vec();
 
+        // Get a mapping of input columns to their input index.
+        let input_columns_to_input_idx = columns
+            .iter()
+            .enumerate()
+            .map(|(pos, col)| (col.column_id, pos))
+            .collect::<HashMap<_, _>>();
+
         // Compute i2o mapping
         let mut i2o_mapping = vec![vec![]; columns.len()];
         let mut output_column_indices = vec![];
-        for (i, column) in columns.iter().enumerate() {
-            if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
-                i2o_mapping[i].push(*pos);
-                output_column_indices.push(i);
-            }
+        for (output_index, column_id) in output_column_ids.iter().enumerate() {
+            let input_idx = input_columns_to_input_idx
+                .get(column_id)
+                .expect("failed to create i2o mapping for replicated state table.");
+            i2o_mapping[*input_idx].push(output_index);
+            output_column_indices.push(output_index);
         }
         let i2o_mapping = ColIndexMultiMapping::new(i2o_mapping, output_column_indices.len());
 
