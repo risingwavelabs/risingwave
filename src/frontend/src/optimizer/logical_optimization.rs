@@ -432,7 +432,6 @@ static BATCH_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock:
     )
 });
 
-
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,

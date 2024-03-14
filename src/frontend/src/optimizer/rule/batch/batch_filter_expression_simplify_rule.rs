@@ -16,8 +16,8 @@ use std::collections::HashSet;
 
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::LogicalScan;
-use crate::optimizer::{BoxedRule, ExpressionSimplifyRewriter, PlanRef};
 use crate::optimizer::rule::Rule;
+use crate::optimizer::{BoxedRule, ExpressionSimplifyRewriter, PlanRef};
 use crate::utils::Condition;
 
 pub struct BatchFilterExpressionSimplifyRule {}
