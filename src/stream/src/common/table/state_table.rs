@@ -406,15 +406,16 @@ where
             .collect_vec();
 
         // Compute i2o mapping
+        // Note that this can be a partial mapping, since we use the i2o mapping to get
+        // any 1 of the output columns, and use that to fill the input column.
         let mut i2o_mapping = vec![None; columns.len()];
-        let mut output_column_indices = vec![];
         for (i, column) in columns.iter().enumerate() {
             if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
                 i2o_mapping[i] = Some(*pos);
-                output_column_indices.push(i);
             }
         }
-        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+        // We can prune any duplicate column indices
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_ids.len());
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
