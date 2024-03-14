@@ -33,7 +33,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::column_index_mapping::ColIndexMultiMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -142,8 +142,8 @@ pub struct StateTableInner<
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
-    /// It is only applicable for replication.
-    i2o_mapping: ColIndexMapping,
+    /// It is only applicable for replication (arrangement backfill).
+    i2o_mapping: ColIndexMultiMapping,
 
     /// Output indices
     /// Used for:
@@ -406,15 +406,15 @@ where
             .collect_vec();
 
         // Compute i2o mapping
-        let mut i2o_mapping = vec![None; columns.len()];
+        let mut i2o_mapping = vec![vec![]; columns.len()];
         let mut output_column_indices = vec![];
         for (i, column) in columns.iter().enumerate() {
             if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
-                i2o_mapping[i] = Some(*pos);
+                i2o_mapping[i].push(*pos);
                 output_column_indices.push(i);
             }
         }
-        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+        let i2o_mapping = ColIndexMultiMapping::new(i2o_mapping, output_column_indices.len());
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
@@ -616,7 +616,7 @@ where
             watermark_cache,
             data_types,
             output_indices: vec![],
-            i2o_mapping: ColIndexMapping::new(vec![], 0),
+            i2o_mapping: ColIndexMultiMapping::new(vec![], 0),
             is_consistent_op,
         }
     }
@@ -1556,7 +1556,7 @@ fn end_range_to_memcomparable<R: Row>(
 }
 
 fn fill_non_output_indices(
-    i2o_mapping: &ColIndexMapping,
+    i2o_mapping: &ColIndexMultiMapping,
     data_types: &[DataType],
     chunk: StreamChunk,
 ) -> StreamChunk {
@@ -1564,13 +1564,16 @@ fn fill_non_output_indices(
     let (ops, columns, vis) = chunk.into_inner();
     let mut full_columns = Vec::with_capacity(data_types.len());
     for (i, data_type) in data_types.iter().enumerate() {
-        if let Some(j) = i2o_mapping.try_map(i) {
-            full_columns.push(columns[j].clone());
-        } else {
+        let cols = i2o_mapping.map(i);
+        if cols.is_empty() {
             let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
             column_builder.append_n_null(cardinality);
             let column: ArrayRef = column_builder.finish().into();
             full_columns.push(column)
+        } else {
+            for col in cols {
+                full_columns.push(columns[*col].clone());
+            }
         }
     }
     let data_chunk = DataChunk::new(full_columns, vis);
@@ -1601,7 +1604,7 @@ mod tests {
             vec![Op::Insert],
             DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32]),
         );
-        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
+        let i2o_mapping = ColIndexMultiMapping::new(vec![vec![1], vec![], vec![0]], 2);
         let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
         check(
             filled_chunk,

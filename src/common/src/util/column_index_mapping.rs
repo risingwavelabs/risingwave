@@ -353,6 +353,26 @@ impl Debug for ColIndexMapping {
     }
 }
 
+#[derive(Clone)]
+pub struct ColIndexMultiMapping {
+    /// Each subscript is mapped to the corresponding elements.
+    /// We use this when the same column can be mapped to multiple output columns.
+    map: Vec<Vec<usize>>,
+}
+
+impl ColIndexMultiMapping {
+    pub fn new(map: Vec<Vec<usize>>, target_size: usize) -> Self {
+        if let Some(target_max) = map.iter().flatten().max_by_key(|x| *x) {
+            assert!(*target_max < target_size)
+        };
+        Self { map }
+    }
+
+    pub fn map(&self, index: usize) -> &[usize] {
+        &self.map[index]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +408,17 @@ mod tests {
     fn test_identity() {
         let mapping = ColIndexMapping::identity(10);
         assert!(mapping.is_identity());
+    }
+
+    #[test]
+    fn test_mapping_input_to_two_outputs() {
+        let mapping = ColIndexMultiMapping {
+            map: vec![vec![0, 1], vec![2], vec![3, 4], vec![], vec![]],
+        };
+        assert_eq!(mapping.map(0), &[0, 1]);
+        assert_eq!(mapping.map(1), &[2]);
+        assert_eq!(mapping.map(2), &[3, 4]);
+        assert!(mapping.map(3).is_empty());
+        assert!(mapping.map(4).is_empty());
     }
 }
