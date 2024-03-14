@@ -40,9 +40,9 @@ impl BatchFilterExpressionSimplifyRule {
 pub struct ConditionRewriter {}
 impl ConditionRewriter {
     pub fn rewrite_condition(condition: Condition) -> Condition {
-        let conjuctions = condition.conjunctions.clone();
+        let conjunctions = condition.conjunctions.clone();
         let mut set = HashSet::new();
-        for expr in conjuctions {
+        for expr in conjunctions {
             let e;
             if let ExprImpl::FunctionCall(func_call) = expr.clone() {
                 // Not(e)
