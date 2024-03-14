@@ -288,7 +288,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     type Bitmap = N;
 
     fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
-        let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
+        let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder, true);
 
         let mut serializers = {
             let buffers = if S::Buffer::alloc() {

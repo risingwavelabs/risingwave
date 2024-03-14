@@ -110,7 +110,7 @@ impl StreamChunkCompactor {
             .map(|c| {
                 let hash_values = c
                     .data_chunk()
-                    .get_hash_values(&key_indices, Crc32FastBuilder)
+                    .get_hash_values(&key_indices, Crc32FastBuilder, true)
                     .into_iter()
                     .map(|hash| hash.value())
                     .collect_vec();

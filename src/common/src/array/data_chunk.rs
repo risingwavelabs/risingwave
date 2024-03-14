@@ -344,11 +344,13 @@ impl DataChunk {
         Ok(outputs)
     }
 
-    /// Compute hash values for each row.
+    /// Compute hash values for each row. The number of the HashCodes is `self.capacity()`. 
+    /// When skip_invisible_row is true, the HashCode for the invisible rows is arbitrary. 
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
+        skip_invisible_row: bool
     ) -> Vec<HashCode<H>> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());

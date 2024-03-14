@@ -146,7 +146,7 @@ impl VirtualNode {
         }
 
         data_chunk
-            .get_hash_values(keys, Crc32FastBuilder)
+            .get_hash_values(keys, Crc32FastBuilder, false)
             .into_iter()
             .map(|hash| hash.into())
             .collect()
