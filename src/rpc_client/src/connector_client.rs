@@ -203,7 +203,7 @@ impl ConnectorClient {
         start_offset: Option<String>,
         properties: HashMap<String, String>,
         snapshot_done: bool,
-        common_param: SourceCommonParam,
+        is_source_job: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .rpc_client
@@ -214,7 +214,7 @@ impl ConnectorClient {
                 start_offset: start_offset.unwrap_or_default(),
                 properties,
                 snapshot_done,
-                common_param: Some(common_param),
+                is_source_job,
             })
             .await
             .inspect_err(|err| {
@@ -234,7 +234,8 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
-        common_param: SourceCommonParam,
+        is_source_job: bool,
+        is_backfill_table: bool,
     ) -> Result<()> {
         let response = self
             .rpc_client
@@ -244,7 +245,8 @@ impl ConnectorClient {
                 source_type: source_type as _,
                 properties,
                 table_schema,
-                common_param: Some(common_param),
+                is_source_job,
+                is_backfill_table,
             })
             .await
             .inspect_err(|err| {

@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use prometheus::Registry;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_compaction_group_ssts, BranchedSstInfo,
@@ -141,7 +141,7 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
 async fn test_unpin_snapshot_before() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let epoch = 0;
+    let epoch = test_epoch(0);
 
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
@@ -172,14 +172,15 @@ async fn test_unpin_snapshot_before() {
         );
     }
 
+    let epoch2 = epoch.next_epoch();
     // unpin nonexistent target will not return error
     for _ in 0..3 {
         hummock_manager
             .unpin_snapshot_before(
                 context_id,
                 HummockSnapshot {
-                    committed_epoch: epoch + 1,
-                    current_epoch: epoch + 1,
+                    committed_epoch: epoch2,
+                    current_epoch: epoch2,
                 },
             )
             .await
@@ -207,7 +208,7 @@ async fn test_hummock_compaction_task() {
         .is_none());
 
     // Add some sstables and commit.
-    let epoch: u64 = 1;
+    let epoch = test_epoch(1);
     let original_tables = generate_test_sstables_with_table_id(
         epoch,
         1,
@@ -274,7 +275,7 @@ async fn test_hummock_compaction_task() {
 async fn test_hummock_table() {
     let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
 
-    let epoch: u64 = 1;
+    let epoch = test_epoch(1);
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
@@ -323,7 +324,7 @@ async fn test_hummock_transaction() {
     // Add and commit tables in epoch1.
     // BEFORE:  committed_epochs = []
     // AFTER:   committed_epochs = [epoch1]
-    let epoch1: u64 = 1;
+    let epoch1 = test_epoch(1);
     {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
@@ -360,7 +361,7 @@ async fn test_hummock_transaction() {
     // Add and commit tables in epoch2.
     // BEFORE:  committed_epochs = [epoch1]
     // AFTER:   committed_epochs = [epoch1, epoch2]
-    let epoch2 = epoch1 + 1;
+    let epoch2 = epoch1.next_epoch();
     {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
@@ -514,11 +515,12 @@ async fn test_hummock_manager_basic() {
         FIRST_VERSION_ID
     );
 
-    let mut epoch = 1;
+    let mut epoch = test_epoch(1);
     let mut register_log_count = 0;
     let mut commit_log_count = 0;
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef| async move {
-        let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+        let original_tables =
+            generate_test_tables(test_epoch(epoch), get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
             &hummock_manager,
             &original_tables,
@@ -537,7 +539,7 @@ async fn test_hummock_manager_basic() {
     commit_one(epoch, hummock_manager.clone()).await;
     register_log_count += 1;
     commit_log_count += 1;
-    epoch += 1;
+    epoch.inc_epoch();
 
     let init_version_id = FIRST_VERSION_ID;
 
@@ -635,7 +637,7 @@ async fn test_pin_snapshot_response_lost() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
-    let mut epoch: u64 = 1;
+    let mut epoch = test_epoch(1);
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
@@ -651,12 +653,13 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await
     .unwrap();
-    epoch += 1;
+    epoch.inc_epoch();
 
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
     let mut epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
-    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
+    let prev_epoch = epoch.prev_epoch();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, prev_epoch);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -673,17 +676,21 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await
     .unwrap();
-    epoch += 1;
+    epoch.inc_epoch();
 
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
-    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
+    let prev_epoch = epoch.prev_epoch();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, prev_epoch);
 
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
-    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
+    assert_eq!(
+        epoch_recorded_in_frontend.committed_epoch,
+        epoch.prev_epoch()
+    );
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -700,12 +707,15 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await
     .unwrap();
-    epoch += 1;
+    epoch.inc_epoch();
 
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
     epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
-    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
+    assert_eq!(
+        epoch_recorded_in_frontend.committed_epoch,
+        epoch.prev_epoch()
+    );
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -722,19 +732,22 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await
     .unwrap();
-    epoch += 1;
+    epoch.inc_epoch();
 
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
     epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
-    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
+    assert_eq!(
+        epoch_recorded_in_frontend.committed_epoch,
+        epoch.prev_epoch()
+    );
 }
 
 #[tokio::test]
 async fn test_print_compact_task() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     // Add some sstables and commit.
-    let epoch: u64 = 1;
+    let epoch = test_epoch(1);
     let original_tables =
         generate_test_sstables_with_table_id(epoch, 1, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -777,7 +790,7 @@ async fn test_print_compact_task() {
 async fn test_invalid_sst_id() {
     let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let epoch = 1;
+    let epoch = test_epoch(1);
     let ssts = generate_test_tables(epoch, vec![1]);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
@@ -912,7 +925,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         .is_none());
 
     // Add some sstables and commit.
-    let epoch: u64 = 1;
+    let epoch = test_epoch(1);
     let original_tables = generate_test_sstables_with_table_id(
         epoch,
         1,
@@ -1032,7 +1045,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         .is_none());
 
     // Add some sstables and commit.
-    let epoch: u64 = 1;
+    let epoch = test_epoch(1);
     let original_tables = generate_test_sstables_with_table_id(
         epoch,
         1,
@@ -1153,7 +1166,7 @@ async fn test_version_stats() {
     assert!(init_stats.table_stats.is_empty());
 
     // Commit epoch
-    let epoch = 1;
+    let epoch = test_epoch(1);
     register_table_ids_to_compaction_group(
         &hummock_manager,
         &[1, 2, 3],

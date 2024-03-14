@@ -276,7 +276,7 @@ impl Parser {
         }
     }
 
-    /// Parse `FORMAT ... ENCODE ... (...)` in `CREATE SOURCE` and `CREATE SINK`.
+    /// Parse `FORMAT ... ENCODE ... (...)`.
     pub fn parse_schema(&mut self) -> Result<Option<ConnectorSchema>, ParserError> {
         if !self.parse_keyword(Keyword::FORMAT) {
             return Ok(None);
