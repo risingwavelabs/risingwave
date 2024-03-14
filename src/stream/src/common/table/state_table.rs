@@ -55,10 +55,10 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
+    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{KeyedRow, TableDistribution};
+use risingwave_storage::table::{deserialize_log_stream, KeyedRow, TableDistribution};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
@@ -97,6 +97,9 @@ pub struct StateTableInner<
 
     /// State store backend.
     local_store: S::Local,
+
+    /// State store for accessing snapshot data
+    store: S,
 
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
@@ -422,6 +425,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            store,
             pk_serde,
             row_serde,
             pk_indices,
@@ -603,6 +607,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            store,
             pk_serde,
             row_serde,
             pk_indices,
@@ -1452,6 +1457,41 @@ where
     #[cfg(test)]
     pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
         &self.watermark_cache
+    }
+}
+
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub async fn iter_log_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        epoch_range: (u64, u64),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_> {
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
+        Ok(deserialize_log_stream(
+            self.store
+                .iter_log(
+                    epoch_range,
+                    memcomparable_range_with_vnode,
+                    ReadLogOptions {
+                        table_id: self.table_id,
+                    },
+                )
+                .await?,
+            &self.row_serde,
+        )
+        .map_err(Into::into))
     }
 }
 

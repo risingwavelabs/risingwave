@@ -274,6 +274,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
     type Iter = impl StateStoreReadIter;
 
     fn get(
@@ -306,6 +307,15 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         );
         self.traced_iter(self.inner.iter(key_range, epoch, read_options), span)
             .map_ok(identity)
+    }
+
+    fn iter_log(
+        &self,
+        epoch_range: (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
+        self.inner.iter_log(epoch_range, key_range, options)
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -30,7 +31,8 @@ use crate::store::*;
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type Iter = PanicStateStoreStream;
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+    type Iter = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -51,6 +53,15 @@ impl StateStoreRead for PanicStateStore {
     ) -> StorageResult<Self::Iter> {
         panic!("should not read from the state store!");
     }
+
+    async fn iter_log(
+        &self,
+        _epoch_range: (u64, u64),
+        _key_range: TableKeyRange,
+        _options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        unimplemented!()
+    }
 }
 
 impl StateStoreWrite for PanicStateStore {
@@ -65,7 +76,7 @@ impl StateStoreWrite for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
-    type Iter<'a> = PanicStateStoreStream;
+    type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -171,10 +182,10 @@ impl StateStore for PanicStateStore {
     }
 }
 
-pub struct PanicStateStoreStream;
+pub struct PanicStateStoreIter<T: IterItem>(PhantomData<T>);
 
-impl StateStoreIter for PanicStateStoreStream {
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
-        panic!("should not call next on panic state store stream")
+impl<T: IterItem> StateStoreIter<T> for PanicStateStoreIter<T> {
+    async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
+        panic!("should not call next on panic state store iter")
     }
 }

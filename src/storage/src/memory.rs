@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -537,6 +538,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
+    type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
     type Iter = RangeKvStateStoreIter<R>;
 
     #[allow(clippy::unused_async)]
@@ -570,7 +572,33 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
                 to_full_key_range(read_options.table_id, key_range),
             ),
             epoch,
+            true,
         ))
+    }
+
+    async fn iter_log(
+        &self,
+        (min_epoch, max_epoch): (u64, u64),
+        key_range: TableKeyRange,
+        options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        let new_value_iter = RangeKvStateStoreIter::new(
+            batched_iter::Iter::new(
+                self.inner.clone(),
+                to_full_key_range(options.table_id, key_range.clone()),
+            ),
+            max_epoch,
+            true,
+        );
+        let old_value_iter = RangeKvStateStoreIter::new(
+            batched_iter::Iter::new(
+                self.inner.clone(),
+                to_full_key_range(options.table_id, key_range),
+            ),
+            min_epoch,
+            false,
+        );
+        RangeKvStateStoreChangeLogIter::new(new_value_iter, old_value_iter)
     }
 }
 
@@ -653,6 +681,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
     inner: batched_iter::Iter<R>,
 
     epoch: HummockEpoch,
+    is_inclusive_epoch: bool,
 
     last_key: Option<UserKey<Bytes>>,
 
@@ -660,10 +689,15 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
-    pub fn new(inner: batched_iter::Iter<R>, epoch: HummockEpoch) -> Self {
+    pub fn new(
+        inner: batched_iter::Iter<R>,
+        epoch: HummockEpoch,
+        is_inclusive_epoch: bool,
+    ) -> Self {
         Self {
             inner,
             epoch,
+            is_inclusive_epoch,
             last_key: None,
             item_buffer: None,
         }
@@ -673,9 +707,7 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
     #[allow(clippy::unused_async)]
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
-        let ret = self.next_inner();
-        let item = ret?;
-        self.item_buffer = item;
+        self.next_inner()?;
         Ok(self
             .item_buffer
             .as_ref()
@@ -684,19 +716,112 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
-    fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
+    fn next_inner(&mut self) -> StorageResult<()> {
+        self.item_buffer = None;
         while let Some((key, value)) = self.inner.next()? {
-            if key.epoch_with_gap.pure_epoch() > self.epoch {
+            let epoch = key.epoch_with_gap.pure_epoch();
+            if epoch > self.epoch {
+                continue;
+            }
+            if epoch == self.epoch && !self.is_inclusive_epoch {
                 continue;
             }
             if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {
                 self.last_key = Some(key.user_key.clone());
                 if let Some(value) = value {
-                    return Ok(Some((key, value)));
+                    self.item_buffer = Some((key, value));
+                    break;
                 }
             }
         }
-        Ok(None)
+        Ok(())
+    }
+}
+
+pub struct RangeKvStateStoreChangeLogIter<R: RangeKv> {
+    new_value_iter: RangeKvStateStoreIter<R>,
+    old_value_iter: RangeKvStateStoreIter<R>,
+    item_buffer: Option<(TableKey<Bytes>, ChangeLogValue<Bytes>)>,
+}
+
+impl<R: RangeKv> RangeKvStateStoreChangeLogIter<R> {
+    fn new(
+        mut new_value_iter: RangeKvStateStoreIter<R>,
+        mut old_value_iter: RangeKvStateStoreIter<R>,
+    ) -> StorageResult<Self> {
+        new_value_iter.next_inner()?;
+        old_value_iter.next_inner()?;
+        Ok(Self {
+            new_value_iter,
+            old_value_iter,
+            item_buffer: None,
+        })
+    }
+}
+
+impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for RangeKvStateStoreChangeLogIter<R> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreReadLogItemRef<'_>>> {
+        loop {
+            match (
+                &self.new_value_iter.item_buffer,
+                &self.old_value_iter.item_buffer,
+            ) {
+                (None, None) => {
+                    self.item_buffer = None;
+                }
+                (Some((key, new_value)), None) => {
+                    self.item_buffer = Some((
+                        key.user_key.table_key.clone(),
+                        ChangeLogValue::Insert(new_value.clone()),
+                    ));
+                    self.new_value_iter.next_inner()?;
+                }
+                (None, Some((key, old_value))) => {
+                    self.item_buffer = Some((
+                        key.user_key.table_key.clone(),
+                        ChangeLogValue::Delete(old_value.clone()),
+                    ));
+                    self.old_value_iter.next_inner()?;
+                }
+                (Some((new_value_key, new_value)), Some((old_value_key, old_value))) => {
+                    match new_value_key.user_key.cmp(&old_value_key.user_key) {
+                        Ordering::Less => {
+                            self.item_buffer = Some((
+                                new_value_key.user_key.table_key.clone(),
+                                ChangeLogValue::Insert(new_value.clone()),
+                            ));
+                            self.new_value_iter.next_inner()?;
+                        }
+                        Ordering::Greater => {
+                            self.item_buffer = Some((
+                                new_value_key.user_key.table_key.clone(),
+                                ChangeLogValue::Delete(old_value.clone()),
+                            ));
+                            self.old_value_iter.next_inner()?;
+                        }
+                        Ordering::Equal => {
+                            if new_value == old_value {
+                                continue;
+                            }
+                            self.item_buffer = Some((
+                                new_value_key.user_key.table_key.clone(),
+                                ChangeLogValue::Update {
+                                    new_value: new_value.clone(),
+                                    old_value: old_value.clone(),
+                                },
+                            ));
+                            self.new_value_iter.next_inner()?;
+                            self.old_value_iter.next_inner()?;
+                        }
+                    }
+                }
+            };
+            break;
+        }
+        Ok(self
+            .item_buffer
+            .as_ref()
+            .map(|(key, value)| (key.to_ref(), value.to_ref())))
     }
 }
 

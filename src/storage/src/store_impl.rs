@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -98,6 +99,7 @@ fn may_verify(state_store: impl StateStore + AsHummock) -> impl StateStore + AsH
         VerifyStateStore {
             actual: state_store,
             expected,
+            _phantom: PhantomData::<()>,
         }
     }
 }
@@ -202,6 +204,7 @@ macro_rules! dispatch_state_store {
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
+    use std::marker::PhantomData;
     use std::ops::{Bound, Deref};
     use std::sync::Arc;
 
@@ -237,9 +240,10 @@ pub mod verify {
         }
     }
 
-    pub struct VerifyStateStore<A, E> {
+    pub struct VerifyStateStore<A, E, T = ()> {
         pub actual: A,
         pub expected: Option<E>,
+        pub _phantom: PhantomData<T>,
     }
 
     impl<A: AsHummock, E> AsHummock for VerifyStateStore<A, E> {
@@ -249,6 +253,7 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
+        type ChangeLogIter = impl StateStoreReadChangeLogIter;
         type Iter = impl StateStoreReadIter;
 
         async fn get(
@@ -288,13 +293,36 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter(actual, expected))
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
             }
+        }
+
+        async fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> StorageResult<Self::ChangeLogIter> {
+            let actual = self
+                .actual
+                .iter_log(epoch_range, key_range.clone(), options.clone())
+                .await?;
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.iter_log(epoch_range, key_range, options).await?)
+            } else {
+                None
+            };
+
+            Ok(verify_iter::<StateStoreReadLogItem>(actual, expected))
         }
     }
 
-    impl<A: StateStoreIter, E: StateStoreIter> StateStoreIter for VerifyStateStore<A, E> {
-        async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    impl<A: StateStoreIter<T>, E: StateStoreIter<T>, T: IterItem> StateStoreIter<T>
+        for VerifyStateStore<A, E, T>
+    where
+        for<'a> T::ItemRef<'a>: PartialEq + Debug,
+    {
+        async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
             let actual = self.actual.try_next().await?;
             if let Some(expected) = self.expected.as_mut() {
                 let expected = expected.try_next().await?;
@@ -304,11 +332,18 @@ pub mod verify {
         }
     }
 
-    fn verify_iter(
-        actual: impl StateStoreIter,
-        expected: Option<impl StateStoreIter>,
-    ) -> impl StateStoreIter {
-        VerifyStateStore { actual, expected }
+    fn verify_iter<T: IterItem>(
+        actual: impl StateStoreIter<T>,
+        expected: Option<impl StateStoreIter<T>>,
+    ) -> impl StateStoreIter<T>
+    where
+        for<'a> T::ItemRef<'a>: PartialEq + Debug,
+    {
+        VerifyStateStore {
+            actual,
+            expected,
+            _phantom: PhantomData::<T>,
+        }
     }
 
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
@@ -336,6 +371,7 @@ pub mod verify {
             Self {
                 actual: self.actual.clone(),
                 expected: self.expected.clone(),
+                _phantom: PhantomData,
             }
         }
     }
@@ -384,7 +420,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter(actual, expected))
+                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
             }
         }
 
@@ -498,6 +534,7 @@ pub mod verify {
             VerifyStateStore {
                 actual: self.actual.new_local(option).await,
                 expected,
+                _phantom: PhantomData::<()>,
             }
         }
 
@@ -701,30 +738,30 @@ pub mod boxed_state_store {
     use crate::StateStore;
 
     #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreIter: Send {
-        async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>>;
+    pub trait DynamicDispatchedStateStoreIter<T: IterItem>: Send {
+        async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
     }
 
     #[async_trait::async_trait]
-    impl<I: StateStoreIter> DynamicDispatchedStateStoreIter for I {
-        async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    impl<T: IterItem, I: StateStoreIter<T>> DynamicDispatchedStateStoreIter<T> for I {
+        async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
             self.try_next().await
         }
     }
 
-    pub type BoxStateStoreIter<'a> = Box<dyn DynamicDispatchedStateStoreIter + 'a>;
-    impl<'a> StateStoreIter for BoxStateStoreIter<'a> {
+    pub type BoxStateStoreIter<'a, T> = Box<dyn DynamicDispatchedStateStoreIter<T> + 'a>;
+    impl<'a, T: IterItem> StateStoreIter<T> for BoxStateStoreIter<'a, T> {
         fn try_next(
             &mut self,
-        ) -> impl Future<Output = StorageResult<Option<StateStoreIterItemRef<'_>>>> + Send + '_
-        {
+        ) -> impl Future<Output = StorageResult<Option<T::ItemRef<'_>>>> + Send + '_ {
             self.deref_mut().try_next()
         }
     }
 
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static>;
+    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreIterItem>;
+    pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
@@ -741,6 +778,13 @@ pub mod boxed_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIter>;
+
+        async fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> StorageResult<BoxStateStoreReadChangeLogIter>;
     }
 
     #[async_trait::async_trait]
@@ -762,10 +806,21 @@ pub mod boxed_state_store {
         ) -> StorageResult<BoxStateStoreReadIter> {
             Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
         }
+
+        async fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> StorageResult<BoxStateStoreReadChangeLogIter> {
+            Ok(Box::new(
+                self.iter_log(epoch_range, key_range, options).await?,
+            ))
+        }
     }
 
     // For LocalStateStore
-    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a>;
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
@@ -999,6 +1054,7 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
 
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
+        type ChangeLogIter = BoxStateStoreReadChangeLogIter;
         type Iter = BoxStateStoreReadIter;
 
         fn get(
@@ -1017,6 +1073,15 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             self.deref().iter(key_range, epoch, read_options)
+        }
+
+        fn iter_log(
+            &self,
+            epoch_range: (u64, u64),
+            key_range: TableKeyRange,
+            options: ReadLogOptions,
+        ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
+            self.deref().iter_log(epoch_range, key_range, options)
         }
     }
 
