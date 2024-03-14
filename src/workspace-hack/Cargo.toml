@@ -41,6 +41,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4", features = ["tokio"] }
 crossbeam-epoch = { version = "0.9" }
+crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
 crypto-bigint = { version = "0.5", features = ["generic-array", "zeroize"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
@@ -107,7 +108,7 @@ quote = { version = "1" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
-redis = { version = "0.24", features = ["async-std-comp", "tokio-comp"] }
+redis = { version = "0.25", features = ["async-std-comp", "tokio-comp"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
@@ -125,7 +126,7 @@ serde_json = { version = "1", features = ["alloc", "raw_value"] }
 serde_with = { version = "3", features = ["json"] }
 sha1 = { version = "0.10" }
 sha2 = { version = "0.10", features = ["oid"] }
-smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+smallvec = { version = "1", default-features = false, features = ["const_new", "serde", "union", "write"] }
 sqlx = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
 sqlx-mysql = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "rust_decimal", "time", "uuid"] }
@@ -167,6 +168,9 @@ auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+crossbeam-epoch = { version = "0.9" }
+crossbeam-queue = { version = "0.3" }
+crossbeam-utils = { version = "0.8" }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
@@ -199,6 +203,7 @@ regex-automata = { version = "0.4", default-features = false, features = ["dfa",
 regex-syntax = { version = "0.8" }
 rustc-hash = { version = "1" }
 rustix = { version = "0.38", features = ["fs", "net"] }
+scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
 sha2 = { version = "0.10", features = ["oid"] }
