@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use axum::http::{header, StatusCode, Uri};
-use axum::response::{Html, IntoResponse as _, Response};
+use axum::response::{IntoResponse as _, Response};
 use axum::Router;
 use rust_embed::RustEmbed;
 
@@ -21,13 +21,17 @@ use rust_embed::RustEmbed;
 #[folder = "$OUT_DIR/assets"]
 struct Assets;
 
+// TODO: switch to `axum-embed` for better robustness after bumping to axum 0.7.
 async fn static_handler(uri: Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
-
-    if path.is_empty() {
-        let data = Assets::get("index.html").unwrap().data;
-        return Html(data).into_response();
-    }
+    let path = {
+        if uri.path().ends_with('/') {
+            // Append `index.html` to directory paths.
+            format!("{}index.html", uri.path())
+        } else {
+            uri.path().to_owned()
+        }
+    };
+    let path = path.trim_start_matches('/');
 
     match Assets::get(path) {
         Some(file) => {
