@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use redis::aio::Connection;
+use redis::aio::MultiplexedConnection;
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -170,14 +170,14 @@ pub struct RedisSinkWriter {
 
 struct RedisSinkPayloadWriter {
     // connection to redis, one per executor
-    conn: Option<Connection>,
+    conn: Option<MultiplexedConnection>,
     // the command pipeline for write-commit
     pipe: Pipeline,
 }
 impl RedisSinkPayloadWriter {
     pub async fn new(config: RedisConfig) -> Result<Self> {
         let client = config.common.build_client()?;
-        let conn = Some(client.get_async_connection().await?);
+        let conn = Some(client.get_multiplexed_async_connection().await?);
         let pipe = redis::pipe();
 
         Ok(Self { conn, pipe })
