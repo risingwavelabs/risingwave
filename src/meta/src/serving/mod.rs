@@ -49,20 +49,19 @@ impl ServingVnodeMapping {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
         let mut upserted: HashMap<FragmentId, ParallelUnitMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
-        for (fragment_id, streaming_parallelism) in streaming_parallelisms {
+        for fragment_id in streaming_parallelisms.keys() {
             let new_mapping = {
-                let old_mapping = serving_vnode_mappings.get(&fragment_id);
-                // Set max serving parallelism to `streaming_parallelism`. It's not a must.
-                place_vnode(old_mapping, workers, streaming_parallelism)
+                let old_mapping = serving_vnode_mappings.get(fragment_id);
+                place_vnode(old_mapping, workers, None)
             };
             match new_mapping {
                 None => {
-                    serving_vnode_mappings.remove(&fragment_id as _);
-                    failed.push(fragment_id);
+                    serving_vnode_mappings.remove(fragment_id as _);
+                    failed.push(*fragment_id);
                 }
                 Some(mapping) => {
-                    serving_vnode_mappings.insert(fragment_id, mapping.clone());
-                    upserted.insert(fragment_id, mapping);
+                    serving_vnode_mappings.insert(*fragment_id, mapping.clone());
+                    upserted.insert(*fragment_id, mapping);
                 }
             }
         }
