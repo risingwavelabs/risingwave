@@ -39,7 +39,6 @@ source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
 unset RUSTC_WRAPPER # disable sccache
-export TODO_DISABLE_EMBEDDED_DASHBOARD=1 # TODO(bugen): remove this after the embedded dashboard is ready
 
 echo "--- Install protoc3"
 PROTOC_ARCH=${ARCH}

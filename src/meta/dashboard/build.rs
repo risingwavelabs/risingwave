@@ -61,13 +61,7 @@ fn build() -> anyhow::Result<()> {
 }
 
 fn main() -> anyhow::Result<()> {
-    rerun_if_changed!("build.rs");
-
-    let should_build = env_var_is_true("ENABLE_BUILD_DASHBOARD") // asked to build by RiseDev
-        || (std::env::var("PROFILE").unwrap() == "release" && !env_var_is_true("RISINGWAVE_CI")); // release build and not in CI
-
-    // TODO(bugen): remove this after the embedded dashboard is ready
-    let should_build = should_build && !env_var_is_true("TODO_DISABLE_EMBEDDED_DASHBOARD");
+    let should_build = env_var_is_true("ENABLE_BUILD_DASHBOARD");
 
     if should_build {
         build()?;

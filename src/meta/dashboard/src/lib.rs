@@ -24,13 +24,16 @@ mod proxy;
 /// Based on the configuration, it will either serve the assets embedded in the binary,
 /// or proxy all requests to the latest static files built and hosted on GitHub.
 ///
-/// - For development and CI builds, the requests to the dashboard will be proxied. This
-///   is to reduce the build time and eliminate the dependency on `node`, so that the
-///   developer experience can be better.
+/// - If env var `ENABLE_BUILD_DASHBOARD` is not set during the build, the requests to
+///   the dashboard will be proxied. This is to reduce the build time and eliminate the
+///   dependency on `node`, so that the developer experience can be better. This is the
+///   default behavior for CI and development builds.
 ///
-/// - For release builds, the assets will built in the build script and embedded in the
-///   binary. This is to make the deployment easier and the dashboard more reliable
-///   without relying on external or remote resources.
+/// - If env var `ENABLE_BUILD_DASHBOARD` is set during the build, the assets will be
+///   built in the build script and embedded in the binary. This is to make the
+///   deployment easier and the dashboard more reliable without relying on external or
+///   remote resources. This is the default behavior for versioned releases, and can be
+///   manually enabled for development builds with RiseDev.
 ///
 /// If you're going to develop with the dashboard, see `dashboard/README.md` for more
 /// details.

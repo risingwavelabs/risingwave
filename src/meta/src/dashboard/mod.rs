@@ -412,7 +412,7 @@ impl DashboardService {
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
         let dashboard_router = if let Some(ui_path) = ui_path {
-            // TODO(bugen): remove `ui_path`
+            // TODO(bugen): remove `ui_path` and all in the embedded `risingwave_meta_dashboard`.
             get_service(ServeDir::new(ui_path))
                 .handle_error(|e| async move { match e {} })
                 .boxed_clone()

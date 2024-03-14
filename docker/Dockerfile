@@ -76,8 +76,6 @@ ENV GIT_SHA=$GIT_SHA
 COPY ./ /risingwave
 WORKDIR /risingwave
 
-# TODO(bugen): remove this after the embedded dashboard is ready
-ENV TODO_DISABLE_EMBEDDED_DASHBOARD=1
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-python-udf && \
   mkdir -p /risingwave/bin && \
