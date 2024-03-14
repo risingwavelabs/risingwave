@@ -291,12 +291,16 @@ async fn test_disable_arrangement_backfill() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::disable_arrangement_backfill()).await?;
     let mut session = cluster.start_session();
     // Since cluster disables arrangement backfill, it should not work.
-    session.run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true").await?;
+    session
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
+        .await?;
     let result = session
         .run("EXPLAIN (verbose) CREATE MATERIALIZED VIEW m1 AS SELECT * FROM generate_series(1, 1000)")
         .await?;
     assert!(!result.contains("ArrangementBackfill"));
-    session.run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=false").await?;
+    session
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=false")
+        .await?;
     assert!(!result.contains("ArrangementBackfill"));
     Ok(())
 }
