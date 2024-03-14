@@ -12,21 +12,14 @@ RUN add-apt-repository ppa:deadsnakes/ppa -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install python3.12 python3.12-dev -yy
 ENV PYO3_PYTHON=python3.12
 
-FROM base AS dashboard-builder
-
-RUN apt-get update && apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
-  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
-  && apt-get update && apt-get install -y nodejs
-
-COPY ./dashboard/ /risingwave/dashboard
-COPY ./proto  /risingwave/proto
-
-RUN cd /risingwave/dashboard && npm i && npm run build && rm -rf node_modules
-
 FROM base AS rust-base
 
 RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
+
+# Install Node.js as it's required to build the dashboard.
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+ENV NVM_DIR /root/.nvm
+RUN . $NVM_DIR/nvm.sh && nvm install 20
 
 SHELL ["/bin/bash", "-c"]
 
@@ -75,6 +68,8 @@ ENV GIT_SHA=$GIT_SHA
 
 COPY ./ /risingwave
 WORKDIR /risingwave
+
+ENV ENABLE_BUILD_DASHBOARD=1
 
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release --features "rw-static-link" --features embedded-python-udf && \
@@ -134,14 +129,11 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
-# Set default dashboard UI to local path instead of github proxy
-ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 # Set default connector libs path
 ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
