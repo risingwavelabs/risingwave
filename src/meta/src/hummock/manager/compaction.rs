@@ -133,7 +133,7 @@ impl HummockManager {
                 let mut generated_task_count = 0;
                 let mut existed_groups = groups.clone();
                 let mut meet_error = false;
-                let mut wait_compact_groups = HashSet::default();
+                let mut wait_compact_groups: HashSet<CompactionGroupId> = HashSet::default();
 
                 while generated_task_count < pull_task_count && !meet_error {
                     let compact_ret = self
