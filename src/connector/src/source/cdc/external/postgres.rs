@@ -114,10 +114,6 @@ impl ExternalTableReader for PostgresExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
-
-    fn get_stat(&self) -> usize {
-        0
-    }
 }
 
 impl PostgresExternalTableReader {

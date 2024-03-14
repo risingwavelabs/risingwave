@@ -16,7 +16,6 @@ pub mod mock_external_table;
 mod postgres;
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicUsize;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -217,8 +216,6 @@ pub trait ExternalTableReader {
         primary_keys: Vec<String>,
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
-
-    fn get_stat(&self) -> usize;
 }
 
 #[derive(Debug)]
@@ -233,7 +230,6 @@ pub struct MySqlExternalTableReader {
     config: ExternalTableConfig,
     rw_schema: Schema,
     field_names: String,
-    row_cnt: AtomicUsize,
     // use mutex to provide shared mutable access to the connection
     conn: tokio::sync::Mutex<mysql_async::Conn>,
 }
@@ -285,10 +281,6 @@ impl ExternalTableReader for MySqlExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
-
-    fn get_stat(&self) -> usize {
-        self.row_cnt.load(std::sync::atomic::Ordering::Relaxed)
-    }
 }
 
 impl MySqlExternalTableReader {
@@ -321,7 +313,6 @@ impl MySqlExternalTableReader {
             config,
             rw_schema,
             field_names,
-            row_cnt: AtomicUsize::new(0),
             conn: tokio::sync::Mutex::new(conn),
         })
     }
@@ -381,8 +372,6 @@ impl MySqlExternalTableReader {
             #[for_await]
             for row in row_stream {
                 let row = row?;
-                self.row_cnt
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 yield row;
             }
         } else {
@@ -435,8 +424,6 @@ impl MySqlExternalTableReader {
             #[for_await]
             for row in row_stream {
                 let row = row?;
-                self.row_cnt
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 yield row;
             }
         };
@@ -510,14 +497,6 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
-    }
-
-    fn get_stat(&self) -> usize {
-        match self {
-            ExternalTableReaderImpl::MySql(mysql) => mysql.get_stat(),
-            ExternalTableReaderImpl::Postgres(postgres) => postgres.get_stat(),
-            ExternalTableReaderImpl::Mock(mock) => mock.get_stat(),
-        }
     }
 }
 

@@ -115,8 +115,4 @@ impl ExternalTableReader for MockExternalTableReader {
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner()
     }
-
-    fn get_stat(&self) -> usize {
-        0
-    }
 }

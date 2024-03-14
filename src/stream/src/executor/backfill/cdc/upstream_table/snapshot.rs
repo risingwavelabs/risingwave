@@ -108,11 +108,6 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         for chunk in chunk_stream {
             yield Some(chunk?);
         }
-
-        tracing::info!(
-            "snapshot_read done, row count: {}",
-            self.inner.table_reader().get_stat()
-        );
         yield None;
     }
 
