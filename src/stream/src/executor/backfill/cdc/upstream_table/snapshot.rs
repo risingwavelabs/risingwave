@@ -38,7 +38,7 @@ pub trait UpstreamTableRead {
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct SnapshotReadArgs {
     pub epoch: u64,
     pub current_pos: Option<OwnedRow>,
