@@ -4099,7 +4099,8 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.6.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=899fc01#899fc017f0b85ac4ccee66a4fd050604c0a00b58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15240094bab62dfeb59bb974e2fb7bff18727c6dc7bd1f5f6fc82a9e6fda5a38"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -4111,7 +4112,8 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.4.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=899fc01#899fc017f0b85ac4ccee66a4fd050604c0a00b58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad95f985cfbd5a8bf9f115d963918e742dfbb75350febff509b09cf194842b0c"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4126,7 +4128,8 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.3.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=899fc01#899fc017f0b85ac4ccee66a4fd050604c0a00b58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acf22ed0dfa6315714099046504711d5563d191a442afcd87bd4d0bf5010bb9a"
 dependencies = [
  "bytes",
  "cmsketch 0.1.5",
@@ -4142,8 +4145,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=899fc01#899fc017f0b85ac4ccee66a4fd050604c0a00b58"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65b0a4ca5d917e684c9267e8e2bcec4b3e0c27dd91c84945c20c09ddff906cac"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.4.0",
@@ -4162,7 +4166,8 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.5.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=899fc01#899fc017f0b85ac4ccee66a4fd050604c0a00b58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe0d0d6090461ad435dc2316e9800f336faa6b858d6c85dfb54091cb4cf127e"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -4191,7 +4196,8 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.3.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=899fc01#899fc017f0b85ac4ccee66a4fd050604c0a00b58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77a5ee5ab890d1893232fd44af33197c7499813816b8880649a15ee9438d5e07"
 dependencies = [
  "ahash 0.8.6",
  "cc",
@@ -8107,7 +8113,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
