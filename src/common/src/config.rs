@@ -963,6 +963,8 @@ pub struct S3ObjectStoreConfig {
     pub retry_unknown_service_error: bool,
     #[serde(default)]
     pub developer: S3ObjectStoreDeveloperConfig,
+    #[serde(default = "default::object_store_config::s3::identity_resolution_timeout_s")]
+    pub identity_resolution_timeout_s: u64,
 }
 
 /// The subsections `[storage.object_store.s3.developer]`.
@@ -1609,6 +1611,7 @@ pub mod default {
             const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
             const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
             const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
+            const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
             const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
 
@@ -1638,6 +1641,10 @@ pub mod default {
 
             pub fn object_store_req_retry_max_attempts() -> usize {
                 DEFAULT_RETRY_MAX_ATTEMPTS
+            }
+
+            pub fn identity_resolution_timeout_s() -> u64 {
+                DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S
             }
 
             pub mod developer {

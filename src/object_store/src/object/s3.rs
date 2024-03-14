@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
-use aws_sdk_s3::config::{Credentials, Region};
+use aws_sdk_s3::config::{Credentials, IdentityCache, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
@@ -597,6 +597,13 @@ impl S3ObjectStore {
                     aws_sdk_s3::config::Builder::from(&sdk_config)
                         .endpoint_url(endpoint)
                         .force_path_style(is_force_path_style)
+                        .identity_cache(
+                            IdentityCache::lazy()
+                                .load_timeout(Duration::from_secs(
+                                    config.s3.identity_resolution_timeout_s,
+                                ))
+                                .build(),
+                        )
                         .build(),
                 );
                 client
@@ -655,6 +662,13 @@ impl S3ObjectStore {
                 .await,
         )
         .force_path_style(true)
+        .identity_cache(
+            IdentityCache::lazy()
+                .load_timeout(Duration::from_secs(
+                    s3_object_store_config.s3.identity_resolution_timeout_s,
+                ))
+                .build(),
+        )
         .http_client(Self::new_http_client(&s3_object_store_config))
         .behavior_version_latest();
         let config = builder
