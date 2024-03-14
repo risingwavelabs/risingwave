@@ -114,8 +114,14 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 RowOp::Delete(ref old_v) => {
                     e.insert(RowOp::Update((*old_v, v)));
                 }
-                RowOp::Insert(_) | RowOp::Update(_) => {
-                    tracing::warn!("double insert");
+                RowOp::Insert(_) => {
+                    tracing::warn!("double insert for the same pk");
+                    e.insert(RowOp::Insert(v));
+                }
+                RowOp::Update((ref old_v, _)) => {
+                    tracing::warn!("double insert for the same pk");
+                    e.insert(RowOp::Update((*old_v, v)));
+
                 }
             },
         }
@@ -135,7 +141,8 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                     e.insert(RowOp::Delete(*prev));
                 }
                 RowOp::Delete(_) => {
-                    tracing::warn!("double delete");
+                    tracing::warn!("double delete for the same pk");
+                    e.insert(RowOp::Delete(v));
                 }
             },
         }

@@ -197,6 +197,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             need_advance_delete,
             self.chunk_size,
             self.input_data_types,
+            self.sink_param.downstream_pk.clone()
         );
 
         if self.sink.is_sink_into_table() {
@@ -296,6 +297,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         re_construct_with_sink_pk: bool,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
+        down_stream_pk: Vec<usize>,
     ) {
         // need to buffer chunks during one barrier
         if need_advance_delete || re_construct_with_sink_pk {
@@ -333,7 +335,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             chunks
                         };
                         let chunks = if re_construct_with_sink_pk {
-                            StreamChunkCompactor::new(stream_key.clone(), chunks)
+                            StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
                                 .reconstructed_compacted_chunks(
                                     chunk_size,
                                     input_data_types.clone(),
@@ -712,8 +714,7 @@ mod test {
             StreamChunk::from_pretty(
                 " I I I
                 U- 1 1 10
-                U+ 1 1 40
-                +  1 3 30",
+                U+ 1 1 40",
             )
         );
 
