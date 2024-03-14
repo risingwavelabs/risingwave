@@ -42,7 +42,7 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
+                TransactionMode::IsolationLevel(_) => {}
             }
         }
 
