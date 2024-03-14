@@ -114,23 +114,6 @@ impl JsonEncoder {
         }
     }
 
-    pub fn new_with_s3(
-        schema: Schema,
-        col_indices: Option<Vec<usize>>,
-        _map: HashMap<String, (u8, u8)>,
-    ) -> Self {
-        Self {
-            schema,
-            col_indices,
-            time_handling_mode: TimeHandlingMode::Milli,
-            date_handling_mode: DateHandlingMode::String,
-            timestamp_handling_mode: TimestampHandlingMode::String,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
-            custom_json_type: CustomJsonType::S3,
-            kafka_connect: None,
-        }
-    }
-
     pub fn new_with_bigquery(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
         Self {
             schema,
@@ -276,10 +259,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::Es
-            | CustomJsonType::None
-            | CustomJsonType::BigQuery
-            | CustomJsonType::S3 => {
+            CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
                 json!(v.to_text())
             }
         },
@@ -331,10 +311,7 @@ fn datum_to_json_object(
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
             CustomJsonType::Es | CustomJsonType::StarRocks(_) => JsonbVal::from(jsonb_ref).take(),
-            CustomJsonType::Doris(_)
-            | CustomJsonType::None
-            | CustomJsonType::BigQuery
-            | CustomJsonType::S3 => {
+            CustomJsonType::Doris(_) | CustomJsonType::None | CustomJsonType::BigQuery => {
                 json!(jsonb_ref.to_string())
             }
         },
@@ -385,10 +362,7 @@ fn datum_to_json_object(
                         "starrocks can't support struct".to_string(),
                     ));
                 }
-                CustomJsonType::Es
-                | CustomJsonType::None
-                | CustomJsonType::BigQuery
-                | CustomJsonType::S3 => {
+                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
