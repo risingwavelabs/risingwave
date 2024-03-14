@@ -16,10 +16,14 @@ FROM base AS rust-base
 
 RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld unzip
 
-# Install Node.js as it's required to build the dashboard.
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+# Install Node.js as requirement for building the dashboard.
 ENV NVM_DIR /root/.nvm
-RUN . $NVM_DIR/nvm.sh && nvm install 20
+ENV NVM_VERSION 0.39.7
+ENV NODE_VERSION 20.11.1
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$NVM_VERSION/install.sh | bash \
+  && . $NVM_DIR/nvm.sh \
+  && nvm install $NODE_VERSION
+ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 
 SHELL ["/bin/bash", "-c"]
 
