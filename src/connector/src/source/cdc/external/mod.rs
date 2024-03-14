@@ -246,7 +246,7 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
-    #[serde(rename = "ssl.name", default = "Default::default")]
+    #[serde(rename = "ssl.mode", default = "Default::default")]
     pub sslmode: SslMode,
 }
 

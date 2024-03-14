@@ -20,13 +20,14 @@ use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use openssl::ssl::{SslConnector, SslMethod};
+use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DatumRef;
 use serde_derive::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
-use tokio_postgres::NoTls;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
@@ -135,10 +136,13 @@ impl PostgresExternalTableReader {
             config.host,
             config.port,
             config.database,
-            dbg!(&config.sslmode)
+            config.sslmode
         );
 
-        let (client, connection) = tokio_postgres::connect(&database_url, NoTls).await?;
+        let builder = SslConnector::builder(SslMethod::tls())?;
+        let connector = MakeTlsConnector::new(builder.build());
+
+        let (client, connection) = tokio_postgres::connect(&database_url, connector).await?;
 
         tokio::spawn(async move {
             if let Err(e) = connection.await {
