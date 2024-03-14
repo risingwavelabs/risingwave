@@ -169,7 +169,7 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()]
+            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()]
                 .into(),
             ..Default::default()
         }
@@ -264,7 +264,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = true;".into()]
+            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
             ..Default::default()
         }

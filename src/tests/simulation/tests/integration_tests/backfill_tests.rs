@@ -165,7 +165,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     // Create a materialized view with parallelism = 3;
     session.run("SET STREAMING_PARALLELISM=3").await?;
     session
-        .run("SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=true")
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
         .await?;
     session.run("SET STREAMING_RATE_LIMIT=30").await?;
     session
