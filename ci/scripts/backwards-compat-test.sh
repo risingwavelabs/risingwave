@@ -67,6 +67,7 @@ ENABLE_BUILD_RUST=false
 ENABLE_RELEASE_PROFILE=false
 EOF
 
+# See https://github.com/risingwavelabs/risingwave/pull/15448
 if version_le "${VERSION:-}" "1.8.0" ; then
   echo "ENABLE_ALL_IN_ONE=true" >> risedev-components.user.env
 fi
