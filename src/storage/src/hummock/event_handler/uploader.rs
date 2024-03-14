@@ -26,6 +26,7 @@ use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
+use prometheus::{HistogramTimer, IntGauge};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -51,7 +52,10 @@ use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
-pub type UploadTaskOutput = Vec<LocalSstableInfo>;
+pub struct UploadTaskOutput {
+    pub ssts: Vec<LocalSstableInfo>,
+    pub wait_poll_timer: Option<HistogramTimer>,
+}
 pub type SpawnUploadTask = Arc<
     dyn Fn(UploadTaskPayload, UploadTaskInfo) -> JoinHandle<HummockResult<UploadTaskOutput>>
         + Send
@@ -115,6 +119,7 @@ struct UploadingTask {
     task_info: UploadTaskInfo,
     spawn_upload_task: SpawnUploadTask,
     task_size_guard: GenericGauge<AtomicU64>,
+    task_count_guard: IntGauge,
 }
 
 pub struct MergeImmTaskOutput {
@@ -189,6 +194,7 @@ impl Future for MergingImmTask {
 impl Drop for UploadingTask {
     fn drop(&mut self) {
         self.task_size_guard.sub(self.task_info.task_size as u64);
+        self.task_count_guard.dec();
     }
 }
 
@@ -234,12 +240,14 @@ impl UploadingTask {
             debug!("start upload task: {:?}", task_info);
         }
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
+        context.stats.uploader_uploading_task_count.inc();
         Self {
             payload,
             join_handle,
             task_info,
             spawn_upload_task: context.spawn_upload_task.clone(),
             task_size_guard: context.buffer_tracker.global_upload_task_size().clone(),
+            task_count_guard: context.stats.uploader_uploading_task_count.clone(),
         }
     }
 
@@ -255,9 +263,9 @@ impl UploadingTask {
                     }
                 })
                 .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
-                .map(|ssts| {
+                .map(|output| {
                     StagingSstableInfo::new(
-                        ssts,
+                        output.ssts,
                         self.task_info.epochs.clone(),
                         self.task_info.imm_ids.clone(),
                         self.task_info.task_size,
@@ -955,6 +963,11 @@ impl HummockUploader {
             uploaded: uploaded_data,
             table_watermarks,
         });
+
+        self.context
+            .stats
+            .uploader_syncing_epoch_count
+            .set(self.syncing_data.len() as _);
     }
 
     fn add_synced_data(&mut self, epoch: HummockEpoch, synced_state: SyncedDataState) {
@@ -1038,6 +1051,8 @@ impl HummockUploader {
         self.sealed_data.clear();
         self.unsealed_data.clear();
 
+        self.context.stats.uploader_syncing_epoch_count.set(0);
+
         // TODO: call `abort` on the uploading task join handle
     }
 }
@@ -1059,6 +1074,10 @@ impl HummockUploader {
                 Ok(Vec::new())
             };
             let syncing_data = self.syncing_data.pop_back().expect("must exist");
+            self.context
+                .stats
+                .uploader_syncing_epoch_count
+                .set(self.syncing_data.len() as _);
             let epoch = syncing_data.sync_epoch;
 
             let newly_uploaded_sstable_infos = match &result {
@@ -1330,15 +1349,18 @@ mod tests {
     async fn dummy_success_upload_future(
         _: UploadTaskPayload,
         _: UploadTaskInfo,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
-        Ok(dummy_success_upload_output())
+    ) -> HummockResult<UploadTaskOutput> {
+        Ok(UploadTaskOutput {
+            ssts: dummy_success_upload_output(),
+            wait_poll_timer: None,
+        })
     }
 
     #[allow(clippy::unused_async)]
     async fn dummy_fail_upload_future(
         _: UploadTaskPayload,
         _: UploadTaskInfo,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
+    ) -> HummockResult<UploadTaskOutput> {
         Err(HummockError::other("failed"))
     }
 
@@ -1381,14 +1403,14 @@ mod tests {
         let run_count = Arc::new(AtomicUsize::new(0));
         let fail_num = 10;
         let run_count_clone = run_count.clone();
-        let uploader_context = test_uploader_context(move |_, _| {
+        let uploader_context = test_uploader_context(move |payload, info| {
             let run_count = run_count.clone();
             async move {
                 // fail in the first `fail_num` run, and success at the end
                 let ret = if run_count.load(SeqCst) < fail_num {
                     Err(HummockError::other("fail"))
                 } else {
-                    Ok(dummy_success_upload_output())
+                    dummy_success_upload_future(payload, info).await
                 };
                 run_count.fetch_add(1, SeqCst);
                 ret
@@ -1790,10 +1812,13 @@ mod tests {
                     let end_epoch = *task_info.epochs.first().unwrap();
                     assert!(end_epoch >= start_epoch);
                     spawn(async move {
-                        let ret = gen_sstable_info(start_epoch, end_epoch);
+                        let ssts = gen_sstable_info(start_epoch, end_epoch);
                         start_tx.send(task_info).unwrap();
                         finish_rx.await.unwrap();
-                        Ok(ret)
+                        Ok(UploadTaskOutput {
+                            ssts,
+                            wait_poll_timer: None,
+                        })
                     })
                 }
             }),
