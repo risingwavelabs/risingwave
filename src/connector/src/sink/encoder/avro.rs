@@ -149,9 +149,7 @@ impl QueryField for AvroEncoded {
     fn get_field(&self, name: &str) -> Option<String> {
         name.split('.')
             .try_fold(&self.value, |val, field| match val {
-                Value::Record(fields) => {
-                    fields.into_iter().find(|(n, _)| n == field).map(|(_, v)| v)
-                }
+                Value::Record(fields) => fields.iter().find(|(n, _)| n == field).map(|(_, v)| v),
                 _ => None,
             })
             .and_then(|v| match v {

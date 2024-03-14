@@ -87,7 +87,7 @@ pub trait QueryField {
 }
 
 impl QueryField for String {
-    fn get_field<'s>(&'s self, _name: &str) -> Option<String> {
+    fn get_field(&self, _name: &str) -> Option<String> {
         None
     }
 }

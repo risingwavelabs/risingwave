@@ -41,6 +41,9 @@ set -euo pipefail
 echo "--- testing pulsar sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/pulsar_sink.slt'
 
+echo "--- testing mqtt sink"
+sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
+
 sleep 1
 
 echo "--- Kill cluster"
