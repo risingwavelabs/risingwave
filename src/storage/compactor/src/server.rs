@@ -17,7 +17,6 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
 };
@@ -41,7 +40,10 @@ use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactionExecutor,
+    CompactorContext,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
@@ -71,7 +73,7 @@ pub async fn prepare_start_parameters(
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
     HeapProfiler,
-    Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    Option<CompactionAwaitTreeRegRef>,
     Arc<StorageOpts>,
     Arc<CompactorMetrics>,
 ) {
@@ -154,8 +156,7 @@ pub async fn prepare_start_parameters(
             .build()
             .ok(),
     };
-    let await_tree_reg =
-        await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
+    let await_tree_reg = await_tree_config.map(new_compaction_await_tree_reg_ref);
 
     (
         sstable_store,

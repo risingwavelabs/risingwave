@@ -230,6 +230,7 @@ async fn compaction_test(
         Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
+        None,
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();

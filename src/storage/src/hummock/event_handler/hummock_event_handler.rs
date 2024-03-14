@@ -15,10 +15,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
+use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
@@ -184,15 +187,34 @@ impl HummockEventHandler {
             state_store_metrics,
             &compactor_context.storage_opts,
             Arc::new(move |payload, task_info| {
-                spawn(flush_imms(
-                    payload,
-                    task_info,
-                    upload_compactor_context.clone(),
-                    filter_key_extractor_manager.clone(),
-                    cloned_sstable_object_id_manager.clone(),
-                ))
+                static NEXT_UPLOAD_TASK_ID: LazyLock<AtomicUsize> =
+                    LazyLock::new(|| AtomicUsize::new(0));
+                let tree_root = upload_compactor_context.await_tree_reg.as_ref().map(|reg| {
+                    let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
+                    reg.write().register(
+                        format!("spawn_upload_task/{}", upload_task_id),
+                        format!("Spawn Upload task: {}", task_info),
+                    )
+                });
+                spawn({
+                    let future = flush_imms(
+                        payload,
+                        task_info,
+                        upload_compactor_context.clone(),
+                        filter_key_extractor_manager.clone(),
+                        cloned_sstable_object_id_manager.clone(),
+                    );
+                    if let Some(tree_root) = tree_root {
+                        tree_root.instrument(future).left_future()
+                    } else {
+                        future.right_future()
+                    }
+                })
             }),
-            default_spawn_merging_task(compactor_context.compaction_executor.clone()),
+            default_spawn_merging_task(
+                compactor_context.compaction_executor.clone(),
+                compactor_context.await_tree_reg.clone(),
+            ),
             CacheRefiller::default_spawn_refill_task(),
         )
     }
