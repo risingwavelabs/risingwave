@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{NON_RESERVED_SYS_CATALOG_ID, NON_RESERVED_USER_ID};
+use risingwave_common::catalog::NON_RESERVED_USER_ID;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use thiserror_ext::AsReport;
 use tokio::sync::RwLock;
@@ -169,14 +169,7 @@ impl IdGeneratorManager {
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
             database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
             schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
-            table: Arc::new(
-                StoredIdGenerator::new(
-                    meta_store.clone(),
-                    "table",
-                    Some(NON_RESERVED_SYS_CATALOG_ID as u64),
-                )
-                .await,
-            ),
+            table: Arc::new(StoredIdGenerator::new(meta_store.clone(), "table", Some(1)).await),
             function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))

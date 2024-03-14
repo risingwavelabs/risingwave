@@ -210,7 +210,6 @@ pub struct MetaOpts {
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
-
     /// The number of traces to be cached in-memory by the tracing collector
     /// embedded in the meta node.
     pub cached_traces_num: u32,
@@ -223,6 +222,7 @@ pub struct MetaOpts {
 
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
+    pub enable_dropped_column_reclaim: bool,
 }
 
 impl MetaOpts {
@@ -278,6 +278,7 @@ impl MetaOpts {
             cached_traces_memory_limit_bytes: usize::MAX,
             enable_trivial_move: true,
             enable_check_task_level_overlap: true,
+            enable_dropped_column_reclaim: false,
         }
     }
 }

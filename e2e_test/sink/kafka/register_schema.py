@@ -5,7 +5,8 @@ from confluent_kafka.schema_registry import SchemaRegistryClient, Schema
 def main():
     url = sys.argv[1]
     subject = sys.argv[2]
-    with open(sys.argv[3]) as f:
+    local_path = sys.argv[3]
+    with open(local_path) as f:
         schema_str = f.read()
     if 4 < len(sys.argv):
         keys = sys.argv[4].split(',')
@@ -14,11 +15,16 @@ def main():
 
     client = SchemaRegistryClient({"url": url})
 
-    if keys:
-        schema_str = select_keys(schema_str, keys)
+    if local_path.endswith('.avsc'):
+        if keys:
+            schema_str = select_keys(schema_str, keys)
+        else:
+            schema_str = remove_unsupported(schema_str)
+        schema = Schema(schema_str, 'AVRO')
+    elif local_path.endswith('.proto'):
+        schema = Schema(schema_str, 'PROTOBUF')
     else:
-        schema_str = remove_unsupported(schema_str)
-    schema = Schema(schema_str, 'AVRO')
+        raise ValueError('{} shall end with .avsc or .proto'.format(local_path))
     client.register_schema(subject, schema)
 
 

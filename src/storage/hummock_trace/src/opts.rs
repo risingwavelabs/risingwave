@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bincode::{Decode, Encode};
+use foyer::memory::CacheContext;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -56,6 +57,24 @@ impl From<TracedCachePriority> for CachePriority {
         match value {
             TracedCachePriority::High => Self::High,
             TracedCachePriority::Low => Self::Low,
+        }
+    }
+}
+
+impl From<CacheContext> for TracedCachePriority {
+    fn from(value: CacheContext) -> Self {
+        match value {
+            CacheContext::Default => Self::High,
+            CacheContext::LruPriorityLow => Self::Low,
+        }
+    }
+}
+
+impl From<TracedCachePriority> for CacheContext {
+    fn from(value: TracedCachePriority) -> Self {
+        match value {
+            TracedCachePriority::High => Self::Default,
+            TracedCachePriority::Low => Self::LruPriorityLow,
         }
     }
 }
@@ -149,11 +168,14 @@ pub struct TracedNewLocalOptions {
     pub op_consistency_level: TracedOpConsistencyLevel,
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
+    pub vnodes: TracedBitmap,
 }
 
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
+        use risingwave_common::hash::VirtualNode;
+
         Self {
             table_id: TracedTableId { table_id },
             op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
@@ -161,6 +183,7 @@ impl TracedNewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
+            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
         }
     }
 }
@@ -224,7 +247,6 @@ impl From<TracedEpochPair> for EpochPair {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedInitOptions {
     pub epoch: TracedEpochPair,
-    pub vnodes: TracedBitmap,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
