@@ -294,8 +294,9 @@ async fn test_disable_arrangement_backfill() -> Result<()> {
     session
         .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
         .await?;
+    session.run("CREATE TABLE t (v1 int)").await?;
     let result = session
-        .run("EXPLAIN (verbose) CREATE MATERIALIZED VIEW m1 AS SELECT * FROM generate_series(1, 1000)")
+        .run("EXPLAIN (verbose) CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t")
         .await?;
     assert!(!result.contains("ArrangementBackfill"));
     session
