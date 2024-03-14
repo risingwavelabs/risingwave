@@ -560,6 +560,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
+
+    fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
+        _ = writer.insert(|_column| Ok(None));
+    }
 }
 
 #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
@@ -661,6 +665,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     offset = msg.offset,
                     "got a empty message, could be a heartbeat"
                 );
+                parser.emit_empty_row(builder.row_writer().with_meta(MessageMeta {
+                    meta: &msg.meta,
+                    split_id: &msg.split_id,
+                    offset: &msg.offset,
+                }));
+
+                continue;
             }
 
             // calculate process_time - event_time lag
