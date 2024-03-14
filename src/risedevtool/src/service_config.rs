@@ -61,6 +61,7 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
 
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub provide_sqlite_backend: Option<Vec<SqliteConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
@@ -166,6 +167,15 @@ pub struct EtcdConfig {
     pub exporter_port: u16,
 
     pub provide_etcd: Option<Vec<EtcdConfig>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct SqliteConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -331,6 +341,7 @@ pub enum ServiceConfig {
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
+    Sqlite(SqliteConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Tempo(TempoConfig),
@@ -352,6 +363,7 @@ impl ServiceConfig {
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
+            Self::Sqlite(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
             Self::Tempo(c) => &c.id,

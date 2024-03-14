@@ -14,7 +14,7 @@
 
 use std::env;
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,7 +27,7 @@ use risedev::{
     generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService,
+    PubsubService, RedisService, ServiceConfig, SqliteConfig, Task, TempoService, ZooKeeperService,
     RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
@@ -101,6 +101,7 @@ fn task_main(
         let listen_info = match service {
             ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Sqlite(_) => None,
             ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
             ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
@@ -157,6 +158,34 @@ fn task_main(
                 let mut task =
                     risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
+            }
+            ServiceConfig::Sqlite(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct SqliteService(SqliteConfig);
+                impl Task for SqliteService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                let prefix_data = env::var("PREFIX_DATA")?;
+                let file_path = PathBuf::from(&prefix_data)
+                    .join(&c.id)
+                    .join("metadata.sqlite");
+
+                ctx.service(&SqliteService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using local sqlite: {:?}", file_path));
             }
             ServiceConfig::Prometheus(c) => {
                 let mut ctx =

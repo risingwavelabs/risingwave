@@ -70,7 +70,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
+  # `dev-compute-node` have the same settings as default except the compute node will be started by user.
   dev-compute-node:
     steps:
       - use: meta-node
@@ -339,6 +339,18 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
+      - use: compute-node
+      - use: frontend
+
+  meta-1cn-1fe-sqlite:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
       - use: compactor
       - use: compute-node
       - use: frontend
@@ -1013,6 +1025,10 @@ template:
     # Other etcd nodes
     provide-etcd: "etcd*"
 
+  sqlite:
+    # Id of this instance
+    id: sqlite
+
   compute-node:
     # Compute-node advertise address
     address: "127.0.0.1"
@@ -1086,6 +1102,9 @@ template:
 
     # Etcd backend config
     provide-etcd-backend: "etcd*"
+
+    # Sqlite backend config
+    provide-sqlite-backend: "sqlite*"
 
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"

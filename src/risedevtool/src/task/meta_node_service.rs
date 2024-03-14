@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -76,21 +76,36 @@ impl MetaNodeService {
         }
 
         let mut is_persistent_meta_store = false;
-        match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
-            [] => {
-                cmd.arg("--backend").arg("mem");
-            }
-            etcds => {
-                is_persistent_meta_store = true;
-                cmd.arg("--backend")
-                    .arg("etcd")
-                    .arg("--etcd-endpoints")
-                    .arg(
-                        etcds
-                            .iter()
-                            .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
-                            .join(","),
-                    );
+
+        if let Some(sqlite_config) = &config.provide_sqlite_backend
+            && !sqlite_config.is_empty()
+        {
+            is_persistent_meta_store = true;
+            let prefix_data = env::var("PREFIX_DATA")?;
+            let file_path = PathBuf::from(&prefix_data)
+                .join(&sqlite_config[0].id)
+                .join("metadata.sqlite");
+            cmd.arg("--backend")
+                .arg("sql")
+                .arg("--sql-endpoint")
+                .arg(format!("sqlite://{}?mode=rwc", file_path.display()));
+        } else {
+            match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
+                [] => {
+                    cmd.arg("--backend").arg("mem");
+                }
+                etcds => {
+                    is_persistent_meta_store = true;
+                    cmd.arg("--backend")
+                        .arg("etcd")
+                        .arg("--etcd-endpoints")
+                        .arg(
+                            etcds
+                                .iter()
+                                .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
+                                .join(","),
+                        );
+                }
             }
         }
 
