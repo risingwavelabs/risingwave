@@ -117,7 +117,7 @@ impl<'a> ToBinary for ListRef<'a> {
             DataType::Interval => Type::INTERVAL_ARRAY,
             DataType::Bytea => Type::BYTEA_ARRAY,
             DataType::Jsonb => Type::JSONB_ARRAY,
-            DataType::Serial => Type::INT4_ARRAY,
+            DataType::Serial => Type::INT8_ARRAY,
             // INFO: `Int256` not support in `ScalarRefImpl::to_sql`
             // Just let `Array[Int256]` continue `to_sql`, and the `ScalarRefImpl::to_sql` will handle the error.
             DataType::Int256 => Type::NUMERIC_ARRAY,
