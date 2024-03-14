@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::mem;
+use core::time::Duration;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -22,6 +23,14 @@ use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table_data_insert_all_request::TableDataInsertAllRequest;
 use gcp_bigquery_client::model::table_data_insert_all_request_rows::TableDataInsertAllRequestRows;
 use gcp_bigquery_client::Client;
+use google_cloud_gax::grpc::{Request};
+use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::Rows as AppendRowsRequestRows;
+use google_cloud_gax::conn::{ConnectionOptions, Environment};
+use google_cloud_bigquery::grpc::apiv1::bigquery_client::StreamingWriteClient;
+use google_cloud_bigquery::grpc::apiv1::conn_pool::{WriteConnectionManager, DOMAIN};
+use google_cloud_googleapis::cloud::bigquery::storage::v1::AppendRowsRequest;
+use google_cloud_pubsub::client::google_cloud_auth;
+use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -30,6 +39,7 @@ use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
@@ -44,6 +54,7 @@ use crate::sink::{
 };
 
 pub const BIGQUERY_SINK: &str = "bigquery";
+const DEFAULT_GRPC_CHANNEL_NUMS: usize = 4;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -69,27 +80,40 @@ fn default_max_batch_rows() -> usize {
 
 impl BigQueryCommon {
     pub(crate) async fn build_client(&self, aws_auth_props: &AwsAuthProps) -> Result<Client> {
-        let service_account = if let Some(local_path) = &self.local_path {
-            let auth_json = std::fs::read_to_string(local_path)
+        let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
+        
+        let service_account = serde_json::from_str::<ServiceAccountKey>(&auth_json)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
-            serde_json::from_str::<ServiceAccountKey>(&auth_json)
-                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
-        } else if let Some(s3_path) = &self.s3_path {
-            let url =
-                Url::parse(s3_path).map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
-            let auth_json = load_file_descriptor_from_s3(&url, aws_auth_props)
-                .await
-                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
-            serde_json::from_slice::<ServiceAccountKey>(&auth_json)
-                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
-        } else {
-            return Err(SinkError::BigQuery(anyhow::anyhow!("`bigquery.local.path` and `bigquery.s3.path` set at least one, configure as needed.")));
-        };
         let client: Client = Client::from_service_account_key(service_account, false)
             .await
             .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
         Ok(client)
     }
+
+    pub(crate) async fn build_writer_client(&self, aws_auth_props: &AwsAuthProps) -> Result<StorageWriterClient> {
+        let auth_json = self.get_auth_json_from_path(aws_auth_props).await?;
+        
+        let credentials_file= CredentialsFile::new_from_str(&auth_json).await.unwrap();
+        let client = StorageWriterClient::new(credentials_file).await?;
+        Ok(client)
+    }
+
+    async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String>{
+        if let Some(local_path) = &self.local_path{
+            std::fs::read_to_string(local_path)
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))
+        }else if let Some(s3_path) = &self.s3_path {
+            let url =
+                Url::parse(s3_path).map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            let auth_vec = load_file_descriptor_from_s3(&url, aws_auth_props)
+                .await
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            Ok(String::from_utf8(auth_vec).unwrap())
+        }else{
+            Err(SinkError::BigQuery(anyhow::anyhow!("`bigquery.local.path` and `bigquery.s3.path` set at least one, configure as needed.")))
+        }
+    }
+    
 }
 
 #[serde_as]
@@ -280,7 +304,7 @@ pub struct BigQuerySinkWriter {
     pub config: BigQueryConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    client: Client,
+    client: StorageWriterClient,
     is_append_only: bool,
     insert_request: TableDataInsertAllRequest,
     row_encoder: JsonEncoder,
@@ -308,7 +332,7 @@ impl BigQuerySinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = config.common.build_client(&config.aws_auth_props).await?;
+        let client = config.common.build_writer_client(&config.aws_auth_props).await?;
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -398,6 +422,50 @@ impl SinkWriter for BigQuerySinkWriter {
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
+    }
+}
+
+struct StorageWriterClient{
+    client: StreamingWriteClient,
+    environment: Environment,
+}
+impl StorageWriterClient{
+    pub async fn new(credentials: CredentialsFile) -> Result<Self>{
+        // let credentials = CredentialsFile::new_from_file("/home/xxhx/winter-dynamics-383822-9690ac19ce78.json".to_string()).await.unwrap();
+        let ts_grpc = google_cloud_auth::token::DefaultTokenSourceProvider::new_with_credentials(
+            Self::bigquery_grpc_auth_config(),
+            Box::new(credentials),
+        )
+        .await.unwrap();
+        let conn_options = ConnectionOptions{
+            connect_timeout: Some(Duration::from_secs(30)),
+            timeout: None,
+        };
+        let environment = Environment::GoogleCloud(Box::new(ts_grpc));
+        let conn = WriteConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, DOMAIN, &conn_options).await.unwrap();
+        let client = conn.conn();
+        Ok(StorageWriterClient{
+            client,
+            environment,
+        })
+    }
+    pub async fn append_rows(
+        &mut self,
+        rows: Vec<AppendRowsRequestRows>,
+        write_stream: String,
+    ) -> Result<()> {
+        let trace_id =  Uuid::new_v4().hyphenated().to_string();
+        let append_req:Vec<AppendRowsRequest> = rows.into_iter().map(|row| AppendRowsRequest{ write_stream: write_stream.clone(), offset:None, trace_id: trace_id.clone(), missing_value_interpretations: HashMap::default(), rows: Some(row)}).collect();
+        let a = self.client.append_rows(Request::new(tokio_stream::iter(append_req))).await;
+        Ok(())
+    }
+
+    fn bigquery_grpc_auth_config() -> google_cloud_auth::project::Config<'static> {
+        google_cloud_auth::project::Config {
+            audience: Some(google_cloud_bigquery::grpc::apiv1::conn_pool::AUDIENCE),
+            scopes: Some(&google_cloud_bigquery::grpc::apiv1::conn_pool::SCOPES),
+            sub: None,
+        }
     }
 }
 

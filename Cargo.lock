@@ -273,7 +273,26 @@ dependencies = [
  "arrow-row 48.0.1",
  "arrow-schema 48.0.1",
  "arrow-select 48.0.1",
- "arrow-string",
+ "arrow-string 48.0.1",
+]
+
+[[package]]
+name = "arrow"
+version = "50.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa285343fba4d829d49985bdc541e3789cf6000ed0e84be7c039438df4a4e78c"
+dependencies = [
+ "arrow-arith 50.0.0",
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-cast 50.0.0",
+ "arrow-data 50.0.0",
+ "arrow-ipc 50.0.0",
+ "arrow-ord 50.0.0",
+ "arrow-row 50.0.0",
+ "arrow-schema 50.0.0",
+ "arrow-select 50.0.0",
+ "arrow-string 50.0.0",
 ]
 
 [[package]]
@@ -622,6 +641,22 @@ dependencies = [
  "arrow-data 48.0.1",
  "arrow-schema 48.0.1",
  "arrow-select 48.0.1",
+ "num",
+ "regex",
+ "regex-syntax 0.8.2",
+]
+
+[[package]]
+name = "arrow-string"
+version = "50.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f3b37f2aeece31a2636d1b037dabb69ef590e03bdc7eb68519b51ec86932a7"
+dependencies = [
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-data 50.0.0",
+ "arrow-schema 50.0.0",
+ "arrow-select 50.0.0",
  "num",
  "regex",
  "regex-syntax 0.8.2",
@@ -1509,6 +1544,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -2969,7 +3005,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "676796427e638d85e9eadf13765705212be60b34f8fc5d3934d95184c63ca1b4"
 dependencies = [
  "ahash 0.8.6",
- "arrow",
+ "arrow 48.0.1",
  "arrow-array 48.0.1",
  "arrow-schema 48.0.1",
  "async-compression",
@@ -3016,7 +3052,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31e23b3d21a6531259d291bd20ce59282ea794bda1018b0a1e278c13cd52e50c"
 dependencies = [
  "ahash 0.8.6",
- "arrow",
+ "arrow 48.0.1",
  "arrow-array 48.0.1",
  "arrow-buffer 48.0.1",
  "arrow-schema 48.0.1",
@@ -3034,7 +3070,7 @@ version = "33.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4de1fd0d8db0f2b8e4f4121bfa1c7c09d3a5c08a0a65c2229cd849eb65cff855"
 dependencies = [
- "arrow",
+ "arrow 48.0.1",
  "chrono",
  "dashmap",
  "datafusion-common",
@@ -3056,7 +3092,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18e227fe88bf6730cab378d0cd8fc4c6b2ea42bc7e414a8ea9feba7225932735"
 dependencies = [
  "ahash 0.8.6",
- "arrow",
+ "arrow 48.0.1",
  "arrow-array 48.0.1",
  "datafusion-common",
  "sqlparser",
@@ -3070,7 +3106,7 @@ version = "33.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c6648e62ea7605b9bfcd87fdc9d67e579c3b9ac563a87734ae5fe6d79ee4547"
 dependencies = [
- "arrow",
+ "arrow 48.0.1",
  "async-trait",
  "chrono",
  "datafusion-common",
@@ -3089,7 +3125,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f32b8574add16a32411a9b3fb3844ac1fc09ab4e7be289f86fd56d620e4f2508"
 dependencies = [
  "ahash 0.8.6",
- "arrow",
+ "arrow 48.0.1",
  "arrow-array 48.0.1",
  "arrow-buffer 48.0.1",
  "arrow-ord 48.0.1",
@@ -3124,7 +3160,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "796abd77d5bfecd9e5275a99daf0ec45f5b3a793ec431349ce8211a67826fd22"
 dependencies = [
  "ahash 0.8.6",
- "arrow",
+ "arrow 48.0.1",
  "arrow-array 48.0.1",
  "arrow-buffer 48.0.1",
  "arrow-schema 48.0.1",
@@ -3154,7 +3190,7 @@ version = "33.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26de2592417beb20f73f29b131a04d7de14e2a6336c631554d611584b4306236"
 dependencies = [
- "arrow",
+ "arrow 48.0.1",
  "chrono",
  "datafusion",
  "datafusion-common",
@@ -3169,7 +3205,7 @@ version = "33.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ced70b8a5648ba7b95c61fc512183c33287ffe2c9f22ffe22700619d7d48c84f"
 dependencies = [
- "arrow",
+ "arrow 48.0.1",
  "arrow-schema 48.0.1",
  "datafusion-common",
  "datafusion-expr",
@@ -3225,7 +3261,7 @@ name = "deltalake-core"
 version = "0.17.0"
 source = "git+https://github.com/risingwavelabs/delta-rs?rev=5c2dccd4640490202ffe98adbd13b09cef8e007b#5c2dccd4640490202ffe98adbd13b09cef8e007b"
 dependencies = [
- "arrow",
+ "arrow 48.0.1",
  "arrow-array 48.0.1",
  "arrow-buffer 48.0.1",
  "arrow-cast 48.0.1",
@@ -4662,6 +4698,33 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
+]
+
+[[package]]
+name = "google-cloud-bigquery"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c48abc8687f4c4cc143dd5bd3da5f1d7ef38334e4af5cef6de4c39295c6a3fd0"
+dependencies = [
+ "anyhow",
+ "arrow 50.0.0",
+ "async-trait",
+ "backon",
+ "base64 0.21.7",
+ "bigdecimal 0.4.2",
+ "google-cloud-auth",
+ "google-cloud-gax",
+ "google-cloud-googleapis",
+ "google-cloud-token",
+ "num-bigint",
+ "reqwest",
+ "reqwest-middleware",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8534,6 +8597,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "once_cell",
  "percent-encoding",
@@ -8556,6 +8620,21 @@ dependencies = [
  "web-sys",
  "webpki-roots",
  "winreg",
+]
+
+[[package]]
+name = "reqwest-middleware"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88a3e86aa6053e59030e7ce2d2a3b258dd08fc2d337d52f73f6cb480f5858690"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "http 0.2.9",
+ "reqwest",
+ "serde",
+ "task-local-extensions",
+ "thiserror",
 ]
 
 [[package]]
@@ -9149,6 +9228,9 @@ dependencies = [
  "futures-async-stream",
  "gcp-bigquery-client",
  "glob",
+ "google-cloud-bigquery",
+ "google-cloud-gax",
+ "google-cloud-googleapis",
  "google-cloud-pubsub",
  "http 0.2.9",
  "hyper",
@@ -12024,6 +12106,15 @@ name = "target-lexicon"
 version = "0.12.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c39fd04924ca3a864207c66fc2cd7d22d7c016007f9ce846cbb9326331930a"
+
+[[package]]
+name = "task-local-extensions"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba323866e5d033818e3240feeb9f7db2c4296674e4d9e16b97b7bf8f490434e8"
+dependencies = [
+ "pin-utils",
+]
 
 [[package]]
 name = "task_stats_alloc"
