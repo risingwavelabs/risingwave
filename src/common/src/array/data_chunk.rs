@@ -344,20 +344,25 @@ impl DataChunk {
         Ok(outputs)
     }
 
-    /// Compute hash values for each row. The number of the HashCodes is `self.capacity()`. 
-    /// When skip_invisible_row is true, the HashCode for the invisible rows is arbitrary. 
+    /// Compute hash values for each row. The number of the returning `HashCodes` is `self.capacity()`.
+    /// When `skip_invisible_row` is true, the `HashCode` for the invisible rows is arbitrary.
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-        skip_invisible_row: bool
+        skip_invisible_row: bool,
     ) -> Vec<HashCode<H>> {
-        let mut states = Vec::with_capacity(self.capacity());
-        states.resize_with(self.capacity(), || hasher_builder.build_hasher());
+        let len = self.capacity();
+        let mut states = Vec::with_capacity(len);
+        states.resize_with(len, || hasher_builder.build_hasher());
         // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx);
-            array.hash_vec(&mut states[..]);
+            if skip_invisible_row {
+                array.hash_vec(&mut states[..], self.visibility());
+            } else {
+                array.hash_vec(&mut states[..], &Bitmap::ones(len));
+            }
         }
         finalize_hashers(&states[..])
             .into_iter()

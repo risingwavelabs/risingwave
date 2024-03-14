@@ -59,7 +59,7 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<
                 .map(|idx| *idx as usize)
                 .collect::<Vec<_>>(),
             hasher_builder,
-            false
+            false,
         )
         .iter_mut()
         .map(|hash_value| hash_value.value() as usize % output_count)
