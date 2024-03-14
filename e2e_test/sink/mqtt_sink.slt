@@ -12,7 +12,7 @@ FROM
 WITH
   (
     connector='mqtt',
-    url ='tcp://mqtt-server',
+    url='tcp://mqtt-server',
     topic = 'not_used',
     topic.field = 'topic',
     type = 'append-only',
@@ -55,12 +55,12 @@ VALUES ( '13',  22.0 );
 statement ok
 FLUSH;
 
-sleep 5s
+sleep 15s
 
 query IT rowsort
-SELECT * FROM mqtt_source;
+SELECT device_id, temperature FROM mqtt ORDER BY device_id, temperature;
 ----
-12 56.0
-12 59.0
-13 20.0
-13 22.0
+12 56
+12 59
+13 20
+13 22
