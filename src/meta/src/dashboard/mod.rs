@@ -405,7 +405,7 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-        let dashboard_router = risingwave_meta_dashboard::router().boxed_clone();
+        let dashboard_router = risingwave_meta_dashboard::router();
 
         let app = Router::new()
             .fallback_service(dashboard_router)
