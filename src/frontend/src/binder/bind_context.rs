@@ -72,7 +72,7 @@ pub struct LateralBindContext {
 ///
 /// ```sql
 /// WITH RECURSIVE t(n) AS (
-/// ---------------^ Init
+/// # -------------^ Init
 ///     VALUES (1)
 ///   UNION ALL
 ///     SELECT n+1 FROM t WHERE n < 100
