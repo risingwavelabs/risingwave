@@ -402,6 +402,9 @@ MqttConfig:
     comments: Whether the message should be retained by the broker
     required: false
     default: Default::default
+  - name: topic.field
+    field_type: String
+    required: false
   - name: r#type
     field_type: String
     required: true

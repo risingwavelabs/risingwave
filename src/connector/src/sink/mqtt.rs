@@ -28,8 +28,8 @@ use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
-use super::formatter::SinkFormatterImpl;
-use super::writer::FormattedSink;
+use super::encoder::{QueryField, SerTo};
+use super::formatter::{SinkFormatter, SinkFormatterImpl};
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
@@ -51,6 +51,10 @@ pub struct MqttConfig {
     /// Whether the message should be retained by the broker
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub retain: bool,
+
+    // if set, will use a field value as the topic name, and the topic will be ignored. can be specified as `field.property` or `field`
+    #[serde(rename = "topic.field")]
+    pub topic_field: Option<String>,
 
     // accept "append-only"
     pub r#type: String,
@@ -249,15 +253,45 @@ struct MqttSinkPayloadWriter {
     retain: bool,
 }
 
-impl FormattedSink for MqttSinkPayloadWriter {
-    type K = Vec<u8>;
-    type V = Vec<u8>;
+impl MqttSinkPayloadWriter {}
 
-    async fn write_one(&mut self, _k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+impl MqttSinkPayloadWriter {
+    async fn write_chunk<F: SinkFormatter>(
+        &mut self,
+        chunk: StreamChunk,
+        formatter: &F,
+    ) -> Result<()>
+    where
+        F::K: SerTo<Vec<u8>>,
+        F::V: SerTo<Vec<u8>> + QueryField,
+    {
+        for r in formatter.format_chunk(&chunk) {
+            let (_, event_object) = r?;
+            let topic = {
+                if let Some(name) = &self.config.topic_field {
+                    match &event_object {
+                        Some(event_object) => {
+                            event_object.get_field(name).context("column not found")?
+                        }
+                        None => self.config.common.topic.clone(),
+                    }
+                } else {
+                    self.config.common.topic.clone()
+                }
+            };
+
+            self.write_one(&topic, event_object.map(SerTo::ser_to).transpose()?)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn write_one(&mut self, topic: &str, v: Option<Vec<u8>>) -> Result<()> {
         match v {
             Some(v) => self
                 .client
-                .publish(&self.config.common.topic, self.qos, self.retain, v)
+                .publish(topic, self.qos, self.retain, v)
                 .await
                 .context("mqtt sink error")
                 .map_err(SinkError::Mqtt),
