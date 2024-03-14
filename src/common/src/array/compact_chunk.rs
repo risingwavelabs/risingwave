@@ -121,7 +121,6 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
                 RowOp::Update((ref old_v, _)) => {
                     tracing::warn!("double insert for the same pk");
                     e.insert(RowOp::Update((*old_v, v)));
-
                 }
             },
         }

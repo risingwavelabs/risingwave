@@ -197,7 +197,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             need_advance_delete,
             self.chunk_size,
             self.input_data_types,
-            self.sink_param.downstream_pk.clone()
+            self.sink_param.downstream_pk.clone(),
         );
 
         if self.sink.is_sink_into_table() {
@@ -288,6 +288,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn process_msg(
         input: impl MessageStream,
