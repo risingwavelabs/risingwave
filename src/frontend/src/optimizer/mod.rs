@@ -857,6 +857,17 @@ impl PlanRoot {
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
+
+    pub fn should_use_arrangement_backfill(&self) -> bool {
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let arrangement_backfill_disabled = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .disable_arrangement_backfill;
+        !arrangement_backfill_disabled && session_ctx.config().streaming_use_arrangement_backfill()
+    }
 }
 
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
