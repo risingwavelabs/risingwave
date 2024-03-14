@@ -84,7 +84,7 @@ impl MetaNodeService {
             let prefix_data = env::var("PREFIX_DATA")?;
             let file_path = PathBuf::from(&prefix_data)
                 .join(&sqlite_config[0].id)
-                .join("metadata.sqlite");
+                .join(&sqlite_config[0].file);
             cmd.arg("--backend")
                 .arg("sql")
                 .arg("--sql-endpoint")

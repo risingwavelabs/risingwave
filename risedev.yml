@@ -1029,6 +1029,9 @@ template:
     # Id of this instance
     id: sqlite
 
+    # File name of the sqlite database
+    file: metadata.db
+
   compute-node:
     # Compute-node advertise address
     address: "127.0.0.1"

@@ -176,6 +176,8 @@ pub struct SqliteConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+
+    pub file: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

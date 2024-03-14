@@ -178,9 +178,9 @@ fn task_main(
                 }
 
                 let prefix_data = env::var("PREFIX_DATA")?;
-                let file_path = PathBuf::from(&prefix_data)
-                    .join(&c.id)
-                    .join("metadata.sqlite");
+                let file_dir = PathBuf::from(&prefix_data).join(&c.id);
+                std::fs::create_dir_all(&file_dir)?;
+                let file_path = file_dir.join(&c.file);
 
                 ctx.service(&SqliteService(c.clone()));
                 ctx.complete_spin();
