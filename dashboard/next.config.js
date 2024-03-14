@@ -25,7 +25,7 @@ const nextConfig = {
     // We have a separate step for running ESLint in CI.
     // Ignore to skip the development dependency on `eslint` for production builds.
     ignoreDuringBuilds: true,
-  }
+  },
 }
 
 module.exports = nextConfig
