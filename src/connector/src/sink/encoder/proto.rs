@@ -15,14 +15,14 @@
 use bytes::{BufMut, Bytes};
 use prost::Message;
 use prost_reflect::{
-    DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value,
+    DynamicMessage, FieldDescriptor, Kind, MapKey, MessageDescriptor, ReflectMessage, Value,
 };
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
+use super::{FieldEncodeError, QueryField, Result as SinkResult, RowEncoder, SerTo};
 
 type Result<T> = std::result::Result<T, FieldEncodeError>;
 
@@ -126,6 +126,60 @@ impl SerTo<Vec<u8>> for ProtoEncoded {
         }
         self.message.encode(&mut buf).unwrap();
         Ok(buf)
+    }
+}
+
+impl QueryField for Value {
+    fn get_field(&self, name: &str) -> Option<String> {
+        let mut split = name.splitn(2, '.');
+        let name = match split.next() {
+            Some(name) => name,
+            None => return None,
+        };
+
+        let r = split.next();
+
+        match self {
+            Value::Message(m) => match r {
+                Some(name) => m.get_field_by_name(name).and_then(|f| f.get_field(name)),
+                None => m
+                    .get_field_by_name(name)
+                    .and_then(|f| f.as_str().map(ToOwned::to_owned)),
+            },
+            Value::Map(m) => match r {
+                Some(name) => m
+                    .get(&MapKey::String(name.to_string()))
+                    .and_then(|f| f.get_field(name)),
+                None => m
+                    .get(&MapKey::String(name.to_string()))
+                    .and_then(|f| f.as_str().map(ToOwned::to_owned)),
+            },
+            v => match r {
+                Some(_) => None,
+                None => v.as_str().map(ToOwned::to_owned),
+            },
+        }
+    }
+}
+
+impl QueryField for ProtoEncoded {
+    fn get_field(&self, name: &str) -> Option<String> {
+        let mut split = name.splitn(2, '.');
+        let name = match split.next() {
+            Some(name) => name,
+            None => return None,
+        };
+
+        match split.next() {
+            Some(name) => self
+                .message
+                .get_field_by_name(name)
+                .and_then(|f| f.get_field(name)),
+            None => self
+                .message
+                .get_field_by_name(name)
+                .and_then(|f| f.as_str().map(ToOwned::to_owned)),
+        }
     }
 }
 

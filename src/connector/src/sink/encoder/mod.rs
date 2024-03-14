@@ -82,6 +82,16 @@ impl<T> SerTo<T> for T {
     }
 }
 
+pub trait QueryField {
+    fn get_field(&self, name: &str) -> Option<String>;
+}
+
+impl QueryField for String {
+    fn get_field<'s>(&'s self, _name: &str) -> Option<String> {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub enum DateHandlingMode {
     #[default]
