@@ -58,7 +58,7 @@ FLUSH;
 sleep 5s
 
 query IT rowsort
-SELECT * FROM pulsar_source;
+SELECT * FROM mqtt_source;
 ----
 12 56.0
 12 59.0
