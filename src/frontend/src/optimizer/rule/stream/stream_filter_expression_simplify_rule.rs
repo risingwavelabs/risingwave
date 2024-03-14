@@ -22,7 +22,7 @@ use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, P
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 
-/// Speically for the `StreamFilter` under `StreamShare`
+/// Specially for the `StreamFilter` under `StreamShare`
 pub struct StreamFilterExpressionSimplifyRule {}
 impl Rule for StreamFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
