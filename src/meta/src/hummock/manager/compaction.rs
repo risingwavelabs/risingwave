@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use function_name::named;
@@ -133,28 +133,23 @@ impl HummockManager {
                 let mut generated_task_count = 0;
                 let mut existed_groups = groups.clone();
                 let mut meet_error = false;
+                let mut wait_compact_groups = HashSet::default();
 
                 while generated_task_count < pull_task_count && !meet_error {
                     let compact_ret = self
-                        .get_compact_tasks(
-                            std::mem::take(&mut existed_groups),
-                            pull_task_count - generated_task_count,
-                            selector,
-                        )
+                        .get_compact_tasks(std::mem::take(&mut existed_groups), selector)
                         .await;
 
                     match compact_ret {
-                        Ok((compact_tasks, trivial_tasks)) => {
+                        Ok(compact_tasks) => {
                             if compact_tasks.is_empty() {
                                 break;
                             }
                             generated_task_count += compact_tasks.len();
-                            for task in trivial_tasks {
-                                existed_groups.push(task.compaction_group_id);
-                            }
                             for task in compact_tasks {
                                 let task_id = task.task_id;
                                 existed_groups.push(task.compaction_group_id);
+                                wait_compact_groups.insert(task.compaction_group_id);
                                 if let Err(e) =
                                     compactor.send_event(ResponseEvent::CompactTask(task))
                                 {
@@ -179,6 +174,13 @@ impl HummockManager {
                 if generated_task_count < pull_task_count && !meet_error {
                     // no compact_task to be picked
                     for group in groups {
+                        self.compaction_state.unschedule(group, task_type);
+                    }
+                } else if !meet_error {
+                    for group in groups {
+                        if wait_compact_groups.contains(&group) {
+                            continue;
+                        }
                         self.compaction_state.unschedule(group, task_type);
                     }
                 }
