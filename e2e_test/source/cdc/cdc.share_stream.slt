@@ -23,6 +23,9 @@ create source mysql_mytest with (
  server.id = '5601'
 );
 
+statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
+create materialized view mv as select * from mysql_mytest;
+
 statement error The upstream table name must contain database name prefix*
 create table products_test ( id INT,
    name STRING,
