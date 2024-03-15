@@ -774,7 +774,7 @@ where
         // Because of memtable spill, there may be a PUT key share the same `pure_epoch` with DELETE key.
         // Do not assume that "the epoch of keys behind must be smaller than the current key."
         if (epoch < task_config.watermark && task_config.gc_delete_keys && value.is_delete())
-            || (epoch < task_config.watermark && (watermark_can_see_last_key))
+            || (epoch < task_config.watermark && watermark_can_see_last_key)
         {
             drop = true;
         }

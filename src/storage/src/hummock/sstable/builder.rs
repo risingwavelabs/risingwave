@@ -646,33 +646,6 @@ pub(super) mod tests {
         b.finish().await.unwrap();
     }
 
-    #[ignore]
-    #[tokio::test]
-    async fn test_empty_with_delete_range() {
-        let opt = SstableBuilderOptions {
-            capacity: 0,
-            block_capacity: 4096,
-            restart_interval: 16,
-            bloom_false_positive: 0.1,
-            ..Default::default()
-        };
-        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
-        // b.add_monotonic_deletes(vec![
-        //     MonotonicDeleteEvent::new(table_id, b"abcd".to_vec(), 0),
-        //     MonotonicDeleteEvent::new(table_id, b"eeee".to_vec(), HummockEpoch::MAX),
-        // ]);
-        let s = b.finish().await.unwrap().sst_info;
-        let key_range = s.sst_info.key_range.unwrap();
-        assert_eq!(
-            user_key(&key_range.left),
-            UserKey::for_test(TableId::default(), b"abcd").encode()
-        );
-        assert_eq!(
-            user_key(&key_range.right),
-            UserKey::for_test(TableId::default(), b"eeee").encode()
-        );
-    }
-
     #[tokio::test]
     async fn test_basic() {
         let opt = default_builder_opt_for_test();

@@ -225,47 +225,4 @@ mod tests {
             iterator_test_value_of(TEST_KEYS_COUNT * 4).as_slice()
         );
     }
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_concat_seek_empty_sst() {
-        let sstable_store = mock_sstable_store();
-        let table1 = gen_iterator_test_sstable_with_range_tombstones(
-            1,
-            vec![],
-            // vec![(1, 2, 1), (3, 4, 1)],
-            sstable_store.clone(),
-        )
-        .await;
-        let table2 = gen_iterator_test_sstable_with_range_tombstones(
-            1,
-            vec![],
-            // vec![(4, 5, 1), (6, 7, 1)],
-            sstable_store.clone(),
-        )
-        .await;
-        let table3 = gen_iterator_test_sstable_info(
-            3,
-            default_builder_opt_for_test(),
-            |x| TEST_KEYS_COUNT + x,
-            sstable_store.clone(),
-            TEST_KEYS_COUNT,
-        )
-        .await;
-        let mut iter = ConcatIterator::new(
-            vec![table1, table2, table3],
-            sstable_store,
-            Arc::new(SstableIteratorReadOptions::default()),
-        );
-
-        iter.seek(iterator_test_key_of(2).to_ref()).await.unwrap();
-
-        let key = iter.key();
-        let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT).to_ref());
-        assert_eq!(
-            val.into_user_value().unwrap(),
-            iterator_test_value_of(TEST_KEYS_COUNT).as_slice()
-        );
-    }
 }
