@@ -185,6 +185,11 @@ pub fn build_additional_column_catalog(
     Ok(catalog)
 }
 
+/// Utility function for adding partition and offset columns to the columns, if not specified by the user.
+///
+/// ## Returns
+/// - `columns_exist`: whether 1. `partition`/`file` and 2. `offset` columns are included in `columns`.
+/// - `additional_columns`: The `ColumnCatalog` for `partition`/`file` and `offset` columns.
 pub fn add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
@@ -224,10 +229,22 @@ pub fn add_partition_offset_cols(
             .collect()
     };
     assert_eq!(additional_columns.len(), 2);
+    use risingwave_pb::plan_common::additional_column::ColumnType;
+    assert_matches::assert_matches!(
+        additional_columns[0].column_desc.additional_column,
+        AdditionalColumn {
+            column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
+        }
+    );
+    assert_matches::assert_matches!(
+        additional_columns[1].column_desc.additional_column,
+        AdditionalColumn {
+            column_type: Some(ColumnType::Offset(_)),
+        }
+    );
 
     // Check if partition/file/offset columns are included explicitly.
     for col in columns {
-        use risingwave_pb::plan_common::additional_column::ColumnType;
         match col.column_desc.additional_column {
             AdditionalColumn {
                 column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
