@@ -319,7 +319,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "num",
 ]
 
@@ -335,7 +335,7 @@ dependencies = [
  "arrow-schema 50.0.0",
  "chrono",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "num",
 ]
 
@@ -550,7 +550,7 @@ dependencies = [
  "arrow-data 48.0.1",
  "arrow-schema 48.0.1",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -565,7 +565,7 @@ dependencies = [
  "arrow-data 50.0.0",
  "arrow-schema 50.0.0",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -2158,6 +2158,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmsketch"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17a94b4d5dca45a6aa85960fbb1d60096203102716732e8997515cc8ff2b6fff"
+dependencies = [
+ "paste",
+]
+
+[[package]]
 name = "coarsetime"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2394,7 +2403,7 @@ dependencies = [
  "cranelift-entity",
  "cranelift-isle",
  "gimli",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "log",
  "regalloc2",
  "smallvec",
@@ -2935,7 +2944,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
 dependencies = [
  "cfg-if",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "lock_api",
  "once_cell",
  "parking_lot_core 0.9.8",
@@ -2980,7 +2989,7 @@ dependencies = [
  "futures",
  "glob",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "indexmap 2.0.0",
  "itertools 0.11.0",
  "log",
@@ -3031,7 +3040,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "futures",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "log",
  "object_store",
  "parking_lot 0.12.1",
@@ -3067,7 +3076,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "datafusion-physical-expr",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "itertools 0.11.0",
  "log",
  "regex-syntax 0.8.2",
@@ -3092,7 +3101,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "hex",
  "indexmap 2.0.0",
  "itertools 0.11.0",
@@ -3127,7 +3136,7 @@ dependencies = [
  "datafusion-physical-expr",
  "futures",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "indexmap 2.0.0",
  "itertools 0.11.0",
  "log",
@@ -4089,37 +4098,22 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.3.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caed9c227536e3b6fb92aea800c44de7516ecc339a11eb01544549dd6f43cb69"
+checksum = "15240094bab62dfeb59bb974e2fb7bff18727c6dc7bd1f5f6fc82a9e6fda5a38"
 dependencies = [
- "foyer-common 0.2.0",
+ "foyer-common",
  "foyer-intrusive",
+ "foyer-memory",
  "foyer-storage",
  "foyer-workspace-hack",
 ]
 
 [[package]]
 name = "foyer-common"
-version = "0.1.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e441ea6dcf68cc0626535868343f838c803a75fd7686c3895e2c99c9c8f11d60"
-dependencies = [
- "anyhow",
- "bytes",
- "foyer-workspace-hack",
- "itertools 0.12.0",
- "madsim-tokio",
- "parking_lot 0.12.1",
- "paste",
- "tracing",
-]
-
-[[package]]
-name = "foyer-common"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f10010b8cb0f380cc30ff8c82ec7f6addc2ced72b3758d336f351831a56a4a59"
+checksum = "ad95f985cfbd5a8bf9f115d963918e742dfbb75350febff509b09cf194842b0c"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4133,13 +4127,13 @@ dependencies = [
 
 [[package]]
 name = "foyer-intrusive"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f967c3c40435a621fb1b8670d8f6501d67e79cea08b1ce07c150147aabdc588"
+checksum = "acf22ed0dfa6315714099046504711d5563d191a442afcd87bd4d0bf5010bb9a"
 dependencies = [
  "bytes",
- "cmsketch",
- "foyer-common 0.1.0",
+ "cmsketch 0.1.5",
+ "foyer-common",
  "foyer-workspace-hack",
  "itertools 0.12.0",
  "memoffset",
@@ -4150,17 +4144,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "foyer-storage"
-version = "0.2.1"
+name = "foyer-memory"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8df47c9672ac893c172832c79c41bc4be7b24f71376fb00be461418c7a4d1cfe"
+checksum = "a694cde4dd2c9fdd8cc2d294fcb265fdd6be1ee62fa35c37e9fc328871f33b6d"
+dependencies = [
+ "ahash 0.8.6",
+ "bitflags 2.4.0",
+ "cmsketch 0.2.0",
+ "crossbeam",
+ "foyer-intrusive",
+ "foyer-workspace-hack",
+ "futures",
+ "hashbrown 0.14.3",
+ "itertools 0.12.0",
+ "libc",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+]
+
+[[package]]
+name = "foyer-storage"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe0d0d6090461ad435dc2316e9800f336faa6b858d6c85dfb54091cb4cf127e"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
  "bitmaps",
  "bytes",
- "cmsketch",
- "foyer-common 0.2.0",
+ "foyer-common",
  "foyer-intrusive",
  "foyer-workspace-hack",
  "futures",
@@ -4169,7 +4182,7 @@ dependencies = [
  "lz4",
  "madsim-tokio",
  "memoffset",
- "nix 0.27.1",
+ "nix 0.28.0",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -4182,11 +4195,13 @@ dependencies = [
 
 [[package]]
 name = "foyer-workspace-hack"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72699c6a83a9e76c13d1196518be3c7d85183e62507a3c0e248d556a7e875072"
+checksum = "77a5ee5ab890d1893232fd44af33197c7499813816b8880649a15ee9438d5e07"
 dependencies = [
+ "ahash 0.8.6",
  "cc",
+ "crossbeam-channel",
  "crossbeam-utils",
  "either",
  "futures-channel",
@@ -4194,16 +4209,16 @@ dependencies = [
  "futures-executor",
  "futures-sink",
  "futures-util",
+ "hashbrown 0.14.3",
  "libc",
- "log",
- "memchr",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
+ "proc-macro2",
+ "quote",
  "rand",
+ "smallvec",
+ "syn 2.0.48",
  "tokio",
- "tokio-util",
- "tower",
- "tracing",
  "tracing-core",
 ]
 
@@ -4820,9 +4835,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.0"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
+checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
  "ahash 0.8.6",
  "allocator-api2",
@@ -4834,7 +4849,7 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -5175,7 +5190,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "serde",
 ]
 
@@ -5797,7 +5812,7 @@ name = "lru"
 version = "0.7.6"
 source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=95f347b#95f347b5ca3c947335a51adf40fa86178ef4d60d"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -5815,7 +5830,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efa59af2ddfad1854ae27d75009d538d0998b4b2fd47083e743ac1a10e46c60"
 dependencies = [
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -6409,17 +6424,6 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
-dependencies = [
- "bitflags 2.4.0",
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
@@ -6679,7 +6683,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
 dependencies = [
  "crc32fast",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "indexmap 2.0.0",
  "memchr",
 ]
@@ -6954,7 +6958,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4d6a8c22fc714f0c2373e6091bf6f5e9b37b1bc0b1184874b7e0a4e303d318f"
 dependencies = [
  "dlv-list",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -7147,7 +7151,7 @@ dependencies = [
  "chrono",
  "flate2",
  "futures",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "lz4_flex",
  "num",
  "num-bigint",
@@ -7182,7 +7186,7 @@ dependencies = [
  "flate2",
  "futures",
  "half 2.3.1",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "lz4_flex",
  "num",
  "num-bigint",
@@ -8718,10 +8722,11 @@ dependencies = [
  "async-trait",
  "criterion",
  "either",
+ "foyer",
  "futures",
  "futures-async-stream",
  "futures-util",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "hytra",
  "icelake",
  "itertools 0.12.0",
@@ -9017,6 +9022,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "clap",
+ "foyer",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -9522,6 +9528,7 @@ dependencies = [
  "criterion",
  "expect-test",
  "fail",
+ "foyer",
  "futures",
  "futures-async-stream",
  "itertools 0.12.0",
@@ -9552,6 +9559,7 @@ dependencies = [
  "bincode 2.0.0-rc.3",
  "byteorder",
  "bytes",
+ "foyer",
  "futures",
  "futures-async-stream",
  "itertools 0.12.0",
@@ -10063,6 +10071,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.7.0-alpha"
 dependencies = [
+ "ahash 0.8.6",
  "anyhow",
  "arc-swap",
  "async-trait",
@@ -10145,6 +10154,7 @@ dependencies = [
  "enum-as-inner",
  "expect-test",
  "fail",
+ "foyer",
  "futures",
  "futures-async-stream",
  "governor",
@@ -14059,6 +14069,7 @@ dependencies = [
  "clap_builder",
  "combine",
  "crossbeam-epoch",
+ "crossbeam-queue",
  "crossbeam-utils",
  "crypto-bigint 0.5.5",
  "deranged",
@@ -14080,7 +14091,7 @@ dependencies = [
  "getrandom",
  "governor",
  "hashbrown 0.13.2",
- "hashbrown 0.14.0",
+ "hashbrown 0.14.3",
  "hmac",
  "hyper",
  "indexmap 1.9.3",
