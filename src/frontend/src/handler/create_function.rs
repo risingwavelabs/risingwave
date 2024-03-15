@@ -50,7 +50,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
+                "python" | "java" | "wasm" | "rust" | "javascript" | "deno" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -122,6 +122,8 @@ pub async fn handle_create_function(
     let mut link = None;
     let mut body = None;
     let mut compressed_binary = None;
+    let mut param_name = None;
+    let mut param_value = None;
 
     match language.as_str() {
         "python" if params.using.is_none() => {
@@ -185,6 +187,41 @@ pub async fn handle_create_function(
                     .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
                     .into_string(),
             );
+        }
+        "deno" => {
+            identifier = function_name.to_string();
+            match (params.using, params.as_) {
+                (None, None) => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "Either USING or AS must be specified".into(),
+                    )
+                    .into())
+                }
+                (None, Some(_as)) => body = Some(_as.into_string()),
+                (Some(CreateFunctionUsing::Link(link)), None) => {
+                    let bytes = download_code_from_link(&link).await?;
+                    compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+                }
+                (Some(CreateFunctionUsing::Base64(encoded)), None) => {
+                    use base64::prelude::{Engine, BASE64_STANDARD};
+                    let bytes = BASE64_STANDARD
+                        .decode(encoded)
+                        .context("invalid base64 encoding")?;
+                    compressed_binary = Some(zstd::stream::encode_all(bytes.as_slice(), 0)?);
+                }
+                (Some(_), Some(_)) => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "Both USING and AS cannot be specified".into(),
+                    )
+                    .into())
+                }
+            };
+
+            param_name = params.param.as_ref().map(|_| "function_type".to_string());
+            param_value = params.param.map(|p| {
+                let CreateFunctionParamType::FunctionType(f) = p;
+                return f.to_string();
+            });
         }
         "rust" => {
             if params.using.is_some() {
@@ -282,6 +319,8 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
+        param_name,
+        param_value,
     };
 
     let catalog_writer = session.catalog_writer()?;
@@ -335,6 +374,19 @@ fn find_wasm_identifier_v2(
             ))
         })?;
     Ok(identifier.into())
+}
+
+/// Download wasm binary from a link.
+#[allow(clippy::unused_async)]
+async fn download_code_from_link(link: &str) -> Result<Vec<u8>> {
+    // currently only local file system is supported
+    if let Some(path) = link.strip_prefix("fs://") {
+        let content =
+            std::fs::read(path).context("failed to read the code from local file system")?;
+        Ok(content)
+    } else {
+        Err(ErrorCode::InvalidParameterValue("only 'fs://' is supported".to_string()).into())
+    }
 }
 
 /// Generate a function identifier in v0.1 format from the function signature.

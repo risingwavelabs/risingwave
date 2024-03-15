@@ -537,6 +537,9 @@ message UserDefinedFunction {
   // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
   optional bytes compressed_binary = 10;
   bool always_retry_on_network_error = 9;
+
+  optional string param_name = 11;
+  optional string param_value = 12;
 }
 
 // Additional information for user defined table functions.
@@ -548,4 +551,7 @@ message UserDefinedTableFunction {
   optional string identifier = 6;
   optional string body = 7;
   optional bytes compressed_binary = 10;
+  optional string param_name = 11;
+  optional string param_value = 12;
+
 }

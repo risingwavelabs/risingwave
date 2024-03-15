@@ -2859,6 +2859,8 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
+
+    pub param: Option<CreateFunctionParamType>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2877,6 +2879,9 @@ impl fmt::Display for CreateFunctionBody {
         }
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
+        }
+        if let Some(param) = &self.param {
+            write!(f, " {param}")?;
         }
         Ok(())
     }
@@ -2947,6 +2952,43 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionParamFunctionType {
+    Normal,
+    Async,
+    Generator,
+    AsyncGenerator,
+}
+
+impl fmt::Display for CreateFunctionParamFunctionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CreateFunctionParamFunctionType::Normal => write!(f, "normal"),
+            CreateFunctionParamFunctionType::Async => write!(f, "async"),
+            CreateFunctionParamFunctionType::Generator => write!(f, "generator"),
+            CreateFunctionParamFunctionType::AsyncGenerator => write!(f, "async_generator"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionParamType {
+    FunctionType(CreateFunctionParamFunctionType),
+}
+
+impl fmt::Display for CreateFunctionParamType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SET ")?;
+        match self {
+            CreateFunctionParamType::FunctionType(function_type) => {
+                write!(f, "function_type = '{function_type}'")
             }
         }
     }
@@ -3171,6 +3213,7 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                param: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
@@ -3192,6 +3235,7 @@ mod tests {
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
+                param: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),

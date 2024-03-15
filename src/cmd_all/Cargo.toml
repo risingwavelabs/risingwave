@@ -10,8 +10,9 @@ repository = { workspace = true }
 [features]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
+embedded-deno-udf = ["risingwave_expr/embedded-deno-udf"]
 embedded-python-udf = ["risingwave_expr/embedded-python-udf"]
-default = ["rw-static-link"]
+default = ["embedded-deno-udf", "rw-static-link"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]

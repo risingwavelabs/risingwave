@@ -2433,6 +2433,9 @@ impl Parser {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
+            } else if self.parse_keyword(Keyword::SET) {
+                ensure_not_set(&body.param, "SET")?;
+                body.param = Some(self.parse_create_function_param()?);
             } else {
                 return Ok(body);
             }
@@ -2452,6 +2455,48 @@ impl Parser {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
+        }
+    }
+
+    fn parse_create_function_param(&mut self) -> Result<CreateFunctionParamType, ParserError> {
+        let variable = self.parse_identifier()?;
+        if variable.value.to_lowercase() != "function_type" {
+            return Err(ParserError::ParserError(format!(
+                "SET {} is not supported",
+                variable.value
+            )));
+        }
+
+        if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
+            let value = self.parse_set_variable()?;
+            match value {
+                SetVariableValue::Single(s) => {
+                    match s.to_string_unquoted().to_lowercase().as_str() {
+                        "normal" => Ok(CreateFunctionParamType::FunctionType(
+                            CreateFunctionParamFunctionType::Normal,
+                        )),
+                        "async" => Ok(CreateFunctionParamType::FunctionType(
+                            CreateFunctionParamFunctionType::Async,
+                        )),
+                        "generator" => Ok(CreateFunctionParamType::FunctionType(
+                            CreateFunctionParamFunctionType::Generator,
+                        )),
+                        "async_generator" => Ok(CreateFunctionParamType::FunctionType(
+                            CreateFunctionParamFunctionType::AsyncGenerator,
+                        )),
+                        v => Err(ParserError::ParserError(format!(
+                            "SET FUNCTION_TYPE to {} is not supported",
+                            v
+                        ))),
+                    }
+                }
+                SetVariableValue::List(_) => self.expected("only one value set", self.peek_token()),
+                SetVariableValue::Default => Ok(CreateFunctionParamType::FunctionType(
+                    CreateFunctionParamFunctionType::Normal,
+                )),
+            }
+        } else {
+            self.expected("equals sign or TO", self.peek_token())
         }
     }
 

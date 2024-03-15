@@ -17,6 +17,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
+#[cfg(feature = "embedded-deno-udf")]
+use arrow_udf_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
@@ -75,6 +77,13 @@ impl UdfImpl {
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => {
                 for res in runtime.call_table_function(identifier, &input, 1024)? {
+                    yield res?;
+                }
+            }
+            #[cfg(feature = "embedded-deno-udf")]
+            UdfImpl::Deno(runtime) => {
+                let mut iter = runtime.call_table_function(identifier, input, 1024).await?;
+                while let Some(res) = iter.next().await {
                     yield res?;
                 }
             }
@@ -223,6 +232,79 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 body,
             )?;
             UdfImpl::Python(rt)
+        }
+
+        "deno" => {
+            let rt = DenoRuntime::new();
+            let body = match udtf.get_body() {
+                Ok(body) => body.clone(),
+                Err(_) => match udtf.get_compressed_binary() {
+                    Ok(compressed_binary) => {
+                        let binary = zstd::stream::decode_all(compressed_binary.as_slice())
+                            .context("failed to decompress binary")?;
+                        String::from_utf8(binary).context("failed to decode binary")?
+                    }
+                    Err(_) => {
+                        bail!("UDF body or compressed binary is required for deno UDF");
+                    }
+                },
+            };
+
+            let function_type = if let (Ok(f), Ok(function_type)) = (
+                udtf.get_param_name().map(|s| s.as_str()),
+                udtf.get_param_value().map(|s| s.as_str()),
+            ) {
+                if f == "function_type" {
+                    function_type
+                } else {
+                    "generator"
+                }
+            } else {
+                "generator"
+            };
+
+            let body = match function_type {
+                "async" => {
+                    format!(
+                        "export async function {}({}) {{ {} }}",
+                        identifier,
+                        udtf.arg_names.join(","),
+                        body
+                    )
+                }
+                "async_generator" => {
+                    format!(
+                        "export async function* {}({}) {{ {} }}",
+                        identifier,
+                        udtf.arg_names.join(","),
+                        body
+                    )
+                }
+                "generator" => {
+                    format!(
+                        "export function* {}({}) {{ {} }}",
+                        identifier,
+                        udtf.arg_names.join(","),
+                        body
+                    )
+                }
+                _ => {
+                    format!(
+                        "export function {}({}) {{ {} }}",
+                        identifier,
+                        udtf.arg_names.join(","),
+                        body
+                    )
+                }
+            };
+
+            futures::executor::block_on(rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                DenoCallMode::CalledOnNullInput,
+                &body,
+            ))?;
+            UdfImpl::Deno(rt)
         }
         // connect to UDF service
         _ => {

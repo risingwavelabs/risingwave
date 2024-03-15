@@ -16,12 +16,14 @@ ignored = ["workspace-hack", "ctor"]
 normal = ["workspace-hack", "ctor"]
 
 [features]
+embedded-deno-udf = ["arrow-udf-deno"]
 embedded-python-udf = ["arrow-udf-python"]
 
 [dependencies]
 anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-udf-deno = { workspace = true, optional = true }
 arrow-udf-js = { workspace = true }
 arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true }
@@ -38,6 +40,7 @@ easy-ext = "1"
 educe = "0.5"
 either = "1"
 enum-as-inner = "0.6"
+futures = "0.3"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 itertools = "0.12"

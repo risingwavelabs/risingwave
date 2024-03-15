@@ -315,6 +315,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
+            param_name: value.0.param_name,
+            param_value: value.0.param_value,
         }
     }
 }
