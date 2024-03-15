@@ -816,7 +816,7 @@ impl CatalogController {
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
             } else if let Some(source_info) = &source.source_info
-                && source_info.inner_ref().has_streaming_job
+                && source_info.inner_ref().is_shared
             {
                 vec![source_id]
             } else {

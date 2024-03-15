@@ -59,7 +59,7 @@ impl BoundSource {
     }
 
     pub fn can_backfill(&self) -> bool {
-        self.catalog.info.has_streaming_job
+        self.catalog.info.is_shared
     }
 }
 

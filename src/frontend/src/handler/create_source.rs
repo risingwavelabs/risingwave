@@ -505,7 +505,7 @@ fn bind_columns_from_source_for_cdc(
         row_encode: row_encode_to_prost(&source_schema.row_encode) as i32,
         format_encode_options,
         use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
-        has_streaming_job: true,
+        is_shared: true,
         ..Default::default()
     };
     if !format_encode_options_to_consume.is_empty() {
@@ -1307,7 +1307,7 @@ pub async fn handle_create_source(
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
     let create_cdc_source_job = with_properties.is_shared_cdc_source();
-    let has_streaming_job = create_cdc_source_job
+    let is_shared = create_cdc_source_job
         || (with_properties.is_kafka_connector() && session.config().rw_enable_reusable_source());
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
@@ -1315,8 +1315,8 @@ pub async fn handle_create_source(
     } else {
         bind_columns_from_source(&session, &source_schema, &with_properties).await?
     };
-    if has_streaming_job {
-        source_info.has_streaming_job = true;
+    if is_shared {
+        source_info.is_shared = true;
         source_info.is_distributed = !create_cdc_source_job;
     }
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
@@ -1415,7 +1415,7 @@ pub async fn handle_create_source(
 
     let catalog_writer = session.catalog_writer()?;
 
-    if has_streaming_job {
+    if is_shared {
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
             let source_node = LogicalSource::with_catalog(

@@ -67,8 +67,8 @@ message StreamSourceInfo {
   // Currently, the following sources have streaming jobs:
   // - Direct CDC sources (mysql & postgresql)
   // - MQ sources (Kafka, Pulsar, Kinesis, etc.)
-  bool has_streaming_job = 13;
-  // Only used when `has_streaming_job` is `true`.
+  bool is_shared = 13;
+  // Only used when `is_shared` is `true`.
   // If `false`, `requires_singleton` will be set in the stream plan.
   bool is_distributed = 15;
   reserved "cdc_source_job"; // deprecated

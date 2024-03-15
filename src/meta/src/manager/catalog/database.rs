@@ -404,12 +404,7 @@ impl DatabaseManager {
             .chain(
                 self.sources
                     .iter()
-                    .filter(|(_, source)| {
-                        source
-                            .info
-                            .as_ref()
-                            .is_some_and(|info| info.has_streaming_job)
-                    })
+                    .filter(|(_, source)| source.info.as_ref().is_some_and(|info| info.is_shared))
                     .map(|(id, _)| id)
                     .copied(),
             )

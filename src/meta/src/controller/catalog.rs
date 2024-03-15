@@ -1980,7 +1980,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
             if let Some(source_info) = source_info
-                && source_info.into_inner().has_streaming_job
+                && source_info.into_inner().is_shared
             {
                 to_drop_streaming_jobs.push(object_id);
             }
