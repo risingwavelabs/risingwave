@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -192,7 +192,11 @@ async fn compact_shared_buffer(
                     format!("compact_shared_buffer/{}", id),
                     format!(
                         "Compact Shared Buffer: {:?}",
-                        payload.iter().map(|imm| imm.batch_id()).collect_vec()
+                        payload
+                            .iter()
+                            .flat_map(|imm| imm.epochs().iter())
+                            .copied()
+                            .collect::<BTreeSet<_>>()
                     ),
                 )
             });

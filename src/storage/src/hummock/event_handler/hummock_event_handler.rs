@@ -193,7 +193,7 @@ impl HummockEventHandler {
                     let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
                     reg.write().register(
                         format!("spawn_upload_task/{}", upload_task_id),
-                        format!("Spawn Upload task: {}", task_info),
+                        format!("Spawn Upload Task: {}", task_info),
                     )
                 });
                 spawn({

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{poll_fn, Future};
 use std::mem::swap;
@@ -91,7 +91,10 @@ pub(crate) fn default_spawn_merging_task(
                         "Merging Imm {:?} {:?} {:?}",
                         table_id,
                         instance_id,
-                        imms.iter().map(|imm| imm.batch_id()).collect_vec()
+                        imms.iter()
+                            .flat_map(|imm| imm.epochs().iter())
+                            .copied()
+                            .collect::<BTreeSet<_>>()
                     ),
                 )
             });
