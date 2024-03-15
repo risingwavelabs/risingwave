@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use foyer::memory::CacheContext;
 use futures::future::try_join_all;
-use futures::{stream, StreamExt, TryFutureExt};
+use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -99,7 +102,8 @@ pub async fn compact(
                         result
                     })
                     .collect_vec()
-            }),
+            })
+            .instrument_await(format!("shared_buffer_compact_compaction_group {}", id)),
         );
     }
     // Note that the output is reordered compared with input `payload`.
@@ -179,13 +183,32 @@ async fn compact_shared_buffer(
         }
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let handle = compaction_executor.spawn(async move {
-            compactor
-                .run(
-                    MergeIterator::new(forward_iters),
-                    multi_filter_key_extractor,
+        let handle = compaction_executor.spawn({
+            static NEXT_SHARED_BUFFER_COMPACT_ID: LazyLock<AtomicUsize> =
+                LazyLock::new(|| AtomicUsize::new(0));
+            let tree_root = context.await_tree_reg.as_ref().map(|reg| {
+                let id = NEXT_SHARED_BUFFER_COMPACT_ID.fetch_add(1, Relaxed);
+                reg.write().register(
+                    format!("compact_shared_buffer/{}", id),
+                    format!(
+                        "Compact Shared Buffer: {:?}",
+                        payload
+                            .iter()
+                            .flat_map(|imm| imm.epochs().iter())
+                            .copied()
+                            .collect::<BTreeSet<_>>()
+                    ),
                 )
-                .await
+            });
+            let future = compactor.run(
+                MergeIterator::new(forward_iters),
+                multi_filter_key_extractor,
+            );
+            if let Some(root) = tree_root {
+                root.instrument(future).left_future()
+            } else {
+                future.right_future()
+            }
         });
         compaction_futures.push(handle);
     }
