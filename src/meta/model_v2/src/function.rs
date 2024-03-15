@@ -47,6 +47,8 @@ pub struct Model {
     pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,
     pub always_retry_on_network_error: bool,
+    pub param_name: Option<String>,
+    pub param_value: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -104,6 +106,8 @@ impl From<PbFunction> for ActiveModel {
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
+            param_name: Set(function.param_name),
+            param_value: Set(function.param_value),
         }
     }
 }

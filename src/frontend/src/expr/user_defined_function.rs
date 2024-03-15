@@ -60,6 +60,8 @@ impl UserDefinedFunction {
             link: udf.link.clone(),
             compressed_binary: udf.compressed_binary.clone(),
             always_retry_on_network_error: udf.always_retry_on_network_error,
+            param_name: udf.param_name.clone(),
+            param_value: udf.param_value.clone(),
         };
 
         Ok(Self {
@@ -96,6 +98,8 @@ impl Expr for UserDefinedFunction {
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
+                param_name: self.catalog.param_name.clone(),
+                param_value: self.catalog.param_value.clone(),
             })),
         }
     }

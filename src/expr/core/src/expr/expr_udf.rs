@@ -20,6 +20,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Error};
 use arrow_schema::{Field, Fields, Schema};
+#[cfg(feature = "embedded-deno-udf")]
+use arrow_udf_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
@@ -73,6 +75,8 @@ pub enum UdfImpl {
     JavaScript(JsRuntime),
     #[cfg(feature = "embedded-python-udf")]
     Python(PythonRuntime),
+    #[cfg(feature = "embedded-deno-udf")]
+    Deno(Arc<DenoRuntime>),
 }
 
 #[async_trait::async_trait]
@@ -130,6 +134,8 @@ impl UserDefinedFunction {
             UdfImpl::JavaScript(_) => "javascript",
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(_) => "python",
+            #[cfg(feature = "embedded-deno-udf")]
+            UdfImpl::Deno(_) => "deno",
             UdfImpl::External(_) => "external",
         };
         let labels: &[&str; 4] = &[addr, language, &self.identifier, fragment_id.as_str()];
@@ -152,6 +158,10 @@ impl UserDefinedFunction {
             UdfImpl::JavaScript(runtime) => runtime.call(&self.identifier, &arrow_input),
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(runtime) => runtime.call(&self.identifier, &arrow_input),
+            #[cfg(feature = "embedded-deno-udf")]
+            UdfImpl::Deno(runtime) => {
+                futures::executor::block_on(runtime.call(&self.identifier, arrow_input))
+            }
             UdfImpl::External(client) => {
                 let disable_retry_count = self.disable_retry_count.load(Ordering::Relaxed);
                 let result = if self.always_retry_on_network_error {
@@ -277,6 +287,57 @@ impl Build for UserDefinedFunction {
                     body,
                 )?;
                 UdfImpl::Python(rt)
+            }
+            #[cfg(feature = "embedded-deno-udf")]
+            "deno" if udf.body.is_some() => {
+                let mut rt = DenoRuntime::new();
+                let body = match udf.get_body() {
+                    Ok(body) => body.clone(),
+                    Err(_) => match udf.get_compressed_binary() {
+                        Ok(compressed_binary) => {
+                            let binary = zstd::stream::decode_all(compressed_binary.as_slice())
+                                .context("failed to decompress binary")?;
+                            String::from_utf8(binary).context("failed to decode binary")?
+                        }
+                        Err(_) => {
+                            bail!("UDF body or compressed binary is required for deno UDF");
+                        }
+                    },
+                };
+
+                let is_async = if let (Ok(name), Ok(ty)) = (
+                    udf.get_param_name().map(|s| s.as_str()),
+                    udf.get_param_value().map(|s| s.as_str()),
+                ) {
+                    "function_type" == name && "async" == ty
+                } else {
+                    false
+                };
+
+                let body = if is_async {
+                    format!(
+                        "export async function {}({}) {{ {} }}",
+                        identifier,
+                        udf.arg_names.join(","),
+                        body
+                    )
+                } else {
+                    format!(
+                        "export function {}({}) {{ {} }}",
+                        identifier,
+                        udf.arg_names.join(","),
+                        body
+                    )
+                };
+
+                futures::executor::block_on(rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    DenoCallMode::CalledOnNullInput,
+                    &body,
+                ))?;
+
+                UdfImpl::Deno(rt)
             }
             #[cfg(not(madsim))]
             _ => {
