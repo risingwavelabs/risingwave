@@ -13,11 +13,6 @@ enable_auto = true
 threshold_auto = 0.8999999761581421
 dir = "./"
 
-[memory]
-threshold_aggressive = 0.9
-threshold_graceful = 0.8
-threshold_stable = 0.7
-
 [meta]
 min_sst_retention_time_sec = 86400
 full_gc_interval_sec = 86400
@@ -107,6 +102,9 @@ stream_exchange_concurrent_barriers = 1
 stream_exchange_concurrent_dispatchers = 0
 stream_dml_channel_initial_permits = 32768
 stream_hash_agg_max_dirty_groups_heap_size = 67108864
+stream_memory_controller_threshold_aggressive = 0.9
+stream_memory_controller_threshold_graceful = 0.8
+stream_memory_controller_threshold_stable = 0.7
 
 [storage]
 share_buffers_sync_parallelism = 1

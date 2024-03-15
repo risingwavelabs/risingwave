@@ -282,9 +282,18 @@ pub async fn compute_node_serve(
     // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = MemoryManager::new(MemoryManagerConfig {
         total_memory: compute_memory_bytes + storage_memory_bytes,
-        threshold_aggressive: config.memory.threshold_aggressive,
-        threshold_graceful: config.memory.threshold_graceful,
-        threshold_stable: config.memory.threshold_stable,
+        threshold_aggressive: config
+            .streaming
+            .developer
+            .memory_controller_threshold_aggressive,
+        threshold_graceful: config
+            .streaming
+            .developer
+            .memory_controller_threshold_graceful,
+        threshold_stable: config
+            .streaming
+            .developer
+            .memory_controller_threshold_stable,
         metrics: streaming_metrics.clone(),
     });
 

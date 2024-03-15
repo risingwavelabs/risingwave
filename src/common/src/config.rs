@@ -142,10 +142,6 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
-    pub memory: MemoryConfig,
-
-    #[serde(default)]
-    #[config_doc(nested)]
     pub meta: MetaConfig,
 
     #[serde(default)]
@@ -791,19 +787,6 @@ pub struct FileCacheConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-/// The subsection `[memory]` and in `risingwave.toml`.
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
-pub struct MemoryConfig {
-    #[serde(default = "default::memory::threshold_aggressive")]
-    pub threshold_aggressive: f64,
-
-    #[serde(default = "default::memory::threshold_graceful")]
-    pub threshold_graceful: f64,
-
-    #[serde(default = "default::memory::threshold_stable")]
-    pub threshold_stable: f64,
-}
-
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
     /// Disabled.
@@ -905,6 +888,15 @@ pub struct StreamingDeveloperConfig {
     /// The max heap size of dirty groups of `HashAggExecutor`.
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
+
+    #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
+    pub memory_controller_threshold_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_graceful")]
+    pub memory_controller_threshold_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_stable")]
+    pub memory_controller_threshold_stable: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1514,6 +1506,16 @@ pub mod default {
         pub fn enable_check_task_level_overlap() -> bool {
             false
         }
+
+        pub fn memory_controller_threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn memory_controller_threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn memory_controller_threshold_stable() -> f64 {
+            0.7
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1667,18 +1669,6 @@ pub mod default {
                     vec!["SlowDown".into(), "TooManyRequests".into()]
                 }
             }
-        }
-    }
-
-    pub mod memory {
-        pub fn threshold_aggressive() -> f64 {
-            0.9
-        }
-        pub fn threshold_graceful() -> f64 {
-            0.8
-        }
-        pub fn threshold_stable() -> f64 {
-            0.7
         }
     }
 }
