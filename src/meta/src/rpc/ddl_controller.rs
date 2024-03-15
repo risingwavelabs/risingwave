@@ -1361,12 +1361,8 @@ impl DdlController {
             .get_upstream_root_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
-        // XXX: do we need to filter here?
-        let upstream_mview_actors: HashMap<_, _> = upstream_root_fragments
+        let upstream_root_actors: HashMap<_, _> = upstream_root_fragments
             .iter()
-            // .filter(|(_, fragment)| {
-            //     fragment.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0
-            // })
             .map(|(&table_id, fragment)| {
                 (
                     table_id,
@@ -1465,7 +1461,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors,
+            upstream_root_actors,
             internal_tables,
             building_locations,
             existing_locations,

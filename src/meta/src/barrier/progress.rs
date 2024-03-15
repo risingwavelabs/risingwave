@@ -414,7 +414,7 @@ impl CreateMviewProgressTracker {
             if let Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                upstream_mview_actors,
+                upstream_root_actors,
                 definition,
                 ddl_type,
                 ..
@@ -422,7 +422,7 @@ impl CreateMviewProgressTracker {
             {
                 // Keep track of how many times each upstream MV appears.
                 let mut upstream_mv_count = HashMap::new();
-                for (table_id, actors) in upstream_mview_actors {
+                for (table_id, actors) in upstream_root_actors {
                     assert!(!actors.is_empty());
                     let dispatch_count: usize = dispatchers
                         .iter()
