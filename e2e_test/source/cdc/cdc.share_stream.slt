@@ -17,11 +17,14 @@ create source mysql_mytest with (
  connector = 'mysql-cdc',
  hostname = '${MYSQL_HOST:localhost}',
  port = '${MYSQL_TCP_PORT:8306}',
- username = 'dbz',
+ username = 'rwcdc',
  password = '${MYSQL_PWD:}',
  database.name = 'mytest',
  server.id = '5601'
 );
+
+statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
+create materialized view mv as select * from mysql_mytest;
 
 statement error The upstream table name must contain database name prefix*
 create table products_test ( id INT,

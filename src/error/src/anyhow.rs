@@ -133,6 +133,16 @@ macro_rules! def_anyhow_newtype {
             pub fn into_inner(self) -> ::anyhow::Error {
                 self.0
             }
+
+            /// Get the type name of the inner error.
+            pub fn variant_name(&self) -> &'static str {
+                $(
+                    if self.0.downcast_ref::<$from>().is_some() {
+                        return stringify!($from);
+                    }
+                )*
+                return "connector_error";
+            }
         }
 
         $(

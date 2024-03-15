@@ -29,7 +29,6 @@
 pub mod anyhow;
 pub mod common;
 pub mod macros;
-pub mod suppressor;
 pub mod tonic;
 
 // Re-export the `thiserror-ext` crate.

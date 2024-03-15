@@ -41,6 +41,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4", features = ["tokio"] }
 crossbeam-epoch = { version = "0.9" }
+crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
 crypto-bigint = { version = "0.5", features = ["generic-array", "zeroize"] }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
@@ -48,6 +49,7 @@ digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 flate2 = { version = "1", features = ["zlib"] }
+flume = { version = "0.10" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
@@ -58,6 +60,7 @@ futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["js", "rdrand", "std"] }
 governor = { version = "0.6", default-features = false, features = ["dashmap", "jitter", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["raw"] }
@@ -105,7 +108,7 @@ quote = { version = "1" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
-redis = { version = "0.24", features = ["async-std-comp", "tokio-comp"] }
+redis = { version = "0.25", features = ["async-std-comp", "tokio-comp"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
@@ -113,7 +116,6 @@ reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rustc-hash = { version = "1" }
-rustix = { version = "0.38", features = ["fs", "net"] }
 scopeguard = { version = "1" }
 sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -123,7 +125,7 @@ serde_json = { version = "1", features = ["alloc", "raw_value"] }
 serde_with = { version = "3", features = ["json"] }
 sha1 = { version = "0.10" }
 sha2 = { version = "0.10", features = ["oid"] }
-smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+smallvec = { version = "1", default-features = false, features = ["const_new", "serde", "union", "write"] }
 sqlx = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
 sqlx-mysql = { version = "0.7", default-features = false, features = ["bigdecimal", "chrono", "json", "rust_decimal", "time", "uuid"] }
@@ -165,11 +167,15 @@ auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
+crossbeam-epoch = { version = "0.9" }
+crossbeam-queue = { version = "0.3" }
+crossbeam-utils = { version = "0.8" }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
 itertools = { version = "0.11" }
@@ -195,7 +201,7 @@ regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
 rustc-hash = { version = "1" }
-rustix = { version = "0.38", features = ["fs", "net"] }
+scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
 sha2 = { version = "0.10", features = ["oid"] }

@@ -62,7 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -345,12 +345,16 @@ impl HummockManager {
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
+        let mut object_store_config = ObjectStoreConfig::default();
+        // For fs and hdfs object store, operations are not always atomic.
+        // We should manually enable atomicity guarantee by setting the atomic_write_dir config when building services.
+        object_store_config.set_atomic_write_dir();
         let object_store = Arc::new(
             build_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                ObjectStoreConfig::default(),
+                object_store_config,
             )
             .await,
         );
@@ -1228,11 +1232,26 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        while let Some(task) = self
+        while let Some(mut task) = self
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
+                if self.env.opts.enable_dropped_column_reclaim {
+                    task.table_schemas = match self.metadata_manager() {
+                        MetadataManager::V1(mgr) => mgr
+                            .catalog_manager
+                            .get_versioned_table_schemas(&task.existing_table_ids)
+                            .await
+                            .into_iter()
+                            .map(|(table_id, column_ids)| (table_id, TableSchema { column_ids }))
+                            .collect(),
+                        MetadataManager::V2(_) => {
+                            // TODO #13952: support V2
+                            BTreeMap::default()
+                        }
+                    }
+                }
                 return Ok(Some(task));
             }
             assert!(

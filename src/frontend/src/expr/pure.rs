@@ -92,6 +92,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Translate
             | expr_node::Type::Coalesce
             | expr_node::Type::ConcatWs
+            | expr_node::Type::ConcatWsVariadic
             | expr_node::Type::Abs
             | expr_node::Type::SplitPart
             | expr_node::Type::Ceil
@@ -102,6 +103,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::CharLength
             | expr_node::Type::Repeat
             | expr_node::Type::ConcatOp
+            | expr_node::Type::Concat
+            | expr_node::Type::ConcatVariadic
             | expr_node::Type::BoolOut
             | expr_node::Type::OctetLength
             | expr_node::Type::BitLength
@@ -181,7 +184,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbExtractPath
+            | expr_node::Type::JsonbExtractPathVariadic
             | expr_node::Type::JsonbExtractPathText
+            | expr_node::Type::JsonbExtractPathTextVariadic
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
             | expr_node::Type::JsonbObject
@@ -194,7 +199,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbExistsAll
             | expr_node::Type::JsonbStripNulls
             | expr_node::Type::JsonbBuildArray
+            | expr_node::Type::JsonbBuildArrayVariadic
             | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbBuildObjectVariadic
             | expr_node::Type::JsonbPathExists
             | expr_node::Type::JsonbPathMatch
             | expr_node::Type::JsonbPathQueryArray
@@ -225,6 +232,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
+            | expr_node::Type::FormatVariadic
             | expr_node::Type::PgwireSend
             | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform

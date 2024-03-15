@@ -345,9 +345,12 @@ pub struct MetaConfig {
     #[serde(default, with = "meta_prefix")]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
+    /// Whether compactor should rewrite row to remove dropped column.
+    #[serde(default = "default::meta::enable_dropped_column_reclaim")]
+    pub enable_dropped_column_reclaim: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
@@ -475,8 +478,13 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub developer: BatchDeveloperConfig,
 
+    /// This is the max number of queries per sql session.
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    /// This is the max number of batch queries per frontend node.
+    #[serde(default)]
+    pub max_batch_queries_per_frontend_node: Option<u64>,
 
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
@@ -880,6 +888,15 @@ pub struct StreamingDeveloperConfig {
     /// The max heap size of dirty groups of `HashAggExecutor`.
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
+
+    #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
+    pub memory_controller_threshold_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_graceful")]
+    pub memory_controller_threshold_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_stable")]
+    pub memory_controller_threshold_stable: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -932,9 +949,17 @@ pub struct ObjectStoreConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
+    pub object_store_set_atomic_write_dir: bool,
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+}
+
+impl ObjectStoreConfig {
+    pub fn set_atomic_write_dir(&mut self) {
+        self.object_store_set_atomic_write_dir = true;
+    }
 }
 
 /// The subsections `[storage.object_store.s3]`.
@@ -1144,6 +1169,9 @@ pub mod default {
 
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
+        }
+        pub fn enable_dropped_column_reclaim() -> bool {
+            false
         }
     }
 
@@ -1478,6 +1506,16 @@ pub mod default {
         pub fn enable_check_task_level_overlap() -> bool {
             false
         }
+
+        pub fn memory_controller_threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn memory_controller_threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn memory_controller_threshold_stable() -> f64 {
+            0.7
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1580,6 +1618,10 @@ pub mod default {
 
         pub fn object_store_read_timeout_ms() -> u64 {
             8 * 60 * 1000
+        }
+
+        pub fn object_store_set_atomic_write_dir() -> bool {
+            false
         }
 
         pub mod s3 {

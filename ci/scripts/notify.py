@@ -87,6 +87,8 @@ INTEGRATION_TEST_MAP = {
     "deltalake-sink-json": ["xinhao"],
     "pinot-sink-json": ["yiming"],
     "client-library-none": ["tao"],
+    "nats-json": ["tao"],
+    "nats-protobuf": ["tao"],
 }
 
 def get_failed_tests(get_test_status, test_map):

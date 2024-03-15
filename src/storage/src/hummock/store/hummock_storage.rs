@@ -40,7 +40,7 @@ use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
-use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
@@ -59,7 +59,7 @@ use crate::store::*;
 use crate::StateStore;
 
 struct HummockStorageShutdownGuard {
-    shutdown_sender: UnboundedSender<HummockEvent>,
+    shutdown_sender: HummockEventSender,
 }
 
 impl Drop for HummockStorageShutdownGuard {
@@ -78,7 +78,7 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    hummock_event_sender: UnboundedSender<HummockEvent>,
+    hummock_event_sender: HummockEventSender,
     // only used in test for setting hummock version in uploader
     _version_update_sender: UnboundedSender<HummockVersionUpdate>,
 
@@ -260,7 +260,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
@@ -442,7 +442,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type Iter = HummockStorageIterator;
 
     fn get(
         &self,
@@ -458,7 +458,7 @@ impl StateStoreRead for HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
         assert_eq!(
             r_vnode_exclusive - l_vnode_inclusive,

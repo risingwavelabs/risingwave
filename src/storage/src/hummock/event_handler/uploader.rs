@@ -26,6 +26,7 @@ use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
+use prometheus::{HistogramTimer, IntGauge};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -51,7 +52,10 @@ use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
-pub type UploadTaskOutput = Vec<LocalSstableInfo>;
+pub struct UploadTaskOutput {
+    pub ssts: Vec<LocalSstableInfo>,
+    pub wait_poll_timer: Option<HistogramTimer>,
+}
 pub type SpawnUploadTask = Arc<
     dyn Fn(UploadTaskPayload, UploadTaskInfo) -> JoinHandle<HummockResult<UploadTaskOutput>>
         + Send
@@ -115,6 +119,7 @@ struct UploadingTask {
     task_info: UploadTaskInfo,
     spawn_upload_task: SpawnUploadTask,
     task_size_guard: GenericGauge<AtomicU64>,
+    task_count_guard: IntGauge,
 }
 
 pub struct MergeImmTaskOutput {
@@ -189,6 +194,7 @@ impl Future for MergingImmTask {
 impl Drop for UploadingTask {
     fn drop(&mut self) {
         self.task_size_guard.sub(self.task_info.task_size as u64);
+        self.task_count_guard.dec();
     }
 }
 
@@ -234,12 +240,14 @@ impl UploadingTask {
             debug!("start upload task: {:?}", task_info);
         }
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
+        context.stats.uploader_uploading_task_count.inc();
         Self {
             payload,
             join_handle,
             task_info,
             spawn_upload_task: context.spawn_upload_task.clone(),
             task_size_guard: context.buffer_tracker.global_upload_task_size().clone(),
+            task_count_guard: context.stats.uploader_uploading_task_count.clone(),
         }
     }
 
@@ -255,9 +263,9 @@ impl UploadingTask {
                     }
                 })
                 .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
-                .map(|ssts| {
+                .map(|output| {
                     StagingSstableInfo::new(
-                        ssts,
+                        output.ssts,
                         self.task_info.epochs.clone(),
                         self.task_info.imm_ids.clone(),
                         self.task_info.task_size,
@@ -955,6 +963,11 @@ impl HummockUploader {
             uploaded: uploaded_data,
             table_watermarks,
         });
+
+        self.context
+            .stats
+            .uploader_syncing_epoch_count
+            .set(self.syncing_data.len() as _);
     }
 
     fn add_synced_data(&mut self, epoch: HummockEpoch, synced_state: SyncedDataState) {
@@ -1038,6 +1051,8 @@ impl HummockUploader {
         self.sealed_data.clear();
         self.unsealed_data.clear();
 
+        self.context.stats.uploader_syncing_epoch_count.set(0);
+
         // TODO: call `abort` on the uploading task join handle
     }
 }
@@ -1059,6 +1074,10 @@ impl HummockUploader {
                 Ok(Vec::new())
             };
             let syncing_data = self.syncing_data.pop_back().expect("must exist");
+            self.context
+                .stats
+                .uploader_syncing_epoch_count
+                .set(self.syncing_data.len() as _);
             let epoch = syncing_data.sync_epoch;
 
             let newly_uploaded_sstable_infos = match &result {
@@ -1181,6 +1200,7 @@ mod tests {
     use futures::FutureExt;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -1210,7 +1230,7 @@ mod tests {
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
-    const INITIAL_EPOCH: HummockEpoch = 5;
+    const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
 
     pub trait UploadOutputFuture =
@@ -1329,33 +1349,37 @@ mod tests {
     async fn dummy_success_upload_future(
         _: UploadTaskPayload,
         _: UploadTaskInfo,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
-        Ok(dummy_success_upload_output())
+    ) -> HummockResult<UploadTaskOutput> {
+        Ok(UploadTaskOutput {
+            ssts: dummy_success_upload_output(),
+            wait_poll_timer: None,
+        })
     }
 
     #[allow(clippy::unused_async)]
     async fn dummy_fail_upload_future(
         _: UploadTaskPayload,
         _: UploadTaskInfo,
-    ) -> HummockResult<Vec<LocalSstableInfo>> {
+    ) -> HummockResult<UploadTaskOutput> {
         Err(HummockError::other("failed"))
     }
 
     #[tokio::test]
     pub async fn test_uploading_task_future() {
         let uploader_context = test_uploader_context(dummy_success_upload_future);
+
         let imm = gen_imm(INITIAL_EPOCH).await;
         let imm_size = imm.size();
         let imm_id = imm.batch_id();
         let task = UploadingTask::new(vec![imm], &uploader_context);
         assert_eq!(imm_size, task.task_info.task_size);
         assert_eq!(vec![imm_id], task.task_info.imm_ids);
-        assert_eq!(vec![INITIAL_EPOCH as HummockEpoch], task.task_info.epochs);
+        assert_eq!(vec![INITIAL_EPOCH], task.task_info.epochs);
         let output = task.await.unwrap();
         assert_eq!(output.sstable_infos(), &dummy_success_upload_output());
         assert_eq!(imm_size, output.imm_size());
         assert_eq!(&vec![imm_id], output.imm_ids());
-        assert_eq!(&vec![INITIAL_EPOCH as HummockEpoch], output.epochs());
+        assert_eq!(&vec![INITIAL_EPOCH], output.epochs());
 
         let uploader_context = test_uploader_context(dummy_fail_upload_future);
         let task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH).await], &uploader_context);
@@ -1379,14 +1403,14 @@ mod tests {
         let run_count = Arc::new(AtomicUsize::new(0));
         let fail_num = 10;
         let run_count_clone = run_count.clone();
-        let uploader_context = test_uploader_context(move |_, _| {
+        let uploader_context = test_uploader_context(move |payload, info| {
             let run_count = run_count.clone();
             async move {
                 // fail in the first `fail_num` run, and success at the end
                 let ret = if run_count.load(SeqCst) < fail_num {
                     Err(HummockError::other("fail"))
                 } else {
-                    Ok(dummy_success_upload_output())
+                    dummy_success_upload_future(payload, info).await
                 };
                 run_count.fetch_add(1, SeqCst);
                 ret
@@ -1401,7 +1425,7 @@ mod tests {
     #[tokio::test]
     async fn test_uploader_basic() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let epoch1 = INITIAL_EPOCH + 1;
+        let epoch1 = INITIAL_EPOCH.next_epoch();
         let imm = gen_imm(epoch1).await;
         uploader.add_imm(imm.clone());
         assert_eq!(1, uploader.unsealed_data.len());
@@ -1476,8 +1500,10 @@ mod tests {
         // When we get IMM_MERGE_THRESHOLD epochs, there should be merging task started for sealed
         // data. Then we await the merging task and check the uploader's state again.
         let mut merged_imms = VecDeque::new();
+
+        let mut epoch = INITIAL_EPOCH;
         for i in 1..=ckpt_intervals {
-            let epoch = INITIAL_EPOCH + i;
+            epoch.inc_epoch();
             let mut imm1 = gen_imm(epoch).await;
             let mut imm2 = gen_imm(epoch).await;
 
@@ -1502,7 +1528,8 @@ mod tests {
                 assert_eq!(2, imms.len());
             }
 
-            let epoch_cnt = (epoch - INITIAL_EPOCH) as usize;
+            let epoch_cnt = i;
+
             if epoch_cnt < imm_merge_threshold {
                 assert!(uploader.sealed_data.merging_tasks.is_empty());
                 assert!(uploader.sealed_data.spilled_data.is_empty());
@@ -1564,8 +1591,8 @@ mod tests {
     #[tokio::test]
     async fn test_uploader_empty_epoch() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let epoch1 = INITIAL_EPOCH + 1;
-        let epoch2 = INITIAL_EPOCH + 2;
+        let epoch1 = INITIAL_EPOCH.next_epoch();
+        let epoch2 = epoch1.next_epoch();
         let imm = gen_imm(epoch2).await;
         // epoch1 is empty while epoch2 is not. Going to seal empty epoch1.
         uploader.add_imm(imm);
@@ -1609,7 +1636,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let epoch = 1;
+        let epoch = test_epoch(1);
         let imm1 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items1.clone()),
             epoch,
@@ -1629,7 +1656,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
         ];
-        let epoch = 2;
+        let epoch = test_epoch(2);
         let imm2 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items2.clone()),
             epoch,
@@ -1650,7 +1677,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value33")),
             ),
         ];
-        let epoch = 3;
+        let epoch = test_epoch(3);
         let imm3 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items3.clone()),
             epoch,
@@ -1692,12 +1719,12 @@ mod tests {
     async fn test_uploader_empty_advance_mce() {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let initial_pinned_version = uploader.context.pinned_version.clone();
-        let epoch1 = INITIAL_EPOCH + 1;
-        let epoch2 = INITIAL_EPOCH + 2;
-        let epoch3 = INITIAL_EPOCH + 3;
-        let epoch4 = INITIAL_EPOCH + 4;
-        let epoch5 = INITIAL_EPOCH + 5;
-        let epoch6 = INITIAL_EPOCH + 6;
+        let epoch1 = INITIAL_EPOCH.next_epoch();
+        let epoch2 = epoch1.next_epoch();
+        let epoch3 = epoch2.next_epoch();
+        let epoch4 = epoch3.next_epoch();
+        let epoch5 = epoch4.next_epoch();
+        let epoch6 = epoch5.next_epoch();
         let version1 = initial_pinned_version.new_pin_version(test_hummock_version(epoch1));
         let version2 = initial_pinned_version.new_pin_version(test_hummock_version(epoch2));
         let version3 = initial_pinned_version.new_pin_version(test_hummock_version(epoch3));
@@ -1785,10 +1812,13 @@ mod tests {
                     let end_epoch = *task_info.epochs.first().unwrap();
                     assert!(end_epoch >= start_epoch);
                     spawn(async move {
-                        let ret = gen_sstable_info(start_epoch, end_epoch);
+                        let ssts = gen_sstable_info(start_epoch, end_epoch);
                         start_tx.send(task_info).unwrap();
                         finish_rx.await.unwrap();
-                        Ok(ret)
+                        Ok(UploadTaskOutput {
+                            ssts,
+                            wait_poll_timer: None,
+                        })
                     })
                 }
             }),
@@ -1814,8 +1844,8 @@ mod tests {
     async fn test_uploader_finish_in_order() {
         let (buffer_tracker, mut uploader, new_task_notifier) = prepare_uploader_order_test();
 
-        let epoch1 = INITIAL_EPOCH + 1;
-        let epoch2 = INITIAL_EPOCH + 2;
+        let epoch1 = INITIAL_EPOCH.next_epoch();
+        let epoch2 = epoch1.next_epoch();
         let memory_limiter = buffer_tracker.get_memory_limiter().clone();
         let memory_limiter = Some(memory_limiter.deref());
 
@@ -1874,7 +1904,7 @@ mod tests {
         // sealed: epoch2: uploaded sst([imm2])
         // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
 
-        let epoch3 = INITIAL_EPOCH + 3;
+        let epoch3 = epoch2.next_epoch();
         let imm3_1 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(imm3_1.clone());
         let (await_start3_1, finish_tx3_1) = new_task_notifier(vec![imm3_1.batch_id()]);
@@ -1893,7 +1923,7 @@ mod tests {
         // sealed: uploaded sst([imm2])
         // syncing: epoch1: uploading: [imm1_4], [imm1_3], uploaded: sst([imm1_2, imm1_1])
 
-        let epoch4 = INITIAL_EPOCH + 4;
+        let epoch4 = epoch3.next_epoch();
         let imm4 = gen_imm_with_limiter(epoch4, memory_limiter).await;
         uploader.add_imm(imm4.clone());
         assert_uploader_pending(&mut uploader).await;
