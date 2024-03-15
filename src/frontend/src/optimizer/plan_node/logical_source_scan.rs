@@ -34,14 +34,15 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamSourceBackfill,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamSourceScan,
     ToStreamContext,
 };
 use crate::optimizer::property::Distribution::HashShard;
 use crate::utils::{ColIndexMapping, Condition};
 
+/// `LogicalSourceScan` is used for batch scan from source, and MV on a *shared source*.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalSourceBackfill {
+pub struct LogicalSourceScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
 
@@ -53,7 +54,7 @@ pub struct LogicalSourceBackfill {
     output_row_id_index: Option<usize>,
 }
 
-impl LogicalSourceBackfill {
+impl LogicalSourceScan {
     pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Result<Self> {
         let mut column_catalog = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
@@ -84,7 +85,7 @@ impl LogicalSourceBackfill {
             LogicalSource::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
         let (core, output_row_id_index) = core.exclude_generated_columns();
 
-        Ok(LogicalSourceBackfill {
+        Ok(LogicalSourceScan {
             base,
             core,
             output_exprs,
@@ -96,12 +97,12 @@ impl LogicalSourceBackfill {
         self.core
             .catalog
             .clone()
-            .expect("source catalog should exist for LogicalSourceBackfill")
+            .expect("source catalog should exist for LogicalSourceScan")
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalSourceBackfill}
-impl Distill for LogicalSourceBackfill {
+impl_plan_tree_node_for_leaf! {LogicalSourceScan}
+impl Distill for LogicalSourceScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let src = Pretty::from(self.source_catalog().name.clone());
         let time = Pretty::debug(&self.core.kafka_timestamp_range);
@@ -111,18 +112,18 @@ impl Distill for LogicalSourceBackfill {
             ("time_range", time),
         ];
 
-        childless_record("LogicalSourceBackfill", fields)
+        childless_record("LogicalSourceScan", fields)
     }
 }
 
-impl ColPrunable for LogicalSourceBackfill {
+impl ColPrunable for LogicalSourceScan {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
-impl ExprRewritable for LogicalSourceBackfill {
+impl ExprRewritable for LogicalSourceScan {
     fn has_rewritable_expr(&self) -> bool {
         self.output_exprs.is_some()
     }
@@ -142,7 +143,7 @@ impl ExprRewritable for LogicalSourceBackfill {
     }
 }
 
-impl ExprVisitable for LogicalSourceBackfill {
+impl ExprVisitable for LogicalSourceScan {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.output_exprs
             .iter()
@@ -151,7 +152,7 @@ impl ExprVisitable for LogicalSourceBackfill {
     }
 }
 
-impl PredicatePushdown for LogicalSourceBackfill {
+impl PredicatePushdown for LogicalSourceScan {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -161,7 +162,7 @@ impl PredicatePushdown for LogicalSourceBackfill {
     }
 }
 
-impl ToBatch for LogicalSourceBackfill {
+impl ToBatch for LogicalSourceScan {
     fn to_batch(&self) -> Result<PlanRef> {
         let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
@@ -174,9 +175,9 @@ impl ToBatch for LogicalSourceBackfill {
     }
 }
 
-impl ToStream for LogicalSourceBackfill {
+impl ToStream for LogicalSourceScan {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan = StreamSourceBackfill::new(self.core.clone()).into();
+        let mut plan = StreamSourceScan::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {
             let logical_project = generic::Project::new(exprs.to_vec(), plan);

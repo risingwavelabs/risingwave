@@ -35,15 +35,21 @@ use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
+/// `StreamSourceScan` scans from a *shared source*. It forwards data from the upstream [`StreamSource`],
+/// and also backfills data from the external source.
+///
+/// Unlike [`StreamSource`], which is a leaf node in the stream graph, `StreamSourceScan` is converted to `merge -> backfill`
+///
+/// [`StreamSource`]:super::StreamSource
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamSourceBackfill {
+pub struct StreamSourceScan {
     pub base: PlanBase<Stream>,
     core: generic::Source,
 }
 
-impl_plan_tree_node_for_leaf! { StreamSourceBackfill }
+impl_plan_tree_node_for_leaf! { StreamSourceScan }
 
-impl StreamSourceBackfill {
+impl StreamSourceScan {
     pub fn new(source: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &source,
@@ -163,7 +169,7 @@ impl StreamSourceBackfill {
     }
 }
 
-impl Distill for StreamSourceBackfill {
+impl Distill for StreamSourceScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let columns = self
             .get_columns()
@@ -171,15 +177,15 @@ impl Distill for StreamSourceBackfill {
             .map(|ele| Pretty::from(ele.to_string()))
             .collect();
         let col = Pretty::Array(columns);
-        childless_record("StreamSourceBackfill", vec![("columns", col)])
+        childless_record("StreamSourceScan", vec![("columns", col)])
     }
 }
 
-impl ExprRewritable for StreamSourceBackfill {}
+impl ExprRewritable for StreamSourceScan {}
 
-impl ExprVisitable for StreamSourceBackfill {}
+impl ExprVisitable for StreamSourceScan {}
 
-impl StreamNode for StreamSourceBackfill {
+impl StreamNode for StreamSourceScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         unreachable!("stream source backfill cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }

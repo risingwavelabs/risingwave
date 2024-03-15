@@ -1228,7 +1228,7 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?;
-        fragments.retain(|(_, _, mask, _)| *mask & PbFragmentTypeFlag::SourceBackfill as i32 != 0);
+        fragments.retain(|(_, _, mask, _)| *mask & PbFragmentTypeFlag::SourceScan as i32 != 0);
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, upstream_fragment_id, _, stream_node) in fragments {

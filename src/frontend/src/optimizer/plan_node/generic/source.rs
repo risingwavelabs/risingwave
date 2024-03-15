@@ -41,7 +41,7 @@ pub enum SourceNodeKind {
     ///
     /// Note:
     /// - For non backfill-able source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `LogicalSource`.
-    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will create `LogicalSourceBackfill` instead of `LogicalSource`.
+    /// - For backfill-able source, `CREATE MATERIALIZE VIEW` will create `LogicalSourceScan` instead of `LogicalSource`.
     CreateMViewOrBatch,
 }
 

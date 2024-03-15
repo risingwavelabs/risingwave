@@ -311,7 +311,7 @@ fn build_fragment(
                 .push(node.upstream_source_id);
         }
         NodeBody::SourceBackfill(node) => {
-            current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceBackfill as u32;
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::SourceScan as u32;
             // memorize upstream source id for later use
             let source_id = node.source_id;
             state.dependent_table_ids.insert(source_id.into());
