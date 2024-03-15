@@ -1300,6 +1300,7 @@ impl Binder {
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.
                     Ok(ExprImpl::literal_int(binder.session_id.0))
@@ -1458,6 +1459,7 @@ impl Binder {
                 | Clause::Filter
                 | Clause::GeneratedColumn
                 | Clause::From
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -1510,6 +1512,7 @@ impl Binder {
                 | Clause::Values
                 | Clause::From
                 | Clause::GeneratedColumn
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
@@ -1531,6 +1534,7 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::Values
+                | Clause::Insert
                 | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",

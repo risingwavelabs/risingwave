@@ -76,7 +76,7 @@ impl Output for LocalOutput {
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
-                    "failed to send message to actor {}: {:?}",
+                    "failed to send message to actor {}, message: {:?}",
                     self.actor_id,
                     message
                 )
@@ -130,7 +130,7 @@ impl Output for RemoteOutput {
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
-                    "failed to send message to actor {}: {:#?}",
+                    "failed to send message to actor {}, message: {:?}",
                     self.actor_id,
                     message
                 )

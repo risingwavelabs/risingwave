@@ -17,10 +17,10 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -336,16 +336,13 @@ pub async fn merge_imms_in_memory(
             table_id,
             table_key: key_entry.key.clone(),
         };
-        if full_key_tracker
-            .observe_multi_version(
-                user_key,
-                key_entry
-                    .new_values
-                    .iter()
-                    .map(|(epoch_with_gap, _)| *epoch_with_gap),
-            )
-            .is_some()
-        {
+        if full_key_tracker.observe_multi_version(
+            user_key,
+            key_entry
+                .new_values
+                .iter()
+                .map(|(epoch_with_gap, _)| *epoch_with_gap),
+        ) {
             let last_entry = merged_entries.last_mut().expect("non-empty");
             if last_entry.value_offset == values.len() {
                 warn!(key = ?last_entry.key, "key has no value in imm compact. skipped");
@@ -423,7 +420,7 @@ fn generate_splits(
     if existing_table_ids.len() > 1 {
         if parallelism > 1 && compact_data_size > sstable_size {
             let mut last_buffer_size = 0;
-            let mut last_user_key = UserKey::default();
+            let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
             for (data_size, user_key) in size_and_start_user_keys {
                 if last_buffer_size >= sub_compaction_data_size
                     && last_user_key.as_ref() != user_key
@@ -497,7 +494,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,

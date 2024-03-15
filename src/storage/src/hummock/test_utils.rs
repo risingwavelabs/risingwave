@@ -17,9 +17,8 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Stream, TryStreamExt};
+use foyer::memory::CacheContext;
 use itertools::Itertools;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
@@ -32,7 +31,6 @@ use super::{
     HummockResult, InMemWriter, MonotonicDeleteEvent, SstableMeta, SstableWriterOptions,
     DEFAULT_RESTART_INTERVAL,
 };
-use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::iterator::ForwardMergeRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -45,6 +43,7 @@ use crate::hummock::{
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
+use crate::StateStoreIter;
 
 pub fn default_opts_for_test() -> StorageOpts {
     StorageOpts {
@@ -323,7 +322,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         kv_iter,
         range_tombstones,
         sstable_store.clone(),
-        CachePolicy::Fill(CachePriority::High),
+        CachePolicy::Fill(CacheContext::Default),
     )
     .await
 }
@@ -376,10 +375,9 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> usize {
-    futures::pin_mut!(s);
+pub async fn count_stream(mut i: impl StateStoreIter + Send) -> usize {
     let mut c: usize = 0;
-    while s.try_next().await.unwrap().is_some() {
+    while i.try_next().await.unwrap().is_some() {
         c += 1
     }
     c

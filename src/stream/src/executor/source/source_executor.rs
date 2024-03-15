@@ -39,7 +39,7 @@ use crate::executor::*;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -85,7 +85,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
     }
 
-    async fn build_stream_source_reader(
+    pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
@@ -116,6 +116,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
+    /// `source_id | source_name | actor_id | fragment_id`
     #[inline]
     fn get_metric_labels(&self) -> [String; 4] {
         [
@@ -314,7 +315,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            tracing::debug!(actor_id = self.actor_ctx.id, state = ?cache, "take snapshot");
+            tracing::debug!(state = ?cache, "take snapshot");
             core.split_state_store.set_states(cache).await?;
         }
 
@@ -405,7 +406,7 @@ impl<S: StateStore> SourceExecutor<S> {
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(state = ?recover_state, "start with state");
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
@@ -422,6 +423,7 @@ impl<S: StateStore> SourceExecutor<S> {
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
+        // TODO: for backfill-able source, pause until there's a MV.
 
         yield Message::Barrier(barrier);
 

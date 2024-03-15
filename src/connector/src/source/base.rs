@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -331,17 +331,6 @@ impl Default for ConnectorProperties {
 }
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector_b_tree_map(with_properties: &BTreeMap<String, String>) -> bool {
-        with_properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| {
-                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
-                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
-            })
-            .unwrap_or(false)
-    }
-
     pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
         with_properties
             .get(UPSTREAM_SOURCE_KEY)
@@ -516,6 +505,7 @@ pub type DataType = risingwave_common::types::DataType;
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
+    /// This field is only used by datagen.
     pub is_visible: bool,
 }
 

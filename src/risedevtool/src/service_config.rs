@@ -185,6 +185,8 @@ pub struct PrometheusConfig {
     pub remote_write_region: String,
     pub remote_write_url: String,
 
+    pub scrape_interval: String,
+
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -221,6 +223,7 @@ pub struct TempoConfig {
     pub address: String,
     pub port: u16,
     pub otlp_port: u16,
+    pub max_bytes_per_trace: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
