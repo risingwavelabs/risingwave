@@ -98,10 +98,11 @@ To ensure we always make progress,
 we will keep track of the last row we backfilled to,
 and continue from after that row in the next epoch.
 
-References:
-- [RFC: Use Backfill To Let Mv On Mv Stream Again](https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0013-use-backfill-to-let-mv-on-mv-stream-again.md)
-
 In the following sections, we will delve into specific types of backfill.
+
+### References
+
+[RFC: Use Backfill To Let Mv On Mv Stream Again](https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0013-use-backfill-to-let-mv-on-mv-stream-again.md)
 
 ## NoShuffle Backfill
 
