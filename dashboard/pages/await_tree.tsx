@@ -79,9 +79,9 @@ export default function AwaitTreeDump() {
         .map(([k, v]) => `[RPC ${k}]\n${v}`)
         .join("\n")
       const compactionTraces = _(response.compactionTaskTraces)
-          .entries()
-          .map(([k, v]) => `[Compaction ${k}]\n${v}`)
-          .join("\n")
+        .entries()
+        .map(([k, v]) => `[Compaction ${k}]\n${v}`)
+        .join("\n")
 
       result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}`
     } catch (e: any) {
