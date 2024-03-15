@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod logical_filter_expression_simplify_rule;
+pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
 pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
@@ -92,7 +94,6 @@ pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
 pub use stream::split_now_and_rule::*;
 pub use stream::split_now_or_rule::*;
-pub use stream::stream_filter_expression_simplify_rule::*;
 pub use stream::stream_project_merge_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
