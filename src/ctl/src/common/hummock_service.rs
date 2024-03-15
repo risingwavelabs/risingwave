@@ -136,6 +136,7 @@ impl HummockServiceOpts {
             metrics.object_store_metrics.clone(),
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
+            None,
         )
         .await?;
 

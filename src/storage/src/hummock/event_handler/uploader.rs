@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{poll_fn, Future};
 use std::mem::swap;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 use std::task::{ready, Context, Poll};
 
 use futures::future::{try_join_all, TryJoinAll};
@@ -39,7 +41,9 @@ use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
-use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor};
+use crate::hummock::compactor::{
+    merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
+};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -77,9 +81,34 @@ pub type SpawnMergingTask = Arc<
 
 pub(crate) fn default_spawn_merging_task(
     compaction_executor: Arc<CompactionExecutor>,
+    await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 ) -> SpawnMergingTask {
     Arc::new(move |table_id, instance_id, imms, tracker| {
-        compaction_executor.spawn(merge_imms_in_memory(table_id, instance_id, imms, tracker))
+        compaction_executor.spawn({
+            static NEXT_MERGING_TASK_ID: LazyLock<AtomicUsize> =
+                LazyLock::new(|| AtomicUsize::new(0));
+            let tree_root = await_tree_reg.as_ref().map(|reg| {
+                let merging_task_id = NEXT_MERGING_TASK_ID.fetch_add(1, Relaxed);
+                reg.write().register(
+                    format!("merging_task/{}", merging_task_id),
+                    format!(
+                        "Merging Imm {:?} {:?} {:?}",
+                        table_id,
+                        instance_id,
+                        imms.iter()
+                            .flat_map(|imm| imm.epochs().iter())
+                            .copied()
+                            .collect::<BTreeSet<_>>()
+                    ),
+                )
+            });
+            let future = merge_imms_in_memory(table_id, instance_id, imms, tracker);
+            if let Some(root) = tree_root {
+                root.instrument(future).left_future()
+            } else {
+                future.right_future()
+            }
+        })
     })
 }
 
@@ -1314,7 +1343,7 @@ mod tests {
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
-            default_spawn_merging_task(compaction_executor),
+            default_spawn_merging_task(compaction_executor, None),
             BufferTracker::for_test(),
             &config,
             Arc::new(HummockStateStoreMetrics::unused()),
@@ -1335,7 +1364,7 @@ mod tests {
             Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
-            default_spawn_merging_task(compaction_executor),
+            default_spawn_merging_task(compaction_executor, None),
             BufferTracker::for_test(),
             &config,
         )
@@ -1822,7 +1851,7 @@ mod tests {
                     })
                 }
             }),
-            default_spawn_merging_task(compaction_executor),
+            default_spawn_merging_task(compaction_executor, None),
             buffer_tracker.clone(),
             &config,
         );

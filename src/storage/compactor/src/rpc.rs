@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use parking_lot::RwLock;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{
     DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
@@ -26,6 +23,7 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
     StackTraceResponse,
 };
+use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
@@ -69,11 +67,11 @@ impl CompactorService for CompactorServiceImpl {
 }
 
 pub struct MonitorServiceImpl {
-    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>) -> Self {
+    pub fn new(await_tree_reg: Option<CompactionAwaitTreeRegRef>) -> Self {
         Self { await_tree_reg }
     }
 }
