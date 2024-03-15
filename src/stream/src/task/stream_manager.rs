@@ -209,7 +209,7 @@ impl LocalStreamManager {
                     .lock()
                     .iter()
                 {
-                    writeln!(o, ">> barrier {}\n\n{}", e, trace).ok();
+                    writeln!(o, ">> Barrier {}\n\n{}", e, trace).ok();
                 }
             }
         })
