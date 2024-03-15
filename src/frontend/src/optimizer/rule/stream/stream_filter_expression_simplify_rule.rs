@@ -53,9 +53,12 @@ impl StreamFilterExpressionSimplifyRule {
 /// `True` => the return value of the input `func_type` will *definitely* not be null
 /// `False` => vice versa
 fn is_not_null(func_type: ExprType) -> bool {
-    func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
-    || func_type == ExprType::IsTrue || func_type == ExprType::IsFalse
-    || func_type == ExprType::IsNotTrue || func_type == ExprType::IsNotFalse
+    func_type == ExprType::IsNull
+        || func_type == ExprType::IsNotNull
+        || func_type == ExprType::IsTrue
+        || func_type == ExprType::IsFalse
+        || func_type == ExprType::IsNotTrue
+        || func_type == ExprType::IsNotFalse
 }
 
 /// Simply extract every possible `InputRef` out from the input `expr`
