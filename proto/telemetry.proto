@@ -90,14 +90,14 @@ message MetaReport {
   repeated StreamJobDesc stream_jobs = 6;
 }
 
-enum TableOptimization {
+enum PlanOptimization {
   TABLE_OPTIMIZATION_UNSPECIFIED = 0;
 }
 
 message StreamJobDesc {
   int32 table_id = 1;
   optional string connector_name = 2;
-  repeated TableOptimization table_optimizations = 3;
+  repeated PlanOptimization plan_optimizations = 3;
 }
 
 message ComputeReport {

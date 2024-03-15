@@ -44,7 +44,7 @@ struct RwVersion {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum TableOptimization {
+pub enum PlanOptimization {
     // todo: add optimization applied to each job
     Placeholder,
 }
@@ -53,7 +53,7 @@ pub enum TableOptimization {
 pub struct MetaTelemetryJobDesc {
     pub table_id: i32,
     pub connector: Option<String>,
-    pub optimization: Vec<TableOptimization>,
+    pub optimization: Vec<PlanOptimization>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,12 +73,13 @@ impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
         risingwave_pb::telemetry::StreamJobDesc {
             table_id: val.table_id,
             connector_name: val.connector,
-            table_optimizations: val
+            plan_optimizations: val
                 .optimization
                 .iter()
                 .map(|opt| match opt {
-                    TableOptimization::Placeholder => {
-                        risingwave_pb::telemetry::TableOptimization::Unspecified as i32
+                    PlanOptimization::Placeholder => {
+                        risingwave_pb::telemetry::PlanOptimization::TableOptimizationUnspecified
+                            as i32
                     }
                 })
                 .collect(),
