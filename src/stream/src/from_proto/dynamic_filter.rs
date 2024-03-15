@@ -65,7 +65,8 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
             DynamicFilterExecutor::new(
                 params.actor_context,
-                &params.info,
+                params.eval_error_report,
+                params.info.schema.clone(),
                 source_l,
                 source_r,
                 key_l,
@@ -84,7 +85,8 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
             DynamicFilterExecutor::new(
                 params.actor_context,
-                &params.info,
+                params.eval_error_report,
+                params.info.schema.clone(),
                 source_l,
                 source_r,
                 key_l,
