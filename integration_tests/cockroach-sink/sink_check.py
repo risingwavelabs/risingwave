@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-relations = ['target_count', 'data_types']
+relations = ['target_count', 'data_types', 'cock_all_data_types']
 
 failed_cases = []
 for rel in relations:
