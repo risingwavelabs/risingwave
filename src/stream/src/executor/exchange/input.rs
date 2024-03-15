@@ -200,6 +200,10 @@ impl RemoteInput {
                     // Read barrier mutation from local barrier manager and attach it to the barrier message.
                     if cfg!(not(test)) {
                         if let Message::Barrier(barrier) = &mut msg {
+                            assert!(
+                                barrier.mutation.is_none(),
+                                "Mutation should be erased in remote side"
+                            );
                             let mutation = local_barrier_manager
                                 .read_barrier_mutation(barrier)
                                 .await

@@ -330,6 +330,9 @@ impl ManagedBarrierState {
                 ..
             })
             | None => {
+                // If the barrier's state is stashed, this occurs exclusively in scenarios where the barrier has not been
+                // injected by the barrier manager, or the barrier message is blocked at the `RemoteInput` side waiting for injection.
+                // Given these conditions, it's inconceivable for an actor to attempt collect at this point.
                 panic!(
                     "cannot collect new actor barrier {:?} at current state: Stashed or None",
                     barrier.epoch,
