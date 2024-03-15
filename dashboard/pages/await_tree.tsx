@@ -82,8 +82,12 @@ export default function AwaitTreeDump() {
         .entries()
         .map(([k, v]) => `[Compaction ${k}]\n${v}`)
         .join("\n")
+      const barrierTraces = _(response.inflightBarrierTraces)
+        .entries()
+        .map(([k, v]) => `[Barrier ${k}]\n${v}`)
+        .join("\n")
 
-      result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}`
+      result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}\n${barrierTraces}`
     } catch (e: any) {
       result = `${title}\n\nERROR: ${e.message}\n${e.cause}`
     }
