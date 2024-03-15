@@ -23,14 +23,13 @@ use axum::body::boxed;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, get_service};
+use axum::routing::get;
 use axum::Router;
 use risingwave_rpc_client::ComputeClientPool;
-use tower::{ServiceBuilder, ServiceExt};
+use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
-use tower_http::services::ServeDir;
 
 use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::MetadataManager;
@@ -53,7 +52,6 @@ pub(super) mod handlers {
     use axum::Json;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
