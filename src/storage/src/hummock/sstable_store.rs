@@ -53,10 +53,6 @@ use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{BlockHolder, HummockError, HummockResult, MemoryLimiter};
 use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
 
-const MAX_META_CACHE_SHARD_BITS: usize = 2;
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
-
 pub type TableHolder = CacheEntry<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
@@ -245,7 +241,7 @@ impl SstableStore {
             eviction_config: LruConfig {
                 high_priority_pool_ratio: 0.0,
             },
-            object_pool_capacity: (1 << meta_cache_shard_bits) * 1024,
+            object_pool_capacity: config.meta_shard_num * 1024,
             hash_builder: RandomState::default(),
             event_listener: MetaCacheEventListener::from(config.meta_file_cache.clone()),
         }));
