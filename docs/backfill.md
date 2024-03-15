@@ -181,6 +181,10 @@ since `ArrangementBackfill` can be on a different parallel unit than its upstrea
 For the historical part,
 we use a `Replicated StateTable` to read historical data, and replicate the shared buffer.
 
+### Arrangement Backfill gets planned
+
+TODO: Discuss frontend parts here.
+
 ### Backfill logic
 
 ![backfill sides](./images/backfill/backfill-sides.png)
@@ -256,6 +260,19 @@ To replicate the shared buffer, we simply just create a `ReplicatedStateTable`.
 This will just store the `ReadVersions` but never upload them to the Object Store.
 Then the `StateTable`'s logic will take care of
 merging the shared buffer and the committed data in the Object store for us.
+
+### Recovery
+
+TODO
+
+### Scaling
+
+TODO
+
+### Further improvements
+
+- Make backfill vnode level within each partition:
+  https://github.com/risingwavelabs/risingwave/issues/14905
 
 ## Cdc Backfill
 
