@@ -519,11 +519,10 @@ impl ObjectStore for S3ObjectStore {
             }
         }
         if !all_errors.is_empty() {
-            return Err(ObjectError::internal(
-                format!(
-                    "DeleteObjects request returned exception for some objects: {:?}",
-                    all_errors
-                )));
+            return Err(ObjectError::internal(format!(
+                "DeleteObjects request returned exception for some objects: {:?}",
+                all_errors
+            )));
         }
 
         Ok(())
