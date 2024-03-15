@@ -146,6 +146,7 @@ impl VirtualNode {
         }
 
         data_chunk
+            // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/15705
             .get_hash_values(keys, Crc32FastBuilder, false)
             .into_iter()
             .map(|hash| hash.into())
