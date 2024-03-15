@@ -694,12 +694,9 @@ pub(crate) fn load_certs(
         certificates.as_bytes().to_owned()
     };
 
-    let certs = rustls_pemfile::certs(&mut cert_bytes.as_slice())?;
-
-    Ok(certs
-        .into_iter()
-        .map(tokio_rustls::rustls::Certificate)
-        .collect())
+    rustls_pemfile::certs(&mut cert_bytes.as_slice())
+        .map(|cert| Ok(tokio_rustls::rustls::Certificate(cert?.to_vec())))
+        .collect()
 }
 
 pub(crate) fn load_private_key(
@@ -711,10 +708,10 @@ pub(crate) fn load_private_key(
         certificate.as_bytes().to_owned()
     };
 
-    let certs = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())?;
-    let cert = certs
-        .into_iter()
+    let cert = rustls_pemfile::pkcs8_private_keys(&mut cert_bytes.as_slice())
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?;
-    Ok(tokio_rustls::rustls::PrivateKey(cert))
+    Ok(tokio_rustls::rustls::PrivateKey(
+        cert?.secret_pkcs8_der().to_vec(),
+    ))
 }
