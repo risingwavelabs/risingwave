@@ -13,6 +13,11 @@ enable_auto = true
 threshold_auto = 0.8999999761581421
 dir = "./"
 
+[memory]
+threshold_aggressive = 0.9
+threshold_graceful = 0.8
+threshold_stable = 0.7
+
 [meta]
 min_sst_retention_time_sec = 86400
 full_gc_interval_sec = 86400

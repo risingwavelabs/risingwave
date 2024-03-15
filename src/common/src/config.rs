@@ -142,6 +142,10 @@ pub struct RwConfig {
 
     #[serde(default)]
     #[config_doc(nested)]
+    pub memory: MemoryConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
     pub meta: MetaConfig,
 
     #[serde(default)]
@@ -785,6 +789,19 @@ pub struct FileCacheConfig {
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+/// The subsection `[memory]` and in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct MemoryConfig {
+    #[serde(default = "default::memory::threshold_aggressive")]
+    pub threshold_aggressive: f64,
+
+    #[serde(default = "default::memory::threshold_graceful")]
+    pub threshold_graceful: f64,
+
+    #[serde(default = "default::memory::threshold_stable")]
+    pub threshold_stable: f64,
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
@@ -1650,6 +1667,18 @@ pub mod default {
                     vec!["SlowDown".into(), "TooManyRequests".into()]
                 }
             }
+        }
+    }
+
+    pub mod memory {
+        pub fn threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn threshold_stable() -> f64 {
+            0.7
         }
     }
 }
