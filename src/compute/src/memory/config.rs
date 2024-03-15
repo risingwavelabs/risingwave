@@ -33,7 +33,7 @@ const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
 const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
-const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 1024;
+const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
@@ -95,7 +95,8 @@ pub fn storage_memory_config(
 
     if meta_cache_capacity_mb != default_meta_cache_capacity_mb {
         default_block_cache_capacity_mb += default_meta_cache_capacity_mb;
-        default_block_cache_capacity_mb -= meta_cache_capacity_mb;
+        default_block_cache_capacity_mb =
+            default_block_cache_capacity_mb.saturating_sub(meta_cache_capacity_mb);
     }
 
     let default_shared_buffer_capacity_mb = ((non_reserved_memory_bytes as f64
@@ -112,7 +113,8 @@ pub fn storage_memory_config(
             ));
     if shared_buffer_capacity_mb != default_shared_buffer_capacity_mb {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
-        default_block_cache_capacity_mb -= shared_buffer_capacity_mb;
+        default_block_cache_capacity_mb =
+            default_block_cache_capacity_mb.saturating_sub(shared_buffer_capacity_mb);
     }
     let block_cache_capacity_mb = storage_config
         .block_cache_capacity_mb
@@ -170,15 +172,15 @@ pub fn storage_memory_config(
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
+        block_shard_num,
         meta_cache_capacity_mb,
+        meta_shard_num,
         shared_buffer_capacity_mb,
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
-        block_shard_num,
-        meta_shard_num,
     }
 }
 

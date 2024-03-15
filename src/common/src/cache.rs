@@ -1049,7 +1049,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 0));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(4, 256, 0));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 1);
         assert_eq!(cache.shard(10), 2);
@@ -1349,7 +1349,7 @@ mod tests {
 
     #[test]
     fn test_write_request_pending() {
-        let cache = Arc::new(LruCache::new(0, 5, 0));
+        let cache = Arc::new(LruCache::new(1, 5, 0));
         {
             let mut shard = cache.shards[0].lock();
             insert(&mut shard, "a", "v1");
@@ -1394,7 +1394,7 @@ mod tests {
     #[test]
     fn test_event_listener() {
         let listener = Arc::new(TestLruCacheEventListener::default());
-        let cache = Arc::new(LruCache::with_event_listener(0, 2, 0, listener.clone()));
+        let cache = Arc::new(LruCache::with_event_listener(1, 2, 0, listener.clone()));
 
         // full-fill cache
         let h = cache.insert(
@@ -1489,7 +1489,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_future_cancel() {
-        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(0, 5, 0));
+        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(1, 5, 0));
         // do not need sender because this receiver will be cancelled.
         let (_, recv) = channel::<()>();
         let polled = Arc::new(AtomicBool::new(false));
