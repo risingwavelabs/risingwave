@@ -869,11 +869,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::memory_controller_threshold_stable")]
     pub memory_controller_threshold_stable: f64,
 
-    #[serde(default = "default::developer::stream_disable_arrangement_backfill")]
-    /// Disable arrangement backfill
+    #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
+    /// Enable arrangement backfill
     /// If true, the arrangement backfill will be disabled,
     /// even if session variable set.
-    pub disable_arrangement_backfill: bool,
+    pub enable_arrangement_backfill: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1493,8 +1493,8 @@ pub mod default {
         pub fn memory_controller_threshold_stable() -> f64 {
             0.7
         }
-        pub fn stream_disable_arrangement_backfill() -> bool {
-            false
+        pub fn stream_enable_arrangement_backfill() -> bool {
+            true
         }
     }
 

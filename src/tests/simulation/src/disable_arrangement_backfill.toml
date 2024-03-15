@@ -3,4 +3,4 @@ telemetry_enabled = false
 metrics_level = "Disabled"
 
 [streaming.developer]
-stream_disable_arrangement_backfill = true
+stream_enable_arrangement_backfill = false

@@ -297,7 +297,7 @@ metrics_level = "Disabled"
         }
     }
 
-    pub fn disable_arrangement_backfill() -> Self {
+    pub fn enable_arrangement_backfill() -> Self {
         let config_path = {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");

@@ -853,7 +853,7 @@ impl PlanRoot {
             .env()
             .streaming_config()
             .developer
-            .disable_arrangement_backfill;
+            .enable_arrangement_backfill;
         !arrangement_backfill_disabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 }

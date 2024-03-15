@@ -287,8 +287,8 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_disable_arrangement_backfill() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::disable_arrangement_backfill()).await?;
+async fn test_enable_arrangement_backfill() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::enable_arrangement_backfill()).await?;
     let mut session = cluster.start_session();
     // Since cluster disables arrangement backfill, it should not work.
     session
