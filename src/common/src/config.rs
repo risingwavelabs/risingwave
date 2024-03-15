@@ -17,7 +17,6 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -531,41 +530,7 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub enum MetricLevel {
-    #[default]
-    Disabled = 0,
-    Critical = 1,
-    Info = 2,
-    Debug = 3,
-}
-
-impl clap::ValueEnum for MetricLevel {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
-    }
-
-    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
-            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
-            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
-            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
-        }
-    }
-}
-
-impl PartialEq<Self> for MetricLevel {
-    fn eq(&self, other: &Self) -> bool {
-        (*self as u8).eq(&(*other as u8))
-    }
-}
-
-impl PartialOrd for MetricLevel {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        (*self as u8).partial_cmp(&(*other as u8))
-    }
-}
+pub use risingwave_common_metrics::MetricLevel;
 
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
