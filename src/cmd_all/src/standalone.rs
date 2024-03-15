@@ -261,8 +261,6 @@ mod test {
                 ParsedStandaloneOpts {
                     meta_opts: Some(
                         MetaNodeOpts {
-                            vpc_id: None,
-                            security_group_id: None,
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
@@ -279,6 +277,8 @@ mod test {
                             prometheus_selector: None,
                             connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
+                            vpc_id: None,
+                            security_group_id: None,
                             config_path: "src/config/test.toml",
                             backend: None,
                             barrier_interval_ms: None,

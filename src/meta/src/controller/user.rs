@@ -296,8 +296,10 @@ impl CatalogController {
             } else {
                 on_conflict.do_nothing();
             }
+
             UserPrivilege::insert(privilege)
                 .on_conflict(on_conflict)
+                .do_nothing()
                 .exec(&txn)
                 .await?;
         }

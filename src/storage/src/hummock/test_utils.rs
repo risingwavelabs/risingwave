@@ -17,8 +17,8 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use foyer::memory::CacheContext;
 use itertools::Itertools;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
@@ -322,7 +322,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         kv_iter,
         range_tombstones,
         sstable_store.clone(),
-        CachePolicy::Fill(CachePriority::High),
+        CachePolicy::Fill(CacheContext::Default),
     )
     .await
 }

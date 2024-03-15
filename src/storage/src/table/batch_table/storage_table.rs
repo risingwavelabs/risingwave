@@ -20,12 +20,12 @@ use std::sync::Arc;
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
@@ -359,7 +359,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
@@ -446,8 +446,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ) {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CachePriority::Low),
-            _ => CachePolicy::Fill(CachePriority::High),
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheContext::LruPriorityLow),
+            _ => CachePolicy::Fill(CacheContext::Default),
         };
 
         let table_key_ranges = {
