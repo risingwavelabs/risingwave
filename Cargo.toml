@@ -138,7 +138,7 @@ arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
 # FIXME: This should be changed to the official crate once it's published.
-arrow-udf-deno = { git = "https://github.com/bakjos/arrow-udf.git", rev = "8660631" }
+arrow-udf-deno = { git = "https://github.com/bakjos/arrow-udf.git", rev = "3a00425" }
 arrow-udf-js = "0.1"
 arrow-udf-wasm = { version = "0.2", features = ["build"] }
 arrow-udf-python = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "6c32f71" }
