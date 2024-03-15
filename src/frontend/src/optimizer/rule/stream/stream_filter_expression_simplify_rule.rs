@@ -50,16 +50,20 @@ impl StreamFilterExpressionSimplifyRule {
     }
 }
 
-fn is_null_or_not_null(func_type: ExprType) -> bool {
+/// `True` => the return value of the input `func_type` will *definitely* not be null
+/// `False` => vice versa
+fn is_not_null(func_type: ExprType) -> bool {
     func_type == ExprType::IsNull || func_type == ExprType::IsNotNull
+    || func_type == ExprType::IsTrue || func_type == ExprType::IsFalse
+    || func_type == ExprType::IsNotTrue || func_type == ExprType::IsNotFalse
 }
 
 /// Simply extract every possible `InputRef` out from the input `expr`
 fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
     match expr.clone() {
         ExprImpl::FunctionCall(func_call) => {
-            // `IsNotNull( ... )` or `IsNull( ... )` will be ignored
-            if is_null_or_not_null(func_call.func_type()) {
+            // the functions that *never* return null will be ignored
+            if is_not_null(func_call.func_type()) {
                 return;
             }
             for sub_expr in func_call.inputs() {
