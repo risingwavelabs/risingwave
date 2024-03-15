@@ -888,6 +888,15 @@ pub struct StreamingDeveloperConfig {
     /// The max heap size of dirty groups of `HashAggExecutor`.
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
+
+    #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
+    pub memory_controller_threshold_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_graceful")]
+    pub memory_controller_threshold_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_stable")]
+    pub memory_controller_threshold_stable: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1496,6 +1505,16 @@ pub mod default {
 
         pub fn enable_check_task_level_overlap() -> bool {
             false
+        }
+
+        pub fn memory_controller_threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn memory_controller_threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn memory_controller_threshold_stable() -> f64 {
+            0.7
         }
     }
 
