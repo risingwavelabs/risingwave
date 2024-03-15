@@ -43,7 +43,7 @@ use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::{
     new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext,
 };
-use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
@@ -62,7 +62,7 @@ use crate::store::*;
 use crate::StateStore;
 
 struct HummockStorageShutdownGuard {
-    shutdown_sender: UnboundedSender<HummockEvent>,
+    shutdown_sender: HummockEventSender,
 }
 
 impl Drop for HummockStorageShutdownGuard {
@@ -81,7 +81,7 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    hummock_event_sender: UnboundedSender<HummockEvent>,
+    hummock_event_sender: HummockEventSender,
     // only used in test for setting hummock version in uploader
     _version_update_sender: UnboundedSender<HummockVersionUpdate>,
 

@@ -13,29 +13,23 @@
 // limitations under the License.
 
 mod prometheus;
-mod proxy;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::{boxed, Body};
+use axum::body::boxed;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, get_service};
+use axum::routing::get;
 use axum::Router;
-use hyper::Request;
-use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use thiserror_ext::AsReport;
-use tower::{ServiceBuilder, ServiceExt};
+use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
-use tower_http::services::ServeDir;
 
 use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::MetadataManager;
@@ -47,7 +41,6 @@ pub struct DashboardService {
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
-    pub ui_path: Option<String>,
     pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
 }
@@ -59,7 +52,6 @@ pub(super) mod handlers {
     use axum::Json;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
@@ -291,10 +283,6 @@ pub(super) mod handlers {
         Path((worker_id, file_path)): Path<(WorkerId, String)>,
         Extension(srv): Extension<Service>,
     ) -> Result<Response> {
-        if srv.ui_path.is_none() {
-            bail!("Should provide ui_path");
-        }
-
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
@@ -373,7 +361,6 @@ pub(super) mod handlers {
 impl DashboardService {
     pub async fn serve(self) -> Result<()> {
         use handlers::*;
-        let ui_path = self.ui_path.clone();
         let srv = Arc::new(self);
 
         let cors_layer = CorsLayer::new()
@@ -416,27 +403,7 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-
-        let dashboard_router = if let Some(ui_path) = ui_path {
-            get_service(ServeDir::new(ui_path))
-                .handle_error(|e| async move { match e {} })
-                .boxed_clone()
-        } else {
-            let cache = Arc::new(Mutex::new(HashMap::new()));
-            tower::service_fn(move |req: Request<Body>| {
-                let cache = cache.clone();
-                async move {
-                    proxy::proxy(req, cache).await.or_else(|err| {
-                        Ok((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            err.context("Unhandled internal error").to_report_string(),
-                        )
-                            .into_response())
-                    })
-                }
-            })
-            .boxed_clone()
-        };
+        let dashboard_router = risingwave_meta_dashboard::router();
 
         let app = Router::new()
             .fallback_service(dashboard_router)

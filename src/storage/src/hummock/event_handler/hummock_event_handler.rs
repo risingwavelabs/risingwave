@@ -25,10 +25,12 @@ use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
+use prometheus::{Histogram, IntGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use thiserror_ext::AsReport;
 use tokio::spawn;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, trace, warn};
@@ -41,7 +43,7 @@ use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
     default_spawn_merging_task, HummockUploader, SpawnMergingTask, SpawnUploadTask, SyncedData,
-    UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
@@ -121,9 +123,57 @@ impl BufferTracker {
     }
 }
 
+#[derive(Clone)]
+pub struct HummockEventSender {
+    inner: UnboundedSender<HummockEvent>,
+    event_count: IntGauge,
+}
+
+pub fn event_channel(event_count: IntGauge) -> (HummockEventSender, HummockEventReceiver) {
+    let (tx, rx) = unbounded_channel();
+    (
+        HummockEventSender {
+            inner: tx,
+            event_count: event_count.clone(),
+        },
+        HummockEventReceiver {
+            inner: rx,
+            event_count,
+        },
+    )
+}
+
+impl HummockEventSender {
+    pub fn send(&self, event: HummockEvent) -> Result<(), SendError<HummockEvent>> {
+        self.inner.send(event)?;
+        self.event_count.inc();
+        Ok(())
+    }
+}
+
+pub struct HummockEventReceiver {
+    inner: UnboundedReceiver<HummockEvent>,
+    event_count: IntGauge,
+}
+
+impl HummockEventReceiver {
+    async fn recv(&mut self) -> Option<HummockEvent> {
+        let event = self.inner.recv().await?;
+        self.event_count.dec();
+        Some(event)
+    }
+}
+
+struct HummockEventHandlerMetrics {
+    event_handler_on_sync_finish_latency: Histogram,
+    event_handler_on_spilled_latency: Histogram,
+    event_handler_on_apply_version_update: Histogram,
+    event_handler_on_recv_version_update: Histogram,
+}
+
 pub struct HummockEventHandler {
-    hummock_event_tx: UnboundedSender<HummockEvent>,
-    hummock_event_rx: UnboundedReceiver<HummockEvent>,
+    hummock_event_tx: HummockEventSender,
+    hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
     pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
@@ -140,6 +190,7 @@ pub struct HummockEventHandler {
     last_instance_id: LocalInstanceId,
 
     sstable_object_id_manager: Option<Arc<SstableObjectIdManager>>,
+    metrics: HummockEventHandlerMetrics,
 }
 
 async fn flush_imms(
@@ -179,6 +230,8 @@ impl HummockEventHandler {
     ) -> Self {
         let upload_compactor_context = compactor_context.clone();
         let cloned_sstable_object_id_manager = sstable_object_id_manager.clone();
+        let upload_task_latency = state_store_metrics.uploader_upload_task_latency.clone();
+        let wait_poll_latency = state_store_metrics.uploader_wait_poll_latency.clone();
         Self::new_inner(
             version_update_rx,
             pinned_version,
@@ -196,14 +249,27 @@ impl HummockEventHandler {
                         format!("Spawn Upload Task: {}", task_info),
                     )
                 });
+                let upload_task_latency = upload_task_latency.clone();
+                let wait_poll_latency = wait_poll_latency.clone();
+                let upload_compactor_context = upload_compactor_context.clone();
+                let filter_key_extractor_manager = filter_key_extractor_manager.clone();
+                let sstable_object_id_manager = cloned_sstable_object_id_manager.clone();
                 spawn({
-                    let future = flush_imms(
-                        payload,
-                        task_info,
-                        upload_compactor_context.clone(),
-                        filter_key_extractor_manager.clone(),
-                        cloned_sstable_object_id_manager.clone(),
-                    );
+                    let future = async move {
+                        let _timer = upload_task_latency.start_timer();
+                        let ssts = flush_imms(
+                            payload,
+                            task_info,
+                            upload_compactor_context.clone(),
+                            filter_key_extractor_manager.clone(),
+                            sstable_object_id_manager.clone(),
+                        )
+                        .await?;
+                        Ok(UploadTaskOutput {
+                            ssts,
+                            wait_poll_timer: Some(wait_poll_latency.start_timer()),
+                        })
+                    };
                     if let Some(tree_root) = tree_root {
                         tree_root.instrument(future).left_future()
                     } else {
@@ -230,7 +296,8 @@ impl HummockEventHandler {
         spawn_merging_task: SpawnMergingTask,
         spawn_refill_task: SpawnRefillTask,
     ) -> Self {
-        let (hummock_event_tx, hummock_event_rx) = unbounded_channel();
+        let (hummock_event_tx, hummock_event_rx) =
+            event_channel(state_store_metrics.event_handler_pending_event.clone());
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
@@ -240,6 +307,21 @@ impl HummockEventHandler {
             state_store_metrics.uploader_uploading_task_size.clone(),
         );
         let write_conflict_detector = ConflictDetector::new_from_config(storage_opts);
+
+        let metrics = HummockEventHandlerMetrics {
+            event_handler_on_sync_finish_latency: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["on_sync_finish"]),
+            event_handler_on_spilled_latency: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["on_spilled"]),
+            event_handler_on_apply_version_update: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["apply_version"]),
+            event_handler_on_recv_version_update: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["recv_version_update"]),
+        };
 
         let uploader = HummockUploader::new(
             state_store_metrics,
@@ -269,6 +351,7 @@ impl HummockEventHandler {
             refiller,
             last_instance_id: 0,
             sstable_object_id_manager,
+            metrics,
         }
     }
 
@@ -284,7 +367,7 @@ impl HummockEventHandler {
         ReadOnlyRwLockRef::new(self.read_version_mapping.clone())
     }
 
-    pub fn event_sender(&self) -> UnboundedSender<HummockEvent> {
+    pub fn event_sender(&self) -> HummockEventSender {
         self.hummock_event_tx.clone()
     }
 
@@ -527,6 +610,10 @@ impl HummockEventHandler {
     }
 
     fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
+        let _timer = self
+            .metrics
+            .event_handler_on_recv_version_update
+            .start_timer();
         let pinned_version = self
             .refiller
             .last_new_pinned_version()
@@ -578,6 +665,10 @@ impl HummockEventHandler {
         pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
+        let _timer = self
+            .metrics
+            .event_handler_on_apply_version_update
+            .start_timer();
         self.pinned_version
             .store(Arc::new(new_pinned_version.clone()));
 
@@ -661,10 +752,15 @@ impl HummockEventHandler {
     fn handle_uploader_event(&mut self, event: UploaderEvent) {
         match event {
             UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables) => {
+                let _timer = self
+                    .metrics
+                    .event_handler_on_sync_finish_latency
+                    .start_timer();
                 self.handle_epoch_synced(epoch, newly_uploaded_sstables);
             }
 
             UploaderEvent::DataSpilled(staging_sstable_info) => {
+                let _timer = self.metrics.event_handler_on_spilled_latency.start_timer();
                 self.handle_data_spilled(staging_sstable_info);
             }
 

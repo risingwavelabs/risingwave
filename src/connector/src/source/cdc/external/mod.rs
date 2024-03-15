@@ -36,6 +36,7 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
+use crate::WithPropertiesExt;
 
 #[derive(Debug)]
 pub enum CdcTableType {
@@ -46,11 +47,8 @@ pub enum CdcTableType {
 }
 
 impl CdcTableType {
-    pub fn from_properties(with_properties: &HashMap<String, String>) -> Self {
-        let connector = with_properties
-            .get("connector")
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
+    pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
+        let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
             "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
