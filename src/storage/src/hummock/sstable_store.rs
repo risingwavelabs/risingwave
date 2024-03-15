@@ -18,14 +18,16 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use ahash::RandomState;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
+use foyer::memory::{
+    Cache, CacheContext, CacheEntry, CacheEventListener, EntryState, Key, LruCacheConfig,
+    LruConfig, Value,
+};
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::cache::{
-    CachePriority, LookupResponse, LruCacheEventListener, LruKey, LruValue,
-};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -48,12 +50,14 @@ use crate::hummock::block_stream::{
 };
 use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
-use crate::hummock::{
-    BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
-};
+use crate::hummock::{BlockHolder, HummockError, HummockResult, MemoryLimiter};
 use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
 
-pub type TableHolder = CacheableEntry<HummockSstableObjectId, Box<Sstable>>;
+const MAX_META_CACHE_SHARD_BITS: usize = 2;
+const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
+
+pub type TableHolder = CacheEntry<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -61,7 +65,7 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CachePriority),
+    Fill(CacheContext),
     /// Fill file cache only.
     FillFileCache,
     /// Read the cache but not fill the cache afterwards.
@@ -70,7 +74,7 @@ pub enum CachePolicy {
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CachePriority::High)
+        CachePolicy::Fill(CacheContext::Default)
     }
 }
 
@@ -96,16 +100,31 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
-struct BlockCacheEventListener {
+pub struct BlockCacheEventListener {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     metrics: Arc<HummockStateStoreMetrics>,
 }
 
-impl LruCacheEventListener for BlockCacheEventListener {
-    type K = (u64, u64);
-    type T = Box<Block>;
+impl BlockCacheEventListener {
+    pub fn new(
+        data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
+        metrics: Arc<HummockStateStoreMetrics>,
+    ) -> Self {
+        Self {
+            data_file_cache,
+            metrics,
+        }
+    }
+}
 
-    fn on_release(&self, key: Self::K, value: Self::T) {
+impl CacheEventListener<(HummockSstableObjectId, u64), Box<Block>> for BlockCacheEventListener {
+    fn on_release(
+        &self,
+        key: (HummockSstableObjectId, u64),
+        value: Box<Block>,
+        _context: CacheContext,
+        _charges: usize,
+    ) {
         let key = SstableBlockIndex {
             sst_id: key.0,
             block_idx: key.1,
@@ -122,13 +141,22 @@ impl LruCacheEventListener for BlockCacheEventListener {
     }
 }
 
-struct MetaCacheEventListener(FileCache<HummockSstableObjectId, CachedSstable>);
+pub struct MetaCacheEventListener(FileCache<HummockSstableObjectId, CachedSstable>);
 
-impl LruCacheEventListener for MetaCacheEventListener {
-    type K = HummockSstableObjectId;
-    type T = Box<Sstable>;
+impl From<FileCache<HummockSstableObjectId, CachedSstable>> for MetaCacheEventListener {
+    fn from(value: FileCache<HummockSstableObjectId, CachedSstable>) -> Self {
+        Self(value)
+    }
+}
 
-    fn on_release(&self, key: Self::K, value: Self::T) {
+impl CacheEventListener<HummockSstableObjectId, Box<Sstable>> for MetaCacheEventListener {
+    fn on_release(
+        &self,
+        key: HummockSstableObjectId,
+        value: Box<Sstable>,
+        _context: CacheContext,
+        _charges: usize,
+    ) {
         // temporarily avoid spawn task while task drop with madsim
         // FYI: https://github.com/madsim-rs/madsim/issues/182
         #[cfg(not(madsim))]
@@ -136,19 +164,21 @@ impl LruCacheEventListener for MetaCacheEventListener {
     }
 }
 
-pub enum CachedOrShared<K, V>
+pub enum CachedOrShared<K, V, L>
 where
-    K: LruKey,
-    V: LruValue,
+    K: Key,
+    V: Value,
+    L: CacheEventListener<K, Box<V>>,
 {
-    Cached(CacheableEntry<K, Box<V>>),
+    Cached(CacheEntry<K, Box<V>, L>),
     Shared(Arc<V>),
 }
 
-impl<K, V> Deref for CachedOrShared<K, V>
+impl<K, V, L> Deref for CachedOrShared<K, V, L>
 where
-    K: LruKey,
-    V: LruValue,
+    K: Key,
+    V: Value,
+    L: CacheEventListener<K, Box<V>>,
 {
     type Target = V;
 
@@ -180,7 +210,8 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>>>,
+    // TODO(MrCroxx): use no hash random state
+    meta_cache: Arc<Cache<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>>,
 
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     meta_file_cache: FileCache<HummockSstableObjectId, CachedSstable>,
@@ -197,26 +228,32 @@ impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
-        let block_cache_listener = Arc::new(BlockCacheEventListener {
-            data_file_cache: config.data_file_cache.clone(),
-            metrics: config.state_store_metrics,
-        });
-        let meta_cache_listener = Arc::new(MetaCacheEventListener(config.meta_file_cache.clone()));
+
+        let block_cache = BlockCache::new(
+            config.block_cache_capacity,
+            config.block_shard_num,
+            config.high_priority_ratio,
+            BlockCacheEventListener::new(
+                config.data_file_cache.clone(),
+                config.state_store_metrics.clone(),
+            ),
+        );
+        // TODO(MrCroxx): support other cache algorithm
+        let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
+            capacity: config.meta_cache_capacity,
+            shards: config.meta_shard_num,
+            eviction_config: LruConfig {
+                high_priority_pool_ratio: 0.0,
+            },
+            object_pool_capacity: (1 << meta_cache_shard_bits) * 1024,
+            hash_builder: RandomState::default(),
+            event_listener: MetaCacheEventListener::from(config.meta_file_cache.clone()),
+        }));
         Self {
             path: config.path,
             store: config.store,
-            block_cache: BlockCache::with_event_listener(
-                config.block_cache_capacity,
-                config.block_shard_num,
-                config.high_priority_ratio,
-                block_cache_listener,
-            ),
-            meta_cache: Arc::new(LruCache::with_event_listener(
-                config.meta_shard_num,
-                config.meta_cache_capacity,
-                0,
-                meta_cache_listener,
-            )),
+            block_cache,
+            meta_cache,
 
             data_file_cache: config.data_file_cache,
             meta_file_cache: config.meta_file_cache,
@@ -236,11 +273,29 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache = Arc::new(LruCache::new(1, meta_cache_capacity, 0));
+        // TODO(MrCroxx): support other cache algorithm
+        let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
+            capacity: meta_cache_capacity,
+            shards: 1,
+            eviction_config: LruConfig {
+                high_priority_pool_ratio: 0.0,
+            },
+            object_pool_capacity: 1024,
+            hash_builder: RandomState::default(),
+            event_listener: FileCache::none().into(),
+        }));
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 1, 0),
+            block_cache: BlockCache::new(
+                block_cache_capacity,
+                1,
+                0,
+                BlockCacheEventListener::new(
+                    FileCache::none(),
+                    Arc::new(HummockStateStoreMetrics::unused()),
+                ),
+            ),
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
@@ -256,7 +311,7 @@ impl SstableStore {
         self.store
             .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
-        self.meta_cache.erase(object_id, &object_id);
+        self.meta_cache.remove(&object_id);
         self.meta_file_cache
             .remove(&object_id)
             .map_err(HummockError::file_cache)?;
@@ -278,7 +333,7 @@ impl SstableStore {
 
         // Delete from cache.
         for &object_id in object_id_list {
-            self.meta_cache.erase(object_id, &object_id);
+            self.meta_cache.remove(&object_id);
             self.meta_file_cache
                 .remove(&object_id)
                 .map_err(HummockError::file_cache)?;
@@ -288,7 +343,7 @@ impl SstableStore {
     }
 
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) {
-        self.meta_cache.erase(object_id, &object_id);
+        self.meta_cache.remove(&object_id);
         if let Err(e) = self.meta_file_cache.remove(&object_id) {
             tracing::warn!(error = %e.as_report(), "meta file cache remove error");
         }
@@ -400,7 +455,7 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    CachePriority::Low
+                    CacheContext::LruPriorityLow
                 };
                 self.block_cache
                     .insert(object_id, idx as u64, Box::new(block), cache_priority)
@@ -580,8 +635,10 @@ impl SstableStore {
     pub async fn sstable_cached(
         &self,
         sst_obj_id: HummockSstableObjectId,
-    ) -> HummockResult<Option<CachedOrShared<HummockSstableObjectId, Sstable>>> {
-        if let Some(sst) = self.meta_cache.lookup(sst_obj_id, &sst_obj_id) {
+    ) -> HummockResult<
+        Option<CachedOrShared<HummockSstableObjectId, Sstable, MetaCacheEventListener>>,
+    > {
+        if let Some(sst) = self.meta_cache.get(&sst_obj_id) {
             return Ok(Some(CachedOrShared::Cached(sst)));
         }
 
@@ -604,50 +661,43 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
         let object_id = sst.get_object_id();
-        let lookup_response = self
-            .meta_cache
-            .lookup_with_request_dedup::<_, HummockError, _>(
-                object_id,
-                object_id,
-                CachePriority::High,
-                || {
-                    let meta_file_cache = self.meta_file_cache.clone();
-                    let store = self.store.clone();
-                    let meta_path = self.get_sst_data_path(object_id);
-                    let stats_ptr = stats.remote_io_time.clone();
-                    let range = sst.meta_offset as usize..sst.file_size as usize;
-                    async move {
-                        if let Some(sst) = meta_file_cache
-                            .lookup(&object_id)
-                            .await
-                            .map_err(HummockError::file_cache)?
-                        {
-                            // TODO(MrCroxx): Make meta cache receives Arc<Sstable> to reduce copy?
-                            let sst: Box<Sstable> = sst.into();
-                            let charge = sst.estimate_size();
-                            return Ok((sst, charge));
-                        }
+        let entry = self.meta_cache.entry(object_id, || {
+            let meta_file_cache = self.meta_file_cache.clone();
+            let store = self.store.clone();
+            let meta_path = self.get_sst_data_path(object_id);
+            let stats_ptr = stats.remote_io_time.clone();
+            let range = sst.meta_offset as usize..sst.file_size as usize;
+            async move {
+                if let Some(sst) = meta_file_cache
+                    .lookup(&object_id)
+                    .await
+                    .map_err(HummockError::file_cache)?
+                {
+                    // TODO(MrCroxx): Make meta cache receives Arc<Sstable> to reduce copy?
+                    let sst: Box<Sstable> = sst.into();
+                    let charge = sst.estimate_size();
+                    return Ok((sst, charge, CacheContext::Default));
+                }
 
-                        let now = Instant::now();
-                        let buf = store.read(&meta_path, range).await?;
-                        let meta = SstableMeta::decode(&buf[..])?;
+                let now = Instant::now();
+                let buf = store.read(&meta_path, range).await?;
+                let meta = SstableMeta::decode(&buf[..])?;
 
-                        let sst = Sstable::new(object_id, meta);
-                        let charge = sst.estimate_size();
-                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                        Ok((Box::new(sst), charge))
-                    }
-                },
-            );
-        match &lookup_response {
-            LookupResponse::Miss(_) | LookupResponse::WaitPendingRequest(_) => {
-                stats.cache_meta_block_miss += 1;
+                let sst = Sstable::new(object_id, meta);
+                let charge = sst.estimate_size();
+                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
+                Ok((Box::new(sst), charge, CacheContext::Default))
             }
-            _ => (),
+        });
+
+        if matches! { entry.state(), EntryState::Wait | EntryState::Miss } {
+            stats.cache_meta_block_miss += 1;
         }
+
         stats.cache_meta_block_total += 1;
-        lookup_response.verbose_instrument_await("sstable")
+
+        entry
     }
 
     pub async fn list_object_metadata_from_object_store(
@@ -672,12 +722,11 @@ impl SstableStore {
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
         let sst = Sstable::new(object_id, meta);
         let charge = sst.estimate_size();
-        self.meta_cache.insert(
+        self.meta_cache.insert_with_context(
             object_id,
-            object_id,
-            charge,
             Box::new(sst),
-            CachePriority::High,
+            charge,
+            CacheContext::Default,
         );
     }
 
@@ -691,11 +740,11 @@ impl SstableStore {
             filter.extend([(object_id, usize::MAX), (object_id, block_index as usize)]);
         }
         self.block_cache
-            .insert(object_id, block_index, block, CachePriority::High);
+            .insert(object_id, block_index, block, CacheContext::Default);
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {
-        self.meta_cache.get_memory_usage() as u64
+        self.meta_cache.usage() as u64
     }
 
     pub async fn get_stream_for_blocks(
@@ -1012,9 +1061,9 @@ impl SstableWriter for StreamingUploadWriter {
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
-        let meta_data = Bytes::from(meta.encode_to_bytes());
+        let metadata = Bytes::from(meta.encode_to_bytes());
 
-        self.object_uploader.write_bytes(meta_data).await?;
+        self.object_uploader.write_bytes(metadata).await?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {

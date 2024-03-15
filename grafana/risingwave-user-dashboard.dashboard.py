@@ -183,12 +183,16 @@ def section_overview(panels):
             "Errors in the system group by type",
             [
                 panels.target(
-                    f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
-                    "compute error {{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                    f"sum({metric('user_compute_error')}) by (error_type, executor_name, fragment_id)",
+                    "{{error_type}} @ {{executor_name}} (fragment_id={{fragment_id}})",
                 ),
                 panels.target(
-                    f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
-                    "parse error {{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                    f"sum({metric('user_source_error')}) by (error_type, source_id, source_name, fragment_id)",
+                    "{{error_type}} @ {{source_name}} (source_id={{source_id}} fragment_id={{fragment_id}})",
+                ),
+                panels.target(
+                    f"sum({metric('user_sink_error')}) by (error_type, sink_id, sink_name, fragment_id)",
+                    "{{error_type}} @ {{sink_name}} (sink_id={{sink_id}} fragment_id={{fragment_id}})",
                 ),
                 panels.target(
                     f"{metric('source_status_is_up')} == 0",
@@ -683,6 +687,16 @@ def section_streaming(outer_panels):
                             f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
                         )
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Source Backfill Throughput(rows/s)",
+                    "The figure shows the number of rows read by each source per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_source_backfill_rows_counts')}[$__rate_interval])) by (source_id, source_name, fragment_id)",
+                            "{{source_id}} {{source_name}} (fragment {{fragment_id}})",
+                        ),
                     ],
                 ),
                 panels.timeseries_rowsps(

@@ -206,14 +206,12 @@ pub mod verify {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use futures::{pin_mut, TryStreamExt};
-    use futures_async_stream::try_stream;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
-    use crate::error::{StorageError, StorageResult};
+    use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
     use crate::storage_value::StorageValue;
     use crate::store::*;
@@ -251,7 +249,7 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type IterStream = impl StateStoreReadIterStream;
+        type Iter = impl StateStoreReadIter;
 
         async fn get(
             &self,
@@ -278,7 +276,7 @@ pub mod verify {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             async move {
                 let actual = self
                     .actual
@@ -290,32 +288,27 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_stream(actual, expected))
+                Ok(verify_iter(actual, expected))
             }
         }
     }
 
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn verify_stream(
-        actual: impl StateStoreIterItemStream,
-        expected: Option<impl StateStoreIterItemStream>,
-    ) {
-        pin_mut!(actual);
-        pin_mut!(expected);
-        let mut expected = expected.as_pin_mut();
-
-        loop {
-            let actual = actual.try_next().await?;
-            if let Some(expected) = expected.as_mut() {
+    impl<A: StateStoreIter, E: StateStoreIter> StateStoreIter for VerifyStateStore<A, E> {
+        async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+            let actual = self.actual.try_next().await?;
+            if let Some(expected) = self.expected.as_mut() {
                 let expected = expected.try_next().await?;
                 assert_eq!(actual, expected);
             }
-            if let Some(actual) = actual {
-                yield actual;
-            } else {
-                break;
-            }
+            Ok(actual)
         }
+    }
+
+    fn verify_iter(
+        actual: impl StateStoreIter,
+        expected: Option<impl StateStoreIter>,
+    ) -> impl StateStoreIter {
+        VerifyStateStore { actual, expected }
     }
 
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
@@ -348,7 +341,7 @@ pub mod verify {
     }
 
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
-        type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+        type Iter<'a> = impl StateStoreIter + 'a;
 
         // We don't verify `may_exist` across different state stores because
         // the return value of `may_exist` is implementation specific and may not
@@ -379,7 +372,7 @@ pub mod verify {
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
             async move {
                 let actual = self
                     .actual
@@ -391,7 +384,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_stream(actual, expected))
+                Ok(verify_iter(actual, expected))
             }
         }
 
@@ -699,8 +692,6 @@ pub mod boxed_state_store {
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
-    use futures::stream::BoxStream;
-    use futures::StreamExt;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -711,9 +702,31 @@ pub mod boxed_state_store {
     use crate::store_impl::AsHummock;
     use crate::StateStore;
 
+    #[async_trait::async_trait]
+    pub trait DynamicDispatchedStateStoreIter: Send {
+        async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>>;
+    }
+
+    #[async_trait::async_trait]
+    impl<I: StateStoreIter> DynamicDispatchedStateStoreIter for I {
+        async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+            self.try_next().await
+        }
+    }
+
+    pub type BoxStateStoreIter<'a> = Box<dyn DynamicDispatchedStateStoreIter + 'a>;
+    impl<'a> StateStoreIter for BoxStateStoreIter<'a> {
+        fn try_next(
+            &mut self,
+        ) -> impl Future<Output = StorageResult<Option<StateStoreIterItemRef<'_>>>> + Send + '_
+        {
+            self.deref_mut().try_next()
+        }
+    }
+
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
+    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static>;
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
@@ -729,7 +742,7 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<BoxStateStoreReadIterStream>;
+        ) -> StorageResult<BoxStateStoreReadIter>;
     }
 
     #[async_trait::async_trait]
@@ -748,13 +761,13 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<BoxStateStoreReadIterStream> {
-            Ok(self.iter(key_range, epoch, read_options).await?.boxed())
+        ) -> StorageResult<BoxStateStoreReadIter> {
+            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
         }
     }
 
     // For LocalStateStore
-    pub type BoxLocalStateStoreIterStream<'a> = BoxStream<'a, StorageResult<StateStoreIterItem>>;
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
@@ -822,7 +835,7 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
-            Ok(self.iter(key_range, read_options).await?.boxed())
+            Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
         fn insert(
@@ -870,7 +883,7 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
 
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
-        type IterStream<'a> = BoxLocalStateStoreIterStream<'a>;
+        type Iter<'a> = BoxLocalStateStoreIterStream<'a>;
 
         fn may_exist(
             &self,
@@ -892,7 +905,7 @@ pub mod boxed_state_store {
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
         }
 
@@ -988,7 +1001,7 @@ pub mod boxed_state_store {
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
 
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
-        type IterStream = BoxStateStoreReadIterStream;
+        type Iter = BoxStateStoreReadIter;
 
         fn get(
             &self,
@@ -1004,7 +1017,7 @@ pub mod boxed_state_store {
             key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+        ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
             self.deref().iter(key_range, epoch, read_options)
         }
     }

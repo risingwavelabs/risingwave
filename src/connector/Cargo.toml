@@ -38,7 +38,7 @@ aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
-base64 = "0.21"
+base64 = "0.22"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = [
@@ -106,21 +106,28 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.24.0", features = ["aio","tokio-comp","async-std-comp"] }
+redis = { version = "0.25", features = [
+    "aio",
+    "tokio-comp",
+    "async-std-comp",
+] }
 regex = "1.4"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+rumqttc = { version = "0.22.0", features = ["url"] }
 rust_decimal = "1"
+rustls-native-certs =  "0.6"
+rustls-pemfile = "1"
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
 simd-json = "0.13.3"
-strum = "0.25"
+strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
 thiserror = "1"
@@ -137,6 +144,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
+tokio-rustls = "0.24"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }

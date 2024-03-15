@@ -20,15 +20,15 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use futures::StreamExt;
+use foyer::memory::CacheContext;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -60,7 +60,7 @@ use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
 };
-use risingwave_storage::StateStore;
+use risingwave_storage::{StateStore, StateStoreIter};
 
 use crate::CompactionTestOpts;
 pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -303,7 +303,8 @@ async fn run_compare_result(
     test_count: u64,
     test_delete_ratio: u32,
 ) -> Result<(), String> {
-    let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 1;
+    let init_epoch = test_epoch(hummock.get_pinned_version().max_committed_epoch() + 1);
+
     let mut normal = NormalState::new(hummock, 1, init_epoch).await;
     let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
     const RANGE_BASE: u64 = 4000;
@@ -317,7 +318,7 @@ async fn run_compare_result(
     let mut rng = StdRng::seed_from_u64(seed);
     let mut overlap_ranges = vec![];
     for epoch_idx in 0..test_count {
-        let epoch = init_epoch + epoch_idx;
+        let epoch = test_epoch(init_epoch / test_epoch(1) + epoch_idx);
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -366,7 +367,7 @@ async fn run_compare_result(
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
-        let next_epoch = epoch + 1;
+        let next_epoch = epoch.next_epoch();
         normal.commit(next_epoch).await?;
         delete_range.commit(next_epoch).await?;
         // let checkpoint = epoch % 10 == 0;
@@ -375,7 +376,7 @@ async fn run_compare_result(
             .commit_epoch(epoch, ret.uncommitted_ssts)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        if epoch % 200 == 0 {
+        if (epoch / test_epoch(1)) % 200 == 0 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -440,7 +441,7 @@ impl NormalState {
                 ReadOptions {
                     ignore_range_tombstone,
                     table_id: self.table_id,
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -466,17 +467,17 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
             .await
             .unwrap(),);
         let mut ret = vec![];
-        while let Some(item) = iter.next().await {
-            let (full_key, val) = item.unwrap();
-            let tkey = full_key.user_key.table_key.0.clone();
-            ret.push((tkey, val));
+        while let Some(item) = iter.try_next().await.unwrap() {
+            let (full_key, val) = item;
+            let tkey = Bytes::copy_from_slice(full_key.user_key.table_key.0);
+            ret.push((tkey, Bytes::copy_from_slice(val)));
         }
         ret
     }
@@ -485,29 +486,31 @@ impl NormalState {
 #[async_trait::async_trait]
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
-                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
-                    ),
-                    ReadOptions {
-                        ignore_range_tombstone: true,
-                        table_id: self.table_id,
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap(),
-        );
+        let mut iter = self
+            .storage
+            .iter(
+                (
+                    Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
+                    Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
+                ),
+                ReadOptions {
+                    ignore_range_tombstone: true,
+                    table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::default(),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         let mut delete_item = Vec::new();
-        while let Some(item) = iter.next().await {
-            let (full_key, value) = item.unwrap();
-            delete_item.push((full_key.user_key.table_key, value));
+        while let Some(item) = iter.try_next().await.unwrap() {
+            let (full_key, value) = item;
+            delete_item.push((
+                full_key.user_key.table_key.copy_into(),
+                Bytes::copy_from_slice(value),
+            ));
         }
         drop(iter);
         for (key, value) in delete_item {

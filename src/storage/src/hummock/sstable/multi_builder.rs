@@ -436,6 +436,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::key::PointRange;
 
@@ -481,7 +482,7 @@ mod tests {
                 .add_full_key_for_test(
                     FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
-                        (table_capacity - i) as u64,
+                        test_epoch((table_capacity - i) as u64),
                     ),
                     HummockValue::put(b"value"),
                     true,
@@ -502,11 +503,11 @@ mod tests {
             mock_sstable_store(),
             opts,
         ));
-        let mut epoch = 100;
+        let mut epoch = test_epoch(100);
 
         macro_rules! add {
             () => {
-                epoch -= 1;
+                epoch.dec_epoch();
                 builder
                     .add_full_key_for_test(
                         FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
@@ -557,7 +558,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             100,
             table_id,
             vec![(
@@ -569,7 +570,7 @@ mod tests {
                 )),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             200,
             table_id,
             vec![(
@@ -592,7 +593,7 @@ mod tests {
         let full_key = FullKey::for_test(
             table_id,
             [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
-            233,
+            test_epoch(1),
         );
         let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
@@ -662,7 +663,7 @@ mod tests {
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             100,
             table_id,
             vec![(
@@ -670,7 +671,7 @@ mod tests {
                 (Bound::Excluded(Bytes::copy_from_slice(b"kkk"))),
             )],
         );
-        builder.add_delete_events(
+        builder.add_delete_events_for_test(
             200,
             table_id,
             vec![(
@@ -732,7 +733,7 @@ mod tests {
             .await
             .unwrap();
         let v = vec![5u8; 220];
-        let epoch = 12;
+        let epoch = test_epoch(12);
         builder
             .add_full_key(
                 FullKey::from_user_key(UserKey::for_test(table_id, b"bbbb"), epoch),
@@ -755,7 +756,7 @@ mod tests {
                     UserKey::for_test(table_id, b"eeee".to_vec()),
                     false,
                 ),
-                new_epoch: 11,
+                new_epoch: test_epoch(11),
             })
             .await
             .unwrap();
@@ -765,7 +766,7 @@ mod tests {
                     UserKey::for_test(table_id, b"ffff".to_vec()),
                     false,
                 ),
-                new_epoch: 10,
+                new_epoch: test_epoch(10),
             })
             .await
             .unwrap();

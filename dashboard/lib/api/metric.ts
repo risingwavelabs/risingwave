@@ -15,15 +15,15 @@
  *
  */
 import { Metrics, MetricsSample } from "../../components/metrics"
+import { GetBackPressureResponse } from "../../proto/gen/monitor_service"
 import api from "./api"
 
-export const INTERVAL = 5000
 export interface BackPressuresMetrics {
   outputBufferBlockingDuration: Metrics[]
 }
 
-// Get back pressure from meta node -> prometheus
-export async function getActorBackPressures() {
+// Get back pressure from Prometheus
+export async function fetchPrometheusBackPressure() {
   const res: BackPressuresMetrics = await api.get(
     "/metrics/fragment/prometheus_back_pressures"
   )
@@ -114,7 +114,8 @@ function convertToBackPressureMetrics(
 
 export function calculateBPRate(
   backPressureNew: BackPressureInfo[],
-  backPressureOld: BackPressureInfo[]
+  backPressureOld: BackPressureInfo[],
+  intervalMs: number
 ): BackPressuresMetrics {
   let mapNew = convertToMapAndAgg(backPressureNew)
   let mapOld = convertToMapAndAgg(backPressureOld)
@@ -124,7 +125,8 @@ export function calculateBPRate(
       result.set(
         key,
         // The *100 in end of the formular is to convert the BP rate to the value used in web UI drawing
-        ((value - (mapOld.get(key) || 0)) / ((INTERVAL / 1000) * 1000000000)) *
+        ((value - (mapOld.get(key) || 0)) /
+          ((intervalMs / 1000) * 1000000000)) *
           100
       )
     } else {
@@ -149,11 +151,12 @@ export const BackPressureInfo = {
 }
 
 // Get back pressure from meta node -> compute node
-export async function getBackPressureWithoutPrometheus() {
-  const response = await api.get("/metrics/fragment/embedded_back_pressures")
-  let backPressureInfos: BackPressureInfo[] = response.backPressureInfos.map(
-    BackPressureInfo.fromJSON
+export async function fetchEmbeddedBackPressure() {
+  const response: GetBackPressureResponse = await api.get(
+    "/metrics/fragment/embedded_back_pressures"
   )
+  let backPressureInfos: BackPressureInfo[] =
+    response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
   backPressureInfos = backPressureInfos.sort((a, b) => a.actorId - b.actorId)
   return backPressureInfos
 }

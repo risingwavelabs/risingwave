@@ -39,9 +39,11 @@ use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
+use crate::task::ActorId;
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
 pub const METADATA_STATE_LEN: usize = 3;
@@ -814,4 +816,28 @@ pub fn create_builder(
     } else {
         DataChunkBuilder::new(data_types, chunk_size)
     }
+}
+
+pub fn update_backfill_metrics(
+    metrics: &StreamingMetrics,
+    actor_id: ActorId,
+    upstream_table_id: u32,
+    cur_barrier_snapshot_processed_rows: u64,
+    cur_barrier_upstream_processed_rows: u64,
+) {
+    metrics
+        .backfill_snapshot_read_row_count
+        .with_label_values(&[
+            upstream_table_id.to_string().as_str(),
+            actor_id.to_string().as_str(),
+        ])
+        .inc_by(cur_barrier_snapshot_processed_rows);
+
+    metrics
+        .backfill_upstream_output_row_count
+        .with_label_values(&[
+            upstream_table_id.to_string().as_str(),
+            actor_id.to_string().as_str(),
+        ])
+        .inc_by(cur_barrier_upstream_processed_rows);
 }

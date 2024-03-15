@@ -3352,46 +3352,36 @@
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(sum(lineitem.l_extendedprice) / 7.0:Decimal) as $expr2] }
     └─LogicalAgg { aggs: [sum(lineitem.l_extendedprice)] }
-      └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(part.p_partkey, part.p_partkey) AND (lineitem.l_quantity < $expr1), output: [lineitem.l_extendedprice] }
+      └─LogicalJoin { type: Inner, on: (part.p_partkey = lineitem.l_partkey) AND (lineitem.l_quantity < $expr1), output: [lineitem.l_extendedprice] }
         ├─LogicalJoin { type: Inner, on: (part.p_partkey = lineitem.l_partkey), output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey] }
         │ ├─LogicalScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice] }
         │ └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [part.p_partkey, part.p_brand, part.p_container], predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-        └─LogicalProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1] }
-          └─LogicalAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
-            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(part.p_partkey, lineitem.l_partkey), output: [part.p_partkey, lineitem.l_quantity] }
-              ├─LogicalAgg { group_key: [part.p_partkey], aggs: [] }
-              │ └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [part.p_partkey, part.p_brand, part.p_container], predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-              └─LogicalScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], predicate: IsNotNull(lineitem.l_partkey) }
+        └─LogicalProject { exprs: [(0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1, lineitem.l_partkey] }
+          └─LogicalAgg { group_key: [lineitem.l_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
+            └─LogicalScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity] }
   batch_plan: |-
     BatchProject { exprs: [(sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal) as $expr2] }
     └─BatchSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
-          └─BatchHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey AND (lineitem.l_quantity < $expr1), output: [lineitem.l_extendedprice] }
+          └─BatchHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey AND (lineitem.l_quantity < $expr1), output: [lineitem.l_extendedprice] }
             ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
             │ └─BatchLookupJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey AND (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar), output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey], lookup table: part }
             │   └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_partkey) }
             │     └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice], distribution: SomeShard }
-            └─BatchProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1] }
-              └─BatchHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
-                └─BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
-                  ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                  │ └─BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
-                  │   └─BatchProject { exprs: [part.p_partkey] }
-                  │     └─BatchFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                  │       └─BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], distribution: UpstreamHashShard(part.p_partkey) }
-                  └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
-                    └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
-                      └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
+            └─BatchProject { exprs: [(0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1, lineitem.l_partkey] }
+              └─BatchHashAgg { group_key: [lineitem.l_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
+                └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
+                  └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [(sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal) as $expr2] }
       └─StreamSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
-            └─StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, part.p_partkey] }
+            └─StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, lineitem.l_partkey] }
               └─StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
-                └─StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
+                └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: all }
                   ├─StreamExchange { dist: HashShard(part.p_partkey) }
                   │ └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
                   │   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
@@ -3400,18 +3390,10 @@
                   │     └─StreamProject { exprs: [part.p_partkey] }
                   │       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
                   │         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-                  └─StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1] }
-                    └─StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
-                      └─StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                        ├─StreamExchange { dist: HashShard(part.p_partkey) }
-                        │ └─StreamProject { exprs: [part.p_partkey] }
-                        │   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                        │     └─StreamProject { exprs: [part.p_partkey] }
-                        │       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                        │         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-                        └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
-                          └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
-                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                  └─StreamProject { exprs: [(0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1, lineitem.l_partkey] }
+                    └─StreamHashAgg { group_key: [lineitem.l_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
+                      └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
+                        └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [avg_yearly], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
@@ -3423,16 +3405,15 @@
 
     Fragment 1
     StreamStatelessSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
-    └── StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, part.p_partkey] }
+    └── StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey, lineitem.l_partkey] }
         └── StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
-            └── StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
+            └── StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: all }
+                ├── tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ]
                 ├── StreamExchange Hash([2]) from 2
-                └── StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1] }
-                    └── StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] } { tables: [ HashAggState: 11 ] }
-                        └── StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                            ├── tables: [ HashJoinLeft: 12, HashJoinDegreeLeft: 13, HashJoinRight: 14, HashJoinDegreeRight: 15 ]
-                            ├── StreamExchange Hash([0]) from 5
-                            └── StreamExchange Hash([0]) from 6
+                └── StreamProject { exprs: [(0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1, lineitem.l_partkey] }
+                    └── StreamHashAgg { group_key: [lineitem.l_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
+                        ├── tables: [ HashAggState: 11 ]
+                        └── StreamExchange Hash([0]) from 5
 
     Fragment 2
     StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
@@ -3454,20 +3435,10 @@
             └── BatchPlanNode
 
     Fragment 5
-    StreamProject { exprs: [part.p_partkey] }
-    └── StreamHashAgg { group_key: [part.p_partkey], aggs: [count] } { tables: [ HashAggState: 16 ] }
-        └── StreamProject { exprs: [part.p_partkey] }
-            └── StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { tables: [ StreamScan: 17 ] }
-                    ├── Upstream
-                    └── BatchPlanNode
-
-    Fragment 6
-    StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
-    └── StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-        ├── tables: [ StreamScan: 18 ]
-        ├── Upstream
-        └── BatchPlanNode
+    StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+    ├── tables: [ StreamScan: 12 ]
+    ├── Upstream
+    └── BatchPlanNode
 
     Table 0 { columns: [ sum(sum(lineitem_l_extendedprice)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -3480,9 +3451,9 @@
 
     Table 2 { columns: [ part_p_partkey, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_l_partkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ part_p_partkey, $expr1 ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr1, lineitem_l_partkey ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ lineitem_l_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 5 { columns: [ lineitem_l_partkey, lineitem_l_quantity, lineitem_l_extendedprice, lineitem_l_orderkey, lineitem_l_linenumber ], primary key: [ $0 ASC, $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -3496,21 +3467,9 @@
 
     Table 10 { columns: [ vnode, p_partkey, part_backfill_finished, part_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 11 { columns: [ part_p_partkey, sum(lineitem_l_quantity), count(lineitem_l_quantity), count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 11 { columns: [ lineitem_l_partkey, sum(lineitem_l_quantity), count(lineitem_l_quantity), count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ part_p_partkey ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 13 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 14 { columns: [ lineitem_l_partkey, lineitem_l_quantity, lineitem_l_orderkey, lineitem_l_linenumber ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 15 { columns: [ lineitem_l_partkey, lineitem_l_orderkey, lineitem_l_linenumber, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 16 { columns: [ part_p_partkey, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 17 { columns: [ vnode, p_partkey, part_backfill_finished, part_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
-
-    Table 18 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 12 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ avg_yearly ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

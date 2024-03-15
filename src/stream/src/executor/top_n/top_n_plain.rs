@@ -202,6 +202,9 @@ mod tests {
     use crate::executor::{Barrier, Message};
 
     mod test1 {
+
+        use risingwave_common::util::epoch::test_epoch;
+
         use super::*;
         use crate::executor::{ActorContext, Execute};
         fn create_stream_chunks() -> Vec<StreamChunk> {
@@ -266,15 +269,15 @@ mod tests {
             let mut chunks = create_stream_chunks();
             let schema = create_schema();
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
-                Message::Barrier(Barrier::new_test_barrier(4)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
                 Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(Barrier::new_test_barrier(5)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -681,6 +684,8 @@ mod tests {
     }
 
     mod test2 {
+
+        use risingwave_common::util::epoch::test_epoch;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -717,12 +722,12 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
                 Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -747,10 +752,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -777,10 +782,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(4)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -996,6 +1001,8 @@ mod tests {
     }
 
     mod test_with_ties {
+
+        use risingwave_common::util::epoch::test_epoch;
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
@@ -1038,12 +1045,12 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
                 Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -1170,10 +1177,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
             .into_executor(schema, pk_indices())
         }
@@ -1196,10 +1203,10 @@ mod tests {
                 ],
             };
             MockSource::with_messages(vec![
-                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(Barrier::new_test_barrier(4)),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
             ])
             .into_executor(schema, pk_indices())
         }

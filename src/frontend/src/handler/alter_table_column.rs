@@ -34,6 +34,65 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
 
+pub async fn replace_table_with_definition(
+    session: &Arc<SessionImpl>,
+    table_name: ObjectName,
+    definition: Statement,
+    original_catalog: &Arc<TableCatalog>,
+    source_schema: Option<ConnectorSchema>,
+) -> Result<()> {
+    // Create handler args as if we're creating a new table with the altered definition.
+    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
+    let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
+    let Statement::CreateTable {
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+        wildcard_idx,
+        ..
+    } = definition
+    else {
+        panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let (graph, table, source) = generate_stream_graph_for_table(
+        session,
+        table_name,
+        original_catalog,
+        source_schema,
+        handler_args,
+        col_id_gen,
+        columns,
+        wildcard_idx,
+        constraints,
+        source_watermarks,
+        append_only,
+    )
+    .await?;
+
+    // Calculate the mapping from the original columns to the new columns.
+    let col_index_mapping = ColIndexMapping::new(
+        original_catalog
+            .columns()
+            .iter()
+            .map(|old_c| {
+                table.columns.iter().position(|new_c| {
+                    new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
+                })
+            })
+            .collect(),
+        table.columns.len(),
+    );
+
+    let catalog_writer = session.catalog_writer()?;
+
+    catalog_writer
+        .replace_table(source, table, graph, col_index_mapping)
+        .await?;
+    Ok(())
+}
+
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
 /// `DropColumn`.
 pub async fn handle_alter_table_column(
@@ -74,7 +133,11 @@ pub async fn handle_alter_table_column(
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {
-            bail_not_implemented!("Alter table with source having schema registry");
+            return Err(ErrorCode::NotSupported(
+                "alter table with schema registry".to_string(),
+                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+            )
+            .into());
         }
     }
 
@@ -145,55 +208,14 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     }
 
-    // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-    let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
-    let Statement::CreateTable {
-        columns,
-        constraints,
-        source_watermarks,
-        append_only,
-        wildcard_idx,
-        ..
-    } = definition
-    else {
-        panic!("unexpected statement type: {:?}", definition);
-    };
-
-    let (graph, table, source) = generate_stream_graph_for_table(
+    replace_table_with_definition(
         &session,
         table_name,
+        definition,
         &original_catalog,
         source_schema,
-        handler_args,
-        col_id_gen,
-        columns,
-        wildcard_idx,
-        constraints,
-        source_watermarks,
-        append_only,
     )
     .await?;
-
-    // Calculate the mapping from the original columns to the new columns.
-    let col_index_mapping = ColIndexMapping::new(
-        original_catalog
-            .columns()
-            .iter()
-            .map(|old_c| {
-                table.columns.iter().position(|new_c| {
-                    new_c.get_column_desc().unwrap().column_id == old_c.column_id().get_id()
-                })
-            })
-            .collect(),
-        table.columns.len(),
-    );
-
-    let catalog_writer = session.catalog_writer()?;
-
-    catalog_writer
-        .replace_table(source, table, graph, col_index_mapping)
-        .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

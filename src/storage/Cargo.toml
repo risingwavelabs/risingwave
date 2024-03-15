@@ -14,6 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
@@ -26,7 +27,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = "0.3"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -90,7 +91,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 moka = { version = "0.12", features = ["future"] }
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
@@ -137,6 +138,10 @@ harness = false
 
 [[bench]]
 name = "bench_row"
+harness = false
+
+[[bench]]
+name = "bench_imm_compact"
 harness = false
 
 [lints]

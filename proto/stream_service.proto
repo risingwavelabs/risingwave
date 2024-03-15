@@ -44,16 +44,6 @@ message DropActorsResponse {
   common.Status status = 2;
 }
 
-message ForceStopActorsRequest {
-  string request_id = 1;
-  uint64 prev_epoch = 2;
-}
-
-message ForceStopActorsResponse {
-  string request_id = 1;
-  common.Status status = 2;
-}
-
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
@@ -61,16 +51,6 @@ message InjectBarrierRequest {
   repeated uint32 actor_ids_to_collect = 4;
 }
 
-message InjectBarrierResponse {
-  string request_id = 1;
-  common.Status status = 2;
-}
-
-message BarrierCompleteRequest {
-  string request_id = 1;
-  uint64 prev_epoch = 2;
-  map<string, string> tracing_context = 3;
-}
 message BarrierCompleteResponse {
   message CreateMviewProgress {
     uint32 backfill_actor_id = 1;
@@ -104,15 +84,33 @@ message WaitEpochCommitResponse {
   common.Status status = 1;
 }
 
+message StreamingControlStreamRequest {
+  message InitRequest {
+    uint64 prev_epoch = 2;
+  }
+
+  oneof request {
+    InitRequest init = 1;
+    InjectBarrierRequest inject_barrier = 2;
+  }
+}
+
+message StreamingControlStreamResponse {
+  message InitResponse {}
+
+  oneof response {
+    InitResponse init = 1;
+    BarrierCompleteResponse complete_barrier = 2;
+  }
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
-  rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
-  rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
-  rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
+  rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
 }
 
 // TODO: Lifecycle management for actors.

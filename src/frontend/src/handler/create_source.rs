@@ -23,8 +23,8 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, Schema, TableId, INITIAL_SOURCE_VERSION_ID,
-    KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::additional_columns::{
@@ -37,6 +37,7 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
+use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
@@ -48,9 +49,10 @@ use risingwave_connector::source::nexmark::source::{get_event_data_types_with_na
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
     ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
-    PULSAR_CONNECTOR, S3_CONNECTOR,
+    KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
+    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
@@ -67,7 +69,6 @@ use thiserror_ext::AsReport;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::ColumnId;
 use crate::error::ErrorCode::{self, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
 use crate::expr::Expr;
@@ -75,9 +76,7 @@ use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{
-    connector_need_pk, get_connector, is_cdc_connector, is_kafka_connector, SourceSchemaCompatExt,
-};
+use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -116,6 +115,8 @@ async fn extract_json_table_schema(
     }
 }
 
+/// Note: these columns are added in `SourceStreamChunkRowWriter::do_action`.
+/// May also look for the usage of `SourceColumnType`.
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
     let columns = vec![
         ColumnCatalog {
@@ -295,7 +296,7 @@ pub(crate) async fn bind_columns_from_source(
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
-    let is_kafka: bool = is_kafka_connector(with_properties);
+    let is_kafka: bool = with_properties.is_kafka_connector();
     let format_encode_options = WithOptions::try_from(source_schema.row_options())?.into_inner();
     let mut format_encode_options_to_consume = format_encode_options.clone();
 
@@ -333,7 +334,6 @@ pub(crate) async fn bind_columns_from_source(
 
     let columns = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native)
-        | (Format::None, Encode::None)
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) => {
@@ -444,6 +444,17 @@ pub(crate) async fn bind_columns_from_source(
             )
             .await?
         }
+        (Format::None, Encode::None) => {
+            if with_properties.is_iceberg_connector() {
+                Some(
+                    extract_iceberg_columns(with_properties)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else {
+                None
+            }
+        }
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
                 "Unknown combination {:?} {:?}",
@@ -520,7 +531,7 @@ pub fn handle_addition_columns(
     mut additional_columns: IncludeOption,
     columns: &mut Vec<ColumnCatalog>,
 ) -> Result<()> {
-    let connector_name = get_connector(with_properties).unwrap(); // there must be a connector in source
+    let connector_name = with_properties.get_connector().unwrap(); // there must be a connector in source
 
     if COMPATIBLE_ADDITIONAL_COLUMNS
         .get(connector_name.as_str())
@@ -865,7 +876,7 @@ fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
     columns: &mut Vec<ColumnCatalog>,
 ) {
-    if is_kafka_connector(with_properties) {
+    if with_properties.is_kafka_connector() {
         if columns.iter().any(|col| {
             matches!(
                 col.column_desc.additional_column.column_type,
@@ -998,6 +1009,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
                 ),
+                MQTT_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Json, Encode::Bytes],
+                ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
                 ),
@@ -1011,7 +1025,8 @@ pub fn validate_compatibility(
     source_schema: &ConnectorSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
-    let connector = get_connector(props)
+    let connector = props
+        .get_connector()
         .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
@@ -1089,7 +1104,7 @@ pub(super) async fn check_source_schema(
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
 ) -> Result<()> {
-    let Some(connector) = get_connector(props) else {
+    let Some(connector) = props.get_connector() else {
         return Ok(());
     };
 
@@ -1156,6 +1171,46 @@ pub(super) fn check_nexmark_schema(
         ))));
     }
     Ok(())
+}
+
+pub async fn extract_iceberg_columns(
+    with_properties: &HashMap<String, String>,
+) -> anyhow::Result<Vec<ColumnCatalog>> {
+    let props = ConnectorProperties::extract(with_properties.clone(), true)?;
+    if let ConnectorProperties::Iceberg(properties) = props {
+        let iceberg_config: IcebergConfig = properties.to_iceberg_config();
+        let table = iceberg_config.load_table().await?;
+        let iceberg_schema: arrow_schema::Schema = table
+            .current_table_metadata()
+            .current_schema()?
+            .clone()
+            .try_into()?;
+
+        let columns = iceberg_schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let data_type = field.data_type().clone();
+                let column_desc = ColumnDesc::named(
+                    field.name(),
+                    ColumnId::new((i as u32).try_into().unwrap()),
+                    data_type.into(),
+                );
+                ColumnCatalog {
+                    column_desc,
+                    is_hidden: false,
+                }
+            })
+            .collect();
+
+        Ok(columns)
+    } else {
+        Err(anyhow!(format!(
+            "Invalid properties for iceberg source: {:?}",
+            props
+        )))
+    }
 }
 
 pub async fn check_iceberg_source(
@@ -1253,7 +1308,7 @@ pub async fn handle_create_source(
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
     // gated the feature with a session variable
-    let create_cdc_source_job = if is_cdc_connector(&with_properties) {
+    let create_cdc_source_job = if with_properties.is_cdc_connector() {
         CdcTableType::from_properties(&with_properties).can_backfill()
     } else {
         false
@@ -1309,7 +1364,7 @@ pub async fn handle_create_source(
         .into());
     }
     let (mut columns, pk_column_ids, row_id_index) =
-        bind_pk_on_relation(columns, pk_names, connector_need_pk(&with_properties))?;
+        bind_pk_on_relation(columns, pk_names, with_properties.connector_need_pk())?;
 
     debug_assert!(is_column_ids_dedup(&columns));
 

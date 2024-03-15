@@ -37,6 +37,8 @@ pub enum ObjectType {
     Function,
     #[sea_orm(string_value = "CONNECTION")]
     Connection,
+    #[sea_orm(string_value = "SUBSCRIPTION")]
+    Subscription,
 }
 
 impl ObjectType {
@@ -51,6 +53,7 @@ impl ObjectType {
             ObjectType::Index => "index",
             ObjectType::Function => "function",
             ObjectType::Connection => "connection",
+            ObjectType::Subscription => "subscription",
         }
     }
 }
@@ -102,6 +105,8 @@ pub enum Relation {
     Schema,
     #[sea_orm(has_many = "super::sink::Entity")]
     Sink,
+    #[sea_orm(has_many = "super::subscription::Entity")]
+    Subscription,
     #[sea_orm(has_many = "super::source::Entity")]
     Source,
     #[sea_orm(has_many = "super::table::Entity")]
@@ -161,6 +166,12 @@ impl Related<super::schema::Entity> for Entity {
 impl Related<super::sink::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Sink.def()
+    }
+}
+
+impl Related<super::subscription::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Subscription.def()
     }
 }
 

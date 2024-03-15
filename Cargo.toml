@@ -25,6 +25,7 @@ members = [
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/dashboard",
   "src/meta/model_v2",
   "src/meta/model_v2/migration",
   "src/meta/node",
@@ -73,6 +74,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
+foyer = "0.6"
 await-tree = "0.1.1"
 aws-config = { version = "1", default-features = false, features = [
   "behavior-version-latest",
@@ -90,7 +92,8 @@ aws-sdk-s3 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-ec2 = { version = "1", default-features = false, features = [
+# To bump the version of aws-sdk-ec2, check the README of https://github.com/risingwavelabs/rw-aws-sdk-ec2
+aws-sdk-ec2 = { package = "rw-aws-sdk-ec2", version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
@@ -112,11 +115,7 @@ hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.3.1", features = [
   "cmake-build",
 ] }
-hashbrown = { version = "0.14.0", features = [
-  "ahash",
-  "inline-more",
-  "nightly",
-] }
+hashbrown = { version = "0.14", features = ["ahash", "inline-more", "nightly"] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
@@ -135,7 +134,7 @@ arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
 arrow-udf-js = "0.1"
-arrow-udf-wasm = { version = "0.1.2", features = ["build"] }
+arrow-udf-wasm = { version = "0.2", features = ["build"] }
 arrow-udf-python = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "6c32f71" }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
 arrow-buffer-deltalake = { package = "arrow-buffer", version = "48.0.1" }
@@ -181,6 +180,7 @@ risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
 risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
+risingwave_meta_dashboard = { path = "./src/meta/dashboard" }
 risingwave_meta_service = { path = "./src/meta/service" }
 risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
 risingwave_meta_model_v2 = { path = "./src/meta/model_v2" }

@@ -192,8 +192,10 @@ mod tests {
             .map(|c| SourceColumnDesc::from(&c.column_desc))
             .collect::<Vec<_>>();
 
-        let mut source_ctx = SourceContext::default();
-        source_ctx.connector_props = ConnectorProperties::PostgresCdc(Box::default());
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::PostgresCdc(Box::default()),
+            ..Default::default()
+        };
         let source_ctx = Arc::new(source_ctx);
         // format plain encode json parser
         let parser = PlainParser::new(
@@ -343,8 +345,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         // format plain encode json parser
-        let mut source_ctx = SourceContext::default();
-        source_ctx.connector_props = ConnectorProperties::MysqlCdc(Box::default());
+        let source_ctx = SourceContext {
+            connector_props: ConnectorProperties::MysqlCdc(Box::default()),
+            ..Default::default()
+        };
         let mut parser = PlainParser::new(
             SpecificParserConfig::DEFAULT_PLAIN_JSON,
             columns.clone(),
