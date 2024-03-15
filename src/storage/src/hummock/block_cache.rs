@@ -29,8 +29,6 @@ use crate::hummock::HummockError;
 type CachedBlockEntry =
     CacheEntry<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
-
 enum BlockEntry {
     Cache(#[allow(dead_code)] CachedBlockEntry),
     Owned(#[allow(dead_code)] Box<Block>),
@@ -113,25 +111,21 @@ impl BlockCache {
     // TODO(MrCroxx): support other cache algorithm
     pub fn new(
         capacity: usize,
-        mut max_shard_bits: usize,
+        block_shard_num: usize,
         high_priority_ratio: usize,
         event_listener: BlockCacheEventListener,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
-            max_shard_bits -= 1;
-        }
-        let shards = 1 << max_shard_bits;
 
         let cache = Cache::lru(LruCacheConfig {
             capacity,
-            shards,
+            shards: block_shard_num,
             eviction_config: LruConfig {
                 high_priority_pool_ratio: high_priority_ratio as f64 / 100.0,
             },
-            object_pool_capacity: shards * 1024,
+            object_pool_capacity: block_shard_num * 1024,
             hash_builder: RandomState::default(),
             event_listener,
         });

@@ -526,6 +526,7 @@ impl StateStoreImpl {
         object_store_metrics: Arc<ObjectStoreMetrics>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
+        await_tree_config: Option<await_tree::Config>,
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
@@ -616,6 +617,8 @@ impl StateStoreImpl {
                     block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
                     meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
                     high_priority_ratio: opts.high_priority_ratio,
+                    meta_shard_num: opts.meta_shard_num,
+                    block_shard_num: opts.block_shard_num,
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     data_file_cache,
@@ -636,6 +639,7 @@ impl StateStoreImpl {
                     key_filter_manager,
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
+                    await_tree_config,
                 )
                 .await?;
 

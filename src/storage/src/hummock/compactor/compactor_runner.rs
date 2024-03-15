@@ -570,7 +570,7 @@ pub async fn compact(
             Some(await_tree_reg) => await_tree_reg
                 .write()
                 .register(
-                    format!("{}-{}", compact_task.task_id, split_index),
+                    format!("compact_runner/{}-{}", compact_task.task_id, split_index),
                     format!(
                         "Compaction Task {} Split {} ",
                         compact_task.task_id, split_index
