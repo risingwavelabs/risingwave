@@ -515,7 +515,7 @@ impl ObjectStore for S3ObjectStore {
 
             // Check if there were errors.
             if !delete_output.errors().is_empty() {
-                all_errors.extend(delete_output.errors().iter().clone());
+                all_errors.extend(delete_output.errors().clone());
             }
         }
         if !all_errors.is_empty() {
