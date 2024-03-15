@@ -849,12 +849,12 @@ impl PlanRoot {
     pub fn should_use_arrangement_backfill(&self) -> bool {
         let ctx = self.plan.ctx();
         let session_ctx = ctx.session_ctx();
-        let arrangement_backfill_disabled = session_ctx
+        let arrangement_backfill_enabled = session_ctx
             .env()
             .streaming_config()
             .developer
             .enable_arrangement_backfill;
-        !arrangement_backfill_disabled && session_ctx.config().streaming_use_arrangement_backfill()
+        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 }
 
