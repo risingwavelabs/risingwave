@@ -53,10 +53,6 @@ use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{BlockHolder, HummockError, HummockResult, MemoryLimiter};
 use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
 
-const MAX_META_CACHE_SHARD_BITS: usize = 2;
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
-
 pub type TableHolder = CacheEntry<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
@@ -196,6 +192,8 @@ pub struct SstableStoreConfig {
     pub block_cache_capacity: usize,
     pub meta_cache_capacity: usize,
     pub high_priority_ratio: usize,
+    pub meta_shard_num: usize,
+    pub block_shard_num: usize,
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
     pub data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
@@ -226,16 +224,10 @@ impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
-        let mut meta_cache_shard_bits = MAX_META_CACHE_SHARD_BITS;
-        while (config.meta_cache_capacity >> meta_cache_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
-            && meta_cache_shard_bits > 0
-        {
-            meta_cache_shard_bits -= 1;
-        }
 
         let block_cache = BlockCache::new(
             config.block_cache_capacity,
-            MAX_CACHE_SHARD_BITS,
+            config.block_shard_num,
             config.high_priority_ratio,
             BlockCacheEventListener::new(
                 config.data_file_cache.clone(),
@@ -245,11 +237,11 @@ impl SstableStore {
         // TODO(MrCroxx): support other cache algorithm
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: config.meta_cache_capacity,
-            shards: 1 << meta_cache_shard_bits,
+            shards: config.meta_shard_num,
             eviction_config: LruConfig {
                 high_priority_pool_ratio: 0.0,
             },
-            object_pool_capacity: (1 << meta_cache_shard_bits) * 1024,
+            object_pool_capacity: config.meta_shard_num * 1024,
             hash_builder: RandomState::default(),
             event_listener: MetaCacheEventListener::from(config.meta_file_cache.clone()),
         }));
@@ -293,7 +285,7 @@ impl SstableStore {
             store,
             block_cache: BlockCache::new(
                 block_cache_capacity,
-                0,
+                1,
                 0,
                 BlockCacheEventListener::new(
                     FileCache::none(),

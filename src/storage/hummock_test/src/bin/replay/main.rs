@@ -122,6 +122,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        meta_shard_num: storage_opts.meta_shard_num,
+        block_shard_num: storage_opts.block_shard_num,
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {

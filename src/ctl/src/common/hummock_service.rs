@@ -176,6 +176,8 @@ impl HummockServiceOpts {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
+            block_shard_num: opts.block_shard_num,
+            meta_shard_num: opts.meta_shard_num,
         })))
     }
 }

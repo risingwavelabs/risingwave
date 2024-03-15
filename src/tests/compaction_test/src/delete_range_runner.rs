@@ -220,6 +220,8 @@ async fn compaction_test(
         meta_file_cache: FileCache::none(),
         recent_filter: None,
         state_store_metrics: state_store_metrics.clone(),
+        meta_shard_num: storage_memory_config.meta_shard_num,
+        block_shard_num: storage_memory_config.block_shard_num,
     }));
 
     let store = HummockStorage::new(
