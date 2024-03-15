@@ -275,7 +275,7 @@ mod tests {
     };
     use crate::hummock::sstable_store::SstableStoreRef;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{SstableDeleteRangeIterator, TableHolder};
+    use crate::hummock::TableHolder;
 
     #[tokio::test]
     async fn test_basic() {

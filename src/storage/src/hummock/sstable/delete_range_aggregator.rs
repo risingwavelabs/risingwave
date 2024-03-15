@@ -255,16 +255,11 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::util::epoch::{is_max_epoch, test_epoch};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
-    use crate::hummock::iterator::test_utils::{
-        gen_iterator_test_sstable_with_range_tombstones, iterator_test_user_key_of,
-        mock_sstable_store,
-    };
     use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
     use crate::hummock::test_utils::test_user_key;
-    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     pub async fn test_compaction_delete_range_iterator() {

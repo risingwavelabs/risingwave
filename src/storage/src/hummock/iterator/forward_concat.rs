@@ -24,8 +24,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_info,
-        gen_iterator_test_sstable_with_range_tombstones, iterator_test_key_of,
+        default_builder_opt_for_test, gen_iterator_test_sstable_info, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
