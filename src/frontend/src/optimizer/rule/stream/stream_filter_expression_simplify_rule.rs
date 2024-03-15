@@ -18,13 +18,13 @@ use risingwave_connector::source::DataType;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 
-/// Specially for the `StreamFilter` under `StreamShare`
-pub struct StreamFilterExpressionSimplifyRule {}
-impl Rule for StreamFilterExpressionSimplifyRule {
+/// Specially for the predicate under `LogicalFilter`
+pub struct LogicalFilterExpressionSimplifyRule {}
+impl Rule for LogicalFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
     /// 1. (NOT (e)) OR (e) => True
     /// 2. (NOT (e)) AND (e) => False
@@ -32,21 +32,15 @@ impl Rule for StreamFilterExpressionSimplifyRule {
     /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        let mut rewriter = StreamFilterExpressionSimplifyRewriter {};
-        let logical_share_plan = filter.input();
-        let share: &LogicalShare = logical_share_plan.as_logical_share()?;
-        let input = share.input().rewrite_exprs(&mut rewriter);
-        share.replace_input(input);
-        Some(LogicalFilter::create(
-            share.clone().into(),
-            filter.predicate().clone(),
-        ))
+        let mut rewriter = ExpressionSimplifyRewriter {};
+        let input = filter.input().rewrite_exprs(&mut rewriter);
+        Some(filter.clone_with_input(input).into())
     }
 }
 
-impl StreamFilterExpressionSimplifyRule {
+impl LogicalFilterExpressionSimplifyRule {
     pub fn create() -> BoxedRule {
-        Box::new(StreamFilterExpressionSimplifyRule {})
+        Box::new(LogicalFilterExpressionSimplifyRule {})
     }
 }
 
@@ -187,8 +181,8 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
     None
 }
 
-struct StreamFilterExpressionSimplifyRewriter {}
-impl ExprRewriter for StreamFilterExpressionSimplifyRewriter {
+struct ExpressionSimplifyRewriter {}
+impl ExprRewriter for ExpressionSimplifyRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         // Check if the input expression is *definitely* null
         let mut columns = vec![];

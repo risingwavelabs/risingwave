@@ -418,8 +418,8 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
 
 static STREAM_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Stream Filter Expression Simplify",
-        vec![StreamFilterExpressionSimplifyRule::create()],
+        "Logical Share Expression Simplify",
+        vec![LogicalFilterExpressionSimplifyRule::create()],
         ApplyOrder::TopDown,
     )
 });
