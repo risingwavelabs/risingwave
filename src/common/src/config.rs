@@ -940,9 +940,17 @@ pub struct ObjectStoreConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
+    pub object_store_set_atomic_write_dir: bool,
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+}
+
+impl ObjectStoreConfig {
+    pub fn set_atomic_write_dir(&mut self) {
+        self.object_store_set_atomic_write_dir = true;
+    }
 }
 
 /// The subsections `[storage.object_store.s3]`.
@@ -1591,6 +1599,10 @@ pub mod default {
 
         pub fn object_store_read_timeout_ms() -> u64 {
             8 * 60 * 1000
+        }
+
+        pub fn object_store_set_atomic_write_dir() -> bool {
+            false
         }
 
         pub mod s3 {
