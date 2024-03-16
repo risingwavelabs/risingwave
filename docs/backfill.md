@@ -60,7 +60,7 @@ In one epoch `B`, we read the `historical` data from `t` up to row `2`, from dat
 | +  | 2  | b    |
 
 > Note that the `op` column is the operation type, and `+` means `insert`.
-> 
+>
 > We use `insert` since all the historical data are just inserts to the downstream materialized view.
 
 In that same epoch `B`, suppose there are some updates to the table `t` due to `DML` statements being ran:
@@ -79,12 +79,12 @@ Since we backfilled the historical data up to row `2`, we only need to apply the
 
 So downstream will just receive:
 1. The historical data up to row `2`.
- 
+
    | op | id | name |
    |----|----|------|
    | +  | 1  | a    |
    | +  | 2  | b    |
- 
+
 2. The realtime delta stream up to row `2`:
 
     | op | id | name |
@@ -118,7 +118,7 @@ For historical data, it uses batch scan to read snapshot data using the `Storage
 
 Using the `NoShuffleDispatcher` means that the actors in the scan fragment
 need to be scheduled to the same parallel unit
-as the actors in the dispatcher. 
+as the actors in the dispatcher.
 
 This also means that the parallelism of `NoShuffleBackfill` is coupled with
 its upstream fragment.
