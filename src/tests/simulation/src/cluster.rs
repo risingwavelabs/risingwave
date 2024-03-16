@@ -38,6 +38,7 @@ use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
 #[cfg(not(madsim))]
 use tokio::runtime::Handle;
+use uuid::Uuid;
 
 use crate::client::RisingWave;
 
@@ -84,14 +85,11 @@ pub struct Configuration {
     /// This determines worker_node_parallelism.
     pub compute_node_cores: usize,
 
-    /// The probability of etcd request timeout.
-    pub etcd_timeout_rate: f32,
-
-    /// Path to etcd data file.
-    pub etcd_data_path: Option<PathBuf>,
-
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
+
+    /// dir to store SQL backend sqlite db
+    pub sqlite_data_dir: Option<PathBuf>,
 }
 
 impl Default for Configuration {
@@ -118,9 +116,8 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            etcd_timeout_rate: 0.0,
-            etcd_data_path: None,
             per_session_queries: vec![].into(),
+            sqlite_data_dir: None,
         }
     }
 }
@@ -305,7 +302,6 @@ metrics_level = "Disabled"
 /// | frontend-x       | 192.168.2.x   |
 /// | compute-x        | 192.168.3.x   |
 /// | compactor-x      | 192.168.4.x   |
-/// | etcd             | 192.168.10.1  |
 /// | kafka-broker     | 192.168.11.1  |
 /// | kafka-producer   | 192.168.11.2  |
 /// | object_store_sim | 192.168.12.1  |
@@ -334,7 +330,6 @@ impl Cluster {
 
         // setup DNS and load balance
         let net = madsim::net::NetSim::current();
-        net.add_dns_record("etcd", "192.168.10.1".parse().unwrap());
         for i in 1..=conf.meta_nodes {
             net.add_dns_record(
                 &format!("meta-{i}"),
@@ -354,26 +349,6 @@ impl Cluster {
                 &format!("192.168.2.{i}:4566"),
             )
         }
-
-        // etcd node
-        let etcd_data = conf
-            .etcd_data_path
-            .as_ref()
-            .map(|path| std::fs::read_to_string(path).unwrap());
-        handle
-            .create_node()
-            .name("etcd")
-            .ip("192.168.10.1".parse().unwrap())
-            .init(move || {
-                let addr = "0.0.0.0:2388".parse().unwrap();
-                let mut builder =
-                    etcd_client::SimServer::builder().timeout_rate(conf.etcd_timeout_rate);
-                if let Some(data) = &etcd_data {
-                    builder = builder.load(data.clone());
-                }
-                builder.serve(addr)
-            })
-            .build();
 
         // kafka broker
         handle
@@ -408,6 +383,17 @@ impl Cluster {
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
+        let sqlite_dir = conf
+            .sqlite_data_dir
+            .as_ref()
+            .map(|dir| format!("{}/", dir.display()))
+            .unwrap_or("".to_string());
+        let sqlite_path = format!(
+            "sqlite://{}stest-{}.sqlite?mode=rwc",
+            sqlite_dir,
+            Uuid::new_v4()
+        );
+
         // meta node
         for i in 1..=conf.meta_nodes {
             let opts = risingwave_meta_node::MetaNodeOpts::parse_from([
@@ -421,7 +407,7 @@ impl Cluster {
                 "--backend",
                 "sql",
                 "--sql-endpoint",
-                "sqlite::memory:",
+                &sqlite_path,
                 "--state-store",
                 "hummock+sim://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--data-directory",

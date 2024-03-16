@@ -78,3 +78,6 @@ simulation-it-test.tar.zst
 e2e_test/iceberg/spark-*-bin*
 
 **/poetry.lock
+
+**/*.sqlite
+**/*.sqlite-journal
