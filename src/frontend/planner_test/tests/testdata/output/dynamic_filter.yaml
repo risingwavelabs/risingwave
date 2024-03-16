@@ -197,3 +197,41 @@
               └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: two predicate on the same subquery
+  before:
+  - create_tables
+  sql: |
+    with cte as (select max(v2) max from t2) select * from t1 where v1 > (select max from cte) AND v1 < (select max+5 from cte);
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: Inner, on: (t1.v1 < $expr1), output: [t1.v1] }
+    ├─LogicalJoin { type: Inner, on: (t1.v1 > max(t2.v2)), output: [t1.v1] }
+    │ ├─LogicalScan { table: t1, columns: [t1.v1] }
+    │ └─LogicalShare { id: 2 }
+    │   └─LogicalAgg { aggs: [max(t2.v2)] }
+    │     └─LogicalScan { table: t2, columns: [t2.v2] }
+    └─LogicalProject { exprs: [(max(t2.v2) + 5:Int32) as $expr1] }
+      └─LogicalShare { id: 2 }
+        └─LogicalAgg { aggs: [max(t2.v2)] }
+          └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 < $expr2), output: [t1.v1, t1._row_id] }
+      ├─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
+      │ ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │ └─StreamExchange { dist: Broadcast }
+      │   └─StreamShare { id: 6 }
+      │     └─StreamProject { exprs: [max(max(t2.v2))] }
+      │       └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
+      │         └─StreamExchange { dist: Single }
+      │           └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
+      │             └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
+      │               └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [(max(max(t2.v2)) + 5:Int32) as $expr2] }
+          └─StreamShare { id: 6 }
+            └─StreamProject { exprs: [max(max(t2.v2))] }
+              └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
+                └─StreamExchange { dist: Single }
+                  └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
+                    └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
+                      └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

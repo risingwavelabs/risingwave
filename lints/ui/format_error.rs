@@ -73,4 +73,11 @@ fn main() {
 
     let _ = anyhow!("{}", anyhow_err);
     let _ = anyhow!("some error occurred: {:?}", anyhow_err);
+
+    use thiserror_ext::AsReport;
+
+    let _ = anyhow!("{}", err.as_report());
+    let _ = anyhow!("some error occurred: {}", err.as_report());
+    let _ = anyhow!("{:?}", anyhow_err.as_report());
+    let _ = anyhow!("some error occurred: {:?}", anyhow_err.as_report());
 }

@@ -1,0 +1,38 @@
+# https://github.com/risingwavelabs/risingwave/issues/15302
+
+statement ok
+set RW_IMPLICIT_FLUSH = true;
+
+statement ok
+create materialized view test_last_ingestion_time as (
+select 'table_a' as source, TO_TIMESTAMP('2024-01-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS') as last_ingestion_time
+union all
+select 'table_b' as source, TO_TIMESTAMP('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS') as last_ingestion_time
+);
+
+statement ok
+create materialized view test_records as (
+select 1 as id, TO_TIMESTAMP('2024-01-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS') as record_timestamp
+union all
+select 2 as id, TO_TIMESTAMP('2024-01-01 00:00:01', 'YYYY-MM-DD HH24:MI:SS') as record_timestamp
+union all
+select 3 as id, TO_TIMESTAMP('2024-01-01 00:00:02', 'YYYY-MM-DD HH24:MI:SS') as record_timestamp
+);
+
+statement ok
+create materialized view test_window as (
+with time_window as (
+    select max(last_ingestion_time) as window_end
+  from test_last_ingestion_time
+)
+select
+  id
+  from test_records, time_window
+  where record_timestamp >= window_end
+);
+
+query i
+select * from test_window;
+----
+2
+3

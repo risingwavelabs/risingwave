@@ -22,6 +22,7 @@ use cmd_impl::hummock::SstDumpArgs;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -550,14 +551,28 @@ pub enum ProfileCommands {
     },
 }
 
-pub async fn start(opts: CliOpts) -> Result<()> {
+/// Start `risectl` with the given options.
+/// Log and abort the process if any error occurs.
+///
+/// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
+/// in an embedded manner.
+pub async fn start(opts: CliOpts) {
+    if let Err(e) = start_fallible(opts).await {
+        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+        std::process::exit(1);
+    }
+}
+
+/// Start `risectl` with the given options.
+/// Return `Err` if any error occurs.
+pub async fn start_fallible(opts: CliOpts) -> Result<()> {
     let context = CtlContext::default();
     let result = start_impl(opts, &context).await;
     context.try_close().await;
     result
 }
 
-pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
+async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?

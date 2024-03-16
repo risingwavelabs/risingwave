@@ -139,7 +139,7 @@ impl StarrocksSink {
                     i.name
                 ))
             })?;
-            if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
+            if !Self::check_and_correct_column_type(&i.data_type, value)? {
                 return Err(SinkError::Starrocks(format!(
                     "Column type don't match, column name is {:?}. starrocks type is {:?} risingwave type is {:?} ",i.name,value,i.data_type
                 )));
@@ -150,7 +150,7 @@ impl StarrocksSink {
 
     fn check_and_correct_column_type(
         rw_data_type: &DataType,
-        starrocks_data_type: String,
+        starrocks_data_type: &String,
     ) -> Result<bool> {
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => {
@@ -186,12 +186,16 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
                 "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
-            // todo! Validate the type struct and list
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
                 "STRUCT is not supported for Starrocks sink.".to_string(),
             )),
-            risingwave_common::types::DataType::List(_) => {
-                Ok(starrocks_data_type.contains("unknown"))
+            risingwave_common::types::DataType::List(list) => {
+                // For compatibility with older versions starrocks
+                if starrocks_data_type.contains("unknown") {
+                    return Ok(true);
+                }
+                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
                 "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
