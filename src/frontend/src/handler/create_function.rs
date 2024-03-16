@@ -220,7 +220,7 @@ pub async fn handle_create_function(
             param_name = params.param.as_ref().map(|_| "function_type".to_string());
             param_value = params.param.map(|p| {
                 let CreateFunctionParamType::FunctionType(f) = p;
-                return f.to_string();
+                f.to_string()
             });
         }
         "rust" => {
