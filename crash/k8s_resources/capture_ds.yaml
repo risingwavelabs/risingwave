@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: capture
+  namespace: default
+  labels:
+    k8s-app: capture-ds
+spec:
+  selector:
+    matchLabels:
+      name: capture
+  template:
+    metadata:
+      labels:
+        name: capture
+    spec:
+      containers:
+        - name: capture
+          imagePullPolicy: Never
+          image: capture:latest
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: LOCAL_PATH
+              value: "/var/coredump"
+            - name: S3_BUCKET
+              value: "myorg-coredump"
+            - name: CLUSTER_NAME
+              value: __CLUSTER_NAME__``
+          resources:
+            limits:
+              memory: 100Mi
+            requests:
+              cpu: 100m
+          securityContext:
+            runAsUser: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - all
+          volumeMounts:
+            - name: coredump
+              mountPath: /var/coredump
+      volumes:
+        - name: coredump
+          hostPath:
+            path: /var/coredump
+            type: DirectoryOrCreate

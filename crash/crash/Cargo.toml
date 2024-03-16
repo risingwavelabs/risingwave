@@ -1,0 +1,26 @@
+[package]
+name = "crash"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace.package]
+version = "1.0.0-alpha"
+edition = "2021"
+homepage = "https://github.com/risingwavelabs/risingwave"
+keywords = ["sql", "database", "streaming"]
+license = "Apache-2.0"
+repository = "https://github.com/risingwavelabs/risingwave"
+
+[dependencies]
+coredump = "0.1.2"
+rlimit = "0.10.0"
+
+[profile.dev]
+opt-level = 0  # Controls the --opt-level the compiler builds with
+debug = true   # Controls whether the compiler passes `-g`
