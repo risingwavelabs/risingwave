@@ -290,7 +290,7 @@ impl Build for UserDefinedFunction {
             }
             #[cfg(feature = "embedded-deno-udf")]
             "deno" if udf.body.is_some() => {
-                let mut rt = DenoRuntime::new();
+                let rt = DenoRuntime::new();
                 let body = match udf.get_body() {
                     Ok(body) => body.clone(),
                     Err(_) => match udf.get_compressed_binary() {

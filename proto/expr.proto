@@ -553,5 +553,4 @@ message UserDefinedTableFunction {
   optional bytes compressed_binary = 10;
   optional string param_name = 11;
   optional string param_value = 12;
-
 }

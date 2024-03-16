@@ -233,7 +233,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             )?;
             UdfImpl::Python(rt)
         }
-
+        #[cfg(feature = "embedded-deno-udf")]
         "deno" => {
             let rt = DenoRuntime::new();
             let body = match udtf.get_body() {
