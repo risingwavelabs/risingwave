@@ -350,7 +350,6 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-        skip_invisible_row: bool,
     ) -> Vec<HashCode<H>> {
         let len = self.capacity();
         let mut states = Vec::with_capacity(len);
@@ -358,11 +357,7 @@ impl DataChunk {
         // Compute hash for the specified columns.
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx);
-            if skip_invisible_row {
-                array.hash_vec(&mut states[..], self.visibility());
-            } else {
-                array.hash_vec(&mut states[..], &Bitmap::ones(len));
-            }
+            array.hash_vec(&mut states[..], self.visibility());
         }
         finalize_hashers(&states[..])
             .into_iter()
