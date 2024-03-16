@@ -187,14 +187,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
         let need_advance_delete =
             stream_key_sink_pk_mismatch && self.sink_param.sink_type != SinkType::AppendOnly;
-
+        // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
+        let re_construct_with_sink_pk = need_advance_delete
+            && self.sink_param.sink_type == SinkType::Upsert
+            && !self.sink_param.downstream_pk.is_empty();
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
             stream_key,
             need_advance_delete,
-            // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
-            need_advance_delete,
+            re_construct_with_sink_pk,
             self.chunk_size,
             self.input_data_types,
             self.sink_param.downstream_pk.clone(),
