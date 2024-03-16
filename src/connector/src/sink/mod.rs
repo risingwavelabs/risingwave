@@ -28,6 +28,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
@@ -81,6 +82,7 @@ macro_rules! for_all_sinks {
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
+                { Mqtt, $crate::sink::mqtt::MqttSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
@@ -146,12 +148,19 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
     pub sink_id: SinkId,
+    pub sink_name: String,
     pub properties: HashMap<String, String>,
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
+
+    /// - For `CREATE SINK ... FROM ...`, the name of the source table.
+    /// - For `CREATE SINK ... AS <query>`, the name of the sink itself.
+    ///
+    /// See also `gen_sink_plan`.
+    // TODO(eric): Why need these 2 fields (db_name and sink_from_name)?
     pub sink_from_name: String,
 }
 
@@ -171,6 +180,7 @@ impl SinkParam {
         };
         Self {
             sink_id: SinkId::from(pb_param.sink_id),
+            sink_name: pb_param.sink_name,
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
             downstream_pk: table_schema
@@ -190,6 +200,7 @@ impl SinkParam {
     pub fn to_proto(&self) -> PbSinkParam {
         PbSinkParam {
             sink_id: self.sink_id.sink_id,
+            sink_name: self.sink_name.clone(),
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
@@ -217,6 +228,7 @@ impl From<SinkCatalog> for SinkParam {
             .collect();
         Self {
             sink_id: sink_catalog.id,
+            sink_name: sink_catalog.name,
             properties: sink_catalog.properties,
             columns,
             downstream_pk: sink_catalog.downstream_pk,
@@ -493,6 +505,12 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Redis error: {0}")]
     Redis(String),
+    #[error("Mqtt error: {0}")]
+    Mqtt(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Nats error: {0}")]
     Nats(
         #[source]

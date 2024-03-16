@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use foyer::memory::CacheContext;
+use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
@@ -55,7 +55,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
+    ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
@@ -177,9 +177,7 @@ where
     /// async interface only used for replicated state table,
     /// as it needs to wait for prev epoch to be committed.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
-        self.local_store
-            .init(InitOptions::new(epoch, self.vnodes().clone()))
-            .await
+        self.local_store.init(InitOptions::new(epoch)).await
     }
 }
 
@@ -195,7 +193,7 @@ where
     /// No need to `wait_for_epoch`, so it should complete immediately.
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store
-            .init(InitOptions::new(epoch, self.vnodes().clone()))
+            .init(InitOptions::new(epoch))
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
@@ -359,9 +357,19 @@ where
 
         let table_option = TableOption::new(table_catalog.retention_seconds);
         let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
+            NewLocalOptions::new_replicated(
+                table_id,
+                op_consistency_level,
+                table_option,
+                distribution.vnodes().clone(),
+            )
         } else {
-            NewLocalOptions::new(table_id, op_consistency_level, table_option)
+            NewLocalOptions::new(
+                table_id,
+                op_consistency_level,
+                table_option,
+                distribution.vnodes().clone(),
+            )
         };
         let local_state_store = store.new_local(new_local_options).await;
 
@@ -573,6 +581,7 @@ where
                 table_id,
                 op_consistency_level,
                 TableOption::default(),
+                distribution.vnodes().clone(),
             ))
             .await;
         let row_serde = make_row_serde();
@@ -744,7 +753,7 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1300,13 +1309,13 @@ where
         table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1385,7 +1394,7 @@ where
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
@@ -1430,7 +1439,7 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1450,19 +1459,17 @@ pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
 fn deserialize_keyed_row_stream<'a>(
-    stream: impl StateStoreIterItemStream + 'a,
+    iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
-    stream.map(move |result| {
-        result
-            .map_err(StreamExecutorError::from)
-            .and_then(|(key, value)| {
-                Ok(KeyedRow::new(
-                    key.user_key.table_key,
-                    deserializer.deserialize(&value).map(OwnedRow::new)?,
-                ))
-            })
+    iter.into_stream(move |(key, value)| {
+        Ok(KeyedRow::new(
+            // TODO: may avoid clone the key when key is not needed
+            key.user_key.table_key.copy_into(),
+            deserializer.deserialize(value).map(OwnedRow::new)?,
+        ))
     })
+    .map_err(Into::into)
 }
 
 pub fn prefix_range_to_memcomparable(

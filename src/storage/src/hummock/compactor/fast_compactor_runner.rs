@@ -296,6 +296,8 @@ impl CompactorRunner {
             is_target_l0_or_lbase: task.target_level == 0 || task.target_level == task.base_level,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
+            table_schemas: Default::default(),
+            disable_drop_column_optimization: false,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 

@@ -14,8 +14,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Future, TryFutureExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -26,7 +25,7 @@ use risingwave_hummock_trace::{
 use thiserror_ext::AsReport;
 
 use super::identity;
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
@@ -67,11 +66,11 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    async fn traced_iter<'a, St: StateStoreIterItemStream>(
+    async fn traced_iter<'a, St: StateStoreIter>(
         &'a self,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
         span: MayTraceSpan,
-    ) -> StorageResult<TracedStateStoreIterStream<St>> {
+    ) -> StorageResult<TracedStateStoreIter<St>> {
         let res = iter_stream_future.await;
         if res.is_ok() {
             span.may_send_result(OperationResult::Iter(TraceResult::Ok(())));
@@ -79,7 +78,7 @@ impl<S> TracedStateStore<S> {
             span.may_send_result(OperationResult::Iter(TraceResult::Err));
         }
         let traced = TracedStateStoreIter::new(res?, span);
-        Ok(traced.into_stream())
+        Ok(traced)
     }
 
     async fn traced_get(
@@ -106,10 +105,8 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-type TracedStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
-
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     fn may_exist(
         &self,
@@ -136,7 +133,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -277,7 +274,7 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
-    type IterStream = impl StateStoreReadIterStream;
+    type Iter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -298,7 +295,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
@@ -347,13 +344,10 @@ impl<S> TracedStateStoreIter<S> {
     }
 }
 
-impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(self) {
-        let inner = self.inner;
-        futures::pin_mut!(inner);
-
-        while let Some((key, value)) = inner
+impl<S: StateStoreIter> StateStoreIter for TracedStateStoreIter<S> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        if let Some((key, value)) = self
+            .inner
             .try_next()
             .await
             .inspect_err(|e| tracing::error!(error = %e.as_report(), "Failed in next"))?
@@ -362,14 +356,12 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
             self.span
                 .may_send_result(OperationResult::IterNext(TraceResult::Ok(Some((
                     TracedBytes::from(key.user_key.table_key.to_vec()),
-                    TracedBytes::from(value.clone()),
+                    TracedBytes::from(Bytes::copy_from_slice(value)),
                 )))));
-            yield (key, value);
+            Ok(Some((key, value)))
+        } else {
+            Ok(None)
         }
-    }
-
-    fn into_stream(self) -> TracedStateStoreIterStream<S> {
-        Self::into_stream_inner(self)
     }
 }
 

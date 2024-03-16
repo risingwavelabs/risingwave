@@ -162,6 +162,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::AppendOnlyTopNExecutor;
@@ -223,11 +224,11 @@ mod tests {
     fn create_source() -> Executor {
         let mut chunks = create_stream_chunks();
         MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut chunks[0])),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut chunks[1])),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Chunk(std::mem::take(&mut chunks[2])),
         ])
         .into_executor(create_schema(), pk_indices())

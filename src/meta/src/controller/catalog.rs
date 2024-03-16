@@ -38,6 +38,7 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
@@ -415,6 +416,57 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(tables)
+    }
+
+    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        let inner = self.inner.read().await;
+
+        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut obj_dependencies = dependencies
+            .into_iter()
+            .map(|(oid, used_by)| PbObjectDependencies {
+                object_id: used_by as _,
+                referenced_object_id: oid as _,
+            })
+            .collect_vec();
+
+        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::TargetTable])
+            .join(JoinType::InnerJoin, sink::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .and(sink::Column::TargetTable.is_not_null()),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
+            PbObjectDependencies {
+                object_id: table_id as _,
+                referenced_object_id: sink_id as _,
+            }
+        }));
+
+        Ok(obj_dependencies)
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {

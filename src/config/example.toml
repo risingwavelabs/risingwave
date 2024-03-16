@@ -51,6 +51,7 @@ compaction_task_max_progress_interval_secs = 600
 hybird_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
+enable_dropped_column_reclaim = false
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -101,6 +102,9 @@ stream_exchange_concurrent_barriers = 1
 stream_exchange_concurrent_dispatchers = 0
 stream_dml_channel_initial_permits = 32768
 stream_hash_agg_max_dirty_groups_heap_size = 67108864
+stream_memory_controller_threshold_aggressive = 0.9
+stream_memory_controller_threshold_graceful = 0.8
+stream_memory_controller_threshold_stable = 0.7
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -175,6 +179,7 @@ object_store_streaming_read_timeout_ms = 480000
 object_store_streaming_upload_timeout_ms = 480000
 object_store_upload_timeout_ms = 480000
 object_store_read_timeout_ms = 480000
+object_store_set_atomic_write_dir = false
 
 [storage.object_store.s3]
 object_store_keepalive_ms = 600000

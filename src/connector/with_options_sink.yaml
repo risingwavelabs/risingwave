@@ -17,6 +17,10 @@ BigQueryConfig:
   - name: bigquery.table
     field_type: String
     required: true
+  - name: bigquery.max_batch_rows
+    field_type: usize
+    required: false
+    default: '1024'
   - name: region
     field_type: String
     required: false
@@ -346,6 +350,61 @@ KinesisSinkConfig:
     field_type: String
     required: false
     alias: kinesis.assumerole.external_id
+MqttConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
+    required: true
+  - name: topic
+    field_type: String
+    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
+    required: true
+  - name: qos
+    field_type: QualityOfService
+    comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
+    required: false
+  - name: username
+    field_type: String
+    comments: Username for the mqtt broker
+    required: false
+  - name: password
+    field_type: String
+    comments: Password for the mqtt broker
+    required: false
+  - name: client_prefix
+    field_type: String
+    comments: Prefix for the mqtt client id.  The client id will be generated as `client_prefix`_`actor_id`_`(executor_id|source_id)`. Defaults to risingwave
+    required: false
+  - name: clean_start
+    field_type: bool
+    comments: '`clean_start = true` removes all the state from queues & instructs the broker  to clean all the client state when client disconnects.   When set `false`, broker will hold the client state and performs pending  operations on the client when reconnection with same `client_id`  happens. Local queue state is also held to retransmit packets after reconnection.'
+    required: false
+    default: Default::default
+  - name: inflight_messages
+    field_type: usize
+    comments: The maximum number of inflight messages. Defaults to 100
+    required: false
+  - name: tls.client_key
+    field_type: String
+    comments: Path to CA certificate file for verifying the broker's key.
+    required: false
+  - name: tls.client_cert
+    field_type: String
+    comments: Path to client's certificate file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the certificate content.
+    required: false
+  - name: tls.client_key
+    field_type: String
+    comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
+    required: false
+  - name: retain
+    field_type: bool
+    comments: Whether the message should be retained by the broker
+    required: false
+    default: Default::default
+  - name: r#type
+    field_type: String
+    required: true
 NatsConfig:
   fields:
   - name: server_url

@@ -147,7 +147,10 @@ impl Strong {
             | ExprType::Round
             | ExprType::Ascii
             | ExprType::Translate
+            | ExprType::Concat
+            | ExprType::ConcatVariadic
             | ExprType::ConcatWs
+            | ExprType::ConcatWsVariadic
             | ExprType::Abs
             | ExprType::SplitPart
             | ExprType::ToChar
@@ -217,6 +220,7 @@ impl Strong {
             | ExprType::Left
             | ExprType::Right
             | ExprType::Format
+            | ExprType::FormatVariadic
             | ExprType::PgwireSend
             | ExprType::PgwireRecv
             | ExprType::ConvertFrom
@@ -255,7 +259,9 @@ impl Strong {
             | ExprType::JsonbAccess
             | ExprType::JsonbAccessStr
             | ExprType::JsonbExtractPath
+            | ExprType::JsonbExtractPathVariadic
             | ExprType::JsonbExtractPathText
+            | ExprType::JsonbExtractPathTextVariadic
             | ExprType::JsonbTypeof
             | ExprType::JsonbArrayLength
             | ExprType::IsJson
@@ -271,7 +277,9 @@ impl Strong {
             | ExprType::JsonbStripNulls
             | ExprType::ToJsonb
             | ExprType::JsonbBuildArray
+            | ExprType::JsonbBuildArrayVariadic
             | ExprType::JsonbBuildObject
+            | ExprType::JsonbBuildObjectVariadic
             | ExprType::JsonbPathExists
             | ExprType::JsonbPathMatch
             | ExprType::JsonbPathQueryArray

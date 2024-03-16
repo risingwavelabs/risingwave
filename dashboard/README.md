@@ -28,44 +28,37 @@ TODO: Find a suitable testing framework
 
 ## Development
 
-Start the RisingWave database, and create tables by removing drop tables from `tpch_snapshot.slt`
+Start a RisingWave cluster, create some tables and materialized views for testing purposes.
+For example:
 
 ```bash
 ./risedev d
-sqllogictest -p 4566 -d dev './e2e_test/streaming/tpch_snapshot.slt'
+sqllogictest -p 4566 -d dev './e2e_test/nexmark/create_tables.slt.part'
+sqllogictest -p 4566 -d dev './e2e_test/streaming/nexmark/create_views.slt.part'
 ```
 
-Install Dependencies.
+Install dependencies and start the development server.
 
 ```bash
 npm i
-```
-
-The website will be served at port 3000. It requests data from the mock server at port 32333.
-
-```bash
 npm run dev
 ```
 
-You should also run:
-
-```bash
-./mock/fetch.sh # dump current data from RisingWave meta node to be used by mock server
-node mock-server.js
-```
-
-To start a mock API server when developing.
+The dashboard is now served at port 3000.
+Go to the Settings page at `http://localhost:3000/settings/` and set the API endpoint to
+`http://localhost:5691/api` in order to connect to the meta node of the running cluster.
 
 ## Test with RisingWave meta node
 
-To replace the built static files in RisingWave with your newest code,
-run the following scripts in the root directory.
+The approach above is the best way to develop the dashboard since it supports hot reload and debugging.
+However, if you still want to test how the dashboard behaves when it's served as static files within the meta node,
+you can ask RiseDev to build the dashboard from the source code by running the following command.
 
 ```bash
-./risedev export-dashboard
+./risedev configure enable dashboard
 ```
 
-The dashboard will be served by meta node at port 5691.
+The dashboard built with the latest sources will be served by meta node at port 5691.
 
 ## Deployment
 
@@ -79,7 +72,7 @@ Build static files for standalone deployment without node.js. The built files ar
 Check more details at [Static HTML Export](https://nextjs.org/docs/advanced-features/static-html-export).
 
 ```bash
-npm run build-static
+npm run build
 ```
 
 The built files are generated at `./out`.

@@ -69,6 +69,9 @@ message ReportBase {
   uint64 report_time = 5;
   // node_type is the node that creates the report
   TelemetryNodeType node_type = 6;
+  // mark the report is a test message
+  // if so, the backend do validations but not store it
+  bool is_test = 7;
 }
 
 message MetaReport {

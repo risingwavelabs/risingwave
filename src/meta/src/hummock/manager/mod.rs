@@ -62,7 +62,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -82,9 +82,10 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
-    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
-    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_local_table_stat,
+    trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
+    trigger_write_stop_stats,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -344,12 +345,16 @@ impl HummockManager {
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
+        let mut object_store_config = ObjectStoreConfig::default();
+        // For fs and hdfs object store, operations are not always atomic.
+        // We should manually enable atomicity guarantee by setting the atomic_write_dir config when building services.
+        object_store_config.set_atomic_write_dir();
         let object_store = Arc::new(
             build_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                ObjectStoreConfig::default(),
+                object_store_config,
             )
             .await,
         );
@@ -1227,11 +1232,26 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        while let Some(task) = self
+        while let Some(mut task) = self
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
+                if self.env.opts.enable_dropped_column_reclaim {
+                    task.table_schemas = match self.metadata_manager() {
+                        MetadataManager::V1(mgr) => mgr
+                            .catalog_manager
+                            .get_versioned_table_schemas(&task.existing_table_ids)
+                            .await
+                            .into_iter()
+                            .map(|(table_id, column_ids)| (table_id, TableSchema { column_ids }))
+                            .collect(),
+                        MetadataManager::V2(_) => {
+                            // TODO #13952: support V2
+                            BTreeMap::default()
+                        }
+                    }
+                }
                 return Ok(Some(task));
             }
             assert!(
@@ -1430,13 +1450,23 @@ impl HummockManager {
                     VarTransactionWrapper,
                     VarTransaction::new(&mut versioning.version_stats,)
                 );
-                if let Some(table_stats_change) = &table_stats_change {
-                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
-                }
 
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
                 current_version.apply_version_delta(&version_delta);
+                if purge_prost_table_stats(&mut version_stats.table_stats, &current_version) {
+                    self.metrics.version_stats.reset();
+                    versioning.local_metrics.clear();
+                }
+                if let Some(table_stats_change) = &table_stats_change {
+                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
+                    trigger_local_table_stat(
+                        &self.metrics,
+                        &mut versioning.local_metrics,
+                        &version_stats,
+                        table_stats_change,
+                    );
+                }
                 commit_multi_var!(
                     self.env.meta_store(),
                     self.sql_meta_store(),
@@ -1447,7 +1477,7 @@ impl HummockManager {
                 )?;
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
+                trigger_version_stat(&self.metrics, &current_version);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
@@ -1708,16 +1738,17 @@ impl HummockManager {
             VarTransaction::new(&mut versioning.version_stats)
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
-        for (table_id, stats) in &table_stats_change {
-            let table_id_str = table_id.to_string();
-            let stats_value =
-                std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
-            self.metrics
-                .table_write_throughput
-                .with_label_values(&[table_id_str.as_str()])
-                .inc_by(stats_value as u64);
+        if purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version) {
+            self.metrics.version_stats.reset();
+            versioning.local_metrics.clear();
         }
+
+        trigger_local_table_stat(
+            &self.metrics,
+            &mut versioning.local_metrics,
+            &version_stats,
+            &table_stats_change,
+        );
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
@@ -1735,11 +1766,7 @@ impl HummockManager {
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(
-            &self.metrics,
-            &versioning.current_version,
-            &versioning.version_stats,
-        );
+        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,

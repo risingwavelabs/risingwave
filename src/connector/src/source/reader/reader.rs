@@ -33,7 +33,7 @@ use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumer
 use crate::source::filesystem::opendal_source::{
     OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
-use crate::source::filesystem::FsPageItem;
+use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
     create_split_reader, BoxChunkSourceStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, SourceColumnDesc, SourceContext, SplitReader,
@@ -149,7 +149,6 @@ impl SourceReader {
                 vec![reader]
             } else {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
-
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
                     tracing::debug!(?splits, ?prop, "spawning connector split reader");
                     let props = prop.clone();
@@ -184,6 +183,33 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(lister: OpendalEnumera
                     yield res
                 } else {
                     // Currrntly due to the lack of prefix list, we just skip the unmatched files.
+                    continue;
+                }
+            }
+            Err(err) => {
+                tracing::error!(error = %err.as_report(), "list object fail");
+                return Err(err);
+            }
+        }
+    }
+}
+
+#[try_stream(boxed, ok = OpendalFsSplit<Src>,  error = crate::error::ConnectorError)]
+pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: OpendalEnumerator<Src>) {
+    let matcher = lister.get_matcher();
+    let mut object_metadata_iter = lister.list().await?;
+
+    while let Some(list_res) = object_metadata_iter.next().await {
+        match list_res {
+            Ok(res) => {
+                if matcher
+                    .as_ref()
+                    .map(|m| m.matches(&res.name))
+                    .unwrap_or(true)
+                {
+                    let split = OpendalFsSplit::new(res.name, 0, res.size as usize);
+                    yield split
+                } else {
                     continue;
                 }
             }

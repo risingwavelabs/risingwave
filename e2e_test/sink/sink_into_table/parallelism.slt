@@ -1,0 +1,87 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET STREAMING_PARALLELISM TO 2;
+
+statement ok
+create table t_simple (v1 int, v2 int);
+
+statement ok
+create table m_simple (v1 int primary key, v2 int);
+
+statement ok
+SET STREAMING_PARALLELISM TO 3;
+
+statement ok
+create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
+
+query I
+select distinct parallelism from rw_fragment_parallelism where name in ('t_simple', 'm_simple', 's_simple_1');
+----
+2
+
+statement ok
+insert into t_simple select * from generate_series(1, 100);
+
+statement ok
+flush;
+
+query I
+select count(*) from m_simple;
+----
+100
+
+statement ok
+drop sink s_simple_1;
+
+statement ok
+drop table t_simple;
+
+statement ok
+drop table m_simple;
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET STREAMING_PARALLELISM TO 2;
+
+statement ok
+create table t_simple (v1 int, v2 int);
+
+statement ok
+create table m_simple (v1 int primary key, v2 int);
+
+statement ok
+SET STREAMING_PARALLELISM TO 3;
+
+# multi fragment sink
+statement ok
+create sink s_multi into m_simple as select v1, count(*)::int from t_simple group by v1;
+
+query I
+select parallelism from rw_fragment_parallelism where array_position(flags, 'SINK') is not null and name = 's_multi';
+----
+3
+
+statement ok
+insert into t_simple select * from generate_series(1, 100);
+
+statement ok
+flush;
+
+query I
+select count(*) from m_simple;
+----
+100
+
+statement ok
+drop sink s_multi;
+
+statement ok
+drop table t_simple;
+
+statement ok
+drop table m_simple;
+

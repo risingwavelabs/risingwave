@@ -350,6 +350,10 @@ fn infer_type_for_special(
             ensure_arity!("coalesce", 1 <= | inputs |);
             align_types(inputs.iter_mut()).map(Some).map_err(Into::into)
         }
+        ExprType::Concat => {
+            ensure_arity!("concat", 1 <= | inputs |);
+            Ok(Some(DataType::Varchar))
+        }
         ExprType::ConcatWs => {
             ensure_arity!("concat_ws", 2 <= | inputs |);
             // 0-th arg must be string
@@ -609,6 +613,22 @@ fn infer_type_for_special(
                 .into());
             }
             Ok(Some(DataType::Jsonb))
+        }
+        ExprType::JsonbExtractPath => {
+            ensure_arity!("jsonb_extract_path", 2 <= | inputs |);
+            inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+            for input in inputs.iter_mut().skip(1) {
+                input.cast_implicit_mut(DataType::Varchar)?;
+            }
+            Ok(Some(DataType::Jsonb))
+        }
+        ExprType::JsonbExtractPathText => {
+            ensure_arity!("jsonb_extract_path_text", 2 <= | inputs |);
+            inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+            for input in inputs.iter_mut().skip(1) {
+                input.cast_implicit_mut(DataType::Varchar)?;
+            }
+            Ok(Some(DataType::Varchar))
         }
         _ => Ok(None),
     }

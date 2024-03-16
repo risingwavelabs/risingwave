@@ -17,7 +17,6 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -345,9 +344,12 @@ pub struct MetaConfig {
     #[serde(default, with = "meta_prefix")]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
+    /// Whether compactor should rewrite row to remove dropped column.
+    #[serde(default = "default::meta::enable_dropped_column_reclaim")]
+    pub enable_dropped_column_reclaim: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
@@ -475,8 +477,13 @@ pub struct BatchConfig {
     #[config_doc(omitted)]
     pub developer: BatchDeveloperConfig,
 
+    /// This is the max number of queries per sql session.
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    /// This is the max number of batch queries per frontend node.
+    #[serde(default)]
+    pub max_batch_queries_per_frontend_node: Option<u64>,
 
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
@@ -523,41 +530,7 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub enum MetricLevel {
-    #[default]
-    Disabled = 0,
-    Critical = 1,
-    Info = 2,
-    Debug = 3,
-}
-
-impl clap::ValueEnum for MetricLevel {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
-    }
-
-    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
-            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
-            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
-            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
-        }
-    }
-}
-
-impl PartialEq<Self> for MetricLevel {
-    fn eq(&self, other: &Self) -> bool {
-        (*self as u8).eq(&(*other as u8))
-    }
-}
-
-impl PartialOrd for MetricLevel {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        (*self as u8).partial_cmp(&(*other as u8))
-    }
-}
+pub use risingwave_common_metrics::MetricLevel;
 
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -594,11 +567,17 @@ pub struct StorageConfig {
     pub block_cache_capacity_mb: Option<usize>,
 
     #[serde(default)]
+    pub block_shard_num: Option<usize>,
+
+    #[serde(default)]
     pub high_priority_ratio_in_percent: Option<usize>,
 
     /// Capacity of sstable meta cache.
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub meta_shard_num: Option<usize>,
 
     /// max memory usage for large query
     #[serde(default)]
@@ -880,6 +859,15 @@ pub struct StreamingDeveloperConfig {
     /// The max heap size of dirty groups of `HashAggExecutor`.
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
+
+    #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
+    pub memory_controller_threshold_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_graceful")]
+    pub memory_controller_threshold_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_stable")]
+    pub memory_controller_threshold_stable: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -932,9 +920,17 @@ pub struct ObjectStoreConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
+    pub object_store_set_atomic_write_dir: bool,
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+}
+
+impl ObjectStoreConfig {
+    pub fn set_atomic_write_dir(&mut self) {
+        self.object_store_set_atomic_write_dir = true;
+    }
 }
 
 /// The subsections `[storage.object_store.s3]`.
@@ -1144,6 +1140,9 @@ pub mod default {
 
         pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
             30
+        }
+        pub fn enable_dropped_column_reclaim() -> bool {
+            false
         }
     }
 
@@ -1478,6 +1477,16 @@ pub mod default {
         pub fn enable_check_task_level_overlap() -> bool {
             false
         }
+
+        pub fn memory_controller_threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn memory_controller_threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn memory_controller_threshold_stable() -> f64 {
+            0.7
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1582,6 +1591,10 @@ pub mod default {
             8 * 60 * 1000
         }
 
+        pub fn object_store_set_atomic_write_dir() -> bool {
+            false
+        }
+
         pub mod s3 {
             /// Retry config for compute node http timeout error.
             const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
@@ -1633,7 +1646,9 @@ pub mod default {
 
 pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
+    pub block_shard_num: usize,
     pub meta_cache_capacity_mb: usize,
+    pub meta_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
@@ -1641,6 +1656,10 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
+
+pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
+pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
+pub const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s
@@ -1655,6 +1674,21 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
+    let meta_shard_num = s.storage.meta_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (meta_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        shard_bits
+    });
+    let block_shard_num = s.storage.block_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_CACHE_SHARD_BITS;
+        while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0
+        {
+            shard_bits -= 1;
+        }
+        shard_bits
+    });
     let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
     let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
@@ -1672,7 +1706,9 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
+        block_shard_num,
         meta_cache_capacity_mb,
+        meta_shard_num,
         shared_buffer_capacity_mb,
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
