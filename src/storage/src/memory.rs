@@ -635,8 +635,10 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
     #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self, _prev_epoch: u64) {
-        unimplemented!("recovery not supported")
+    async fn clear_shared_buffer(&self, prev_epoch: u64) {
+        for (key, _) in self.inner.range((Unbounded, Unbounded), None).unwrap() {
+            assert!(key.epoch_with_gap.pure_epoch() <= prev_epoch);
+        }
     }
 
     #[allow(clippy::unused_async)]

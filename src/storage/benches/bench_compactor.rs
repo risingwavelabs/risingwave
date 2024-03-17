@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_common::cache::CachePriority;
+use foyer::memory::CacheContext;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -27,7 +27,6 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::ValueRowSerializer;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo, TableSchema};
@@ -36,7 +35,7 @@ use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator,
+    ConcatIterator, Forward, HummockIterator, MergeIterator,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -45,8 +44,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRangeIterator, FileCache, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableStore, SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
+    CachePolicy, FileCache, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
+    SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, CompactorMetrics, StoreLocalStatistic,
@@ -65,6 +64,8 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 128 << 20,
         high_priority_ratio: 0,
+        meta_shard_num: 2,
+        block_shard_num: 2,
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),
@@ -78,7 +79,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill(CachePriority::High),
+        policy: CachePolicy::Fill(CacheContext::Default),
     }
 }
 
@@ -115,7 +116,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CachePriority::High),
+            policy: CachePolicy::Fill(CacheContext::Default),
         },
     );
     let mut builder =
@@ -159,7 +160,7 @@ async fn build_table_2(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill(CachePriority::High),
+            policy: CachePolicy::Fill(CacheContext::Default),
         },
     );
     let mut builder =
@@ -271,7 +272,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
     });
     compact_and_build_sst(
         &mut builder,
-        CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(HummockEpoch::MAX)),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,
@@ -313,7 +313,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        cache_policy: CachePolicy::Fill(CachePriority::High),
+        cache_policy: CachePolicy::Fill(CacheContext::Default),
         prefetch_for_large_query: false,
         must_iterated_end_user_key: None,
         max_preload_retry_times: 0,

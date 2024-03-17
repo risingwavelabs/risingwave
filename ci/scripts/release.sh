@@ -63,6 +63,9 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
+# TODO(bugen): It's really hard to get the dashboard built on such old distro.
+#              The assets will be proxied to GitHub during runtime.
+# export ENABLE_BUILD_DASHBOARD=1
 cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
