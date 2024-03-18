@@ -61,7 +61,7 @@ use risingwave_storage::store::SyncResult;
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor};
+use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -156,6 +156,10 @@ pub(super) enum LocalBarrierEvent {
         current_epoch: u64,
         actor: ActorId,
         state: BackfillState,
+    },
+    ReadBarrierMutation {
+        barrier: Barrier,
+        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
     },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
@@ -278,7 +282,10 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    ) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -295,6 +302,7 @@ impl LocalBarrierWorker {
             state: ManagedBarrierState::new(
                 actor_manager.env.state_store(),
                 actor_manager.streaming_metrics.clone(),
+                barrier_await_tree_reg,
             ),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
@@ -402,6 +410,12 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(current_epoch, actor, state);
             }
+            LocalBarrierEvent::ReadBarrierMutation {
+                barrier,
+                mutation_sender,
+            } => {
+                self.read_barrier_mutation(barrier, mutation_sender);
+            }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
         }
@@ -498,6 +512,15 @@ impl LocalBarrierWorker {
 
         self.control_stream_handle.send_response(result);
         Ok(())
+    }
+
+    /// Read mutation from barrier state.
+    fn read_barrier_mutation(
+        &mut self,
+        barrier: Barrier,
+        sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    ) {
+        self.state.read_barrier_mutation(&barrier, sender);
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -609,7 +632,10 @@ impl LocalBarrierWorker {
 
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+        *self = Self::new(
+            self.actor_manager.clone(),
+            self.state.reset_and_take_barrier_await_tree_reg(),
+        );
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -673,6 +699,7 @@ impl LocalBarrierWorker {
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
@@ -695,7 +722,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -750,6 +777,20 @@ impl LocalBarrierManager {
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
         let _ = self.actor_failure_sender.send((actor_id, err));
     }
+
+    /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
+    pub async fn read_barrier_mutation(
+        &self,
+        barrier: &Barrier,
+    ) -> StreamResult<Option<Arc<Mutation>>> {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
+            barrier: barrier.clone(),
+            mutation_sender: tx,
+        });
+        rx.await
+            .map_err(|_| anyhow!("barrier manager maybe reset").into())
+    }
 }
 
 /// Tries to find the root cause of actor failures, based on hard-coded rules.
@@ -787,6 +828,7 @@ impl LocalBarrierManager {
         let _join_handle = LocalBarrierWorker::spawn(
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
+            None,
             None,
             Arc::new(AtomicU64::new(0)),
             rx,
