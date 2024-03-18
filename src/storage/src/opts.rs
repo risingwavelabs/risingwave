@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::memory::{LfuConfig, LruConfig};
 use risingwave_common::config::{
-    extract_storage_memory_config, CacheEvictionConfig, EvictionConfig, ObjectStoreConfig,
-    RwConfig, StorageMemoryConfig,
+    extract_storage_memory_config, EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
@@ -49,10 +47,16 @@ pub struct StorageOpts {
     pub write_conflict_detection_enabled: bool,
     /// Capacity of sstable block cache.
     pub block_cache_capacity_mb: usize,
-    /// Capacity of sstable meta cache.
-    pub meta_cache_capacity_mb: usize,
+    /// the number of block-cache shard. Less shard means that more concurrent-conflict.
+    pub block_cache_shard_num: usize,
     /// Eviction config for block cache.
     pub block_cache_eviction_config: EvictionConfig,
+    /// Capacity of sstable meta cache.
+    pub meta_cache_capacity_mb: usize,
+    /// the number of meta-cache shard. Less shard means that more concurrent-conflict.
+    pub meta_cache_shard_num: usize,
+    /// Eviction config for meta cache.
+    pub meta_cache_eviction_config: EvictionConfig,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
@@ -168,38 +172,13 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
-            block_cache_eviction_config: match c.storage.cache.eviction {
-                CacheEvictionConfig::Lru {
-                    high_priority_ratio_in_percent,
-                } => EvictionConfig::Lru(LruConfig {
-                    high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
-                        risingwave_common::config::default::storage::high_priority_ratio_in_percent(
-                        ),
-                    ) as f64
-                        / 100.0,
-                }),
-                CacheEvictionConfig::Lfu {
-                    window_capacity_ratio_in_percent,
-                    protected_capacity_ratio_in_percent,
-                    cmsketch_eps,
-                    cmsketch_confidence,
-                } => EvictionConfig::Lfu(LfuConfig {
-                    window_capacity_ratio: window_capacity_ratio_in_percent
-                        .unwrap_or(risingwave_common::config::default::storage::window_capacity_ratio_in_percent())
-                        as f64
-                        / 100.0,
-                    protected_capacity_ratio: protected_capacity_ratio_in_percent
-                        .unwrap_or(risingwave_common::config::default::storage::protected_capacity_ratio_in_percent())
-                        as f64
-                        / 100.0,
-                    cmsketch_eps: cmsketch_eps.unwrap_or(risingwave_common::config::default::storage::cmsketch_eps()),
-                    cmsketch_confidence: cmsketch_confidence
-                        .unwrap_or(risingwave_common::config::default::storage::cmsketch_confidence()),
-                }),
-            },
+            block_cache_shard_num: s.block_cache_shard_num,
+            block_cache_eviction_config: s.block_cache_eviction_config.clone(),
+            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
+            meta_cache_shard_num: s.meta_cache_shard_num,
+            meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
-            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,

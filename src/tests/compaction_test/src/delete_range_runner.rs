@@ -214,7 +214,10 @@ async fn compaction_test(
         path: system_params.data_directory().to_string(),
         block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
         meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
-        eviction: EvictionConfig::for_test(),
+        block_cache_shard_num: storage_memory_config.block_cache_shard_num,
+        meta_cache_shard_num: storage_memory_config.meta_cache_shard_num,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         data_file_cache: FileCache::none(),
@@ -231,6 +234,7 @@ async fn compaction_test(
         Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
+        None,
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();

@@ -14,7 +14,7 @@
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::error::v2::tonic::ToTonicStatus;
+use risingwave_common::error::tonic::ToTonicStatus;
 use risingwave_pb::compute::config_service_server::ConfigService;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_stream::task::LocalStreamManager;

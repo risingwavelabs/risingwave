@@ -30,8 +30,6 @@ use crate::hummock::HummockError;
 type CachedBlockEntry =
     CacheEntry<(HummockSstableObjectId, u64), Box<Block>, BlockCacheEventListener>;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
-
 enum BlockEntry {
     Cache(#[allow(dead_code)] CachedBlockEntry),
     Owned(#[allow(dead_code)] Box<Block>),
@@ -83,7 +81,7 @@ unsafe impl Sync for BlockHolder {}
 #[derive(Debug)]
 pub struct BlockCacheConfig {
     pub capacity: usize,
-    pub max_shard_bits: usize,
+    pub shard_num: usize,
     pub eviction: EvictionConfig,
     pub listener: BlockCacheEventListener,
 }
@@ -126,11 +124,7 @@ impl BlockCache {
         );
 
         let capacity = config.capacity;
-        let mut shard_bits = config.max_shard_bits;
-        while (capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
-            shard_bits -= 1;
-        }
-        let shards = 1 << shard_bits;
+        let shards = config.shard_num;
         let object_pool_capacity = shards * 1024;
         let hash_builder = RandomState::default();
         let event_listener = config.listener;

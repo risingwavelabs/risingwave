@@ -24,6 +24,7 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
 use futures::{FutureExt, StreamExt};
+use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -138,6 +139,9 @@ pub(super) struct ManagedBarrierState {
 
     /// Futures will be finished in the order of epoch in ascending order.
     await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
+
+    /// Manages the await-trees of all barriers.
+    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 }
 
 impl ManagedBarrierState {
@@ -146,6 +150,7 @@ impl ManagedBarrierState {
         Self::new(
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
+            None,
         )
     }
 
@@ -153,6 +158,7 @@ impl ManagedBarrierState {
     pub(super) fn new(
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
@@ -160,7 +166,17 @@ impl ManagedBarrierState {
             state_store,
             streaming_metrics,
             await_epoch_completed_futures: FuturesOrdered::new(),
+            barrier_await_tree_reg,
         }
+    }
+
+    pub(super) fn reset_and_take_barrier_await_tree_reg(
+        &mut self,
+    ) -> Option<Arc<Mutex<await_tree::Registry<u64>>>> {
+        if let Some(reg) = &self.barrier_await_tree_reg {
+            reg.lock().clear();
+        }
+        self.barrier_await_tree_reg.take()
     }
 
     /// This method is called when barrier state is modified in either `Issued` or `Stashed`
@@ -232,19 +248,28 @@ impl ManagedBarrierState {
                 }
             }
 
-            self.await_epoch_completed_futures.push_back(
-                sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
-                    move |result| {
-                        (
-                            prev_epoch,
-                            result.map(move |sync_result| BarrierCompleteResult {
-                                sync_result,
-                                create_mview_progress,
-                            }),
-                        )
-                    },
-                ),
-            );
+            self.await_epoch_completed_futures.push_back({
+                let future =
+                    sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
+                        move |result| {
+                            (
+                                prev_epoch,
+                                result.map(move |sync_result| BarrierCompleteResult {
+                                    sync_result,
+                                    create_mview_progress,
+                                }),
+                            )
+                        },
+                    );
+                if let Some(reg) = &self.barrier_await_tree_reg {
+                    reg.lock()
+                        .register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
+                        .instrument(future)
+                        .left_future()
+                } else {
+                    future.right_future()
+                }
+            });
         }
     }
 

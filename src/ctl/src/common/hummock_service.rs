@@ -136,6 +136,7 @@ impl HummockServiceOpts {
             metrics.object_store_metrics.clone(),
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
+            None,
         )
         .await?;
 
@@ -167,7 +168,10 @@ impl HummockServiceOpts {
             path: opts.data_directory,
             block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
             meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
-            eviction: EvictionConfig::for_test(),
+            block_cache_shard_num: opts.block_cache_shard_num,
+            meta_cache_shard_num: opts.meta_cache_shard_num,
+            block_cache_eviction: EvictionConfig::for_test(),
+            meta_cache_eviction: EvictionConfig::for_test(),
             prefetch_buffer_capacity: opts.block_cache_capacity_mb * (1 << 20),
             max_prefetch_block_number: opts.max_prefetch_block_number,
             data_file_cache: FileCache::none(),
