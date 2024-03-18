@@ -17,7 +17,6 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -531,41 +530,7 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub enum MetricLevel {
-    #[default]
-    Disabled = 0,
-    Critical = 1,
-    Info = 2,
-    Debug = 3,
-}
-
-impl clap::ValueEnum for MetricLevel {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
-    }
-
-    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
-            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
-            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
-            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
-        }
-    }
-}
-
-impl PartialEq<Self> for MetricLevel {
-    fn eq(&self, other: &Self) -> bool {
-        (*self as u8).eq(&(*other as u8))
-    }
-}
-
-impl PartialOrd for MetricLevel {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        (*self as u8).partial_cmp(&(*other as u8))
-    }
-}
+pub use risingwave_common_metrics::MetricLevel;
 
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -602,11 +567,17 @@ pub struct StorageConfig {
     pub block_cache_capacity_mb: Option<usize>,
 
     #[serde(default)]
+    pub block_shard_num: Option<usize>,
+
+    #[serde(default)]
     pub high_priority_ratio_in_percent: Option<usize>,
 
     /// Capacity of sstable meta cache.
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub meta_shard_num: Option<usize>,
 
     /// max memory usage for large query
     #[serde(default)]
@@ -888,6 +859,21 @@ pub struct StreamingDeveloperConfig {
     /// The max heap size of dirty groups of `HashAggExecutor`.
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
+
+    #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
+    pub memory_controller_threshold_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_graceful")]
+    pub memory_controller_threshold_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_stable")]
+    pub memory_controller_threshold_stable: f64,
+
+    #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
+    /// Enable arrangement backfill
+    /// If true, the arrangement backfill will be disabled,
+    /// even if session variable set.
+    pub enable_arrangement_backfill: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1497,6 +1483,19 @@ pub mod default {
         pub fn enable_check_task_level_overlap() -> bool {
             false
         }
+
+        pub fn memory_controller_threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn memory_controller_threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn memory_controller_threshold_stable() -> f64 {
+            0.7
+        }
+        pub fn stream_enable_arrangement_backfill() -> bool {
+            true
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1656,7 +1655,9 @@ pub mod default {
 
 pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
+    pub block_shard_num: usize,
     pub meta_cache_capacity_mb: usize,
+    pub meta_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
@@ -1664,6 +1665,10 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
+
+pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
+pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
+pub const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s
@@ -1678,6 +1683,21 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
+    let meta_shard_num = s.storage.meta_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (meta_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        shard_bits
+    });
+    let block_shard_num = s.storage.block_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_CACHE_SHARD_BITS;
+        while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0
+        {
+            shard_bits -= 1;
+        }
+        shard_bits
+    });
     let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
     let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
@@ -1695,7 +1715,9 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
+        block_shard_num,
         meta_cache_capacity_mb,
+        meta_shard_num,
         shared_buffer_capacity_mb,
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
