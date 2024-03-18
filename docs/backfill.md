@@ -218,7 +218,8 @@ For chunks coming from upstream (whether historical or directly from the dispatc
 we will need to transform it from (2) to (3) before yielding the chunks downstream.
 
 For chunks being replicated to the replicated state table, we need to transform them from (2) to (1),
-so they match the upstream state table schema.
+so they match the upstream state table schema. Otherwise, deserialization for these replicated records will fail,
+due to a schema mismatch.
 
 For chunks being read from the replicated state table, it must contain logic to transform them from (1) to (2),
 to ensure the historical side and the upstream side have a consistent schema.
