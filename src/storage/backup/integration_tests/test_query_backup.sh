@@ -81,21 +81,22 @@ execute_sql_and_expect \
 select * from t1;" \
 "1 row"
 
-echo "QUERY_EPOCH=backup_safe_epoch + 1, it's < safe_epoch but covered by backup"
-[ $((backup_safe_epoch + 1)) -eq 1 ]
+echo "QUERY_EPOCH=backup_safe_epoch + 1<<16 + 1, it's < safe_epoch but covered by backup"
+epoch=$((backup_safe_epoch + (1<<16) + 1))
+[ ${epoch} -eq 65537 ]
 execute_sql_and_expect \
-"SET QUERY_EPOCH TO $((backup_safe_epoch + 1));
+"SET QUERY_EPOCH TO ${epoch};
 select * from t1;" \
 "0 row"
 
-echo "QUERY_EPOCH=backup_mce < safe_epoch, it's < safe_epoch but covered by backup"
+echo "QUERY_EPOCH=backup_mce, it's < safe_epoch but covered by backup"
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${backup_mce};
 select * from t1;" \
 "3 row"
 
 echo "QUERY_EPOCH=future epoch. It should fail because it's not covered by any backup"
-future_epoch=18446744073709551615
+future_epoch=18446744073709486080
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${future_epoch};
 select * from t1;" \

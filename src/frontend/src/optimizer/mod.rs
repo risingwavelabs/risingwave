@@ -375,13 +375,7 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        let stream_scan_type = if self
-            .plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_arrangement_backfill()
-        {
+        let stream_scan_type = if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -822,13 +816,7 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
-        } else if self
-            .plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_arrangement_backfill()
-        {
+        } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -856,6 +844,17 @@ impl PlanRoot {
     /// Set the plan root's required dist.
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
+    }
+
+    pub fn should_use_arrangement_backfill(&self) -> bool {
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let arrangement_backfill_enabled = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_arrangement_backfill;
+        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 }
 
