@@ -1,0 +1,62 @@
+# reference: <https://github.com/risingwavelabs/risingwave/issues/15724>
+
+- id: create_table
+  sql: |
+    create table t1 (c1 INT, c2 INT, c3 INT);
+  expected_outputs: []
+
+- id : short_circuit_or_pattern
+  before:
+  - create_table
+  sql: |
+    select true or 'abc'::int > 1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+- id : short_circuit_and_pattern
+  before:
+  - create_table
+  sql: |
+    select false and 'abc'::int > 1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+- id : short_circuit_or_pattern_with_table
+  before:
+  - create_table
+  sql: |
+    select true or 'abc'::int > c1 from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+- id : short_circuit_and_pattern_with_table
+  before:
+  - create_table
+  sql: |
+    select false and 'abc'::int > c1 from t1;
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+# should *not* be identified as const
+# ----
+# - id : short_circuit_or_panic_pattern
+#   before:
+#   - create_table
+#   sql: |
+#     select 'abc'::int > c1 or true from t1;
+#   expected_outputs:
+#   - logical_plan
+#   - batch_plan
+# ----
+# - id : short_circuit_and_panic_pattern
+#   before:
+#   - create_table
+#   sql: |
+#     select 'abc'::int > c1 and false from t1;
+#   expected_outputs:
+#   - logical_plan
+#   - batch_plan
