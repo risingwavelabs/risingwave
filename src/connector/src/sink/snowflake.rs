@@ -35,7 +35,6 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const SNOWFLAKE_SINK: &str = "snowflake";
-const MAX_BATCH_ROW_NUM: u32 = 1000;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct SnowflakeCommon {
@@ -87,6 +86,9 @@ pub struct SnowflakeCommon {
     /// The s3 region, e.g., us-east-2
     #[serde(rename = "snowflake.aws_region")]
     pub aws_region: String,
+
+    #[serde(rename = "snowflake.max_batch_row_num")]
+    pub max_batch_row_num: String,
 }
 
 #[serde_as]
@@ -162,6 +164,8 @@ pub struct SnowflakeSinkWriter {
     row_encoder: JsonEncoder,
     row_counter: u32,
     payload: String,
+    /// the threshold for sinking to s3
+    max_batch_row_num: u32,
     sink_file_suffix: u32,
 }
 
@@ -191,6 +195,8 @@ impl SnowflakeSinkWriter {
         )
         .await;
 
+        let max_batch_row_num = config.common.max_batch_row_num.clone().parse::<u32>().expect("failed to parse `snowflake.max_batch_row_num` as a `u32`");
+
         Self {
             config,
             schema: schema.clone(),
@@ -208,6 +214,7 @@ impl SnowflakeSinkWriter {
             ),
             row_counter: 0,
             payload: String::new(),
+            max_batch_row_num,
             // Start from 0, i.e., `RW_SNOWFLAKE_S3_SINK_FILE_0`
             sink_file_suffix: 0,
         }
@@ -223,7 +230,7 @@ impl SnowflakeSinkWriter {
     }
 
     fn at_sink_threshold(&self) -> bool {
-        self.row_counter >= MAX_BATCH_ROW_NUM
+        self.row_counter >= self.max_batch_row_num
     }
 
     fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
