@@ -14,7 +14,6 @@
 
 #![feature(lazy_cell)]
 #![feature(cursor_remaining)]
-#![feature(bound_map)]
 #![feature(trait_alias)]
 #![feature(coroutines)]
 

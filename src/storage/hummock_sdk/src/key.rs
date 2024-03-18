@@ -476,7 +476,11 @@ impl<T: AsRef<[u8]>> TableKey<T> {
             "too short table key: {:?}",
             self.0.as_ref()
         );
-        let (vnode, inner_key) = self.0.as_ref().split_array_ref::<{ VirtualNode::SIZE }>();
+        let (vnode, inner_key) = self
+            .0
+            .as_ref()
+            .split_first_chunk::<{ VirtualNode::SIZE }>()
+            .unwrap();
         (VirtualNode::from_be_bytes(*vnode), inner_key)
     }
 

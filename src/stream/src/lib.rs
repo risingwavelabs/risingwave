@@ -32,7 +32,6 @@
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(btree_extract_if)]
-#![feature(bound_map)]
 #![feature(iter_order_by)]
 #![feature(exact_size_is_empty)]
 #![feature(impl_trait_in_assoc_type)]
