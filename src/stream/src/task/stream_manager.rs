@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
+use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -33,25 +34,32 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
+use risingwave_pb::stream_service::{
+    StreamingControlStreamRequest, StreamingControlStreamResponse,
+};
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore};
 use rw_futures_util::AttachedFuture;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tonic::Status;
 
-use super::{unique_executor_id, unique_operator_id, BarrierCompleteResult};
+use super::{unique_executor_id, unique_operator_id};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, Barrier, DispatchExecutor, DispatcherImpl, Executor,
-    ExecutorInfo, WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatcherImpl, Executor, ExecutorInfo,
+    WrapperExecutor,
 };
 use crate::from_proto::create_executor;
-use crate::task::barrier_manager::{EventSender, LocalActorOperation, LocalBarrierWorker};
+use crate::task::barrier_manager::{
+    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
+};
 use crate::task::{
     ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
     StreamActorManagerState, StreamEnvironment, UpDownActorIds,
@@ -69,6 +77,7 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 #[derive(Clone)]
 pub struct LocalStreamManager {
     await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 
     pub env: StreamEnvironment,
 
@@ -152,7 +161,10 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        let await_tree_reg =
+        let await_tree_reg = await_tree_config
+            .clone()
+            .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
+        let barrier_await_tree_reg =
             await_tree_config.map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
@@ -161,11 +173,13 @@ impl LocalStreamManager {
             env.clone(),
             streaming_metrics,
             await_tree_reg.clone(),
+            barrier_await_tree_reg.clone(),
             watermark_epoch,
             actor_op_rx,
         );
         Self {
             await_tree_reg,
+            barrier_await_tree_reg,
             env,
             actor_op_tx: EventSender(actor_op_tx),
         }
@@ -187,6 +201,16 @@ impl LocalStreamManager {
                 {
                     writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
                 }
+
+                for (e, trace) in self
+                    .barrier_await_tree_reg
+                    .as_ref()
+                    .expect("async stack trace not enabled")
+                    .lock()
+                    .iter()
+                {
+                    writeln!(o, ">> Barrier {}\n\n{}", e, trace).ok();
+                }
             }
         })
     }
@@ -199,22 +223,27 @@ impl LocalStreamManager {
         }
     }
 
-    /// Broadcast a barrier to all senders. Save a receiver in barrier manager
-    pub async fn send_barrier(
-        &self,
-        barrier: Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
-        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> StreamResult<()> {
-        self.actor_op_tx
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)
-            .await
+    /// Get await-tree contexts for all barrier.
+    pub fn get_barrier_traces(&self) -> HashMap<u64, await_tree::TreeContext> {
+        match &self.barrier_await_tree_reg.as_ref() {
+            Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
+            None => Default::default(),
+        }
     }
 
-    /// Use `epoch` to find collect rx. And wait for all actor to be collected before
-    /// returning.
-    pub async fn collect_barrier(&self, prev_epoch: u64) -> StreamResult<BarrierCompleteResult> {
-        self.actor_op_tx.await_epoch_completed(prev_epoch).await
+    /// Receive a new control stream request from meta. Notify the barrier worker to reset the CN and use the new control stream
+    /// to receive control message from meta
+    pub fn handle_new_control_stream(
+        &self,
+        sender: UnboundedSender<Result<StreamingControlStreamResponse, Status>>,
+        request_stream: BoxStream<'static, Result<StreamingControlStreamRequest, Status>>,
+        init_request: InitRequest,
+    ) {
+        self.actor_op_tx
+            .send_event(LocalActorOperation::NewControlStream {
+                handle: ControlStreamHandle::new(sender, request_stream),
+                init_request,
+            })
     }
 
     /// Drop the resources of the given actors.
@@ -225,17 +254,6 @@ impl LocalStreamManager {
                 result_sender,
             })
             .await
-    }
-
-    /// Force stop all actors on this worker, and then drop their resources.
-    pub async fn reset(&self, prev_epoch: u64) {
-        self.actor_op_tx
-            .send_and_await(|result_sender| LocalActorOperation::Reset {
-                result_sender,
-                prev_epoch,
-            })
-            .await
-            .expect("should receive reset")
     }
 
     pub async fn update_actors(&self, actors: Vec<stream_plan::StreamActor>) -> StreamResult<()> {

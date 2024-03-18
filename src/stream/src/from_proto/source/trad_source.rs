@@ -19,8 +19,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{
-    should_copy_to_format_encode_options, ConnectorProperties, SourceCtrlOpts, UPSTREAM_SOURCE_KEY,
+    should_copy_to_format_encode_options, SourceCtrlOpts, UPSTREAM_SOURCE_KEY,
 };
+use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -208,8 +209,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .map(|c| c.to_ascii_lowercase())
                     .unwrap_or_default();
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
-                let is_fs_v2_connector =
-                    ConnectorProperties::is_new_fs_connector_hash_map(&source.with_properties);
+                let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
 
                 if is_fs_connector {
                     #[expect(deprecated)]

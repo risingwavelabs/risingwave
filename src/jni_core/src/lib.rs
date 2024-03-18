@@ -360,10 +360,11 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
                         iter.cursor = None;
                         Ok(JNI_FALSE)
                     }
-                    Some((key, row)) => {
+                    Some(keyed_row) => {
+                        let (key, row) = keyed_row.into_parts();
                         iter.cursor = Some(RowCursor {
                             row,
-                            extra: RowExtra::Key(key),
+                            extra: RowExtra::Key(key.0),
                         });
                         Ok(JNI_TRUE)
                     }
