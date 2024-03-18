@@ -86,12 +86,19 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(
-            Rc::new(source.catalog),
-            SourceNodeKind::CreateMViewOrBatch,
-            self.ctx(),
-        )?
-        .into())
+        if source.is_backfillable_cdc_connector() {
+            Err(ErrorCode::InternalError(
+                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
+            )
+            .into())
+        } else {
+            Ok(LogicalSource::with_catalog(
+                Rc::new(source.catalog),
+                SourceNodeKind::CreateMViewOrBatch,
+                self.ctx(),
+            )?
+            .into())
+        }
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

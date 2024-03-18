@@ -22,14 +22,14 @@ pub mod deployment;
 pub mod env_var;
 pub mod epoch;
 pub mod hash_util;
-pub mod iter_util;
+pub use rw_iter_util as iter_util;
 pub mod memcmp_encoding;
 pub mod meta_addr;
 pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod query_log;
-pub mod resource_util;
+pub use rw_resource_util as resource_util;
 pub mod row_id;
 pub mod row_serde;
 pub mod runtime;
@@ -40,6 +40,3 @@ pub mod stream_graph_visitor;
 pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
-
-#[macro_use]
-pub mod match_util;

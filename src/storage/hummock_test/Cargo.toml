@@ -19,6 +19,7 @@ async-trait = "0.1"
 bytes = { version = "1" }
 clap = { version = "4", features = ["derive"] }
 fail = "0.5"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2.9"
 itertools = "0.12"

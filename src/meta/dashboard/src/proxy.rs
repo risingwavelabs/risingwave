@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use axum::body::Body;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use bytes::Bytes;
 use hyper::header::CONTENT_TYPE;
+use hyper::service::service_fn;
 use hyper::{HeaderMap, Request};
-use parking_lot::Mutex;
+use thiserror_ext::AsReport as _;
 use url::Url;
 
 #[derive(Clone)]
@@ -60,7 +62,7 @@ impl IntoResponse for CachedResponse {
     }
 }
 
-pub async fn proxy(
+async fn proxy(
     req: Request<Body>,
     cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
 ) -> anyhow::Result<Response> {
@@ -69,7 +71,7 @@ pub async fn proxy(
         path += "index.html";
     }
 
-    if let Some(resp) = cache.lock().get(&path) {
+    if let Some(resp) = cache.lock().unwrap().get(&path) {
         return Ok(resp.clone().into_response());
     }
 
@@ -93,7 +95,25 @@ pub async fn proxy(
         uri: url,
     };
 
-    cache.lock().insert(path, resp.clone());
+    cache.lock().unwrap().insert(path, resp.clone());
 
     Ok(resp.into_response())
+}
+
+/// Router for proxying requests to GitHub static files, requiring internet access.
+pub(crate) fn router() -> Router {
+    let cache = Arc::new(Mutex::new(HashMap::new()));
+
+    Router::new().fallback_service(service_fn(move |req: Request<Body>| {
+        let cache = cache.clone();
+        async move {
+            proxy(req, cache).await.or_else(|err| {
+                Ok((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    err.context("Unhandled internal error").to_report_string(),
+                )
+                    .into_response())
+            })
+        }
+    }))
 }

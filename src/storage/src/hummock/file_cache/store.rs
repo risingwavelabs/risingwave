@@ -43,7 +43,7 @@ pub mod preclude {
 
 pub type Result<T> = core::result::Result<T, FileCacheError>;
 
-pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
+pub type FileCacheEvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
@@ -279,7 +279,6 @@ where
                 catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
-                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
                 reclaimers: config.reclaimers,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,
