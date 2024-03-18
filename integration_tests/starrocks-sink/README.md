@@ -23,7 +23,7 @@ Run the following queries to create database and table. You also use other starr
 CREATE database demo;
 use demo;
 
-CREATE table demo_bhv_table(
+CREATE table upsert_table(
     user_id int,
     target_id text,
     event_timestamp_local datetime
@@ -46,5 +46,5 @@ We only support `upsert` with starrocks' `PRIMARY KEY`
 
 Run the following query
 ```sql
-select user_id, count(*) from demo.demo_bhv_table group by user_id;
+select user_id, count(*) from demo.upsert_table group by user_id;
 ```

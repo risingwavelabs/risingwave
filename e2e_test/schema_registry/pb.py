@@ -1,6 +1,6 @@
-from protobuf import user_pb2
-from google.protobuf.source_context_pb2 import SourceContext
 import sys
+import importlib
+from google.protobuf.source_context_pb2 import SourceContext
 from confluent_kafka import Producer
 from confluent_kafka.serialization import (
     SerializationContext,
@@ -26,7 +26,7 @@ def get_user(i):
     )
 
 def get_user_with_more_fields(i):
-    return user_pb2.UserWithMoreFields(
+    return user_pb2.User(
         id=i,
         name="User_{}".format(i),
         address="Address_{}".format(i),
@@ -34,16 +34,6 @@ def get_user_with_more_fields(i):
         gender=user_pb2.MALE if i % 2 == 0 else user_pb2.FEMALE,
         sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
         age=i,
-    )
-
-def get_user_with_new_type(i):
-    return user_pb2.UserWithNewType(
-        id=i,
-        name="User_{}".format(i),
-        address="Address_{}".format(i),
-        city=i,
-        gender=user_pb2.MALE if i % 2 == 0 else user_pb2.FEMALE,
-        sc=SourceContext(file_name="source/context_{:03}.proto".format(i)),
     )
 
 def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, get_user_fn, pb_message):
@@ -69,7 +59,7 @@ def send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, get_u
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         print("pb.py <brokerlist> <schema-registry-url> <topic> <num-records> <pb_message>")
         exit(1)
 
@@ -79,10 +69,11 @@ if __name__ == "__main__":
     num_records = int(sys.argv[4])
     pb_message = sys.argv[5]
 
+    user_pb2 = importlib.import_module(f'protobuf.{pb_message}_pb2')
+
     all_pb_messages = {
-        'user': (get_user, user_pb2.User),
-        'user_with_more_fields': (get_user_with_more_fields, user_pb2.UserWithMoreFields),
-        'user_with_new_type': (get_user_with_new_type, user_pb2.UserWithNewType),
+        'user': get_user,
+        'user_with_more_fields': get_user_with_more_fields,
     }
 
     assert pb_message in all_pb_messages, f'pb_message must be one of {list(all_pb_messages.keys())}'
@@ -91,7 +82,7 @@ if __name__ == "__main__":
     producer_conf = {"bootstrap.servers": broker_list}
 
     try:
-        send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, *all_pb_messages[pb_message])
+        send_to_kafka(producer_conf, schema_registry_conf, topic, num_records, all_pb_messages[pb_message], user_pb2.User)
     except Exception as e:
         print("Send Protobuf data to schema registry and kafka failed {}", e)
         exit(1)

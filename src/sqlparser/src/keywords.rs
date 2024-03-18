@@ -404,6 +404,7 @@ define_keywords!(
     REF,
     REFERENCES,
     REFERENCING,
+    REFRESH,
     REGCLASS,
     REGISTRY,
     REGPROC,

@@ -49,6 +49,8 @@ pub enum WireFormatError {
     NoMagic,
     #[error("fail to read 4-byte schema ID")]
     NoSchemaId,
+    #[error("failed to parse message indexes")]
+    ParseMessageIndexes,
 }
 
 /// extract the magic number and `schema_id` at the front of payload

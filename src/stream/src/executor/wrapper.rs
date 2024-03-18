@@ -66,7 +66,7 @@ impl WrapperExecutor {
         // -- Shared wrappers --
 
         // Await tree
-        let stream = trace::instrument_await_tree(info.clone(), actor_ctx.id, stream);
+        let stream = trace::instrument_await_tree(info.clone(), stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);

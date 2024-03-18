@@ -395,4 +395,19 @@ impl StreamManagerService for StreamServiceImpl {
 
         Ok(Response::new(ListActorStatesResponse { states }))
     }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn list_object_dependencies(
+        &self,
+        _request: Request<ListObjectDependenciesRequest>,
+    ) -> Result<Response<ListObjectDependenciesResponse>, Status> {
+        let dependencies = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_object_dependencies().await,
+            MetadataManager::V2(mgr) => mgr.catalog_controller.list_object_dependencies().await?,
+        };
+
+        Ok(Response::new(ListObjectDependenciesResponse {
+            dependencies,
+        }))
+    }
 }

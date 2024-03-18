@@ -102,7 +102,6 @@ def init_risingwave_mv(docker):
             );
         """
     ]
-
     rw_config = config['risingwave']
     with psycopg2.connect(database=rw_config['db'], user=rw_config['user'], host=rw_config['host'],
                           port=rw_config['port']) as conn:
@@ -126,7 +125,6 @@ def check_spark_table(docker):
         print(f"Executing sql: {sql}")
         result = spark.sql(sql).collect()
         assert result[0][0] > 100, f"Inserted result is too small: {result[0][0]}, test failed"
-
 
 def run_case(case):
     with DockerCompose(case) as docker:

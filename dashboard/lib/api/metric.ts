@@ -15,6 +15,7 @@
  *
  */
 import { Metrics, MetricsSample } from "../../components/metrics"
+import { GetBackPressureResponse } from "../../proto/gen/monitor_service"
 import api from "./api"
 
 export interface BackPressuresMetrics {
@@ -151,10 +152,11 @@ export const BackPressureInfo = {
 
 // Get back pressure from meta node -> compute node
 export async function fetchEmbeddedBackPressure() {
-  const response = await api.get("/metrics/fragment/embedded_back_pressures")
-  let backPressureInfos: BackPressureInfo[] = response.backPressureInfos.map(
-    BackPressureInfo.fromJSON
+  const response: GetBackPressureResponse = await api.get(
+    "/metrics/fragment/embedded_back_pressures"
   )
+  let backPressureInfos: BackPressureInfo[] =
+    response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
   backPressureInfos = backPressureInfos.sort((a, b) => a.actorId - b.actorId)
   return backPressureInfos
 }

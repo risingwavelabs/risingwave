@@ -73,6 +73,8 @@ pub struct QueryExecution {
     shutdown_tx: Sender<QueryMessage>,
     /// Identified by process_id, secret_key. Query in the same session should have same key.
     pub session_id: SessionId,
+    /// Permit to execute the query. Once query finishes execution, this is dropped.
+    pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 struct QueryRunner {
@@ -94,7 +96,11 @@ struct QueryRunner {
 
 impl QueryExecution {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(query: Query, session_id: SessionId) -> Self {
+    pub fn new(
+        query: Query,
+        session_id: SessionId,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
         let state = QueryState::Pending {
@@ -106,6 +112,7 @@ impl QueryExecution {
             state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
+            permit,
         }
     }
 
@@ -507,7 +514,7 @@ pub(crate) mod tests {
         let query = create_query().await;
         let query_id = query.query_id().clone();
         let pinned_snapshot = hummock_snapshot_manager.acquire();
-        let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));

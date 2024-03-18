@@ -13,28 +13,23 @@
 // limitations under the License.
 
 mod prometheus;
-mod proxy;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::{boxed, Body};
+use axum::body::boxed;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, get_service};
+use axum::routing::get;
 use axum::Router;
-use hyper::Request;
-use parking_lot::Mutex;
 use risingwave_rpc_client::ComputeClientPool;
-use thiserror_ext::AsReport;
-use tower::{ServiceBuilder, ServiceExt};
+use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
-use tower_http::services::ServeDir;
 
 use crate::manager::diagnose::DiagnoseCommandRef;
 use crate::manager::MetadataManager;
@@ -46,7 +41,6 @@ pub struct DashboardService {
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
     pub compute_clients: ComputeClientPool,
-    pub ui_path: Option<String>,
     pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
 }
@@ -58,12 +52,11 @@ pub(super) mod handlers {
     use axum::Json;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
-    use risingwave_pb::meta::{ActorLocation, PbTableFragments};
+    use risingwave_pb::meta::PbTableFragments;
     use risingwave_pb::monitor_service::{
         GetBackPressureResponse, HeapProfilingResponse, ListHeapProfilingResponse,
         StackTraceResponse,
@@ -175,30 +168,6 @@ pub(super) mod handlers {
         Ok(Json(views))
     }
 
-    pub async fn list_actors(
-        Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<ActorLocation>>> {
-        let mut node_actors = srv
-            .metadata_manager
-            .all_node_actors(true)
-            .await
-            .map_err(err)?;
-        let nodes = srv
-            .metadata_manager
-            .list_active_streaming_compute_nodes()
-            .await
-            .map_err(err)?;
-        let actors = nodes
-            .into_iter()
-            .map(|node| ActorLocation {
-                node: Some(node.clone()),
-                actors: node_actors.remove(&node.id).unwrap_or_default(),
-            })
-            .collect::<Vec<_>>();
-
-        Ok(Json(actors))
-    }
-
     pub async fn list_fragments(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
@@ -234,6 +203,7 @@ pub(super) mod handlers {
             a.actor_traces.extend(b.actor_traces);
             a.rpc_traces.extend(b.rpc_traces);
             a.compaction_task_traces.extend(b.compaction_task_traces);
+            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
         }
 
         for worker_node in worker_nodes {
@@ -314,10 +284,6 @@ pub(super) mod handlers {
         Path((worker_id, file_path)): Path<(WorkerId, String)>,
         Extension(srv): Extension<Service>,
     ) -> Result<Response> {
-        if srv.ui_path.is_none() {
-            bail!("Should provide ui_path");
-        }
-
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
@@ -396,7 +362,6 @@ pub(super) mod handlers {
 impl DashboardService {
     pub async fn serve(self) -> Result<()> {
         use handlers::*;
-        let ui_path = self.ui_path.clone();
         let srv = Arc::new(self);
 
         let cors_layer = CorsLayer::new()
@@ -405,7 +370,6 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters))
-            .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
             .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
@@ -440,32 +404,13 @@ impl DashboardService {
             .layer(cors_layer);
 
         let trace_ui_router = otlp_embedded::ui_app(srv.trace_state.clone(), "/trace/");
-
-        let dashboard_router = if let Some(ui_path) = ui_path {
-            get_service(ServeDir::new(ui_path))
-                .handle_error(|e| async move { match e {} })
-                .boxed_clone()
-        } else {
-            let cache = Arc::new(Mutex::new(HashMap::new()));
-            tower::service_fn(move |req: Request<Body>| {
-                let cache = cache.clone();
-                async move {
-                    proxy::proxy(req, cache).await.or_else(|err| {
-                        Ok((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            err.context("Unhandled internal error").to_report_string(),
-                        )
-                            .into_response())
-                    })
-                }
-            })
-            .boxed_clone()
-        };
+        let dashboard_router = risingwave_meta_dashboard::router();
 
         let app = Router::new()
             .fallback_service(dashboard_router)
             .nest("/api", api_router)
-            .nest("/trace", trace_ui_router);
+            .nest("/trace", trace_ui_router)
+            .layer(CompressionLayer::new());
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())

@@ -41,7 +41,7 @@ use crate::executor::{DataChunk, Executor};
 /// async fn test_iceberg_scan() {
 ///     let iceberg_scan_executor = IcebergScanExecutor::new(
 ///         IcebergConfig {
-///             database_name: "demo_db".into(),
+///             database_name: Some("demo_db".into()),
 ///             table_name: "demo_table".into(),
 ///             catalog_type: Some("storage".into()),
 ///             path: "s3a://hummock001/".into(),

@@ -29,6 +29,8 @@ impl GrafanaGen {
 [server]
 http_addr = {grafana_host}
 http_port = {grafana_port}
+grpc-max-recv-msg-size-bytes = 104857600 # 100 Mb
+grpc-max-send-msg-size-bytes = 104857600 # 100 Mb
 
 [users]
 default_theme = light

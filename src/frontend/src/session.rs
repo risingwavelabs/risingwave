@@ -173,6 +173,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::for_test()),
             None,
+            None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
@@ -277,6 +278,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
+            batch_config.max_batch_queries_per_frontend_node,
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));

@@ -55,7 +55,7 @@ async fn main() {
     .unwrap();
 
     let output = client
-        .call("gcd", input2, 0)
+        .call("gcd", input2)
         .await
         .expect("failed to call function");
 
@@ -68,7 +68,7 @@ async fn main() {
     .unwrap();
 
     let output = client
-        .call("gcd3", input3, 0)
+        .call("gcd3", input3)
         .await
         .expect("failed to call function");
 
