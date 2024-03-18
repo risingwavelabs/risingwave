@@ -20,6 +20,7 @@ use bytes::Bytes;
 use foyer::memory::CacheContext;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
@@ -57,7 +58,7 @@ pub fn default_opts_for_test() -> StorageOpts {
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,
-        high_priority_ratio: 0,
+        block_cache_eviction_config: EvictionConfig::for_test(),
         disable_remote_compactor: false,
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
