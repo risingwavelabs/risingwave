@@ -76,9 +76,10 @@ public class MongoDbSourceTest {
                             if (!msg.getPayload().isBlank()) {
                                 count++;
                             }
-                        }
-                        if (count >= 10) {
-                            return count;
+                            // Only read 10 messages
+                            if (count >= 10) {
+                                return count;
+                            }
                         }
                     }
                     return count;

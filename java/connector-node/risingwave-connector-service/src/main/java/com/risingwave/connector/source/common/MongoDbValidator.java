@@ -29,7 +29,6 @@ public class MongoDbValidator extends DatabaseValidator {
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbValidator.class);
 
     String mongodbUrl;
-    boolean isAuthEnabled;
     boolean isShardedCluster;
 
     ConnectionString connStr;
@@ -41,9 +40,7 @@ public class MongoDbValidator extends DatabaseValidator {
 
     public MongoDbValidator(Map<String, String> userProps) {
         this.mongodbUrl = userProps.get("mongodb.url");
-        // TODO: check
         this.connStr = new ConnectionString(mongodbUrl);
-        this.isAuthEnabled = false;
         this.isShardedCluster = false;
         this.client = MongoClients.create(connStr.toString());
     }
@@ -61,7 +58,11 @@ public class MongoDbValidator extends DatabaseValidator {
         for (Document roleDoc : roles) {
             var db = roleDoc.getString("db");
             var role = roleDoc.getString("role");
-            if (db.equals("admin") && (role.equals("readWrite") || role.equals("read"))) {
+            if (db.equals("admin")
+                    && (role.equals("readWrite")
+                            || role.equals("read")
+                            || role.equals("readWriteAnyDatabase")
+                            || roles.equals("readAnyDatabase"))) {
                 LOG.info("user has the appropriate roles to read the admin database");
                 return true;
             }
@@ -71,7 +72,6 @@ public class MongoDbValidator extends DatabaseValidator {
 
     @Override
     void validateUserPrivilege() {
-        // TODO: check user privilege
         // https://debezium.io/documentation/reference/stable/connectors/mongodb.html#setting-up-mongodb
         // You must also have a MongoDB user that has the appropriate roles to read the admin
         // database where the oplog can be read. Additionally, the user must also be able to read
@@ -80,9 +80,7 @@ public class MongoDbValidator extends DatabaseValidator {
         // must have cluster-wide privilege actions find and changeStream.
 
         if (null != connStr.getCredential()) {
-            // TODO: user is provided, check user priviledge
             var secret = connStr.getCredential();
-
             var authDb = client.getDatabase(secret.getSource());
 
             Bson command =
@@ -92,7 +90,7 @@ public class MongoDbValidator extends DatabaseValidator {
                                     secret.getUserName()));
 
             Document ret = authDb.runCommand(command);
-            LOG.info("userInfo: {}", ret.toJson());
+            LOG.info("mongodb userInfo: {}", ret.toJson());
 
             List<Document> users = ret.getEmbedded(List.of(USERS), List.class);
             LOG.info("mongodb users => {}", users);
@@ -125,20 +123,10 @@ public class MongoDbValidator extends DatabaseValidator {
 
             // When change streams are used (the default) the user also
             // must have cluster-wide privilege actions find and changeStream.
-            List<Document> inheriPrivis =
-                    user.getEmbedded(List.of(INHERITED_PRIVILEGES), List.class);
-            if (!inheriPrivis.isEmpty()) {
-                for (Document privi : inheriPrivis) {
-                    // TODO:
-                }
-            }
+            // TODO: may check the privilege actions find and changeStream
         }
 
-        if (isShardedCluster) {
-            // TODO: user must able to read the config database
-            // the user must also be able to read the config database in the configuration server of
-            // a sharded cluster and must have listDatabases privilege action.
-        }
+        // TODO: may check privilege for sharded cluster
     }
 
     @Override
