@@ -1750,14 +1750,14 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
-    let meta_shard_num = s.storage.cache.meta_cache_shard_num.unwrap_or_else(|| {
+    let meta_cache_shard_num = s.storage.cache.meta_cache_shard_num.unwrap_or_else(|| {
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
         shard_bits
     });
-    let block_shard_num = s.storage.cache.block_cache_shard_num.unwrap_or_else(|| {
+    let block_cache_shard_num = s.storage.cache.block_cache_shard_num.unwrap_or_else(|| {
         let mut shard_bits = MAX_CACHE_SHARD_BITS;
         while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0
         {
@@ -1821,9 +1821,9 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
-        block_cache_shard_num: block_shard_num,
+        block_cache_shard_num,
         meta_cache_capacity_mb,
-        meta_cache_shard_num: meta_shard_num,
+        meta_cache_shard_num,
         shared_buffer_capacity_mb,
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
