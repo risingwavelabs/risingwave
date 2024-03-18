@@ -30,6 +30,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use super::alter_table_column::schema_has_schema_registry;
 use super::create_source::{bind_columns_from_source, validate_compatibility};
+use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
