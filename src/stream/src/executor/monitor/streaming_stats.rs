@@ -785,7 +785,7 @@ impl StreamingMetrics {
         let opts = histogram_opts!(
             "stream_barrier_sync_storage_duration_seconds",
             "barrier_sync_latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
 

@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y curl gnupg protobuf-compiler && mkdir -
 COPY ./dashboard/ /risingwave/dashboard
 COPY ./proto  /risingwave/proto
 
-RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_modules
+RUN cd /risingwave/dashboard && npm i && npm run build && rm -rf node_modules
 
 
 FROM base AS java-planner

@@ -172,7 +172,8 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     let epoch = barrier.epoch.prev;
 
     // Read the mutation after receiving the barrier from remote input.
-    let mutation_reader = pin!(manager.read_barrier_mutation(&barrier));
+    let mut mutation_reader = pin!(manager.read_barrier_mutation(&barrier));
+    assert!(poll_fn(|cx| Poll::Ready(mutation_reader.as_mut().poll(cx).is_pending())).await);
 
     request_tx
         .send(Ok(StreamingControlStreamRequest {

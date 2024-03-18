@@ -23,6 +23,7 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
 use futures::{FutureExt, StreamExt};
+use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -52,6 +53,7 @@ enum ManagedBarrierStateInner {
 
     /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
     Issued {
+        mutation: Option<Arc<Mutation>>,
         /// Actor ids remaining to be collected.
         remaining_actors: HashSet<ActorId>,
 
@@ -71,7 +73,6 @@ pub(super) struct BarrierState {
     curr_epoch: u64,
     inner: ManagedBarrierStateInner,
     kind: BarrierKind,
-    mutation: Option<Arc<Mutation>>,
 }
 
 type AwaitEpochCompletedFuture =
@@ -139,6 +140,9 @@ pub(super) struct ManagedBarrierState {
 
     /// Futures will be finished in the order of epoch in ascending order.
     await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
+
+    /// Manages the await-trees of all barriers.
+    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 }
 
 impl ManagedBarrierState {
@@ -147,6 +151,7 @@ impl ManagedBarrierState {
         Self::new(
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
+            None,
         )
     }
 
@@ -154,6 +159,7 @@ impl ManagedBarrierState {
     pub(super) fn new(
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
@@ -161,7 +167,17 @@ impl ManagedBarrierState {
             state_store,
             streaming_metrics,
             await_epoch_completed_futures: FuturesOrdered::new(),
+            barrier_await_tree_reg,
         }
+    }
+
+    pub(super) fn reset_and_take_barrier_await_tree_reg(
+        &mut self,
+    ) -> Option<Arc<Mutex<await_tree::Registry<u64>>>> {
+        if let Some(reg) = &self.barrier_await_tree_reg {
+            reg.lock().clear();
+        }
+        self.barrier_await_tree_reg.take()
     }
 
     pub fn read_barrier_mutation(
@@ -177,19 +193,18 @@ impl ManagedBarrierState {
                         mutation_senders: vec![sender],
                     },
                     kind: barrier.kind,
-                    mutation: None,
                 });
             }
             Entry::Occupied(mut o) => {
                 let state = o.get_mut();
-                match state.inner {
+                match &mut state.inner {
                     ManagedBarrierStateInner::Stashed {
                         ref mut mutation_senders,
                     } => {
                         mutation_senders.push(sender);
                     }
-                    ManagedBarrierStateInner::Issued { .. } => {
-                        let _ = sender.send(state.mutation.clone());
+                    ManagedBarrierStateInner::Issued { mutation, .. } => {
+                        let _ = sender.send(mutation.clone());
                     }
                     _ => {
                         panic!(
@@ -271,19 +286,28 @@ impl ManagedBarrierState {
                 }
             }
 
-            self.await_epoch_completed_futures.push_back(
-                sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
-                    move |result| {
-                        (
-                            prev_epoch,
-                            result.map(move |sync_result| BarrierCompleteResult {
-                                sync_result,
-                                create_mview_progress,
-                            }),
-                        )
-                    },
-                ),
-            );
+            self.await_epoch_completed_futures.push_back({
+                let future =
+                    sync_epoch(&self.state_store, &self.streaming_metrics, prev_epoch, kind).map(
+                        move |result| {
+                            (
+                                prev_epoch,
+                                result.map(move |sync_result| BarrierCompleteResult {
+                                    sync_result,
+                                    create_mview_progress,
+                                }),
+                            )
+                        },
+                    );
+                if let Some(reg) = &self.barrier_await_tree_reg {
+                    reg.lock()
+                        .register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
+                        .instrument(future)
+                        .left_future()
+                } else {
+                    future.right_future()
+                }
+            });
         }
     }
 
@@ -402,10 +426,10 @@ impl ManagedBarrierState {
                 curr_epoch: barrier.epoch.curr,
                 inner: ManagedBarrierStateInner::Issued {
                     remaining_actors: actor_ids_to_collect,
+                    mutation: barrier.mutation.clone(),
                     barrier_inflight_latency: timer,
                 },
                 kind: barrier.kind,
-                mutation: barrier.mutation.clone(),
             },
         );
         self.may_have_collected_all(barrier.epoch.prev);

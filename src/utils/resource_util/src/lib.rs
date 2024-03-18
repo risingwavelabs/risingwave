@@ -399,12 +399,10 @@ mod util {
         use std::io::prelude::*;
         use std::thread;
 
-        use tempfile;
-
         use super::*;
-        use crate::util::resource_util::cpu::{self, get_system_cpu};
-        use crate::util::resource_util::memory::get_system_memory;
-        use crate::util::resource_util::{Controller, DEFAULT_CGROUP_MAX_INDICATOR};
+        use crate::cpu::{self, get_system_cpu};
+        use crate::memory::get_system_memory;
+        use crate::{Controller, DEFAULT_CGROUP_MAX_INDICATOR};
         const DEFAULT_NON_EXISTENT_PATH: &str = "default-non-existent-path";
 
         #[test]
