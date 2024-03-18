@@ -272,7 +272,6 @@ mod test {
                             etcd_username: "",
                             etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: None,
-                            dashboard_ui_path: None,
                             prometheus_endpoint: None,
                             prometheus_selector: None,
                             connector_rpc_endpoint: None,
