@@ -96,7 +96,7 @@ pub fn is_local_address(server_addr: &HostAddr, peer_addr: &HostAddr) -> bool {
 }
 
 pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String> {
-    let addr = format!("{}/{}", host, port);
+    let addr = format!("{}:{}", host, port);
     let mut backoff = ExponentialBackoff::from_millis(100)
         .max_delay(Duration::from_secs(3))
         .factor(5);
