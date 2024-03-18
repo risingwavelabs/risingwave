@@ -38,6 +38,14 @@ const SNOWFLAKE_HOST_ADDR: &str = "snowflakecomputing.com";
 const SNOWFLAKE_REQUEST_ID: &str = "RW_SNOWFLAKE_SINK";
 const S3_INTERMEDIATE_FILE_NAME: &str = "RW_SNOWFLAKE_S3_SINK_FILE";
 
+/// The helper function to generate the s3 file name
+fn generate_s3_file_name(s3_path: Option<String>, suffix: String) -> String {
+    match s3_path {
+        Some(path) => format!("{}/{}_{}", path, S3_INTERMEDIATE_FILE_NAME, suffix),
+        None => format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, suffix),
+    }
+}
+
 /// Claims is used when constructing `jwt_token`
 /// with payload specified.
 /// reference: <https://docs.snowflake.com/en/developer-guide/sql-api/authenticating>
@@ -57,6 +65,7 @@ pub struct SnowflakeHttpClient {
     user: String,
     private_key: String,
     header: HashMap<String, String>,
+    s3_path: Option<String>,
 }
 
 impl SnowflakeHttpClient {
@@ -69,6 +78,7 @@ impl SnowflakeHttpClient {
         rsa_public_key_fp: String,
         private_key: String,
         header: HashMap<String, String>,
+        s3_path: Option<String>,
     ) -> Self {
         // TODO: ensure if we need user to *explicitly* provide the `request_id`
         let url = format!(
@@ -88,6 +98,7 @@ impl SnowflakeHttpClient {
             user,
             private_key,
             header,
+            s3_path,
         }
     }
 
@@ -161,9 +172,9 @@ impl SnowflakeHttpClient {
             );
 
         let request = builder
-            .body(Body::from(format!(
-                "{}_{}",
-                S3_INTERMEDIATE_FILE_NAME, file_suffix
+            .body(Body::from(generate_s3_file_name(
+                self.s3_path.clone(),
+                file_suffix,
             )))
             .map_err(|err| SinkError::Snowflake(err.to_string()))?;
 
@@ -187,12 +198,14 @@ impl SnowflakeHttpClient {
 /// TODO(Zihao): refactor this part after s3 sink is available
 pub struct SnowflakeS3Client {
     s3_bucket: String,
+    s3_path: Option<String>,
     s3_client: S3Client,
 }
 
 impl SnowflakeS3Client {
     pub async fn new(
         s3_bucket: String,
+        s3_path: Option<String>,
         aws_access_key_id: String,
         aws_secret_access_key: String,
         aws_region: String,
@@ -219,6 +232,7 @@ impl SnowflakeS3Client {
 
         Self {
             s3_bucket,
+            s3_path,
             s3_client,
         }
     }
@@ -227,7 +241,10 @@ impl SnowflakeS3Client {
         self.s3_client
             .put_object()
             .bucket(self.s3_bucket.clone())
-            .key(format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, file_suffix))
+            .key(generate_s3_file_name(
+                self.s3_path.clone(),
+                file_suffix,
+            ))
             .body(ByteStream::from(data))
             .send()
             .await

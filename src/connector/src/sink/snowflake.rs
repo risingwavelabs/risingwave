@@ -75,6 +75,13 @@ pub struct SnowflakeCommon {
     #[serde(rename = "snowflake.s3_bucket")]
     pub s3_bucket: String,
 
+    /// The optional s3 path to be specified
+    /// the actual file location would be `<s3_bucket>://<s3_path>/<rw_auto_gen_file_name>`
+    /// if this field is specified by user(s)
+    /// otherwise it would be `<s3_bucket>://<rw_auto_gen_file_name>`
+    #[serde(rename = "snowflake.s3_path")]
+    pub s3_path: Option<String>,
+
     /// s3 credentials
     #[serde(rename = "snowflake.aws_access_key_id")]
     pub aws_access_key_id: String,
@@ -194,10 +201,12 @@ impl SnowflakeSinkWriter {
             config.common.rsa_public_key_fp.clone(),
             config.common.private_key.clone(),
             HashMap::new(),
+            config.common.s3_path.clone(),
         );
 
         let s3_client = SnowflakeS3Client::new(
             config.common.s3_bucket.clone(),
+            config.common.s3_path.clone(),
             config.common.aws_access_key_id.clone(),
             config.common.aws_secret_access_key.clone(),
             config.common.aws_region.clone(),
