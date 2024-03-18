@@ -34,7 +34,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, create_builder, get_new_pos, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter, update_backfill_metrics, METADATA_STATE_LEN,
+    mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -216,6 +216,23 @@ where
         if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
+
+            let backfill_snapshot_read_row_count_metric = self
+                .metrics
+                .backfill_snapshot_read_row_count
+                .with_guarded_label_values(&[
+                    upstream_table_id.to_string().as_str(),
+                    self.actor_id.to_string().as_str(),
+                ]);
+
+            let backfill_upstream_output_row_count_metric = self
+                .metrics
+                .backfill_upstream_output_row_count
+                .with_guarded_label_values(&[
+                    upstream_table_id.to_string().as_str(),
+                    self.actor_id.to_string().as_str(),
+                ]);
+
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
@@ -301,13 +318,10 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-                                        update_backfill_metrics(
-                                            &self.metrics,
-                                            self.actor_id,
-                                            upstream_table_id,
-                                            cur_barrier_snapshot_processed_rows,
-                                            cur_barrier_upstream_processed_rows,
-                                        );
+                                        backfill_snapshot_read_row_count_metric
+                                            .inc_by(cur_barrier_snapshot_processed_rows);
+                                        backfill_upstream_output_row_count_metric
+                                            .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
                                     Some(record) => {
@@ -409,13 +423,9 @@ where
                     upstream_chunk_buffer.clear()
                 }
 
-                update_backfill_metrics(
-                    &self.metrics,
-                    self.actor_id,
-                    upstream_table_id,
-                    cur_barrier_snapshot_processed_rows,
-                    cur_barrier_upstream_processed_rows,
-                );
+                backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
+                backfill_upstream_output_row_count_metric
+                    .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
