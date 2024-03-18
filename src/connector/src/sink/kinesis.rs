@@ -186,7 +186,10 @@ impl KinesisSinkPayloadWriter {
         let payload = Blob::new(payload);
         // todo: switch to put_records() for batching
         Retry::spawn(
-            ExponentialBackoff::from_millis(100).map(jitter).take(3),
+            ExponentialBackoff::from_millis(100)
+                .max_delay(std::time::Duration::from_secs(1))
+                .map(jitter)
+                .take(60),
             || async {
                 self.client
                     .put_record()
