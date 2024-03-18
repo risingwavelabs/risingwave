@@ -40,6 +40,7 @@ impl RegexpContext {
 
         Ok(Self {
             regex: RegexBuilder::new(&origin)
+                .backtrack_limit(1_000_000_000)
                 .build()
                 .map_err(|e| ExprError::Parse(e.to_report_string().into()))?,
             global: options.global,
