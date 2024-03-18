@@ -64,6 +64,9 @@ pub struct TelemetryReportBase {
     pub time_stamp: u64,
     /// node_type is the node that creates the report
     pub node_type: TelemetryNodeType,
+    /// is_test is whether the report is from a test environment, default to be false
+    /// needed in CI for compatible tests with telemetry backend
+    pub is_test: bool,
 }
 
 pub trait TelemetryReport: Serialize {}
@@ -123,7 +126,7 @@ impl Default for SystemData {
 }
 
 /// Sends a `POST` request of the telemetry reporting to a URL.
-async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
+pub async fn post_telemetry_report_pb(url: &str, report_body: Vec<u8>) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)

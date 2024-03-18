@@ -14,6 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
@@ -26,7 +27,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = "0.3"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"

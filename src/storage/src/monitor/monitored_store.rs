@@ -16,20 +16,19 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{Future, TryFutureExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
-use tracing::error;
+use tracing::{error, Instrument};
 
 #[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
 use super::{MonitoredStateStoreGetStats, MonitoredStateStoreIterStats, MonitoredStorageMetrics};
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
@@ -76,22 +75,20 @@ impl<S> MonitoredStateStore<S> {
 }
 
 /// A util function to break the type connection between two opaque return types defined by `impl`.
-pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+pub(crate) fn identity(input: impl StateStoreIter) -> impl StateStoreIter {
     input
 }
 
-pub type MonitoredStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
-
-// Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
+// Note: it is important to define the `MonitoredStateStoreIter` type alias, as it marks that
 // the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
-// `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
+// `'a`. If we simply use `impl StateStoreIter + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
 impl<S> MonitoredStateStore<S> {
-    async fn monitored_iter<'a, St: StateStoreIterItemStream + 'a>(
+    async fn monitored_iter<'a, St: StateStoreIter + 'a>(
         &'a self,
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
-    ) -> StorageResult<MonitoredStateStoreIterStream<St>> {
+    ) -> StorageResult<MonitoredStateStoreIter<St>> {
         // start time takes iterator build time into account
         // wait for iterator creation (e.g. seek)
         let start_time = Instant::now();
@@ -109,7 +106,7 @@ impl<S> MonitoredStateStore<S> {
                 self.storage_metrics.clone(),
             ),
         };
-        Ok(monitored.into_stream())
+        Ok(monitored)
     }
 
     pub fn inner(&self) -> &S {
@@ -127,8 +124,6 @@ impl<S> MonitoredStateStore<S> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<Bytes>> {
-        use tracing::Instrument;
-
         let mut stats =
             MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
 
@@ -149,7 +144,7 @@ impl<S> MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type IterStream = impl StateStoreReadIterStream;
+    type Iter = impl StateStoreReadIter;
 
     fn get(
         &self,
@@ -167,7 +162,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         self.monitored_iter(
             read_options.table_id,
             self.inner.iter(key_range, epoch, read_options),
@@ -177,7 +172,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type Iter<'a> = impl StateStoreIter + 'a;
 
     async fn may_exist(
         &self,
@@ -214,7 +209,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
         // TODO: may collect the metrics as local
         self.monitored_iter(table_id, self.inner.iter(key_range, read_options))
@@ -348,26 +343,20 @@ pub struct MonitoredStateStoreIter<S> {
     stats: MonitoredStateStoreIterStats,
 }
 
-impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
-    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(self) {
-        let inner = self.inner;
-
-        let mut stats = self.stats;
-        futures::pin_mut!(inner);
-        while let Some((key, value)) = inner
+impl<S: StateStoreIter> StateStoreIter for MonitoredStateStoreIter<S> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+        if let Some((key, value)) = self
+            .inner
             .try_next()
+            .instrument(tracing::trace_span!("store_iter_try_next"))
             .await
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in next"))?
         {
-            stats.total_items += 1;
-            stats.total_size += key.encoded_len() + value.len();
-            yield (key, value);
+            self.stats.total_items += 1;
+            self.stats.total_size += key.encoded_len() + value.len();
+            Ok(Some((key, value)))
+        } else {
+            Ok(None)
         }
-        drop(stats);
-    }
-
-    fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
-        Self::into_stream_inner(self)
     }
 }

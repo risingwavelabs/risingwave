@@ -34,6 +34,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -697,6 +698,17 @@ impl MetadataManager {
                 .list_streaming_job_states()
                 .await
                 .map(|x| x.len()),
+        }
+    }
+
+    pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        match self {
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_stream_job_for_telemetry().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .list_stream_job_desc_for_telemetry()
+                    .await
+            }
         }
     }
 

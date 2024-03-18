@@ -102,7 +102,7 @@ pub trait WithPropertiesExt: Get + Sized {
         connector.contains("-cdc")
     }
 
-    fn is_shared_cdc_source(&self) -> bool {
+    fn is_backfillable_cdc_connector(&self) -> bool {
         self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
     }
 

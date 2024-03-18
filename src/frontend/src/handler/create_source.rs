@@ -1306,7 +1306,7 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let create_cdc_source_job = with_properties.is_shared_cdc_source();
+    let create_cdc_source_job = with_properties.is_backfillable_cdc_connector();
     let is_shared = create_cdc_source_job
         || (with_properties.is_kafka_connector() && session.config().rw_enable_reusable_source());
 

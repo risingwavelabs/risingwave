@@ -15,6 +15,7 @@
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Hdfs;
 use opendal::Operator;
+use risingwave_common::config::ObjectStoreConfig;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
@@ -22,14 +23,20 @@ use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal hdfs engine.
-    pub fn new_hdfs_engine(namenode: String, root: String) -> ObjectResult<Self> {
+    pub fn new_hdfs_engine(
+        namenode: String,
+        root: String,
+        config: ObjectStoreConfig,
+    ) -> ObjectResult<Self> {
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         builder.root(&root);
-        let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
-        builder.atomic_write_dir(&atomic_write_dir);
+        if config.object_store_set_atomic_write_dir {
+            let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
+            builder.atomic_write_dir(&atomic_write_dir);
+        }
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

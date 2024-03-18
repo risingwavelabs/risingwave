@@ -20,9 +20,9 @@ use parking_lot::Mutex;
 use prometheus::core::{Collector, Desc};
 use prometheus::proto::{Gauge, LabelPair, Metric, MetricFamily};
 use prometheus::Registry;
+use rw_iter_util::ZipEqFast;
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::util::iter_util::ZipEqFast;
 
 pub struct ErrorMetric<const N: usize> {
     payload: Arc<Mutex<HashMap<[String; N], u32>>>,

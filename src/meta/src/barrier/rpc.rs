@@ -38,7 +38,8 @@ use risingwave_rpc_client::StreamClient;
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
+use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -109,17 +110,33 @@ impl ControlStreamManager {
             .committed_epoch;
         let node_id = node.id;
         let node_host = node.host.clone().unwrap();
-        match self.context.new_control_stream_node(node, prev_epoch).await {
-            Ok((stream_node, response_stream)) => {
-                let _ = self.nodes.insert(node_id, stream_node);
-                self.response_streams
-                    .push(into_future(node_id, response_stream));
-                info!(?node_host, "add control stream worker");
-            }
-            Err(e) => {
-                error!(err = %e.as_report(), ?node_host, "fail to start control stream with worker node");
+        let mut backoff = ExponentialBackoff::from_millis(100)
+            .max_delay(Duration::from_secs(3))
+            .factor(5);
+        const MAX_RETRY: usize = 5;
+        for i in 1..=MAX_RETRY {
+            match self
+                .context
+                .new_control_stream_node(node.clone(), prev_epoch)
+                .await
+            {
+                Ok((stream_node, response_stream)) => {
+                    let _ = self.nodes.insert(node_id, stream_node);
+                    self.response_streams
+                        .push(into_future(node_id, response_stream));
+                    info!(?node_host, "add control stream worker");
+                    return;
+                }
+                Err(e) => {
+                    // It may happen that the dns information of newly registered worker node
+                    // has not been propagated to the meta node and cause error. Wait for a while and retry
+                    let delay = backoff.next().unwrap();
+                    error!(attempt = i, backoff_delay = ?delay, err = %e.as_report(), ?node_host, "fail to resolve worker node address");
+                    sleep(delay).await;
+                }
             }
         }
+        error!(?node_host, "fail to create worker node after retry");
     }
 
     pub(super) async fn reset(
