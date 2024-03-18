@@ -79,10 +79,10 @@ pub struct TableCatalog {
     /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
+    /// Key used as materialize's storage key prefix, including MV order columns and `stream_key`.
     pub pk: Vec<ColumnOrder>,
 
-    /// pk_indices of the corresponding materialize operator's output.
+    /// `pk_indices` of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index

@@ -36,7 +36,7 @@ use crate::error::ConnectorResult;
 pub struct AvroParseOptions<'a> {
     pub schema: Option<&'a Schema>,
     /// Strict Mode
-    /// If strict mode is disabled, an int64 can be parsed from an AvroInt (int32) value.
+    /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
     pub relax_numeric: bool,
 }
 
