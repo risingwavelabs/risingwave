@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::layers::{AwaitTreeLayer, LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
@@ -54,6 +54,7 @@ impl OpendalObjectStore {
                     .with_factor(1.0)
                     .with_jitter(),
             )
+            .layer(AwaitTreeLayer::new())
             .finish();
         Ok(Self {
             op,

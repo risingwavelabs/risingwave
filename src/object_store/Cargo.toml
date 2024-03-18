@@ -27,7 +27,7 @@ hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = "0.12"
 madsim = "0.2.22"
-opendal = "0.44.2"
+opendal = { version = "0.44.2", features = ["layers-await-tree"] }
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
 rustls = "0.21.8"

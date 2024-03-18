@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::layers::{AwaitTreeLayer, LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
 
@@ -37,6 +37,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
+            .layer(AwaitTreeLayer::new())
             .finish();
         Ok(Self {
             op,
