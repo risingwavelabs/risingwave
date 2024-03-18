@@ -22,10 +22,10 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::BackupReaderRef;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use crate::hummock::write_limiter::WriteLimiterRef;
 
@@ -33,7 +33,7 @@ pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
-    version_update_sender: UnboundedSender<HummockEvent>,
+    version_update_sender: HummockEventSender,
     version: u64,
 }
 
@@ -142,7 +142,7 @@ impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         backup_reader: BackupReaderRef,
-        version_update_sender: UnboundedSender<HummockEvent>,
+        version_update_sender: HummockEventSender,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {

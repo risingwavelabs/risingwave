@@ -19,7 +19,7 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::HummockResult;
@@ -34,6 +34,7 @@ pub use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -179,7 +180,7 @@ pub type ReadVersionMappingType =
 pub struct LocalInstanceGuard {
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
-    event_sender: mpsc::UnboundedSender<HummockEvent>,
+    event_sender: HummockEventSender,
 }
 
 impl Drop for LocalInstanceGuard {
