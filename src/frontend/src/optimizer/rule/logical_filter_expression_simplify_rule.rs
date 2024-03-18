@@ -18,11 +18,11 @@ use risingwave_connector::source::DataType;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 
-/// Specially for the predicate under `LogicalFilter`
+/// Specially for the predicate under `LogicalFilter -> LogicalShare -> LogicalFilter`
 pub struct LogicalFilterExpressionSimplifyRule {}
 impl Rule for LogicalFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
@@ -33,8 +33,14 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let mut rewriter = ExpressionSimplifyRewriter {};
-        let input = filter.input().rewrite_exprs(&mut rewriter);
-        Some(filter.clone_with_input(input).into())
+        let logical_share_plan = filter.input();
+        let share: &LogicalShare = logical_share_plan.as_logical_share()?;
+        let input = share.input().rewrite_exprs(&mut rewriter);
+        share.replace_input(input);
+        Some(LogicalFilter::create(
+            share.clone().into(),
+            filter.predicate().clone(),
+        ))
     }
 }
 

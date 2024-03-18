@@ -267,7 +267,7 @@
             │           └─StreamSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
             └─StreamExchange { dist: HashShard(ps_suppkey) }
               └─StreamFilter { predicate: (ps_partkey = ps_partkey) }
-                └─StreamShare { id: 38 }
+                └─StreamShare { id: 5 }
                   └─StreamProject { exprs: [ps_partkey, ps_suppkey, ps_supplycost, _row_id] }
                     └─StreamRowIdGen { row_id_index: 5 }
                       └─StreamSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
@@ -373,12 +373,7 @@
 
     Fragment 21
     StreamFilter { predicate: (ps_partkey = ps_partkey) }
-    └── StreamExchange NoShuffle from 22
-
-    Fragment 22
-    StreamProject { exprs: [ps_partkey, ps_suppkey, ps_supplycost, _row_id] }
-    └── StreamRowIdGen { row_id_index: 5 }
-        └── StreamSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] } { tables: [ Source: 38 ] }
+    └── StreamExchange NoShuffle from 7
 
     Table 0 { columns: [ p_partkey, p_mfgr, ps_partkey, min(ps_supplycost), _row_id ], primary key: [ $0 ASC, $3 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3 ], read pk prefix len hint: 3 }
 
@@ -455,8 +450,6 @@
     Table 36 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
     Table 37 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 38 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, min(ps_supplycost), ps_partkey, _row_id#1, _row_id#2, r_regionkey, _row_id#3, n_nationkey, _row_id#4, s_suppkey ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $16 ASC, $17 ASC, $9 ASC, $10 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], distribution key: [ 3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], read pk prefix len hint: 14 }
 
@@ -1931,14 +1924,14 @@
           │ │                 └─StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
           │ └─StreamExchange { dist: HashShard(l_orderkey) }
           │   └─StreamProject { exprs: [l_orderkey, l_suppkey, _row_id] }
-          │     └─StreamShare { id: 20 }
+          │     └─StreamShare { id: 11 }
           │       └─StreamProject { exprs: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id] }
           │         └─StreamRowIdGen { row_id_index: 16 }
           │           └─StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
           └─StreamExchange { dist: HashShard(l_orderkey) }
             └─StreamProject { exprs: [l_orderkey, l_suppkey, _row_id] }
               └─StreamFilter { predicate: (l_receiptdate > l_commitdate) }
-                └─StreamShare { id: 26 }
+                └─StreamShare { id: 11 }
                   └─StreamProject { exprs: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id] }
                     └─StreamRowIdGen { row_id_index: 16 }
                       └─StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
@@ -1956,7 +1949,7 @@
     │   ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
     │   ├── StreamExchange Hash([1]) from 2
     │   └── StreamExchange Hash([0]) from 10
-    └── StreamExchange Hash([0]) from 12
+    └── StreamExchange Hash([0]) from 11
 
     Fragment 2
     StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [s_name, l_orderkey, l_suppkey, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, o_orderkey] }
@@ -2000,24 +1993,12 @@
 
     Fragment 10
     StreamProject { exprs: [l_orderkey, l_suppkey, _row_id] }
-    └── StreamExchange NoShuffle from 11
+    └── StreamExchange NoShuffle from 9
 
     Fragment 11
-    StreamProject { exprs: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id] }
-    └── StreamRowIdGen { row_id_index: 16 }
-        └── StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-            └── tables: [ Source: 25 ]
-
-    Fragment 12
     StreamProject { exprs: [l_orderkey, l_suppkey, _row_id] }
     └── StreamFilter { predicate: (l_receiptdate > l_commitdate) }
-        └── StreamExchange NoShuffle from 13
-
-    Fragment 13
-    StreamProject { exprs: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate, _row_id] }
-    └── StreamRowIdGen { row_id_index: 16 }
-        └── StreamSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-            └── tables: [ Source: 26 ]
+        └── StreamExchange NoShuffle from 9
 
     Table 0 { columns: [ s_name, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2093,10 +2074,6 @@
     Table 23 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 24 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
-
-    Table 25 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
-
-    Table 26 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 

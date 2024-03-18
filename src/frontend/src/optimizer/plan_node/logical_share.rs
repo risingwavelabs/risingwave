@@ -23,7 +23,6 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::error::Result;
-use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -114,21 +113,7 @@ impl ColPrunable for LogicalShare {
     }
 }
 
-impl ExprRewritable for LogicalShare {
-    fn has_rewritable_expr(&self) -> bool {
-        true
-    }
-
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let input = self.input().rewrite_exprs(r);
-        self.core.replace_input(input);
-        Self {
-            base: self.base.clone_with_new_plan_id(),
-            core: self.core.clone(),
-        }
-        .into()
-    }
-}
+impl ExprRewritable for LogicalShare {}
 
 impl ExprVisitable for LogicalShare {}
 
