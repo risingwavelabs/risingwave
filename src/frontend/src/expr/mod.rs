@@ -630,6 +630,9 @@ impl ExprImpl {
                         ExprImpl::Literal(_inner) => {}
                         ExprImpl::FunctionCall(inner) => {
                             if !self.is_short_circuit(inner) {
+                                // only if the current `func_call` is *not* a short-circuit
+                                // expression, e.g., true or (...) | false and (...),
+                                // shall we proceed to visit it.
                                 self.visit_function_call(inner)
                             }
                         }
@@ -642,6 +645,7 @@ impl ExprImpl {
 
             impl HasOthers {
                 fn is_short_circuit(&self, func_call: &Box<FunctionCall>) -> bool {
+                    /// evaluate the first parameter of `Or` or `And` function call
                     fn eval_first(e: &ExprImpl, expect: bool) -> bool {
                         let Some(Ok(Some(scalar))) = e.try_fold_const() else {
                             return false;
