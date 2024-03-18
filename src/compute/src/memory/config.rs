@@ -14,7 +14,7 @@
 
 use foyer::memory::{LfuConfig, LruConfig};
 use risingwave_common::config::{
-    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig, MAX_CACHE_SHARD_BITS,
+    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig, MAX_BLOCK_CACHE_SHARD_BITS,
     MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
 };
 use risingwave_common::util::pretty_bytes::convert;
@@ -173,7 +173,7 @@ pub fn storage_memory_config(
         .cache
         .block_cache_shard_num
         .unwrap_or_else(|| {
-            let mut shard_bits = MAX_CACHE_SHARD_BITS;
+            let mut shard_bits = MAX_BLOCK_CACHE_SHARD_BITS;
             while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
                 && shard_bits > 0
             {

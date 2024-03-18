@@ -1731,7 +1731,7 @@ pub struct StorageMemoryConfig {
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
 pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
-pub const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
+pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
@@ -1758,7 +1758,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         shard_bits
     });
     let block_cache_shard_num = s.storage.cache.block_cache_shard_num.unwrap_or_else(|| {
-        let mut shard_bits = MAX_CACHE_SHARD_BITS;
+        let mut shard_bits = MAX_BLOCK_CACHE_SHARD_BITS;
         while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0
         {
             shard_bits -= 1;
