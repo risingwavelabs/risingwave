@@ -56,7 +56,8 @@ use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
 use super::catalog::desc::SinkDesc;
 use super::{
-    Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DecoupleMode, Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -510,11 +511,13 @@ impl Sink for IcebergSink {
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        if let Some(interval) = desc.properties.get("commit_checkpoint_interval") {
-            interval.parse::<u64>().unwrap_or(0) > 1
+    fn default_sink_decouple(desc: &SinkDesc) -> DecoupleMode {
+        if let Some(interval) = desc.properties.get("commit_checkpoint_interval")
+            && interval.parse::<u64>().unwrap_or(0) > 1
+        {
+            DecoupleMode::Force(true)
         } else {
-            false
+            DecoupleMode::Recommend(false)
         }
     }
 
