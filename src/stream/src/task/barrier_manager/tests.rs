@@ -118,7 +118,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 }
 
 #[tokio::test]
-async fn test_managed_barrier_collection_before_send_request() -> StreamResult<()> {
+async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     let actor_op_tx = LocalBarrierManager::spawn_for_test();
 
     let (request_tx, request_rx) = unbounded_channel();
@@ -171,8 +171,9 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    // Collect a barrier before sending
-    manager.collect(extra_actor_id, &barrier);
+    // Read the mutation after receiving the barrier from remote input.
+    let mut mutation_reader = pin!(manager.read_barrier_mutation(&barrier));
+    assert!(poll_fn(|cx| Poll::Ready(mutation_reader.as_mut().poll(cx).is_pending())).await);
 
     request_tx
         .send(Ok(StreamingControlStreamRequest {
@@ -186,6 +187,12 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
             )),
         }))
         .unwrap();
+
+    let mutation = mutation_reader.await.unwrap();
+    assert_eq!(mutation, barrier.mutation);
+
+    // Collect a barrier before sending
+    manager.collect(extra_actor_id, &barrier);
 
     // Collect barriers from actors
     let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {
