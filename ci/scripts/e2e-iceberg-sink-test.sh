@@ -39,7 +39,7 @@ sleep 1
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
 .risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/iceberg
-wget https://ci-deps-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
+wget https://rw-ci-deps-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
 tar -xf spark-3.3.1-bin-hadoop3.tgz --no-same-owner
 DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.3.1,org.apache.hadoop:hadoop-aws:3.3.2
 spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
