@@ -476,9 +476,9 @@ impl GlobalStreamManager {
         let table_id = table_fragments.table_id();
 
         // Here we need to consider:
-        // - Source with streaming job (backfill-able source)
+        // - Shared source
         // - Table with connector
-        // - MV on backfill-able source
+        // - MV on shared source
         let mut init_split_assignment = self.source_manager.allocate_splits(&table_id).await?;
         init_split_assignment.extend(
             self.source_manager

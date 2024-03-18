@@ -294,7 +294,6 @@ fn build_fragment(
         }
 
         NodeBody::StreamCdcScan(_) => {
-            // XXX: Should we use a different flag for CDC scan?
             current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // the backfill algorithm is not parallel safe
             current_fragment.requires_singleton = true;

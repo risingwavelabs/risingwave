@@ -598,23 +598,21 @@ fn align_backfill_splits(
     upstream_fragment_id: FragmentId,
 ) -> anyhow::Result<HashMap<ActorId, Vec<SplitImpl>>> {
     backfill_actors
-                .into_iter()
-                .map(|(actor_id, upstream_actor_id)| {
-                    let err = || anyhow::anyhow!("source backfill actor should have upstream actor, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_fragment_id}, actor_id: {actor_id}, upstream_assignment: {upstream_assignment:?}, upstream_actor_id: {upstream_actor_id:?}");
-                    if upstream_actor_id.len() != 1 {
-                        return Err(err());
-                    }
-                    let Some(splits ) = upstream_assignment
-                    .get(&upstream_actor_id[0])
-                     else {
-                        return Err(err());
-                     };
-                    Ok((
-                        actor_id,
-                        splits.clone(),
-                    ))
-                })
-                .collect()
+        .into_iter()
+        .map(|(actor_id, upstream_actor_id)| {
+            let err = || anyhow::anyhow!("source backfill actor should have one upstream actor, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_fragment_id}, actor_id: {actor_id}, upstream_assignment: {upstream_assignment:?}, upstream_actor_id: {upstream_actor_id:?}");
+            if upstream_actor_id.len() != 1 {
+                return Err(err());
+            }
+            let Some(splits) = upstream_assignment.get(&upstream_actor_id[0]) else {
+                return Err(err());
+            };
+            Ok((
+                actor_id,
+                splits.clone(),
+            ))
+        })
+        .collect()
 }
 
 impl SourceManager {
@@ -873,6 +871,10 @@ impl SourceManager {
         Ok(assigned)
     }
 
+    /// Allocates splits to actors for a newly created `SourceBackfill` executor.
+    ///
+    /// Unlike [`Self::allocate_splits`], which creates a new assignment,
+    /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_backfill_splits`]).
     pub async fn allocate_splits_for_backfill(
         &self,
         table_id: &TableId,
