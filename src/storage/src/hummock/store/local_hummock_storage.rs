@@ -23,11 +23,11 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
-use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, SkipWatermarkIterator,
@@ -79,7 +79,7 @@ pub struct LocalHummockStorage {
     is_replicated: bool,
 
     /// Event sender.
-    event_sender: mpsc::UnboundedSender<HummockEvent>,
+    event_sender: HummockEventSender,
 
     memory_limiter: Arc<MemoryLimiter>,
 
@@ -519,7 +519,7 @@ impl LocalHummockStorage {
         instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
         hummock_version_reader: HummockVersionReader,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
+        event_sender: HummockEventSender,
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,

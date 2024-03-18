@@ -34,6 +34,9 @@ use risingwave_storage::filter_key_extractor::{
     RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::backup_reader::BackupReader;
+use risingwave_storage::hummock::event_handler::hummock_event_handler::{
+    event_channel_for_test, HummockEventReceiver, HummockEventSender,
+};
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockVersionUpdate};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -43,7 +46,7 @@ use risingwave_storage::hummock::write_limiter::WriteLimiter;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
@@ -51,12 +54,8 @@ pub async fn prepare_first_valid_version(
     env: MetaSrvEnv,
     hummock_manager_ref: HummockManagerRef,
     worker_node: WorkerNode,
-) -> (
-    PinnedVersion,
-    UnboundedSender<HummockEvent>,
-    UnboundedReceiver<HummockEvent>,
-) {
-    let (tx, mut rx) = unbounded_channel();
+) -> (PinnedVersion, HummockEventSender, HummockEventReceiver) {
+    let (tx, mut rx) = event_channel_for_test();
     let notification_client =
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
     let backup_manager = BackupReader::unused().await;
