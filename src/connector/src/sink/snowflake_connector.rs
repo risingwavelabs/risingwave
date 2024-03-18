@@ -241,10 +241,7 @@ impl SnowflakeS3Client {
         self.s3_client
             .put_object()
             .bucket(self.s3_bucket.clone())
-            .key(generate_s3_file_name(
-                self.s3_path.clone(),
-                file_suffix,
-            ))
+            .key(generate_s3_file_name(self.s3_path.clone(), file_suffix))
             .body(ByteStream::from(data))
             .send()
             .await
