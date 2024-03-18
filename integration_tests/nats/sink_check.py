@@ -8,6 +8,7 @@ for sub in sub_containers:
     cmd = f'docker compose logs {sub}'
     output = subprocess.check_output(['docker', 'compose', 'logs', sub])
     output = output.decode('utf-8')
+    print(output)
 
     lines = output.split('\n')
     processed_lines = [line.replace(f'{sub}-1  | ', '') for line in lines]
