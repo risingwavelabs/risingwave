@@ -96,7 +96,7 @@ select * from t1;" \
 "3 row"
 
 echo "QUERY_EPOCH=future epoch. It should fail because it's not covered by any backup"
-future_epoch=18446744073709551615
+future_epoch=18446744073709486080
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${future_epoch};
 select * from t1;" \
