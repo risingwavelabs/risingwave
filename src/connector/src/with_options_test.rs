@@ -38,6 +38,10 @@ fn common_mod_path() -> PathBuf {
     connector_crate_path().join("src").join("common.rs")
 }
 
+fn mqtt_common_mod_path() -> PathBuf {
+    connector_crate_path().join("src").join("mqtt_common.rs")
+}
+
 pub fn generate_with_options_yaml_source() -> String {
     generate_with_options_yaml_inner(&source_mod_path())
 }
@@ -63,6 +67,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
     for entry in walkdir::WalkDir::new(path)
         .into_iter()
         .chain(walkdir::WalkDir::new(common_mod_path()))
+        .chain(walkdir::WalkDir::new(mqtt_common_mod_path()))
     {
         let entry = entry.expect("Failed to read directory entry");
         if entry.path().extension() == Some("rs".as_ref()) {

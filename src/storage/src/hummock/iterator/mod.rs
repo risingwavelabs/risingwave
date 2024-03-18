@@ -37,6 +37,7 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::MergeIterator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
@@ -49,7 +50,6 @@ pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::EpochWithGap;
 pub use skip_watermark::*;
 
 use crate::monitor::StoreLocalStatistic;

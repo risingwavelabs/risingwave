@@ -29,6 +29,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
@@ -588,7 +589,8 @@ impl<P: ByteStreamSourceParser> P {
     ///
     /// A [`ChunkSourceStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
-        let source_info = self.source_ctx().source_info.clone();
+        let actor_id = self.source_ctx().actor_id;
+        let source_id = self.source_ctx().source_id.table_id();
 
         // Ensure chunk size is smaller than rate limit
         let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
@@ -599,13 +601,8 @@ impl<P: ByteStreamSourceParser> P {
 
         // The parser stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream(self, data_stream).instrument_with(move || {
-            tracing::info_span!(
-                "source_parse_chunk",
-                actor_id = source_info.actor_id,
-                source_id = source_info.source_id.table_id()
-            )
-        })
+        into_chunk_stream(self, data_stream)
+            .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
 
@@ -712,7 +709,15 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                 "failed to parse message, skipping"
                             );
                         }
-                        parser.source_ctx().report_user_source_error(&error);
+
+                        // report to error metrics
+                        let context = parser.source_ctx();
+                        GLOBAL_ERROR_METRICS.user_source_error.report([
+                            error.variant_name().to_string(),
+                            context.source_id.to_string(),
+                            context.source_name.clone(),
+                            context.fragment_id.to_string(),
+                        ]);
                     }
                 }
 
@@ -832,7 +837,7 @@ pub enum ByteStreamSourceParserImpl {
 pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
-    /// Converts this parser into a stream of [`StreamChunk`].
+    /// Converts this `SourceMessage` stream into a stream of [`StreamChunk`].
     pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {

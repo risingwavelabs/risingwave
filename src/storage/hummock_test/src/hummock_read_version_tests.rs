@@ -21,6 +21,7 @@ use parking_lot::RwLock;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -44,14 +45,14 @@ async fn test_read_version_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut epoch = 1;
+    let mut epoch = test_epoch(1);
     let table_id = 0;
     let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
     let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version, vnodes);
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch);
+        let kv_pairs = gen_dummy_batch(1);
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
@@ -64,7 +65,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of(epoch as usize);
+        let key = iterator_test_table_key_of(1_usize);
         let key_range = map_table_key_range((
             Bound::Included(Bytes::from(key.to_vec())),
             Bound::Included(Bytes::from(key.to_vec())),
@@ -84,10 +85,9 @@ async fn test_read_version_basic() {
 
     {
         // several epoch
-        for _ in 0..5 {
-            // epoch from 1 to 6
-            epoch += 1;
-            let kv_pairs = gen_dummy_batch(epoch);
+        for i in 0..5 {
+            epoch.inc_epoch();
+            let kv_pairs = gen_dummy_batch(i + 2);
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let imm = SharedBufferBatch::build_shared_buffer_batch_for_test(
@@ -101,13 +101,13 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        for epoch in 1..epoch {
-            let key = iterator_test_table_key_of(epoch as usize);
+        for e in 1..6 {
+            let epoch = test_epoch(e);
+            let key = iterator_test_table_key_of(e as usize);
             let key_range = map_table_key_range((
                 Bound::Included(Bytes::from(key.to_vec())),
                 Bound::Included(Bytes::from(key.to_vec())),
             ));
-
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
                     .staging()
@@ -149,8 +149,8 @@ async fn test_read_version_basic() {
                     object_id: 1,
                     sst_id: 1,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
-                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2),
+                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), test_epoch(1)),
+                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), test_epoch(2)),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -165,8 +165,8 @@ async fn test_read_version_basic() {
                     object_id: 2,
                     sst_id: 2,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
-                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
+                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
+                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
                         right_exclusive: false,
                     }),
                     file_size: 1,
@@ -222,7 +222,8 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].min_epoch());
+
+        assert_eq!(test_epoch(4), staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -246,7 +247,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].min_epoch());
+        assert_eq!(test_epoch(4), staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
@@ -262,7 +263,7 @@ async fn test_read_filter_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let epoch = 1;
+    let epoch = test_epoch(1);
     let table_id = 0;
     let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
     let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
@@ -340,7 +341,7 @@ async fn test_read_filter_basic() {
 
 //     const NUM_SHARDS: u64 = 2;
 //     let table_id = TableId::from(2);
-//     let epoch = 1;
+//     let epoch = test_epoch(1);
 //     let mut read_version_vec = vec![];
 //     let mut imms = vec![];
 

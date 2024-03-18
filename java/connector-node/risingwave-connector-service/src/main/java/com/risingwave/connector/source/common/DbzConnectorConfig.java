@@ -31,10 +31,6 @@ import org.slf4j.LoggerFactory;
 public class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
 
-    /* Debezium private configs */
-    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
-            "debezium.embedded.shutdown.pause.before.interrupt.ms";
-
     public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
             "cdc.source.wait.streaming.before.exit.seconds";
 
@@ -115,7 +111,7 @@ public class DbzConnectorConfig {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            boolean isMultiTableShared) {
+            boolean isCdcSourceJob) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
@@ -124,13 +120,13 @@ public class DbzConnectorConfig {
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isMultiTableShared={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
                 isCdcBackfill,
-                isMultiTableShared);
+                isCdcSourceJob);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -196,7 +192,7 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
-            if (isMultiTableShared) {
+            if (isCdcSourceJob) {
                 // remove table filtering for the shared Postgres source, since we
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Postgres source");

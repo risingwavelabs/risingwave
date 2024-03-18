@@ -432,7 +432,27 @@ impl Default for SplitDiffOptions {
 /// Reassigns splits if there are new splits or dropped splits,
 /// i.e., `actor_splits` and `discovered_splits` differ.
 ///
+/// The existing splits will remain unmoved in their currently assigned actor.
+///
 /// - `fragment_id`: just for logging
+///
+/// ## Different connectors' behavior of split change
+///
+/// ### Kafka and Pulsar
+/// They only support increasing the number of splits via adding new empty splits.
+/// Old data is not moved.
+///
+/// ### Kinesis
+/// It supports *pairwise* shard split and merge.
+///
+/// In both cases, old data remain in the old shard(s) and the old shard is still available.
+/// New data are routed to the new shard(s).
+/// After the retention period has expired, the old shard will become `EXPIRED` and isn't
+/// listed any more. In other words, the total number of shards will first increase and then decrease.
+///
+/// See also:
+/// - [Kinesis resharding doc](https://docs.aws.amazon.com/streams/latest/dev/kinesis-using-sdk-java-after-resharding.html#kinesis-using-sdk-java-resharding-data-routing)
+/// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
 fn reassign_splits<T>(
     fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,

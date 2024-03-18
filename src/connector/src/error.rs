@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::v2::def_anyhow_newtype;
+use risingwave_common::error::def_anyhow_newtype;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
@@ -58,6 +58,9 @@ def_anyhow_newtype! {
     redis::RedisError => "Redis error",
     arrow_schema::ArrowError => "Arrow error",
     google_cloud_pubsub::client::google_cloud_auth::error::Error => "Google Cloud error",
+    tokio_rustls::rustls::Error => "TLS error",
+    rumqttc::v5::ClientError => "MQTT error",
+    rumqttc::v5::OptionError => "MQTT error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

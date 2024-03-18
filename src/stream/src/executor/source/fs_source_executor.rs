@@ -95,14 +95,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let source_ctx = SourceContext::new_with_suppressor(
+        let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
             None,
-            self.actor_ctx.error_suppressor.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
@@ -236,12 +235,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .collect_vec();
 
         if !incompleted.is_empty() {
-            tracing::debug!(actor_id = self.actor_ctx.id, incompleted = ?incompleted, "take snapshot");
+            tracing::debug!(incompleted = ?incompleted, "take snapshot");
             core.split_state_store.set_states(incompleted).await?
         }
 
         if !completed.is_empty() {
-            tracing::debug!(actor_id = self.actor_ctx.id, completed = ?completed, "take snapshot");
+            tracing::debug!(completed = ?completed, "take snapshot");
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
@@ -336,7 +335,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // init in-memory split states with persisted state if any
         self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::debug!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
+        tracing::debug!(state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
