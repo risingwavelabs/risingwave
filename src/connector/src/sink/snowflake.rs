@@ -195,7 +195,12 @@ impl SnowflakeSinkWriter {
         )
         .await;
 
-        let max_batch_row_num = config.common.max_batch_row_num.clone().parse::<u32>().expect("failed to parse `snowflake.max_batch_row_num` as a `u32`");
+        let max_batch_row_num = config
+            .common
+            .max_batch_row_num
+            .clone()
+            .parse::<u32>()
+            .expect("failed to parse `snowflake.max_batch_row_num` as a `u32`");
 
         Self {
             config,
