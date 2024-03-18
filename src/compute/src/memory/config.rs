@@ -14,8 +14,8 @@
 
 use foyer::memory::{LfuConfig, LruConfig};
 use risingwave_common::config::{
-    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig, MAX_BLOCK_CACHE_SHARD_BITS,
-    MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
+    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
+    MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
 };
 use risingwave_common::util::pretty_bytes::convert;
 
@@ -187,6 +187,7 @@ pub fn storage_memory_config(
             high_priority_ratio_in_percent,
         } => EvictionConfig::Lru(LruConfig {
             high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                // adapt to old version
                 storage_config.high_priority_ratio_in_percent.unwrap_or(
                     risingwave_common::config::default::storage::high_priority_ratio_in_percent(),
                 ),
