@@ -27,9 +27,7 @@ use risingwave_hummock_sdk::compact::{
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{
-    can_concat, EpochWithGap, HummockEpoch, HummockSstableObjectId, KeyComparator,
-};
+use risingwave_hummock_sdk::{can_concat, HummockSstableObjectId, KeyComparator};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
@@ -202,6 +200,7 @@ impl CompactorRunner {
                     sst_groups.len()
                 );
                 for table_infos in sst_groups {
+                    assert!(can_concat(&table_infos));
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
                         table_infos,
@@ -925,4 +924,41 @@ where
     compaction_statistics.delta_drop_stat = table_stats_drop;
 
     Ok(compaction_statistics)
+}
+
+#[cfg(test)]
+pub mod tests {
+    use risingwave_hummock_sdk::can_concat;
+
+    use crate::hummock::compactor::compactor_runner::partition_overlapping_sstable_infos;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
+    };
+    use crate::hummock::value::HummockValue;
+
+    #[tokio::test]
+    async fn test_partition_overlapping_level() {
+        const TEST_KEYS_COUNT: usize = 10;
+        let sstable_store = mock_sstable_store();
+        let mut table_infos = vec![];
+        for object_id in 0..10 {
+            let start_index = object_id * TEST_KEYS_COUNT;
+            let end_index = start_index + 2 * TEST_KEYS_COUNT;
+            let table_info = gen_test_sstable_info(
+                default_builder_opt_for_test(),
+                object_id as u64,
+                (start_index..end_index)
+                    .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+                sstable_store.clone(),
+            )
+            .await;
+            table_infos.push(table_info);
+        }
+        let table_infos = partition_overlapping_sstable_infos(table_infos);
+        assert_eq!(table_infos.len(), 2);
+        for ssts in table_infos {
+            assert!(can_concat(&ssts));
+        }
+    }
 }
