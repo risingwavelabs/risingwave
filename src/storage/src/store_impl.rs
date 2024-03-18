@@ -59,7 +59,7 @@ pub enum StateStoreImpl {
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
-    /// state. (e.g., no read_epoch support, no async checkpoint)
+    /// state. (e.g., no `read_epoch` support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
     SledStateStore(Monitored<SledStateStoreType>),
 }

@@ -118,7 +118,7 @@ pub struct ExecutorParams {
     /// The input executor.
     pub input: Vec<Executor>,
 
-    /// FragmentId of the actor
+    /// `FragmentId` of the actor
     pub fragment_id: FragmentId,
 
     /// Metrics

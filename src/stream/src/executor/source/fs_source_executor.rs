@@ -297,7 +297,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     ..
                 }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state = splits.clone();
+                        boot_state.clone_from(splits);
                     }
                 }
                 _ => {}

@@ -403,7 +403,7 @@ pub struct InequalityInputPair {
     pub(crate) key_required_larger: usize,
     /// Input index of less side of inequality.
     pub(crate) key_required_smaller: usize,
-    /// greater >= less + delta_expression
+    /// greater >= less + `delta_expression`
     pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
 }
 

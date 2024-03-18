@@ -67,7 +67,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// User may select a subset of columns from the upstream table.
     output_indices: Vec<usize>,
 
-    /// State table of the CdcBackfill executor
+    /// State table of the `CdcBackfill` executor
     state_table: StateTable<S>,
 
     progress: Option<CreateMviewProgress>,
@@ -401,7 +401,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // Update last seen binlog offset
                                     if consumed_binlog_offset.is_some() {
-                                        last_binlog_offset = consumed_binlog_offset.clone();
+                                        last_binlog_offset.clone_from(&consumed_binlog_offset);
                                     }
 
                                     // update and persist backfill state
