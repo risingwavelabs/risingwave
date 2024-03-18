@@ -206,7 +206,7 @@ message StreamFsFetchNode {
 }
 
 message SourceBackfillNode {
-  uint32 source_id = 1;
+  uint32 upstream_source_id = 1;
   optional uint32 row_id_index = 2;
   repeated plan_common.ColumnCatalog columns = 3;
   catalog.StreamSourceInfo info = 4;

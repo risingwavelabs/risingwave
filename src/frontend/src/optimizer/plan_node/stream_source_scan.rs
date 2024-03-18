@@ -126,7 +126,7 @@ impl StreamSourceScan {
 
         let source_catalog = self.source_catalog();
         let backfill = SourceBackfillNode {
-            source_id: source_catalog.id,
+            upstream_source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
                 Self::infer_internal_table_catalog()

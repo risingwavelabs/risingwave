@@ -184,7 +184,7 @@ impl BuildingFragment {
                 ),
                 NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
                 NodeBody::SourceBackfill(backfill) => (
-                    backfill.source_id.into(),
+                    backfill.upstream_source_id.into(),
                     // FIXME: only pass required columns instead of all columns here
                     backfill
                         .columns

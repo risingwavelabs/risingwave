@@ -210,20 +210,21 @@ impl ActorBuilder {
                 })
             }
 
-            // "Leaf" node `CdcFilter` used in multi-table cdc backfill plan:
+            // "Leaf" node `CdcFilter` and `SourceBackfill`. They both `Merge` an upstream `Source`
             // cdc_filter -> backfill -> mview
-            NodeBody::CdcFilter(node) => {
+            // source_backfill -> mview
+            NodeBody::CdcFilter(_) | NodeBody::SourceBackfill(_) => {
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 1);
 
                 let merge_node = &input[0];
                 assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
 
-                let upstream_source_id = node.upstream_source_id;
-                tracing::debug!(
-                    "rewrite leaf cdc filter node: upstream source id {}",
-                    upstream_source_id,
-                );
+                let upstream_source_id = match stream_node.get_node_body()? {
+                    NodeBody::CdcFilter(node) => node.upstream_source_id,
+                    NodeBody::SourceBackfill(node) => node.upstream_source_id,
+                    _ => unreachable!(),
+                };
 
                 // Index the upstreams by the an external edge ID.
                 let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
@@ -231,11 +232,13 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
-                // Upstream Cdc Source should be singleton.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
+                // Upstream Cdc Source should be singleton.
+                // SourceBackfill is NoShuffle 1-1 correspondence.
+                // So they both should have only one upstream actor.
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                // rewrite the input of `CdcFilter`
+                // rewrite the input
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
@@ -248,44 +251,6 @@ impl ActorBuilder {
                         ..merge_node.clone()
                     },
                 ];
-                Ok(StreamNode {
-                    input,
-                    ..stream_node.clone()
-                })
-            }
-
-            // "Leaf" node `SourceBackfill`.
-            NodeBody::SourceBackfill(source_backfill) => {
-                let input = stream_node.get_input();
-                assert_eq!(input.len(), 1);
-
-                let merge_node = &input[0];
-                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
-
-                let upstream_source_id = source_backfill.source_id;
-
-                // Index the upstreams by the an external edge ID.
-                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
-                    upstream_table_id: upstream_source_id.into(),
-                    downstream_fragment_id: self.fragment_id,
-                }];
-
-                let upstream_actor_id = upstreams.actors.as_global_ids();
-
-                // rewrite the input of `SourceBackfill`
-                let input = vec![
-                    // Fill the merge node body with correct upstream info.
-                    StreamNode {
-                        node_body: Some(NodeBody::Merge(MergeNode {
-                            upstream_actor_id,
-                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                            fields: merge_node.fields.clone(),
-                        })),
-                        ..merge_node.clone()
-                    },
-                ];
-
                 Ok(StreamNode {
                     input,
                     ..stream_node.clone()

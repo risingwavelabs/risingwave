@@ -238,7 +238,7 @@ impl stream_plan::StreamNode {
         if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
             self.node_body.as_ref()
         {
-            return Some(source.source_id);
+            return Some(source.upstream_source_id);
         }
 
         for child in &self.input {
