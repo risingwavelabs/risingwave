@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
-use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::EpochWithGap;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
@@ -207,7 +207,11 @@ impl SessionImpl {
         self.txn_ctx()
             .snapshot
             .get_or_insert_with(|| {
-                let query_epoch = self.config().query_epoch().map(|epoch| Epoch(epoch.get()));
+                // query_epoch must be pure epoch
+                let query_epoch = self
+                    .config()
+                    .query_epoch()
+                    .map(|epoch| EpochWithGap::from_u64(epoch.get()).pure_epoch().into());
 
                 if let Some(query_epoch) = query_epoch {
                     ReadSnapshot::Other(query_epoch)
