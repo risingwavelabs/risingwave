@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,6 +83,8 @@ fn may_verify(state_store: impl StateStore + AsHummock) -> impl StateStore + AsH
     }
     #[cfg(debug_assertions)]
     {
+        use std::marker::PhantomData;
+
         use risingwave_common::util::env_var::env_var_is_true;
         use tracing::info;
 
