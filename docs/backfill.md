@@ -274,7 +274,7 @@ merging the shared buffer and the committed data in the Object store for us.
 Recall from the above section on [schemas](#schemas):
 > For chunks being replicated to the replicated state table, we need to transform them from (2) to (1),
 so they match the upstream state table schema.
-> 
+>
 > For chunks being read from the replicated state table, it must contain logic to transform them from (1) to (2),
 to ensure the historical side and the upstream side have a consistent schema.
 
