@@ -257,8 +257,8 @@ impl SnowflakeSinkWriter {
     async fn sink_payload(&mut self) -> Result<()> {
         // first sink to the external stage provided by user (i.e., s3)
         self.s3_client
-        .sink_to_s3(self.payload.clone().into(), self.sink_file_suffix)
-        .await?;
+            .sink_to_s3(self.payload.clone().into(), self.sink_file_suffix)
+            .await?;
         // then trigger `insertFiles` post request to snowflake
         self.http_client.send_request(self.sink_file_suffix).await?;
         // reset `payload` & `row_counter`
