@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 use tracing::error;
 
@@ -39,7 +39,9 @@ use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
-use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::hummock_event_handler::{
+    event_channel, BufferTracker, HummockEventSender,
+};
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadVersionMappingType,
 };
@@ -59,7 +61,7 @@ use crate::store::*;
 use crate::StateStore;
 
 struct HummockStorageShutdownGuard {
-    shutdown_sender: UnboundedSender<HummockEvent>,
+    shutdown_sender: HummockEventSender,
 }
 
 impl Drop for HummockStorageShutdownGuard {
@@ -78,7 +80,7 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    hummock_event_sender: UnboundedSender<HummockEvent>,
+    hummock_event_sender: HummockEventSender,
 
     context: CompactorContext,
 
@@ -151,7 +153,8 @@ impl HummockStorage {
         .await
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
-        let (event_tx, mut event_rx) = unbounded_channel();
+        let (event_tx, mut event_rx) =
+            event_channel(state_store_metrics.event_handler_pending_event.clone());
 
         let observer_manager = ObserverManager::new(
             notification_client,
