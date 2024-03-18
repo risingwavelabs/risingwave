@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::addr::try_resolve_dns;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -24,6 +26,7 @@ use risingwave_pb::meta::{
 };
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
+use tracing::{error, info};
 
 use crate::MetaError;
 
@@ -46,7 +49,12 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
-        let host = req.get_host()?.clone();
+        let host: HostAddress = req.get_host()?.clone();
+        let socket_addr = try_resolve_dns(&host.host, host.port).await.map_err(|e| {
+            error!(e);
+            Status::internal(e)
+        })?;
+        info!(?socket_addr, ?host, "resolve host addr");
         let property = req
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
