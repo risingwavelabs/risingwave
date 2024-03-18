@@ -195,7 +195,7 @@ impl<T> ReadOnlyRwLockRef<T> {
 pub struct LocalInstanceGuard {
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
-    // Only send destory event when event_sender when is_some
+    // Only send destroy event when event_sender when is_some
     event_sender: Option<HummockEventSender>,
 }
 
