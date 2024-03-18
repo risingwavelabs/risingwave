@@ -5,14 +5,14 @@ export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
 export RUSTC_WRAPPER=sccache
-export SCCACHE_BUCKET=ci-sccache-bucket
+export SCCACHE_BUCKET=rw-ci-sccache-bucket
 export SCCACHE_REGION=us-east-2
 export SCCACHE_IDLE_TIMEOUT=0
 export CARGO_INCREMENTAL=0
 export CARGO_MAKE_PRINT_TIME_SUMMARY=true
-export MINIO_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/minio
-export MCLI_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/mc
-export GCLOUD_DOWNLOAD_TGZ=https://ci-deps-dist.s3.amazonaws.com/google-cloud-cli-406.0.0-linux-x86_64.tar.gz
+export MINIO_DOWNLOAD_BIN=https://rw-ci-deps-dist.s3.amazonaws.com/minio
+export MCLI_DOWNLOAD_BIN=https://rw-ci-deps-dist.s3.amazonaws.com/mc
+export GCLOUD_DOWNLOAD_TGZ=https://rw-ci-deps-dist.s3.amazonaws.com/google-cloud-cli-406.0.0-linux-x86_64.tar.gz
 export NEXTEST_HIDE_PROGRESS_BAR=true
 unset LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
