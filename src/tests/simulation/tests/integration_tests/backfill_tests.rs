@@ -165,7 +165,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     // Create a materialized view with parallelism = 3;
     session.run("SET STREAMING_PARALLELISM=3").await?;
     session
-        .run("SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL=true")
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
         .await?;
     session.run("SET STREAMING_RATE_LIMIT=30").await?;
     session
@@ -283,5 +283,25 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
         progress
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_enable_arrangement_backfill() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::enable_arrangement_backfill()).await?;
+    let mut session = cluster.start_session();
+    // Since cluster disables arrangement backfill, it should not work.
+    session
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
+        .await?;
+    session.run("CREATE TABLE t (v1 int)").await?;
+    let result = session
+        .run("EXPLAIN (verbose) CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t")
+        .await?;
+    assert!(!result.contains("ArrangementBackfill"));
+    session
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=false")
+        .await?;
+    assert!(!result.contains("ArrangementBackfill"));
     Ok(())
 }

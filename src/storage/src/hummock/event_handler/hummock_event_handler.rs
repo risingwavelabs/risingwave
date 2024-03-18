@@ -15,14 +15,18 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, LazyLock};
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
+use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use thiserror_ext::AsReport;
@@ -237,28 +241,47 @@ impl HummockEventHandler {
             state_store_metrics,
             &compactor_context.storage_opts,
             Arc::new(move |payload, task_info| {
+                static NEXT_UPLOAD_TASK_ID: LazyLock<AtomicUsize> =
+                    LazyLock::new(|| AtomicUsize::new(0));
+                let tree_root = upload_compactor_context.await_tree_reg.as_ref().map(|reg| {
+                    let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
+                    reg.write().register(
+                        format!("spawn_upload_task/{}", upload_task_id),
+                        format!("Spawn Upload Task: {}", task_info),
+                    )
+                });
                 let upload_task_latency = upload_task_latency.clone();
                 let wait_poll_latency = wait_poll_latency.clone();
                 let upload_compactor_context = upload_compactor_context.clone();
                 let filter_key_extractor_manager = filter_key_extractor_manager.clone();
                 let sstable_object_id_manager = cloned_sstable_object_id_manager.clone();
-                spawn(async move {
-                    let _timer = upload_task_latency.start_timer();
-                    let ssts = flush_imms(
-                        payload,
-                        task_info,
-                        upload_compactor_context,
-                        filter_key_extractor_manager,
-                        sstable_object_id_manager,
-                    )
-                    .await?;
-                    Ok(UploadTaskOutput {
-                        ssts,
-                        wait_poll_timer: Some(wait_poll_latency.start_timer()),
-                    })
+                spawn({
+                    let future = async move {
+                        let _timer = upload_task_latency.start_timer();
+                        let ssts = flush_imms(
+                            payload,
+                            task_info,
+                            upload_compactor_context.clone(),
+                            filter_key_extractor_manager.clone(),
+                            sstable_object_id_manager.clone(),
+                        )
+                        .await?;
+                        Ok(UploadTaskOutput {
+                            ssts,
+                            wait_poll_timer: Some(wait_poll_latency.start_timer()),
+                        })
+                    };
+                    if let Some(tree_root) = tree_root {
+                        tree_root.instrument(future).left_future()
+                    } else {
+                        future.right_future()
+                    }
                 })
             }),
-            default_spawn_merging_task(compactor_context.compaction_executor.clone()),
+            default_spawn_merging_task(
+                compactor_context.compaction_executor.clone(),
+                compactor_context.await_tree_reg.clone(),
+            ),
             CacheRefiller::default_spawn_refill_task(),
         )
     }
@@ -872,15 +895,17 @@ impl HummockEventHandler {
                     LocalInstanceGuard {
                         table_id,
                         instance_id,
-                        event_sender: self.hummock_event_tx.clone(),
+                        event_sender: Some(self.hummock_event_tx.clone()),
                     },
                 )) {
                     Ok(_) => {}
-                    Err(_) => {
+                    Err((_, mut guard)) => {
                         warn!(
                             "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
                             table_id, instance_id
-                        )
+                        );
+                        guard.event_sender.take().expect("sender is just set");
+                        self.destroy_read_version(table_id, instance_id);
                     }
                 }
             }
@@ -889,6 +914,14 @@ impl HummockEventHandler {
                 table_id,
                 instance_id,
             } => {
+                self.destroy_read_version(table_id, instance_id);
+            }
+        }
+    }
+
+    fn destroy_read_version(&mut self, table_id: TableId, instance_id: LocalInstanceId) {
+        {
+            {
                 debug!(
                     "read version deregister: table_id: {}, instance_id: {}",
                     table_id, instance_id

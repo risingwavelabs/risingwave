@@ -77,9 +77,6 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_SQL_ENDPOINT")]
     pub sql_endpoint: Option<String>,
 
-    #[clap(long, hide = true, env = "RW_DASHBOARD_UI_PATH")]
-    pub dashboard_ui_path: Option<String>,
-
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve PromQL queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
@@ -250,7 +247,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             listen_addr,
             prometheus_addr,
             dashboard_addr,
-            ui_path: opts.dashboard_ui_path,
         };
 
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
