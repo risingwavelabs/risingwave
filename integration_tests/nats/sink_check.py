@@ -11,7 +11,7 @@ for sub in sub_containers:
     print(output)
 
     lines = output.split('\n')
-    processed_lines = [line.replace(f'{sub}-1  | ', '') for line in lines]
+    processed_lines = [line.replace(f'risingwave-compose-{sub}-1  | ', '') for line in lines]
     processed_lines = [line for line in processed_lines if line.strip() != '']
     rows = (len(processed_lines) - 1) / 2
     print(f'{rows} rows in {sub} container')
