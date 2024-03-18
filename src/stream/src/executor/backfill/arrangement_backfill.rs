@@ -468,7 +468,8 @@ where
                 upstream_table.commit(barrier.epoch).await?;
 
                 backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
-                backfill_upstream_output_row_count_metric.inc_by(cur_barrier_upstream_processed_rows);
+                backfill_upstream_output_row_count_metric
+                    .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
