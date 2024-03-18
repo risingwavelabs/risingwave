@@ -168,6 +168,8 @@ pub struct SnowflakeSinkWriter {
     payload: String,
     /// the threshold for sinking to s3
     max_batch_row_num: u32,
+    /// The current epoch, used in naming the sink files
+    epoch: u64,
     sink_file_suffix: u32,
 }
 
@@ -222,6 +224,7 @@ impl SnowflakeSinkWriter {
             row_counter: 0,
             payload: String::new(),
             max_batch_row_num,
+            epoch: 0,
             // Start from 0, i.e., `RW_SNOWFLAKE_S3_SINK_FILE_0`
             sink_file_suffix: 0,
         }
@@ -252,15 +255,27 @@ impl SnowflakeSinkWriter {
         Ok(())
     }
 
+    fn update_epoch(&mut self, epoch: u64) {
+        self.epoch = epoch;
+    }
+
+    /// Construct the file suffix for current sink
+    fn file_suffix(&self) -> String {
+        format!("{}_{}", self.epoch, self.sink_file_suffix)
+    }
+
     /// Sink `payload` to s3, then trigger corresponding `insertFiles` post request
     /// to snowflake, to finish the overall sinking pipeline.
     async fn sink_payload(&mut self) -> Result<()> {
+        if self.payload.is_empty() {
+            return Ok(());
+        }
         // first sink to the external stage provided by user (i.e., s3)
         self.s3_client
-            .sink_to_s3(self.payload.clone().into(), self.sink_file_suffix)
+            .sink_to_s3(self.payload.clone().into(), self.file_suffix())
             .await?;
         // then trigger `insertFiles` post request to snowflake
-        self.http_client.send_request(self.sink_file_suffix).await?;
+        self.http_client.send_request(self.file_suffix()).await?;
         // reset `payload` & `row_counter`
         self.reset();
         // to ensure s3 sink file unique
@@ -271,7 +286,8 @@ impl SnowflakeSinkWriter {
 
 #[async_trait]
 impl SinkWriter for SnowflakeSinkWriter {
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.update_epoch(epoch);
         Ok(())
     }
 

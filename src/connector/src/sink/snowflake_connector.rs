@@ -147,7 +147,7 @@ impl SnowflakeHttpClient {
 
     /// NOTE: this function should ONLY be called *after*
     /// uploading files to remote external staged storage, i.e., AWS S3
-    pub async fn send_request(&self, file_num: u32) -> Result<()> {
+    pub async fn send_request(&self, file_suffix: String) -> Result<()> {
         let (builder, client) = self.build_request_and_client();
 
         // Generate the jwt_token
@@ -163,7 +163,7 @@ impl SnowflakeHttpClient {
         let request = builder
             .body(Body::from(format!(
                 "{}_{}",
-                S3_INTERMEDIATE_FILE_NAME, file_num
+                S3_INTERMEDIATE_FILE_NAME, file_suffix
             )))
             .map_err(|err| SinkError::Snowflake(err.to_string()))?;
 
@@ -223,11 +223,11 @@ impl SnowflakeS3Client {
         }
     }
 
-    pub async fn sink_to_s3(&self, data: Bytes, file_num: u32) -> Result<()> {
+    pub async fn sink_to_s3(&self, data: Bytes, file_suffix: String) -> Result<()> {
         self.s3_client
             .put_object()
             .bucket(self.s3_bucket.clone())
-            .key(format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, file_num))
+            .key(format!("{}_{}", S3_INTERMEDIATE_FILE_NAME, file_suffix))
             .body(ByteStream::from(data))
             .send()
             .await
