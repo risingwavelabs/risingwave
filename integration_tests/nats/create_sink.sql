@@ -30,3 +30,16 @@ VALUES
 
 
 FLUSH;
+
+CREATE SINK nats_sink_all_types_sink
+FROM
+  nats_sink_all_types
+WITH
+  (
+    connector = 'nats',
+    server_url = 'nats-server:4222',
+    subject = 'subject2',
+    type = 'append-only',
+    force_append_only = 'true',
+    connect_mode = 'plain'
+  );
