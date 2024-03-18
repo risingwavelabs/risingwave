@@ -615,13 +615,13 @@ pub struct StorageConfig {
     #[serde(default)]
     pub block_cache_capacity_mb: Option<usize>,
 
-    /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_eviction.high_priority_ratio_in_percent` with `storage.cache.block_cache_eviction.algorithm = "Lru"` instead.
-    #[serde(default)]
-    pub high_priority_ratio_in_percent: Option<usize>,
-
     /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.meta_cache_capacity_mb` instead.
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
+
+    /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_eviction.high_priority_ratio_in_percent` with `storage.cache.block_cache_eviction.algorithm = "Lru"` instead.
+    #[serde(default)]
+    pub high_priority_ratio_in_percent: Option<usize>,
 
     /// max memory usage for large query
     #[serde(default)]
@@ -1734,16 +1734,18 @@ pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
 pub const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
-    let block_cache_capacity_mb = s
-        .storage
-        .cache
-        .block_cache_capacity_mb
-        .unwrap_or(default::storage::block_cache_capacity_mb());
-    let meta_cache_capacity_mb = s
-        .storage
-        .cache
-        .meta_cache_capacity_mb
-        .unwrap_or(default::storage::meta_cache_capacity_mb());
+    let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
+        // adapt to old version
+        s.storage
+            .block_cache_capacity_mb
+            .unwrap_or(default::storage::block_cache_capacity_mb()),
+    );
+    let meta_cache_capacity_mb = s.storage.cache.meta_cache_capacity_mb.unwrap_or(
+        // adapt to old version
+        s.storage
+            .block_cache_capacity_mb
+            .unwrap_or(default::storage::meta_cache_capacity_mb()),
+    );
     let shared_buffer_capacity_mb = s
         .storage
         .shared_buffer_capacity_mb
@@ -1774,9 +1776,12 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         CacheEvictionConfig::Lru {
             high_priority_ratio_in_percent,
         } => EvictionConfig::Lru(LruConfig {
-            high_priority_pool_ratio: high_priority_ratio_in_percent
-                .unwrap_or(default::storage::high_priority_ratio_in_percent())
-                as f64
+            high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                // adapt to old version
+                s.storage
+                    .high_priority_ratio_in_percent
+                    .unwrap_or(default::storage::high_priority_ratio_in_percent()),
+            ) as f64
                 / 100.0,
         }),
         CacheEvictionConfig::Lfu {

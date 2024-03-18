@@ -79,12 +79,15 @@ pub fn storage_memory_config(
         * STORAGE_META_CACHE_MEMORY_PROPORTION)
         .ceil() as usize)
         >> 20;
-    let meta_cache_capacity_mb = storage_config
-        .meta_cache_capacity_mb
-        .unwrap_or(std::cmp::min(
-            default_meta_cache_capacity_mb,
-            STORAGE_META_CACHE_MAX_MEMORY_MB,
-        ));
+    let meta_cache_capacity_mb = storage_config.cache.meta_cache_capacity_mb.unwrap_or(
+        // adapt to old version
+        storage_config
+            .meta_cache_capacity_mb
+            .unwrap_or(std::cmp::min(
+                default_meta_cache_capacity_mb,
+                STORAGE_META_CACHE_MAX_MEMORY_MB,
+            )),
+    );
 
     let prefetch_buffer_capacity_mb = storage_config
         .prefetch_buffer_capacity_mb
@@ -113,9 +116,12 @@ pub fn storage_memory_config(
         default_block_cache_capacity_mb =
             default_block_cache_capacity_mb.saturating_sub(shared_buffer_capacity_mb);
     }
-    let block_cache_capacity_mb = storage_config
-        .block_cache_capacity_mb
-        .unwrap_or(default_block_cache_capacity_mb);
+    let block_cache_capacity_mb = storage_config.cache.block_cache_capacity_mb.unwrap_or(
+        // adapt to old version
+        storage_config
+            .block_cache_capacity_mb
+            .unwrap_or(default_block_cache_capacity_mb),
+    );
 
     let data_file_cache_ring_buffer_capacity_mb = if storage_config.data_file_cache.dir.is_empty() {
         0
@@ -181,7 +187,9 @@ pub fn storage_memory_config(
             high_priority_ratio_in_percent,
         } => EvictionConfig::Lru(LruConfig {
             high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
-                risingwave_common::config::default::storage::high_priority_ratio_in_percent(),
+                storage_config.high_priority_ratio_in_percent.unwrap_or(
+                    risingwave_common::config::default::storage::high_priority_ratio_in_percent(),
+                ),
             ) as f64
                 / 100.0,
         }),
