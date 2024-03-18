@@ -462,11 +462,27 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
+        let this = self.clone();
+        async fn notify_panic<C: BatchTaskContext>(
+            this: &BatchTaskExecution<C>,
+            state_tx: Option<&mut StateReporter>,
+        ) {
+            let err_str = "execution panic".into();
+            if let Err(e) = this
+                .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str))
+                .await
+            {
+                warn!(
+                    error = %e.as_report(),
+                    "The status receiver in FE has closed so the status push is failed",
+                );
+            }
+        }
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
             let sender = sender;
-            let mut state_tx = state_tx;
+            let mut state_tx_1 = state_tx.clone();
             let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
@@ -481,7 +497,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // close it after task error has been set.
                 expr_context_scope(
                     expr_context,
-                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span),
+                    t_1.run(exec, sender, state_tx_1.as_mut()).instrument(span),
                 )
                 .await;
             };
@@ -492,6 +508,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     AssertUnwindSafe(TaskMonitor::instrument(&monitor, task(task_id.clone())));
                 if let Err(error) = instrumented_task.rw_catch_unwind().await {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
+                    notify_panic(&this, state_tx.as_mut()).await;
                 }
                 let cumulative = monitor.cumulative();
                 batch_metrics
@@ -517,6 +534,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 .await
             {
                 error!("Batch task {:?} panic: {:?}", task_id, error);
+                notify_panic(&this, state_tx.as_mut()).await;
             }
         };
 
