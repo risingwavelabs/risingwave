@@ -43,6 +43,7 @@ use risingwave_storage::row_serde::row_serde_util::{serialize_pk, serialize_pk_w
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{StateStoreIterExt, StateStoreReadIter};
 use risingwave_storage::table::{compute_vnode, TableDistribution, SINGLETON_VNODE};
+use risingwave_storage::StateStoreIter;
 use rw_futures_util::select_all;
 
 use crate::common::log_store_impl::kv_log_store::{
@@ -544,7 +545,7 @@ impl<S: StateStoreReadIter> LogStoreRowOpStream<S> {
     }
 }
 
-pub(crate) type LogStoreItemMergeStream<S> =
+pub(crate) type LogStoreItemMergeStream<S: StateStoreIter + 'static> =
     impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIter>(
     iters: Vec<S>,
