@@ -119,12 +119,8 @@ pub struct StreamingMetrics {
     pub temporal_join_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
     // Backfill
-    pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
-    pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
-
-    // Arrangement Backfill
-    pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
-    pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+    pub backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
+    pub backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
     // CDC Backfill
     pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
@@ -670,7 +666,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+        let backfill_snapshot_read_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_snapshot_read_row_count",
             "Total number of rows that have been read from the backfill snapshot",
             &["table_id", "actor_id"],
@@ -678,30 +674,13 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+        let backfill_upstream_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_upstream_output_row_count",
             "Total number of rows that have been output from the backfill upstream",
             &["table_id", "actor_id"],
             registry
         )
         .unwrap();
-
-        let arrangement_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
-            "stream_arrangement_backfill_snapshot_read_row_count",
-            "Total number of rows that have been read from the arrangement_backfill snapshot",
-            &["table_id", "actor_id"],
-            registry
-        )
-        .unwrap();
-
-        let arrangement_backfill_upstream_output_row_count =
-            register_int_counter_vec_with_registry!(
-                "stream_arrangement_backfill_upstream_output_row_count",
-                "Total number of rows that have been output from the arrangement_backfill upstream",
-                &["table_id", "actor_id"],
-                registry
-            )
-            .unwrap();
 
         let cdc_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
             "stream_cdc_backfill_snapshot_read_row_count",
@@ -1116,8 +1095,6 @@ impl StreamingMetrics {
             temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
-            arrangement_backfill_snapshot_read_row_count,
-            arrangement_backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
             over_window_cached_entry_count,
