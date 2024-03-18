@@ -191,6 +191,22 @@ impl<T> ChangeLogValue<T> {
     }
 }
 
+impl<T: AsRef<[u8]>> ChangeLogValue<T> {
+    pub fn to_ref(&self) -> ChangeLogValue<&[u8]> {
+        match self {
+            ChangeLogValue::Insert(val) => ChangeLogValue::Insert(val.as_ref()),
+            ChangeLogValue::Update {
+                new_value,
+                old_value,
+            } => ChangeLogValue::Update {
+                new_value: new_value.as_ref(),
+                old_value: old_value.as_ref(),
+            },
+            ChangeLogValue::Delete(val) => ChangeLogValue::Delete(val.as_ref()),
+        }
+    }
+}
+
 pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
 pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
 #[derive(Clone)]
