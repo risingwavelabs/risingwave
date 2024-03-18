@@ -42,6 +42,7 @@
   - batch_plan
 
 # should *not* be identified as const
+# otherwise the *semantic* will be inconsistent
 # ----
 # - id : short_circuit_or_panic_pattern
 #   before:
@@ -60,3 +61,4 @@
 #   expected_outputs:
 #   - logical_plan
 #   - batch_plan
+# ----
