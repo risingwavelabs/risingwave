@@ -181,11 +181,13 @@ since `ArrangementBackfill` can be on a different parallel unit than its upstrea
 For the historical part,
 we use a `Replicated StateTable` to read historical data, and replicate the shared buffer.
 
-### Arrangement Backfill gets planned
+### Arrangement Backfill Frontend
 
 TODO: Discuss frontend parts here.
 
 ### Backfill logic
+
+#### Overview
 
 ![backfill sides](./images/backfill/backfill-sides.png)
 
@@ -201,9 +203,13 @@ so our snapshot is stale.
 We will poll from this stream in backfill to get upstream and historical data chunks for processing,
 as well as barriers to checkpoint to backfill state.
 
+For each chunk (DataChunk / StreamChunk), we may also need to do some further processing based on their schemas.
+
+#### Schemas
+
 ![schema](./images/backfill/schema.png)
 
-There are 3 schemas to consider when processing the historical data:
+There are 3 schemas to consider when processing the backfill data:
 1. The state table schema of upstream.
 2. The output schema from upstream to arrangement backfill.
 3. The output schema from arrangement backfill to its downstream.
@@ -216,6 +222,8 @@ so they match the upstream state table schema.
 
 For chunks being read from the replicated state table, it must contain logic to transform them from (1) to (2),
 to ensure the historical side and the upstream side have a consistent schema.
+
+#### Polling loop
 
 ![handle_poll](./images/backfill/handle-poll.png)
 
@@ -260,6 +268,62 @@ To replicate the shared buffer, we simply just create a `ReplicatedStateTable`.
 This will just store the `ReadVersions` but never upload them to the Object Store.
 Then the `StateTable`'s logic will take care of
 merging the shared buffer and the committed data in the Object store for us.
+
+#### Example: Read / Write Paths Replicated Chunk
+
+Recall from the above section on [schemas](#schemas):
+> For chunks being replicated to the replicated state table, we need to transform them from (2) to (1),
+so they match the upstream state table schema.
+> 
+> For chunks being read from the replicated state table, it must contain logic to transform them from (1) to (2),
+to ensure the historical side and the upstream side have a consistent schema.
+
+Where (1) refers to the state table schema of upstream,
+and (2) refers to the output schema from upstream to arrangement backfill.
+
+![replication_example](./images/backfill/replication-example.png)
+
+Now let's consider an instance where (1) has the schema:
+
+| id | name | age | drivers_license_id |
+|----|------|-----|--------------------|
+
+And (2) has the schema:
+
+| drivers_license_id | name | id |
+|--------------------|------|----|
+
+Consider if we have the following chunk being replicated to the `ReplicatedStateTable`:
+
+| drivers_license_id | name   | id |
+|--------------------|--------|----|
+| 1                  | 'Jack' | 29 |
+
+We will to transform it to the schema of (1), and insert it into the `ReplicatedStateTable`:
+
+| id | name   | age  | drivers_license_id |
+|----|--------|------|--------------------|
+| 29 | 'Jack' | NULL | 1                  |
+
+This will then be serialized into kv pairs and written to the state store.
+
+Subsequently, when reading from the state store to get historical data, we deserialize the kv pairs,
+merging the shared buffer with the committed data in the Object Store.
+
+Let's say we got this back:
+
+| id | name   | age  | drivers_license_id |
+|----|--------|------|--------------------|
+| 29 | 'Jack' | NULL | 1                  |
+| 30 | 'Jill' | 30   | 2                  |
+
+Then we will transform it to the schema of (2),
+and arrangement backfill will consume this historical data snapshot:
+
+| drivers_license_id | name   | id |
+|--------------------|--------|----|
+| 1                  | 'Jack' | 29 |
+| 2                  | 'Jill' | 30 |
 
 ### Recovery
 
