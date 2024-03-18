@@ -4150,9 +4150,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a694cde4dd2c9fdd8cc2d294fcb265fdd6be1ee62fa35c37e9fc328871f33b6d"
+checksum = "65b0a4ca5d917e684c9267e8e2bcec4b3e0c27dd91c84945c20c09ddff906cac"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.4.2",
@@ -8917,6 +8917,7 @@ dependencies = [
  "ethnum",
  "expect-test",
  "fixedbitset 0.5.0",
+ "foyer",
  "futures",
  "governor",
  "hex",
@@ -9130,6 +9131,7 @@ dependencies = [
  "chrono",
  "clap",
  "either",
+ "foyer",
  "futures",
  "futures-async-stream",
  "hyper",
@@ -14229,9 +14231,6 @@ dependencies = [
  "uuid",
  "whoami",
  "zeroize",
- "zstd 0.13.0",
- "zstd-safe 7.0.0",
- "zstd-sys",
 ]
 
 [[package]]
