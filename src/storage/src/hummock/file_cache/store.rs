@@ -43,7 +43,7 @@ pub mod preclude {
 
 pub type Result<T> = core::result::Result<T, FileCacheError>;
 
-pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
+pub type FileCacheEvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;

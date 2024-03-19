@@ -3914,9 +3914,9 @@ impl CatalogManager {
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::AuthInfo => user.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => {
-                user.name = update_user.name.clone();
+                user.name.clone_from(&update_user.name);
             }
         });
 

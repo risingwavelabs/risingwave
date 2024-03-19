@@ -444,6 +444,7 @@ mod tests {
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Execute, Mutation};
     use crate::task::test_utils::helper_make_local_actor;
+    use crate::task::LocalBarrierManager;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -724,6 +725,7 @@ mod tests {
         let remote_input = {
             let pool = ComputeClientPool::default();
             RemoteInput::new(
+                LocalBarrierManager::for_test(),
                 pool,
                 addr.into(),
                 (0, 0),

@@ -352,8 +352,12 @@ pub(crate) async fn bind_columns_from_source(
             )?;
 
             stream_source_info.use_schema_registry = protobuf_schema.use_schema_registry;
-            stream_source_info.row_schema_location = protobuf_schema.row_schema_location.0.clone();
-            stream_source_info.proto_message_name = protobuf_schema.message_name.0.clone();
+            stream_source_info
+                .row_schema_location
+                .clone_from(&protobuf_schema.row_schema_location.0);
+            stream_source_info
+                .proto_message_name
+                .clone_from(&protobuf_schema.message_name.0);
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
@@ -388,7 +392,9 @@ pub(crate) async fn bind_columns_from_source(
             )?;
 
             stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info.row_schema_location = row_schema_location.0.clone();
+            stream_source_info
+                .row_schema_location
+                .clone_from(&row_schema_location.0);
             stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
