@@ -422,7 +422,7 @@ fn encode_field<D: MaybeData>(
                                          * Group C: experimental */
         },
         DataType::Int16 => match (expect_list, proto_field.kind()) {
-            (false, Kind::String) if is_big_query => {
+            (false, Kind::Int64) if is_big_query => {
                 maybe.on_base(|s| Ok(Value::I64(s.into_int16() as i64)))?
             }
             _ => return no_match_err(),
@@ -486,7 +486,6 @@ mod tests {
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
         let descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
-        println!("a{:?}", descriptor.descriptor_proto());
         let schema = Schema::new(vec![
             Field::with_name(DataType::Boolean, "bool_field"),
             Field::with_name(DataType::Varchar, "string_field"),

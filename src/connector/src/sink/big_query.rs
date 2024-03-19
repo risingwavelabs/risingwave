@@ -345,8 +345,7 @@ impl BigQuerySinkWriter {
                 .iter()
                 .map(|f| (f.name.as_str(), &f.data_type)),
             config.common.table.clone(),
-            1,
-        );
+        )?;
 
         if !is_append_only {
             let field = FieldDescriptorProto {
@@ -579,33 +578,33 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> prost_reflect::Desc
 fn build_protobuf_schema<'a>(
     fields: impl Iterator<Item = (&'a str, &'a DataType)>,
     name: String,
-    index: i32,
-) -> DescriptorProto {
+) -> Result<DescriptorProto> {
     let mut proto = DescriptorProto {
         name: Some(name),
         ..Default::default()
     };
-    let mut index_mut = index;
-    let mut field_vec = vec![];
     let mut struct_vec = vec![];
-    for (name, data_type) in fields {
-        let (field, des_proto) = build_protobuf_field(data_type, index_mut, name.to_string());
-        field_vec.push(field);
-        if let Some(sv) = des_proto {
-            struct_vec.push(sv);
-        }
-        index_mut += 1;
-    }
+    let field_vec = fields
+        .enumerate()
+        .map(|(index, (name, data_type))| {
+            let (field, des_proto) =
+                build_protobuf_field(data_type, (index + 1) as i32, name.to_string())?;
+            if let Some(sv) = des_proto {
+                struct_vec.push(sv);
+            }
+            Ok(field)
+        })
+        .collect::<Result<Vec<_>>>()?;
     proto.field = field_vec;
     proto.nested_type = struct_vec;
-    proto
+    Ok(proto)
 }
 
 fn build_protobuf_field(
     data_type: &DataType,
     index: i32,
     name: String,
-) -> (FieldDescriptorProto, Option<DescriptorProto>) {
+) -> Result<(FieldDescriptorProto, Option<DescriptorProto>)> {
     let mut field = FieldDescriptorProto {
         name: Some(name.clone()),
         number: Some(index),
@@ -628,21 +627,25 @@ fn build_protobuf_field(
         DataType::Struct(s) => {
             field.r#type = Some(field_descriptor_proto::Type::Message.into());
             let name = format!("Struct{}", name);
-            let sub_proto = build_protobuf_schema(s.iter(), name.clone(), 1);
+            let sub_proto = build_protobuf_schema(s.iter(), name.clone())?;
             field.type_name = Some(name);
-            return (field, Some(sub_proto));
+            return Ok((field, Some(sub_proto)));
         }
         DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.as_ref(), index, name.clone());
+            let (mut field, proto) = build_protobuf_field(l.as_ref(), index, name.clone())?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
-            return (field, proto);
+            return Ok((field, proto));
         }
         DataType::Bytea => field.r#type = Some(field_descriptor_proto::Type::Bytes.into()),
         DataType::Jsonb => field.r#type = Some(field_descriptor_proto::Type::String.into()),
         DataType::Serial => field.r#type = Some(field_descriptor_proto::Type::Int64.into()),
-        DataType::Float32 | DataType::Int256 => todo!(),
+        DataType::Float32 | DataType::Int256 => {
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Don't support Float32 and Int256"
+            )))
+        }
     }
-    (field, None)
+    Ok((field, None))
 }
 
 #[cfg(test)]
@@ -701,7 +704,7 @@ mod test {
             .fields()
             .iter()
             .map(|f| (f.name.as_str(), &f.data_type));
-        let desc = build_protobuf_schema(fields, "t1".to_string(), 1);
+        let desc = build_protobuf_schema(fields, "t1".to_string()).unwrap();
         let pool = build_protobuf_descriptor_pool(&desc);
         let t1_message = pool.get_message_by_name("t1").unwrap();
         assert_matches!(
