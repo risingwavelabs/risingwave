@@ -93,7 +93,7 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 
     ctx: ActorContextRef,
