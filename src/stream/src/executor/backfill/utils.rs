@@ -554,7 +554,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
         if old_state[1..] != current_partial_state[1..] {
             vnodes.iter_vnodes_scalar().for_each(|vnode| {
                 let datum = Some(vnode.into());
-                current_partial_state[0] = datum.clone();
+                current_partial_state[0].clone_from(&datum);
                 old_state[0] = datum;
                 table.write_record(Record::Update {
                     old_row: &old_state[..],

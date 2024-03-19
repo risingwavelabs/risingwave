@@ -94,7 +94,7 @@ impl HummockServiceOpts {
         };
 
         if let Some(dir) = &self.data_dir {
-            opts.data_directory = dir.clone();
+            opts.data_directory.clone_from(dir);
         }
 
         opts

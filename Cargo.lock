@@ -9082,6 +9082,7 @@ dependencies = [
  "thiserror",
  "thiserror-ext",
  "tinyvec",
+ "tokio-retry",
  "toml 0.8.2",
  "tower-layer",
  "tower-service",
