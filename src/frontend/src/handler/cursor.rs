@@ -47,7 +47,8 @@ pub async fn handle_declare_cursor(
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
 
-    let cursor = Cursor::new(plan_fragmenter_result, formats);
+    let mut cursor = Cursor::new(plan_fragmenter_result, formats);
+    cursor.forward_all(session.clone()).await?;
     session.add_cursor(cursor_name, cursor)?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
@@ -57,7 +58,15 @@ pub async fn handle_cursor_fetch(
     cursor_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let row = session.next(&cursor_name, session.clone()).await?;
-
-    Ok(PgResponse::empty_result(StatementType::CURSOR_FETCH))
+    let row = session.curosr_next(&cursor_name)?;
+    let row_set = if let Some(row) = row {
+        vec![row]
+    } else {
+        vec![]
+    };
+    let pg_descs = session.pg_descs(&cursor_name)?;
+    // .values(futures::stream::iter(vec![Ok(row_set)]).boxed(), pg_descs)
+    Ok(PgResponse::builder(StatementType::CURSOR_FETCH)
+        .values(row_set.into(), pg_descs)
+        .into())
 }

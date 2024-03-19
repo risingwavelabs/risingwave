@@ -32,7 +32,7 @@ use pgwire::pg_server::{
     BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
     UserAuthenticator,
 };
-use pgwire::types::{Format, FormatIterator, Row};
+use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::acl::AclMode;
@@ -103,7 +103,6 @@ use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
     GLOBAL_DISTRIBUTED_QUERY_METRICS,
 };
-use crate::session::cursor::Cursor;
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
@@ -584,7 +583,7 @@ pub struct SessionImpl {
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
     /// The cursors declared in the transaction.
-    cursors: HashMap<ObjectName, Cursor>,
+    cursors: Mutex<HashMap<ObjectName, Cursor>>,
 }
 
 #[derive(Error, Debug)]

@@ -14,41 +14,20 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
-use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
-use postgres_types::FromSql;
-use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::{DataType, Datum};
-use risingwave_sqlparser::ast::{ObjectName, SetExpr, Statement};
+use risingwave_sqlparser::ast::ObjectName;
 
-use super::{transaction, PgResponseStream, RwPgResponse};
-use crate::binder::{Binder, BoundStatement};
-use crate::catalog::TableId;
+use super::{transaction, PgResponseStream};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::privilege::resolve_privileges;
 use crate::handler::query::{distribute_execute, local_execute, BatchPlanFragmenterResult};
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
-use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{
-    ExecutionModeDecider, OptimizerContext, OptimizerContextRef, RelationCollectorVisitor,
-    SysTableVisitor,
-};
-use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::Query;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{
-    BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream,
-};
 use crate::session::SessionImpl;
-use crate::PlanRef;
 
 pub struct Cursor {
     plan_fragmenter_result: BatchPlanFragmenterResult,
@@ -56,6 +35,7 @@ pub struct Cursor {
     row_stream: Option<PgResponseStream>,
     pg_descs: Option<Vec<PgFieldDescriptor>>,
     remaining_rows: VecDeque<Row>,
+    all_rows: VecDeque<Row>,
 }
 
 impl Cursor {
@@ -66,6 +46,7 @@ impl Cursor {
             row_stream: None,
             pg_descs: None,
             remaining_rows: VecDeque::<Row>::new(),
+            all_rows: VecDeque::<Row>::new(),
         }
     }
 
@@ -81,7 +62,7 @@ impl Cursor {
 
         let can_timeout_cancel = true;
 
-        let query_start_time = Instant::now();
+        // let query_start_time = Instant::now();
         let query = plan_fragmenter.generate_complete_query().await?;
         tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -116,22 +97,48 @@ impl Cursor {
         Ok(())
     }
 
-    pub async fn next(&mut self, session: Arc<SessionImpl>) -> Result<Option<Row>> {
+    pub async fn forward_all(&mut self, session: Arc<SessionImpl>) -> Result<()> {
         if self.row_stream.is_none() {
-            self.create_stream(session);
+            self.create_stream(session).await?;
         }
+
         if self.remaining_rows.is_empty() {
             let rows = self.row_stream.as_mut().unwrap().next().await;
             let rows = match rows {
-                None => return Ok(None),
+                None => return Ok(()),
                 Some(row) => {
                     row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
                 }
             };
-            self.remaining_rows = rows.into_iter().collect();
+            self.all_rows.extend(rows);
         }
-        let row = self.remaining_rows.pop_front().unwrap();
-        Ok(Some(row))
+        Ok(())
+    }
+
+    // pub async fn next(&mut self, session: Arc<SessionImpl>) -> Result<Option<Row>> {
+    //     if self.row_stream.is_none() {
+    //         self.create_stream(session);
+    //     }
+    //     if self.remaining_rows.is_empty() {
+    //         let rows = self.row_stream.as_mut().unwrap().next().await;
+    //         let rows = match rows {
+    //             None => return Ok(None),
+    //             Some(row) => {
+    //                 row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+    //             }
+    //         };
+    //         self.remaining_rows = rows.into_iter().collect();
+    //     }
+    //     let row = self.remaining_rows.pop_front().unwrap();
+    //     Ok(Some(row))
+    // }
+
+    pub fn next(&mut self) -> Result<Option<Row>> {
+        Ok(self.all_rows.pop_front())
+    }
+
+    pub fn pg_descs(&self) -> Result<Vec<PgFieldDescriptor>> {
+        Ok(self.pg_descs.clone().unwrap())
     }
 }
 
@@ -144,24 +151,46 @@ impl SessionImpl {
     }
 
     pub fn add_cursor(&self, cursor_name: ObjectName, cursor: Cursor) -> Result<()> {
-        if self.cursors.contains_key(&cursor_name) {
+        if self.cursors.lock().contains_key(&cursor_name) {
             return Err(ErrorCode::InternalError(format!(
                 "cursor \"{}\" already exists",
                 cursor_name,
             ))
             .into());
         }
-        self.cursors.insert(cursor_name, cursor);
+        self.cursors.lock().insert(cursor_name, cursor);
         Ok(())
     }
 
-    pub async fn next(
-        &mut self,
-        cursor_name: &ObjectName,
-        session: Arc<SessionImpl>,
-    ) -> Result<Option<Row>> {
-        if let Some(cursor) = self.cursors.get_mut(cursor_name) {
-            cursor.next(session).await
+    // pub async fn next(
+    //     &mut self,
+    //     cursor_name: &ObjectName,
+    //     session: Arc<SessionImpl>,
+    // ) -> Result<Option<Row>> {
+    //     if let Some(cursor) = self.cursors.get_mut(cursor_name) {
+    //         cursor.next(session).await
+    //     } else {
+    //         Err(
+    //             ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))
+    //                 .into(),
+    //         )
+    //     }
+    // }
+
+    pub fn curosr_next(&self, cursor_name: &ObjectName) -> Result<Option<Row>> {
+        if let Some(cursor) = self.cursors.lock().get_mut(cursor_name) {
+            cursor.next()
+        } else {
+            Err(
+                ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))
+                    .into(),
+            )
+        }
+    }
+
+    pub fn pg_descs(&self, cursor_name: &ObjectName) -> Result<Vec<PgFieldDescriptor>> {
+        if let Some(cursor) = self.cursors.lock().get(cursor_name) {
+            cursor.pg_descs()
         } else {
             Err(
                 ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))
