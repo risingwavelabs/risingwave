@@ -180,10 +180,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // delete (1,1)
         // So we do additional compaction in the sink executor per barrier.
 
-        //     1. compact all the chanes with the stream key.
-        //     2. sink all the delete events and then sink all insert evernt.
+        //     1. compact all the changes with the stream key.
+        //     2. sink all the delete events and then sink all insert events.
 
-        // after compacting with the stream key, the two event with the same used defined sink pk must have different stream key.
+        // after compacting with the stream key, the two event with the same user defined sink pk must have different stream key.
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
         let need_advance_delete =
             stream_key_sink_pk_mismatch && self.sink_param.sink_type != SinkType::AppendOnly;
