@@ -1403,6 +1403,17 @@ pub enum Statement {
         param: Ident,
         value: SetVariableValue,
     },
+    /// DECLARE A CURSOR
+    DeclareCursor {
+        binary: bool,
+        /// View name
+        cursor_name: ObjectName,
+        query: Box<Query>,
+    },
+    /// FETCH FROM CURSOR
+    CursorFetch {
+        cursor_name: ObjectName,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1972,6 +1983,12 @@ impl fmt::Display for Statement {
                 write!(f, "KILL {}", process_id)?;
                 Ok(())
             }
+            Statement::DeclareCursor { binary, cursor_name, query } => {
+                write!(f, "DECLARE {} {}CURSOR FOR {}", cursor_name, if *binary { "BINARY " } else { "" }, query)
+            },
+            Statement::CursorFetch { cursor_name } => {
+                write!(f, "FETCH NEXT FROM {}", cursor_name)
+            },
         }
     }
 }

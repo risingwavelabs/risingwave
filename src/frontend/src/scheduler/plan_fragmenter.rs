@@ -129,6 +129,7 @@ impl ExecutionPlanNode {
 }
 
 /// `BatchPlanFragmenter` splits a query plan into fragments.
+#[derive(Clone)]
 pub struct BatchPlanFragmenter {
     query_id: QueryId,
     next_stage_id: StageId,
@@ -595,8 +596,7 @@ impl QueryStageBuilder {
 }
 
 /// Maintains how each stage are connected.
-#[derive(Debug, Serialize)]
-#[cfg_attr(test, derive(Clone))]
+#[derive(Debug, Serialize, Clone)]
 pub struct StageGraph {
     pub root_stage_id: StageId,
     pub stages: HashMap<StageId, QueryStageRef>,
@@ -744,6 +744,7 @@ impl StageGraph {
     }
 }
 
+#[derive(Clone)]
 struct StageGraphBuilder {
     stages: HashMap<StageId, QueryStageRef>,
     child_edges: HashMap<StageId, HashSet<StageId>>,

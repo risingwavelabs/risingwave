@@ -277,6 +277,8 @@ impl Parser {
                 Keyword::EXECUTE => Ok(self.parse_execute()?),
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
+                Keyword::DECLARE => Ok(self.parse_declare()?),
+                Keyword::FETCH => Ok(self.parse_cursor_fetch()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
                 _ => self.expected(
@@ -5309,6 +5311,28 @@ impl Parser {
             object_name,
             comment,
         })
+    }
+
+    /// Parse a SQL DECLARE statement
+    pub fn parse_declare(&mut self) -> Result<Statement, ParserError> {
+        let cursor_name = self.parse_object_name()?;
+        let binary = self.parse_keyword(Keyword::BINARY);
+        self.expect_keyword(Keyword::CURSOR)?;
+        self.expect_keyword(Keyword::FOR)?;
+        let query = Box::new(self.parse_query()?);
+        Ok(Statement::DeclareCursor {
+            binary,
+            cursor_name,
+            query,
+        })
+    }
+
+    /// Parse a SQL CURSOR FETCH statement
+    pub fn parse_cursor_fetch(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::NEXT)?;
+        self.expect_keyword(Keyword::FROM)?;
+        let cursor_name = self.parse_object_name()?;
+        Ok(Statement::CursorFetch { cursor_name })
     }
 }
 

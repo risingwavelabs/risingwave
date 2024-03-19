@@ -100,6 +100,8 @@ pub enum StatementType {
     ROLLBACK,
     SET_TRANSACTION,
     CANCEL_COMMAND,
+    DECLARE_CURSOR,
+    CURSOR_FETCH,
     WAIT,
     KILL,
 }
@@ -290,6 +292,8 @@ impl StatementType {
                 }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
+            Statement::DeclareCursor { .. } => Ok(StatementType::DECLARE_CURSOR),
+            Statement::CursorFetch { .. } => Ok(StatementType::CURSOR_FETCH),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
             _ => Err("unsupported statement type".to_string()),

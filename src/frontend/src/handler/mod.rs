@@ -29,6 +29,7 @@ use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::*;
 
+use self::cursor::{handle_cursor_fetch, handle_declare_cursor};
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
@@ -65,6 +66,7 @@ pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
+pub mod cursor;
 pub mod describe;
 mod drop_connection;
 mod drop_database;
@@ -917,6 +919,14 @@ pub async fn handle(
             object_name,
             comment,
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
+        Statement::DeclareCursor {
+            binary,
+            cursor_name,
+            query,
+        } => handle_declare_cursor(handler_args, binary, cursor_name, *query, formats).await,
+        Statement::CursorFetch { cursor_name } => {
+            handle_cursor_fetch(handler_args, cursor_name).await
+        }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
 }

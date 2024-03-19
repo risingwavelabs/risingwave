@@ -32,7 +32,7 @@ use pgwire::pg_server::{
     BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
     UserAuthenticator,
 };
-use pgwire::types::{Format, FormatIterator};
+use pgwire::types::{Format, FormatIterator, Row};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::acl::AclMode;
@@ -75,6 +75,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+use self::cursor::Cursor;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
@@ -102,6 +103,7 @@ use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
     GLOBAL_DISTRIBUTED_QUERY_METRICS,
 };
+use crate::session::cursor::Cursor;
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
@@ -110,6 +112,7 @@ use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
+pub(crate) mod cursor;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -579,6 +582,9 @@ pub struct SessionImpl {
 
     /// Last idle instant
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
+
+    /// The cursors declared in the transaction.
+    cursors: HashMap<ObjectName, Cursor>,
 }
 
 #[derive(Error, Debug)]
@@ -618,6 +624,7 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
@@ -644,6 +651,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
+            cursors: Default::default(),
         }
     }
 
