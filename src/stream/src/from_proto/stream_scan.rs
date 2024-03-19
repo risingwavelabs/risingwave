@@ -157,7 +157,14 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         if crate::consistency::insane() {
             let mut info = params.info.clone();
             info.identity = format!("{} (troubled)", info.identity);
-            Ok((params.info, TroublemakerExecutor::new((info, exec).into())).into())
+            Ok((
+                params.info,
+                TroublemakerExecutor::new(
+                    (info, exec).into(),
+                    params.env.config().developer.chunk_size,
+                ),
+            )
+                .into())
         } else {
             Ok((params.info, exec).into())
         }

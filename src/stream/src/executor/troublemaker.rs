@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use rand::Rng;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
+use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::Op;
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
@@ -26,34 +30,69 @@ use super::{BoxedMessageStream, Execute, Executor, Message, StreamExecutorError}
 /// inconsistent. This should ONLY BE USED IN INSANE MODE FOR TESTING PURPOSES.
 pub struct TroublemakerExecutor {
     input: Executor,
+    inner: Inner,
 }
 
-struct ExecutionVars {
-    // TODO()
+struct Inner {
+    chunk_size: usize,
+}
+
+struct Vars {
+    chunk_builder: StreamChunkBuilder,
+    met_delete_before: bool,
 }
 
 impl TroublemakerExecutor {
-    pub fn new(input: Executor) -> Self {
+    pub fn new(input: Executor, chunk_size: usize) -> Self {
         assert!(
             crate::consistency::insane(),
             "we should only make trouble in insane mode"
         );
-        Self { input }
+        Self {
+            input,
+            inner: Inner { chunk_size },
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let mut vars = ExecutionVars {};
+        let Self { input, inner: this } = self;
+
+        let data_types = input.schema().data_types();
+
+        let mut vars = Vars {
+            chunk_builder: StreamChunkBuilder::new(this.chunk_size, input.schema().data_types()),
+            met_delete_before: false,
+        };
 
         #[for_await]
-        for msg in self.input.execute() {
+        for msg in input.execute() {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    // TODO(): make some trouble
-                    yield Message::Chunk(chunk);
+                    for record in chunk.records() {
+                        if matches!(
+                            record.to_record_type(),
+                            RecordType::Delete | RecordType::Update
+                        ) {
+                            vars.met_delete_before = true;
+                        }
+
+                        for (op, row) in
+                            make_some_trouble(&data_types, record, vars.met_delete_before)
+                        {
+                            if let Some(chunk) = vars.chunk_builder.append_row(op, row) {
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                    }
+
+                    if let Some(chunk) = vars.chunk_builder.take() {
+                        yield Message::Chunk(chunk);
+                    }
                 }
                 Message::Barrier(barrier) => {
+                    assert!(vars.chunk_builder.take().is_none(), "we don't merge chunks");
                     yield Message::Barrier(barrier);
                 }
                 _ => yield msg,
@@ -66,4 +105,86 @@ impl Execute for TroublemakerExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
+}
+
+fn make_some_trouble(
+    data_types: &[DataType],
+    record: Record<impl Row>,
+    can_change_op: bool,
+) -> impl Iterator<Item = (Op, OwnedRow)> + '_ {
+    let record = if can_change_op && rand::thread_rng().gen_bool(0.5) {
+        // Change the `Op`
+        match record {
+            Record::Insert { new_row } => Record::Delete {
+                old_row: new_row.into_owned_row(),
+            },
+            Record::Delete { old_row } => Record::Insert {
+                new_row: old_row.into_owned_row(),
+            },
+            Record::Update { old_row, new_row } => Record::Update {
+                old_row: new_row.into_owned_row(),
+                new_row: old_row.into_owned_row(),
+            },
+        }
+    } else {
+        // Just convert the rows to owned rows, without changing the `Op`
+        match record {
+            Record::Insert { new_row } => Record::Insert {
+                new_row: new_row.into_owned_row(),
+            },
+            Record::Delete { old_row } => Record::Delete {
+                old_row: old_row.into_owned_row(),
+            },
+            Record::Update { old_row, new_row } => Record::Update {
+                old_row: old_row.into_owned_row(),
+                new_row: new_row.into_owned_row(),
+            },
+        }
+    };
+
+    record
+        .into_rows()
+        .map(|(op, row)| (op, randomize_row(data_types, row)))
+}
+
+fn randomize_row(data_types: &[DataType], row: OwnedRow) -> OwnedRow {
+    let mut data = row.into_inner();
+
+    for (datum, data_type) in data.iter_mut().zip_eq_fast(data_types) {
+        match rand::thread_rng().gen_range(0..3) {
+            0 => {
+                // don't change the value
+            }
+            1 => {
+                *datum = None;
+            }
+            2 => {
+                *datum = match data_type {
+                    DataType::Boolean => Some(ScalarImpl::Bool(rand::random())),
+                    DataType::Int16 => Some(ScalarImpl::Int16(rand::random())),
+                    DataType::Int32 => Some(ScalarImpl::Int32(rand::random())),
+                    DataType::Int64 => Some(ScalarImpl::Int64(rand::random())),
+                    DataType::Float32 => Some(ScalarImpl::Float32(rand::random())),
+                    DataType::Float64 => Some(ScalarImpl::Float64(rand::random())),
+                    DataType::Decimal => Some(ScalarImpl::Decimal(rand::random::<i64>().into())),
+                    DataType::Varchar => Some(ScalarImpl::Utf8(random_string().into_boxed_str())),
+                    _ => datum.take(),
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    OwnedRow::new(data.into_vec())
+}
+
+fn random_string() -> String {
+    let mut rng = rand::thread_rng();
+    let len = rng.gen_range(1..=10);
+    let s: String = rng
+        .sample_iter(rand::distributions::Alphanumeric)
+        .take(len)
+        .map(char::from)
+        .collect();
+    s
 }
