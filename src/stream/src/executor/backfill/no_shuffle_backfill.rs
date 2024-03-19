@@ -97,7 +97,7 @@ pub struct BackfillExecutor<S: StateStore> {
 
     /// Rate limit, just used to initialize the chunk size for
     /// snapshot read side.
-    /// If smaller than chunk_size, it will take precedence.
+    /// If smaller than `chunk_size`, it will take precedence.
     rate_limit: Option<usize>,
 }
 

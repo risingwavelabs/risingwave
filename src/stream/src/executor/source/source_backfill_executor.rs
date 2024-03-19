@@ -256,7 +256,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     ..
                 }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        owned_splits = splits.clone();
+                        owned_splits.clone_from(splits);
                     }
                 }
                 _ => {}

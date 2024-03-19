@@ -129,8 +129,8 @@ pub struct HummockManager {
     pub env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    /// Lock order: compaction, versioning, compaction_group_manager.
-    /// - Lock compaction first, then versioning, and finally compaction_group_manager.
+    /// Lock order: compaction, versioning, `compaction_group_manager`.
+    /// - Lock compaction first, then versioning, and finally `compaction_group_manager`.
     /// - This order should be strictly followed to prevent deadlock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
@@ -1037,7 +1037,9 @@ impl HummockManager {
         } else if is_trivial_move && can_trivial_move {
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            compact_task
+                .sorted_output_ssts
+                .clone_from(&compact_task.input_ssts[0].table_infos);
             self.report_compact_task_impl(
                 task_id,
                 Some(compact_task.clone()),

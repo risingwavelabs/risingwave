@@ -422,7 +422,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         for res in stream::select_all(streams) {
                             let row = res?;
                             if self.condition_always_relax && !self.cleaned_by_watermark {
-                                unused_clean_hint = row[self.key_l].clone()
+                                unused_clean_hint.clone_from(&row[self.key_l])
                             }
                             if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
@@ -462,7 +462,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             }
                         }
                         // Update the last committed row since it has changed
-                        last_committed_epoch_row = current_epoch_row.clone();
+                        last_committed_epoch_row.clone_from(&current_epoch_row);
                     }
 
                     self.left_table.commit(barrier.epoch).await?;

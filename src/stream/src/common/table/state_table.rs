@@ -121,7 +121,7 @@ pub struct StateTableInner<
 
     prefix_hint_len: usize,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
@@ -141,7 +141,7 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
-    /// "i" here refers to the base state_table's actual schema.
+    /// "i" here refers to the base `state_table`'s actual schema.
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
@@ -150,7 +150,7 @@ pub struct StateTableInner<
 
     /// Output indices
     /// Used for:
-    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
