@@ -109,7 +109,7 @@ impl CatalogController {
         let create_type = streaming_job.create_type();
 
         let streaming_parallelism = match parallelism {
-            None => StreamingParallelism::Adaptive,
+            None => StreamingParallelism::Adaptive { percentile: None },
             Some(n) => StreamingParallelism::Fixed(n.parallelism as _),
         };
 
@@ -547,7 +547,7 @@ impl CatalogController {
         }
 
         let parallelism = match default_parallelism {
-            None => StreamingParallelism::Adaptive,
+            None => StreamingParallelism::Adaptive { percentile: None },
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
@@ -1271,7 +1271,9 @@ impl CatalogController {
                 .into_active_model();
 
             streaming_job.parallelism = Set(match parallelism {
-                TableParallelism::Adaptive => StreamingParallelism::Adaptive,
+                TableParallelism::Adaptive { percentile } => {
+                    StreamingParallelism::Adaptive { percentile }
+                }
                 TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
                 TableParallelism::Custom => {
                     unreachable!("sql backend doesn't support custom parallelism")

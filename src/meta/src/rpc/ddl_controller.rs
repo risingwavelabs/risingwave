@@ -1402,7 +1402,7 @@ impl DdlController {
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
         let table_parallelism = match (default_parallelism, &self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
+            (None, DefaultParallelism::Full) => TableParallelism::Adaptive { percentile: None },
             _ => TableParallelism::Fixed(parallelism.get()),
         };
 

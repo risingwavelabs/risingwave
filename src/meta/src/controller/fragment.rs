@@ -337,7 +337,9 @@ impl CatalogController {
             ctx: Some(ctx.unwrap_or_default()),
             parallelism: Some(
                 match parallelism {
-                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                    StreamingParallelism::Adaptive { percentile } => {
+                        TableParallelism::Adaptive { percentile }
+                    }
                     StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
                 }
                 .into(),

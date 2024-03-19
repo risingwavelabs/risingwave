@@ -117,7 +117,9 @@ pub async fn handle_alter_parallelism(
 
 fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {
     let adaptive_parallelism = PbTableParallelism {
-        parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {})),
+        parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {
+            percentile: None,
+        })),
     };
 
     // If the target parallelism is set to 0/auto/default, we would consider it as auto parallelism.

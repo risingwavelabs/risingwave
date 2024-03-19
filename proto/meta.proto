@@ -485,7 +485,9 @@ message TableParallelism {
   // deprecated, treated as AdaptiveParallelism
   message AutoParallelism {}
 
-  message AdaptiveParallelism {}
+  message AdaptiveParallelism {
+    optional float percentile = 1;
+  }
 
   message CustomParallelism {}
 

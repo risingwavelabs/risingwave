@@ -687,7 +687,9 @@ impl GlobalBarrierManagerContext {
                 .map(|(table_id, parallelism)| {
                     // no custom for sql backend
                     let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                        StreamingParallelism::Adaptive { percentile } => {
+                            TableParallelism::Adaptive { percentile }
+                        }
                         StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
                     };
 
@@ -782,22 +784,22 @@ impl GlobalBarrierManagerContext {
             TableParallelism::Custom => {
                 if let Some(fragment_parallelism) = actual_fragment_parallelism {
                     if fragment_parallelism >= available_parallelism {
-                        TableParallelism::Adaptive
+                        TableParallelism::Adaptive { percentile: None }
                     } else {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
                 } else {
-                    TableParallelism::Adaptive
+                    TableParallelism::Adaptive { percentile: None }
                 }
             }
-            TableParallelism::Adaptive => {
+            TableParallelism::Adaptive { percentile } => {
                 match (default_parallelism, actual_fragment_parallelism) {
                     (DefaultParallelism::Default(n), Some(fragment_parallelism))
                         if fragment_parallelism == n.get() =>
                     {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
-                    _ => TableParallelism::Adaptive,
+                    _ => TableParallelism::Adaptive { percentile },
                 }
             }
             _ => assigned_parallelism,
