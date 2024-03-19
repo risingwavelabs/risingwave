@@ -61,7 +61,7 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     store: S,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
-    /// RowSeqScanExecutor.
+    /// `RowSeqScanExecutor`.
     schema: Schema,
 
     /// Used for serializing and deserializing the primary key.
@@ -69,10 +69,10 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
     output_indices: Vec<usize>,
 
-    /// the key part of output_indices.
+    /// the key part of `output_indices`.
     key_output_indices: Option<Vec<usize>>,
 
-    /// the value part of output_indices.
+    /// the value part of `output_indices`.
     value_output_indices: Vec<usize>,
 
     /// used for deserializing key part of output row from pk.
@@ -91,7 +91,7 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
     distribution: TableDistribution,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     read_prefix_len_hint: usize,
@@ -676,10 +676,10 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 
     output_indices: Vec<usize>,
 
-    /// the key part of output_indices.
+    /// the key part of `output_indices`.
     key_output_indices: Option<Vec<usize>>,
 
-    /// the value part of output_indices.
+    /// the value part of `output_indices`.
     value_output_indices: Vec<usize>,
 
     /// used for deserializing key part of output row from pk.

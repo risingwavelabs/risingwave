@@ -122,7 +122,7 @@ pub struct CompactorManagerInner {
     pub heartbeat_expired_seconds: u64,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
 
-    /// The outer lock is a RwLock, so we should still be able to modify each compactor
+    /// The outer lock is a `RwLock`, so we should still be able to modify each compactor
     pub compactor_map: HashMap<HummockContextId, Arc<Compactor>>,
 }
 

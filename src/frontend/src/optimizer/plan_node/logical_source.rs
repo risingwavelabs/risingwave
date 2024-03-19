@@ -59,7 +59,7 @@ pub struct LogicalSource {
     /// Expressions to output. This field presents and will be turned to a `Project` when
     /// converting to a physical plan, only if there are generated columns.
     output_exprs: Option<Vec<ExprImpl>>,
-    /// When there are generated columns, the `StreamRowIdGen`'s row_id_index is different from
+    /// When there are generated columns, the `StreamRowIdGen`'s `row_id_index` is different from
     /// the one in `core`. So we store the one in `output_exprs` here.
     output_row_id_index: Option<usize>,
 }

@@ -106,14 +106,14 @@ impl DatabaseCatalog {
         let old_schema_name = self.schema_name_by_id.get(&id).unwrap().to_owned();
         if old_schema_name != name {
             let mut schema = self.schema_by_name.remove(&old_schema_name).unwrap();
-            schema.name = name.clone();
+            schema.name.clone_from(&name);
             schema.database_id = prost.database_id;
             schema.owner = prost.owner;
             self.schema_by_name.insert(name.clone(), schema);
             self.schema_name_by_id.insert(id, name);
         } else {
             let schema = self.get_schema_mut(id).unwrap();
-            schema.name = name.clone();
+            schema.name.clone_from(&name);
             schema.database_id = prost.database_id;
             schema.owner = prost.owner;
         };

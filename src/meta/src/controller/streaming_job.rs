@@ -701,7 +701,7 @@ impl CatalogController {
                         fragment_replace_map.get(&m.upstream_fragment_id)
                 {
                     m.upstream_fragment_id = *new_fragment_id;
-                    m.upstream_actor_id = new_actor_ids.clone();
+                    m.upstream_actor_id.clone_from(new_actor_ids);
                 }
             });
             for fragment_id in &mut upstream_fragment_id.0 {

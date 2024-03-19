@@ -134,7 +134,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
-    /// enable FastCompactorRunner.
+    /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
     pub check_compaction_result: bool,
     pub max_preload_io_retry_times: usize,

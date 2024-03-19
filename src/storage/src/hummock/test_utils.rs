@@ -342,7 +342,7 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-pub async fn count_stream(mut i: impl StateStoreIter + Send) -> usize {
+pub async fn count_stream(mut i: impl StateStoreIter) -> usize {
     let mut c: usize = 0;
     while i.try_next().await.unwrap().is_some() {
         c += 1

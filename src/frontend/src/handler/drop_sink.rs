@@ -72,7 +72,9 @@ pub async fn handle_drop_sink(
 
         assert!(!table_catalog.incoming_sinks.is_empty());
 
-        table.incoming_sinks = table_catalog.incoming_sinks.clone();
+        table
+            .incoming_sinks
+            .clone_from(&table_catalog.incoming_sinks);
 
         for _ in 0..(table_catalog.incoming_sinks.len() - 1) {
             for fragment in graph.fragments.values_mut() {
