@@ -9343,7 +9343,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal",
+ "opendal 0.44.2",
  "openssl",
  "parking_lot 0.12.1",
  "paste",
