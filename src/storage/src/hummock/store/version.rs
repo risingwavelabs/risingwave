@@ -212,7 +212,7 @@ pub struct HummockReadVersion {
     /// Indicate if this is replicated. If it is, we should ignore it during
     /// global state store read, to avoid duplicated results.
     /// Otherwise for local state store, it is fine, see we will see the
-    /// ReadVersion just for that local state store.
+    /// `ReadVersion` just for that local state store.
     is_replicated: bool,
 
     table_watermarks: Option<TableWatermarksIndex>,

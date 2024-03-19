@@ -212,9 +212,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
-    /// If enabled, SSTable object file and version delta will be retained.
+    /// If enabled, `SSTable` object file and version delta will be retained.
     ///
-    /// SSTable object file need to be deleted via full GC.
+    /// `SSTable` object file need to be deleted via full GC.
     ///
     /// version delta need to be manually deleted.
     #[serde(default = "default::meta::enable_hummock_data_archive")]
@@ -279,11 +279,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::backend")]
     pub backend: MetaBackend,
 
-    /// Schedule space_reclaim compaction for all compaction groups with this interval.
+    /// Schedule `space_reclaim` compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    /// Schedule `ttl_reclaim` compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
@@ -642,13 +642,13 @@ pub struct StorageConfig {
     pub compactor_memory_limit_mb: Option<usize>,
 
     /// Compactor calculates the maximum number of tasks that can be executed on the node based on
-    /// worker_num and compactor_max_task_multiplier.
-    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
+    /// `worker_num` and `compactor_max_task_multiplier`.
+    /// `max_pull_task_count` = `worker_num` * `compactor_max_task_multiplier`
     #[serde(default = "default::storage::compactor_max_task_multiplier")]
     pub compactor_max_task_multiplier: f32,
 
     /// The percentage of memory available when compactor is deployed separately.
-    /// non_reserved_memory_bytes = system_memory_available_bytes * compactor_memory_available_proportion
+    /// `non_reserved_memory_bytes` = `system_memory_available_bytes` * `compactor_memory_available_proportion`
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
     pub compactor_memory_available_proportion: f64,
 
@@ -715,7 +715,7 @@ pub struct StorageConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
-    /// SSTable levels to refill.
+    /// `SSTable` levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
 

@@ -220,7 +220,7 @@ fn generate_splits_fast(
     let mut last_split_key_count = 0;
     for key in indexes {
         if last_split_key_count >= parallel_key_count {
-            splits.last_mut().unwrap().right = key.clone();
+            splits.last_mut().unwrap().right.clone_from(&key);
             splits.push(KeyRange_vec::new(key.clone(), vec![]));
             last_split_key_count = 0;
         }
@@ -289,7 +289,7 @@ pub async fn generate_splits(
                     && !last_key.eq(&key)
                     && remaining_size > parallel_compact_size
                 {
-                    splits.last_mut().unwrap().right = key.clone();
+                    splits.last_mut().unwrap().right.clone_from(&key);
                     splits.push(KeyRange_vec::new(key.clone(), vec![]));
                     last_buffer_size = data_size;
                 } else {
