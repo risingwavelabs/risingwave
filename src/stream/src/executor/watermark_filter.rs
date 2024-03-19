@@ -36,7 +36,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::filter::FilterExecutor;
-use super::{ActorContextRef, Execute, Executor, ExecutorInfo, Message, StreamExecutorResult};
+use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult};
 use crate::common::table::state_table::StateTable;
 use crate::executor::{expect_first_barrier, Watermark};
 use crate::task::ActorEvalErrorReport;
@@ -61,18 +61,13 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
         ctx: ActorContextRef,
-        info: &ExecutorInfo,
         input: Executor,
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
         table: StateTable<S>,
         global_watermark_table: StorageTable<S>,
+        eval_error_report: ActorEvalErrorReport,
     ) -> Self {
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ctx.clone(),
-            identity: Arc::from(info.identity.as_ref()),
-        };
-
         Self {
             ctx,
             input,
@@ -377,7 +372,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::ActorContext;
+    use crate::executor::{ActorContext, ExecutorInfo};
 
     const WATERMARK_TYPE: DataType = DataType::Timestamp;
 
@@ -463,21 +458,26 @@ mod tests {
         let (tx, source) = MockSource::channel();
         let source = source.into_executor(schema, vec![0]);
 
+        let ctx = ActorContext::for_test(123);
         let info = ExecutorInfo {
             schema: source.schema().clone(),
             pk_indices: source.pk_indices().to_vec(),
             identity: "WatermarkFilterExecutor".to_string(),
         };
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: info.identity.clone().into(),
+        };
 
         (
             WatermarkFilterExecutor::new(
-                ActorContext::for_test(123),
-                &info,
+                ctx,
                 source,
                 watermark_expr,
                 1,
                 table,
                 storage_table,
+                eval_error_report,
             )
             .boxed(),
             tx,
