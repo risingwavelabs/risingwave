@@ -357,6 +357,7 @@ impl LocalBarrierWorker {
     async fn run(mut self, mut actor_op_rx: UnboundedReceiver<LocalActorOperation>) {
         loop {
             select! {
+                biased;
                 (sender, create_actors_result) = self.actor_manager_state.next_created_actors() => {
                     self.handle_actor_created(sender, create_actors_result);
                 }
