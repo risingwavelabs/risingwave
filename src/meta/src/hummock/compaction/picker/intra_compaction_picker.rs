@@ -243,6 +243,10 @@ impl IntraCompactionPicker {
                 continue;
             }
 
+            if level_handlers[0].is_level_pending_compact(level) {
+                continue;
+            }
+
             if l0.sub_levels[idx + 1].vnode_partition_count
                 != l0.sub_levels[idx].vnode_partition_count
             {
@@ -272,18 +276,6 @@ impl IntraCompactionPicker {
             assert!(overlap
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
                 .is_empty());
-            let mut target_level_idx = idx;
-            while target_level_idx > 0 {
-                if l0.sub_levels[target_level_idx - 1].level_type
-                    != LevelType::Nonoverlapping as i32
-                    || !overlap
-                        .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
-                        .is_empty()
-                {
-                    break;
-                }
-                target_level_idx -= 1;
-            }
 
             let select_input_size = select_sst.file_size;
             let input_levels = vec![
@@ -301,7 +293,7 @@ impl IntraCompactionPicker {
             return Some(CompactionInput {
                 input_levels,
                 target_level: 0,
-                target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                target_sub_level_id: level.sub_level_id,
                 select_input_size,
                 total_file_count: 1,
                 ..Default::default()
