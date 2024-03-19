@@ -144,7 +144,11 @@ pub enum CustomJsonType {
     Es,
     // starrocks' need jsonb is struct
     StarRocks(HashMap<String, (u8, u8)>),
-    // bigquery need null array -> []
+    None,
+}
+
+#[derive(Clone)]
+pub enum CustomProtoType {
     BigQuery,
     None,
 }

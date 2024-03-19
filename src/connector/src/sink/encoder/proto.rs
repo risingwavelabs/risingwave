@@ -22,7 +22,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
-use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
+use super::{CustomProtoType, FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
 
 type Result<T> = std::result::Result<T, FieldEncodeError>;
 
@@ -31,6 +31,7 @@ pub struct ProtoEncoder {
     col_indices: Option<Vec<usize>>,
     descriptor: MessageDescriptor,
     header: ProtoHeader,
+    custom_proto_type: CustomProtoType,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +50,7 @@ impl ProtoEncoder {
         col_indices: Option<Vec<usize>>,
         descriptor: MessageDescriptor,
         header: ProtoHeader,
+        custom_proto_type: CustomProtoType,
     ) -> SinkResult<Self> {
         match &col_indices {
             Some(col_indices) => validate_fields(
@@ -57,6 +59,7 @@ impl ProtoEncoder {
                     (f.name.as_str(), &f.data_type)
                 }),
                 &descriptor,
+                custom_proto_type.clone(),
             )?,
             None => validate_fields(
                 schema
@@ -64,6 +67,7 @@ impl ProtoEncoder {
                     .iter()
                     .map(|f| (f.name.as_str(), &f.data_type)),
                 &descriptor,
+                custom_proto_type.clone(),
             )?,
         };
 
@@ -72,12 +76,13 @@ impl ProtoEncoder {
             col_indices,
             descriptor,
             header,
+            custom_proto_type,
         })
     }
 }
 
 pub struct ProtoEncoded {
-    message: DynamicMessage,
+    pub message: DynamicMessage,
     header: ProtoHeader,
 }
 
@@ -103,6 +108,7 @@ impl RowEncoder for ProtoEncoder {
                 ((f.name.as_str(), &f.data_type), row.datum_at(idx))
             }),
             &self.descriptor,
+            self.custom_proto_type.clone(),
         )
         .map_err(Into::into)
         .map(|m| ProtoEncoded {
@@ -180,9 +186,19 @@ trait MaybeData: std::fmt::Debug {
 
     fn on_base(self, f: impl FnOnce(ScalarRefImpl<'_>) -> Result<Value>) -> Result<Self::Out>;
 
-    fn on_struct(self, st: &StructType, pb: &MessageDescriptor) -> Result<Self::Out>;
+    fn on_struct(
+        self,
+        st: &StructType,
+        pb: &MessageDescriptor,
+        custom_proto_type: CustomProtoType,
+    ) -> Result<Self::Out>;
 
-    fn on_list(self, elem: &DataType, pb: &FieldDescriptor) -> Result<Self::Out>;
+    fn on_list(
+        self,
+        elem: &DataType,
+        pb: &FieldDescriptor,
+        custom_proto_type: CustomProtoType,
+    ) -> Result<Self::Out>;
 }
 
 impl MaybeData for () {
@@ -192,12 +208,22 @@ impl MaybeData for () {
         Ok(self)
     }
 
-    fn on_struct(self, st: &StructType, pb: &MessageDescriptor) -> Result<Self::Out> {
-        validate_fields(st.iter(), pb)
+    fn on_struct(
+        self,
+        st: &StructType,
+        pb: &MessageDescriptor,
+        custom_proto_type: CustomProtoType,
+    ) -> Result<Self::Out> {
+        validate_fields(st.iter(), pb, custom_proto_type)
     }
 
-    fn on_list(self, elem: &DataType, pb: &FieldDescriptor) -> Result<Self::Out> {
-        encode_field(elem, (), pb, true)
+    fn on_list(
+        self,
+        elem: &DataType,
+        pb: &FieldDescriptor,
+        custom_proto_type: CustomProtoType,
+    ) -> Result<Self::Out> {
+        encode_field(elem, (), pb, true, custom_proto_type)
     }
 }
 
@@ -213,13 +239,27 @@ impl MaybeData for ScalarRefImpl<'_> {
         f(self)
     }
 
-    fn on_struct(self, st: &StructType, pb: &MessageDescriptor) -> Result<Self::Out> {
+    fn on_struct(
+        self,
+        st: &StructType,
+        pb: &MessageDescriptor,
+        custom_proto_type: CustomProtoType,
+    ) -> Result<Self::Out> {
         let d = self.into_struct();
-        let message = encode_fields(st.iter().zip_eq_debug(d.iter_fields_ref()), pb)?;
+        let message = encode_fields(
+            st.iter().zip_eq_debug(d.iter_fields_ref()),
+            pb,
+            custom_proto_type,
+        )?;
         Ok(Value::Message(message))
     }
 
-    fn on_list(self, elem: &DataType, pb: &FieldDescriptor) -> Result<Self::Out> {
+    fn on_list(
+        self,
+        elem: &DataType,
+        pb: &FieldDescriptor,
+        custom_proto_type: CustomProtoType,
+    ) -> Result<Self::Out> {
         let d = self.into_list();
         let vs = d
             .iter()
@@ -231,6 +271,7 @@ impl MaybeData for ScalarRefImpl<'_> {
                     })?,
                     pb,
                     true,
+                    custom_proto_type.clone(),
                 )
             })
             .try_collect()?;
@@ -241,6 +282,7 @@ impl MaybeData for ScalarRefImpl<'_> {
 fn validate_fields<'a>(
     fields: impl Iterator<Item = (&'a str, &'a DataType)>,
     descriptor: &MessageDescriptor,
+    custom_proto_type: CustomProtoType,
 ) -> Result<()> {
     for (name, t) in fields {
         let Some(proto_field) = descriptor.get_field_by_name(name) else {
@@ -249,7 +291,8 @@ fn validate_fields<'a>(
         if proto_field.cardinality() == prost_reflect::Cardinality::Required {
             return Err(FieldEncodeError::new("`required` not supported").with_name(name));
         }
-        encode_field(t, (), &proto_field, false).map_err(|e| e.with_name(name))?;
+        encode_field(t, (), &proto_field, false, custom_proto_type.clone())
+            .map_err(|e| e.with_name(name))?;
     }
     Ok(())
 }
@@ -257,14 +300,15 @@ fn validate_fields<'a>(
 fn encode_fields<'a>(
     fields_with_datums: impl Iterator<Item = ((&'a str, &'a DataType), DatumRef<'a>)>,
     descriptor: &MessageDescriptor,
+    custom_proto_type: CustomProtoType,
 ) -> Result<DynamicMessage> {
     let mut message = DynamicMessage::new(descriptor.clone());
     for ((name, t), d) in fields_with_datums {
         let proto_field = descriptor.get_field_by_name(name).unwrap();
         // On `null`, simply skip setting the field.
         if let Some(scalar) = d {
-            let value =
-                encode_field(t, scalar, &proto_field, false).map_err(|e| e.with_name(name))?;
+            let value = encode_field(t, scalar, &proto_field, false, custom_proto_type.clone())
+                .map_err(|e| e.with_name(name))?;
             message
                 .try_set_field(&proto_field, value)
                 .map_err(|e| FieldEncodeError::new(e).with_name(name))?;
@@ -284,6 +328,7 @@ fn encode_field<D: MaybeData>(
     maybe: D,
     proto_field: &FieldDescriptor,
     in_repeated: bool,
+    custom_proto_type: CustomProtoType,
 ) -> Result<D::Out> {
     // Regarding (proto_field.is_list, in_repeated):
     // (F, T) => impossible
@@ -307,7 +352,7 @@ fn encode_field<D: MaybeData>(
             proto_field.kind()
         )))
     };
-
+    let is_big_query = matches!(custom_proto_type, CustomProtoType::BigQuery);
     let value = match &data_type {
         // Group A: perfect match between RisingWave types and ProtoBuf types
         DataType::Boolean => match (expect_list, proto_field.kind()) {
@@ -345,11 +390,11 @@ fn encode_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Struct(st) => match (expect_list, proto_field.kind()) {
-            (false, Kind::Message(pb)) => maybe.on_struct(st, &pb)?,
+            (false, Kind::Message(pb)) => maybe.on_struct(st, &pb, custom_proto_type)?,
             _ => return no_match_err(),
         },
         DataType::List(elem) => match expect_list {
-            true => maybe.on_list(elem, proto_field)?,
+            true => maybe.on_list(elem, proto_field, custom_proto_type)?,
             false => return no_match_err(),
         },
         // Group B: match between RisingWave types and ProtoBuf Well-Known types
@@ -364,18 +409,61 @@ fn encode_field<D: MaybeData>(
                     Ok(Value::Message(message.transcode_to_dynamic()))
                 })?
             }
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestamptz().to_string())))?
+            }
             _ => return no_match_err(),
         },
-        DataType::Jsonb => return no_match_err(), // Value, NullValue, Struct (map), ListValue
-        // Group C: experimental
-        DataType::Int16 => return no_match_err(),
-        DataType::Date => return no_match_err(), // google.type.Date
-        DataType::Time => return no_match_err(), // google.type.TimeOfDay
-        DataType::Timestamp => return no_match_err(), // google.type.DateTime
-        DataType::Decimal => return no_match_err(), // google.type.Decimal
-        DataType::Interval => return no_match_err(),
-        // Group D: unsupported
-        DataType::Serial | DataType::Int256 => {
+        DataType::Jsonb => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
+            }
+            _ => return no_match_err(), /* Value, NullValue, Struct (map), ListValue
+                                         * Group C: experimental */
+        },
+        DataType::Int16 => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::I64(s.into_int16() as i64)))?
+            }
+            _ => return no_match_err(),
+        },
+        DataType::Date => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int32) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::I32(s.into_date().get_nums_days_unix_epoch())))?
+            }
+            _ => return no_match_err(), // google.type.Date
+        },
+        DataType::Time => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::String(s.into_time().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.TimeOfDay
+        },
+        DataType::Timestamp => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::String(s.into_timestamp().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.DateTime
+        },
+        DataType::Decimal => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::String(s.into_decimal().to_string())))?
+            }
+            _ => return no_match_err(), // google.type.Decimal
+        },
+        DataType::Interval => match (expect_list, proto_field.kind()) {
+            (false, Kind::String) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::String(s.into_interval().as_iso_8601())))?
+            }
+            _ => return no_match_err(), // Group D: unsupported
+        },
+        DataType::Serial => match (expect_list, proto_field.kind()) {
+            (false, Kind::Int64) if is_big_query => {
+                maybe.on_base(|s| Ok(Value::I64(s.into_serial().as_row_id())))?
+            }
+            _ => return no_match_err(), // Group D: unsupported
+        },
+        DataType::Int256 => {
             return no_match_err();
         }
     };
@@ -398,7 +486,7 @@ mod tests {
         let pool_bytes = std::fs::read(pool_path).unwrap();
         let pool = prost_reflect::DescriptorPool::decode(pool_bytes.as_ref()).unwrap();
         let descriptor = pool.get_message_by_name("recursive.AllTypes").unwrap();
-
+        println!("a{:?}", descriptor.descriptor_proto());
         let schema = Schema::new(vec![
             Field::with_name(DataType::Boolean, "bool_field"),
             Field::with_name(DataType::Varchar, "string_field"),
@@ -441,8 +529,14 @@ mod tests {
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(3))),
         ]);
 
-        let encoder =
-            ProtoEncoder::new(schema, None, descriptor.clone(), ProtoHeader::None).unwrap();
+        let encoder = ProtoEncoder::new(
+            schema,
+            None,
+            descriptor.clone(),
+            ProtoHeader::None,
+            CustomProtoType::None,
+        )
+        .unwrap();
         let m = encoder.encode(row).unwrap();
         let encoded: Vec<u8> = m.ser_to().unwrap();
         assert_eq!(
@@ -480,6 +574,7 @@ mod tests {
                 .iter()
                 .map(|f| (f.name.as_str(), &f.data_type)),
             &message_descriptor,
+            CustomProtoType::None,
         )
         .unwrap_err();
         assert_eq!(
@@ -505,6 +600,7 @@ mod tests {
                 .map(|f| (f.name.as_str(), &f.data_type))
                 .zip_eq_debug(row.iter()),
             &message_descriptor,
+            CustomProtoType::None,
         )
         .unwrap_err();
         assert_eq!(
@@ -524,6 +620,7 @@ mod tests {
         let err = validate_fields(
             std::iter::once(("not_exists", &DataType::Int16)),
             &message_descriptor,
+            CustomProtoType::None,
         )
         .unwrap_err();
         assert_eq!(
@@ -534,6 +631,7 @@ mod tests {
         let err = validate_fields(
             std::iter::once(("map_field", &DataType::Jsonb)),
             &message_descriptor,
+            CustomProtoType::None,
         )
         .unwrap_err();
         assert_eq!(

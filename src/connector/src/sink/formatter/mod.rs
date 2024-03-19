@@ -29,7 +29,8 @@ pub use upsert::UpsertFormatter;
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
 use super::encoder::{
-    DateHandlingMode, KafkaConnectParams, TimeHandlingMode, TimestamptzHandlingMode,
+    CustomProtoType, DateHandlingMode, KafkaConnectParams, TimeHandlingMode,
+    TimestamptzHandlingMode,
 };
 use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
@@ -134,7 +135,13 @@ impl SinkFormatterImpl {
                             None => ProtoHeader::None,
                             Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
                         };
-                        let val_encoder = ProtoEncoder::new(schema, None, descriptor, header)?;
+                        let val_encoder = ProtoEncoder::new(
+                            schema,
+                            None,
+                            descriptor,
+                            header,
+                            CustomProtoType::None,
+                        )?;
                         let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
