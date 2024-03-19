@@ -187,7 +187,7 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
     None
 }
 
-struct ExpressionSimplifyRewriter {}
+pub struct ExpressionSimplifyRewriter {}
 impl ExprRewriter for ExpressionSimplifyRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         // Check if the input expression is *definitely* null

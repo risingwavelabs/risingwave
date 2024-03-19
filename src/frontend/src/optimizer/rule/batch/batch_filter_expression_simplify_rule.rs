@@ -17,16 +17,14 @@ use std::collections::HashSet;
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::rule::Rule;
-use crate::optimizer::{BoxedRule, ExpressionSimplifyRewriter, PlanRef};
+use crate::optimizer::{BoxedRule, PlanRef};
 use crate::utils::Condition;
 
 pub struct BatchFilterExpressionSimplifyRule {}
 impl Rule for BatchFilterExpressionSimplifyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let scan: &LogicalScan = plan.as_logical_scan()?;
-        let mut rewriter = ExpressionSimplifyRewriter {};
-        let predicate = scan.predicate().clone().rewrite_expr(&mut rewriter);
-        let predicate = ConditionRewriter::rewrite_condition(predicate);
+        let predicate = ConditionRewriter::rewrite_condition(scan.predicate().clone());
         Some(scan.clone_with_predicate(predicate).into())
     }
 }

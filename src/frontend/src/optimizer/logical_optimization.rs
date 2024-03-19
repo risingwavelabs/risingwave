@@ -423,7 +423,7 @@ static BATCH_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock:
         ApplyOrder::TopDown,
     )
 });
-  
+
 static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Logical Filter Expression Simplify",
