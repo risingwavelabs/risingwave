@@ -187,43 +187,52 @@ pub async fn handle_create_function(
             );
         }
         "rust" => {
-            identifier = wasm_identifier(
-                &function_name,
-                &arg_types,
-                &return_type,
-                matches!(kind, Kind::Table(_)),
-            );
             if params.using.is_some() {
                 return Err(ErrorCode::InvalidParameterValue(
                     "USING is not supported for rust function".to_string(),
                 )
                 .into());
             }
-            let function_body = params
-                .as_
-                .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
-                .into_string();
-            let script = format!("#[arrow_udf::function(\"{identifier}\")]\n{function_body}");
-            body = Some(function_body.clone());
-
-            let wasm_binary =
-                tokio::task::spawn_blocking(move || arrow_udf_wasm::build::build("", &script))
-                    .await?
-                    .context("failed to build rust function")?;
-
-            // below is the same as `wasm` language
-            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-            check_wasm_function(&runtime, &identifier)?;
-
-            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
-        }
-        "wasm" => {
-            identifier = wasm_identifier(
+            let identifier_v1 = wasm_identifier_v1(
                 &function_name,
                 &arg_types,
                 &return_type,
                 matches!(kind, Kind::Table(_)),
             );
+            // if the function returns a struct, users need to add `#[function]` macro by themselves.
+            // otherwise, we add it automatically. the code should start with `fn ...`.
+            let function_macro = if return_type.is_struct() {
+                String::new()
+            } else {
+                format!("#[function(\"{}\")]", identifier_v1)
+            };
+            let script = params
+                .as_
+                .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
+                .into_string();
+            let script = format!(
+                "use arrow_udf::{{function, types::*}};\n{}\n{}",
+                function_macro, script
+            );
+            body = Some(script.clone());
+
+            let wasm_binary = tokio::task::spawn_blocking(move || {
+                let mut opts = arrow_udf_wasm::build::BuildOpts::default();
+                opts.script = script;
+                // use a fixed tempdir to reuse the build cache
+                opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
+
+                arrow_udf_wasm::build::build_with(&opts)
+            })
+            .await?
+            .context("failed to build rust function")?;
+
+            let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
+
+            compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_slice(), 0)?);
+        }
+        "wasm" => {
             let Some(using) = params.using else {
                 return Err(ErrorCode::InvalidParameterValue(
                     "USING must be specified".to_string(),
@@ -242,7 +251,13 @@ pub async fn handle_create_function(
                 }
             };
             let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
-            check_wasm_function(&runtime, &identifier)?;
+            let identifier_v1 = wasm_identifier_v1(
+                &function_name,
+                &arg_types,
+                &return_type,
+                matches!(kind, Kind::Table(_)),
+            );
+            identifier = find_wasm_identifier_v2(&runtime, &identifier_v1)?;
 
             compressed_binary = Some(zstd::stream::encode_all(wasm_binary.as_ref(), 0)?);
         }
@@ -288,21 +303,47 @@ async fn download_binary_from_link(link: &str) -> Result<Bytes> {
     }
 }
 
-/// Check if the function exists in the wasm binary.
-fn check_wasm_function(runtime: &arrow_udf_wasm::Runtime, identifier: &str) -> Result<()> {
-    if !runtime.functions().contains(&identifier) {
-        return Err(ErrorCode::InvalidParameterValue(format!(
-            "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
-            identifier,
-            runtime.functions().join("\n  ")
-        ))
-        .into());
-    }
-    Ok(())
+/// Convert a v0.1 function identifier to v0.2 format.
+///
+/// In arrow-udf v0.1 format, struct type is inline in the identifier. e.g.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct<key:varchar,value:varchar>
+/// ```
+///
+/// However, since arrow-udf v0.2, struct type is no longer inline.
+/// The above identifier is divided into a function and a type.
+///
+/// ```text
+/// keyvalue(varchar,varchar)->struct KeyValue
+/// KeyValue=key:varchar,value:varchar
+/// ```
+///
+/// For compatibility, we should call `find_wasm_identifier_v2` to
+/// convert v0.1 identifiers to v0.2 format before looking up the function.
+fn find_wasm_identifier_v2(
+    runtime: &arrow_udf_wasm::Runtime,
+    inlined_signature: &str,
+) -> Result<String> {
+    let identifier = runtime
+        .find_function_by_inlined_signature(inlined_signature)
+        .ok_or_else(|| {
+            ErrorCode::InvalidParameterValue(format!(
+                "function not found in wasm binary: \"{}\"\nHINT: available functions:\n  {}",
+                inlined_signature,
+                runtime.functions().join("\n  ")
+            ))
+        })?;
+    Ok(identifier.into())
 }
 
-/// Generate the function identifier in wasm binary.
-fn wasm_identifier(name: &str, args: &[DataType], ret: &DataType, table_function: bool) -> String {
+/// Generate a function identifier in v0.1 format from the function signature.
+fn wasm_identifier_v1(
+    name: &str,
+    args: &[DataType],
+    ret: &DataType,
+    table_function: bool,
+) -> String {
     format!(
         "{}({}){}{}",
         name,

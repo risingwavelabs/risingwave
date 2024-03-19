@@ -64,7 +64,7 @@ impl StreamingJobTracker {
 
 #[derive(Clone, Default)]
 pub struct CreatingStreamingJobInfo {
-    /// Identified by process_id, secret_key.
+    /// Identified by `process_id`, `secret_key`.
     session_id: SessionId,
     info: CreatingJobInfo,
 }

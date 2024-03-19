@@ -1074,8 +1074,8 @@ script = """
 echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
 
 # Rewriting Cargo.toml will cause a full rebuild of all crates, so we always check before fix.
-(cargo sort -w -c > /dev/null) || cargo sort -w
-test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -w$(tput sgr0) to fix it."; exit 1; }
+(cargo sort -g -w -c > /dev/null) || cargo sort -g -w
+test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -g -w$(tput sgr0) to fix it."; exit 1; }
 """
 
 [tasks.check-fmt]
@@ -1098,7 +1098,7 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS}
+cargo clippy $@ ${RISINGWAVE_FEATURE_FLAGS}
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """

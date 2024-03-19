@@ -56,7 +56,7 @@ pub struct HashJoinExecutor<K> {
     original_schema: Schema,
     /// Output schema after applying `output_indices`
     schema: Schema,
-    /// output_indices are the indices of the columns that we needed.
+    /// `output_indices` are the indices of the columns that we needed.
     output_indices: Vec<usize>,
     /// Left child executor
     probe_side_source: BoxedExecutor,
