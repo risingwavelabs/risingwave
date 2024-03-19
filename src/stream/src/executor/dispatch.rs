@@ -1190,6 +1190,7 @@ mod tests {
         let broadcast_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
+            fragment_id,
             &PbDispatcher {
                 r#type: DispatcherType::Broadcast as _,
                 dispatcher_id: broadcast_dispatcher_id,
@@ -1203,6 +1204,7 @@ mod tests {
         let simple_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
+            fragment_id,
             &PbDispatcher {
                 r#type: DispatcherType::Simple as _,
                 dispatcher_id: simple_dispatcher_id,
@@ -1226,7 +1228,13 @@ mod tests {
         // 2. Take downstream receivers.
         let mut rxs = [untouched, old, new, old_simple, new_simple]
             .into_iter()
-            .map(|id| (id, ctx.take_receiver((actor_id, id)).unwrap()))
+            .map(|id| {
+                (
+                    id,
+                    ctx.take_receiver((actor_id, id), (fragment_id, simple_dispatcher_id as u32))
+                        .unwrap(),
+                )
+            })
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {
