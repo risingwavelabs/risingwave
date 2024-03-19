@@ -714,6 +714,7 @@ impl GlobalBarrierManagerContext {
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
+
             let mut result = HashMap::new();
 
             for (object_id, streaming_parallelism) in streaming_parallelisms {
@@ -723,7 +724,9 @@ impl GlobalBarrierManagerContext {
                     .await?;
 
                 let table_parallelism = match streaming_parallelism {
-                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                    StreamingParallelism::Adaptive { percentile } => {
+                        TableParallelism::Adaptive { percentile }
+                    }
                     StreamingParallelism::Custom => model::TableParallelism::Custom,
                     StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
                 };
@@ -837,22 +840,22 @@ impl GlobalBarrierManagerContext {
             TableParallelism::Custom => {
                 if let Some(fragment_parallelism) = actual_fragment_parallelism {
                     if fragment_parallelism >= available_parallelism {
-                        TableParallelism::Adaptive
+                        TableParallelism::Adaptive { percentile: None }
                     } else {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
                 } else {
-                    TableParallelism::Adaptive
+                    TableParallelism::Adaptive { percentile: None }
                 }
             }
-            TableParallelism::Adaptive => {
+            TableParallelism::Adaptive { percentile } => {
                 match (default_parallelism, actual_fragment_parallelism) {
                     (DefaultParallelism::Default(n), Some(fragment_parallelism))
                         if fragment_parallelism == n.get() =>
                     {
                         TableParallelism::Fixed(fragment_parallelism)
                     }
-                    _ => TableParallelism::Adaptive,
+                    _ => TableParallelism::Adaptive { percentile },
                 }
             }
             _ => assigned_parallelism,

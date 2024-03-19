@@ -341,7 +341,7 @@ derive_from_blob!(
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize)]
 pub enum StreamingParallelism {
-    Adaptive,
+    Adaptive { percentile: Option<f32> },
     Fixed(usize),
     Custom,
 }

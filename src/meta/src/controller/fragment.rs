@@ -339,7 +339,9 @@ impl CatalogController {
             parallelism: Some(
                 match parallelism {
                     StreamingParallelism::Custom => TableParallelism::Custom,
-                    StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+                    StreamingParallelism::Adaptive { percentile } => {
+                        TableParallelism::Adaptive { percentile }
+                    }
                     StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
                 }
                 .into(),

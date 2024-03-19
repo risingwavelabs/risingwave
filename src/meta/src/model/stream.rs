@@ -23,8 +23,8 @@ use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::table_parallelism::{
-    FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism, PbFixedParallelism,
-    PbParallelism,
+    AdaptiveParallelism, FixedParallelism, Parallelism, PbAdaptiveParallelism, PbCustomParallelism,
+    PbFixedParallelism, PbParallelism,
 };
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
@@ -42,10 +42,10 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
 /// The parallelism for a `TableFragments`.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TableParallelism {
     /// This is when the system decides the parallelism, based on the available parallel units.
-    Adaptive,
+    Adaptive { percentile: Option<f32> },
     /// We set this when the `TableFragments` parallelism is changed.
     /// All fragments which are part of the `TableFragment` will have the same parallelism as this.
     Fixed(usize),
@@ -63,7 +63,10 @@ impl From<PbTableParallelism> for TableParallelism {
         use Parallelism::*;
         match &value.parallelism {
             Some(Fixed(FixedParallelism { parallelism: n })) => Self::Fixed(*n as usize),
-            Some(Adaptive(_)) | Some(Auto(_)) => Self::Adaptive,
+            Some(Adaptive(AdaptiveParallelism { percentile })) => Self::Adaptive {
+                percentile: *percentile,
+            },
+            Some(Auto(_)) => Self::Adaptive { percentile: None },
             Some(Custom(_)) => Self::Custom,
             _ => unreachable!(),
         }
@@ -75,7 +78,9 @@ impl From<TableParallelism> for PbTableParallelism {
         use TableParallelism::*;
 
         let parallelism = match value {
-            Adaptive => PbParallelism::Adaptive(PbAdaptiveParallelism {}),
+            Adaptive { percentile } => {
+                PbParallelism::Adaptive(PbAdaptiveParallelism { percentile })
+            }
             Fixed(n) => PbParallelism::Fixed(PbFixedParallelism {
                 parallelism: n as u32,
             }),
@@ -198,7 +203,7 @@ impl TableFragments {
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
-            TableParallelism::Adaptive,
+            TableParallelism::Adaptive { percentile: None },
         )
     }
 
