@@ -130,8 +130,8 @@ pub struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
-    /// Each session is identified by (process_id,
-    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// Each session is identified by (`process_id`,
+    /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
 
@@ -558,7 +558,7 @@ pub struct SessionImpl {
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
-    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
 
     /// Client address
