@@ -57,7 +57,7 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
         _ => unreachable!(),
     };
 
-    stmt.to_string()
+    stmt.to_unredacted_string()
 }
 
 /// `alter_relation_rename_refs` updates all references of renamed-relation in the definition of
@@ -113,7 +113,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
         }
         _ => unreachable!(),
     };
-    stmt.to_string()
+    stmt.to_unredacted_string()
 }
 
 /// Replace the last ident in the `table_name` with the given name, the object name is ensured to be

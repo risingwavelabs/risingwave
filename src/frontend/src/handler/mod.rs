@@ -213,7 +213,7 @@ impl HandlerArgs {
             }
             _ => {}
         }
-        stmt.to_string()
+        stmt.to_unredacted_string()
     }
 }
 

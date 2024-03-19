@@ -58,6 +58,10 @@ pub use crate::ast::ddl::{
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
 
+tokio::task_local! {
+    pub static REDACT_SQL_OPTION: bool;
+}
+
 pub struct DisplaySeparated<'a, T>
 where
     T: fmt::Display,
@@ -1959,6 +1963,12 @@ impl fmt::Display for Statement {
     }
 }
 
+impl Statement {
+    pub fn to_unredacted_string(&self) -> String {
+        REDACT_SQL_OPTION.sync_scope(false, || self.to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
@@ -2401,7 +2411,14 @@ pub struct SqlOption {
 
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = {}", self.name, self.value)
+        if let Ok(redact_sql_option) =
+            REDACT_SQL_OPTION.try_with(|redact_sql_option| *redact_sql_option)
+            && !redact_sql_option
+        {
+            write!(f, "{} = {}", self.name, self.value)
+        } else {
+            write!(f, "{} = [REDACTED]", self.name)
+        }
     }
 }
 

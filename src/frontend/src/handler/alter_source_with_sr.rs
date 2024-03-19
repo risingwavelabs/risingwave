@@ -287,7 +287,7 @@ pub fn alter_definition_format_encode(
         _ => unreachable!(),
     }
 
-    Ok(stmt.to_string())
+    Ok(stmt.to_unredacted_string())
 }
 
 #[cfg(test)]

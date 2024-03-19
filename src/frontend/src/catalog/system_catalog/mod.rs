@@ -113,6 +113,7 @@ pub struct SysCatalogReaderImpl {
     config: Arc<RwLock<ConfigMap>>,
     // Read system params.
     system_params: SystemParamsReaderRef,
+    user_id: UserId,
 }
 
 impl SysCatalogReaderImpl {
@@ -124,6 +125,7 @@ impl SysCatalogReaderImpl {
         auth_context: Arc<AuthContext>,
         config: Arc<RwLock<ConfigMap>>,
         system_params: SystemParamsReaderRef,
+        user_id: UserId,
     ) -> Self {
         Self {
             catalog_reader,
@@ -133,6 +135,7 @@ impl SysCatalogReaderImpl {
             auth_context,
             config,
             system_params,
+            user_id,
         }
     }
 }

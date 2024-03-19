@@ -381,7 +381,7 @@ PHP	₱ USD $
 \\."#;
     let ast = one_statement_parses_to(sql, "");
     println!("{:#?}", ast);
-    // assert_eq!(sql, ast.to_string());
+    // assert_eq!(sql, ast.to_unredacted_string());
 }
 
 #[test]

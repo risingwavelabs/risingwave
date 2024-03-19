@@ -144,7 +144,7 @@ pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> Resul
         _ => unreachable!(),
     }
 
-    Ok(stmt.to_string())
+    Ok(stmt.to_unredacted_string())
 }
 
 #[cfg(test)]

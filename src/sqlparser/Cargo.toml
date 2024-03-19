@@ -27,6 +27,14 @@ normal = ["workspace-hack"]
 [dependencies]
 itertools = "0.12"
 serde = { version = "1.0", features = ["derive"], optional = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

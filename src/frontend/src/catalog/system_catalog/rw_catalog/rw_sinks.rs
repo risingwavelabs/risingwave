@@ -19,6 +19,7 @@ use risingwave_pb::user::grant_privilege::Object;
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::utils::redact::redact_definition;
 
 #[derive(Fields)]
 struct RwSink {
@@ -45,6 +46,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
+    let user_id = reader.user_id;
 
     Ok(schemas
         .flat_map(|schema| {
@@ -61,7 +63,12 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     .to_uppercase(),
                 sink_type: sink.sink_type.to_proto().as_str_name().into(),
                 connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
-                definition: sink.create_sql(),
+                definition: if sink.owner.user_id == user_id {
+                    sink.create_sql()
+                } else {
+                    redact_definition(&sink.create_sql())
+                        .unwrap_or_else(|_| "unable to redact definition".into())
+                },
                 acl: get_acl_items(
                     &Object::SinkId(sink.id.sink_id),
                     false,

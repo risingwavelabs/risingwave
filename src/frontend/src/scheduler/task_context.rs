@@ -53,6 +53,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
             self.session.auth_context(),
             self.session.shared_config(),
             self.session.env().system_params_manager().get_params(),
+            self.session.user_id(),
         ))
     }
 

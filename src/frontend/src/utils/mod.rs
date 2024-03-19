@@ -31,6 +31,8 @@ mod index_set;
 pub use index_set::*;
 pub(crate) mod group_by;
 pub mod overwrite_options;
+pub mod redact;
+
 pub use group_by::*;
 pub use overwrite_options::*;
 

@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_sqlparser::ast::REDACT_SQL_OPTION;
 
-// Traverses the 'testdata/' directory and runs all files.
-#[test]
-fn run_all_test_files() {
-    REDACT_SQL_OPTION.sync_scope(false, || {
-        risingwave_sqlparser_test_runner::run_all_test_files();
-    });
+use crate::error::Result;
+
+pub fn redact_definition(definition: &str) -> Result<String> {
+    let [stmt]: [_; 1] = risingwave_sqlparser::parser::Parser::parse_sql(definition)
+        .context("unable to parse definition")?
+        .try_into()
+        .unwrap();
+    Ok(REDACT_SQL_OPTION.sync_scope(true, || stmt.to_string()))
 }
