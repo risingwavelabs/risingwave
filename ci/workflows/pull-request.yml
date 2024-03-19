@@ -265,7 +265,7 @@ steps:
 
   - label: "end-to-end mqtt sink test"
     if: build.pull_request.labels includes "ci/run-e2e-mqtt-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-sink-tests?(,|$$)/
-    command: "ci/scripts/e2e-pulsar-mqtt-test.sh -p ci-dev"
+    command: "ci/scripts/e2e-mqtt-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"

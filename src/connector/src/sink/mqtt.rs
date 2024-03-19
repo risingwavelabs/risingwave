@@ -17,8 +17,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context as _};
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
@@ -27,18 +29,19 @@ use serde_with::serde_as;
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
-use super::catalog::SinkFormatDesc;
-use super::encoder::{QueryField, SerTo};
-use super::formatter::{SinkFormatter, SinkFormatterImpl};
+use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::{
+    DateHandlingMode, JsonEncoder, ProtoEncoder, ProtoHeader, RowEncoder, SerTo, TimeHandlingMode,
+    TimestampHandlingMode, TimestamptzHandlingMode,
+};
+use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use crate::deserialize_bool_from_string;
 use crate::connector_common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
-use crate::sink::writer::{
-    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
-};
-use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
-use crate::{deserialize_bool_from_string, dispatch_sink_formatter_impl};
+use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
+use crate::sink::{Result, Sink, SinkError, SinkParam};
 
 pub const MQTT_SINK: &str = "mqtt";
 
@@ -56,18 +59,57 @@ pub struct MqttConfig {
     #[serde(rename = "topic.field")]
     pub topic_field: Option<String>,
 
-    // accept "append-only"
-    pub r#type: String,
+    /// If set to true, and topic_field is set, will fallback to the default topic if the field is not found
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    pub fallback_to_default: bool,
+}
+
+pub enum RowEncoderWrapper {
+    Json(JsonEncoder),
+    Proto(ProtoEncoder),
+}
+
+impl RowEncoder for RowEncoderWrapper {
+    type Output = Vec<u8>;
+
+    fn encode_cols(
+        &self,
+        row: impl Row,
+        col_indices: impl Iterator<Item = usize>,
+    ) -> Result<Self::Output> {
+        match self {
+            RowEncoderWrapper::Json(json) => json.encode_cols(row, col_indices)?.ser_to(),
+            RowEncoderWrapper::Proto(proto) => proto.encode_cols(row, col_indices)?.ser_to(),
+        }
+    }
+
+    fn schema(&self) -> &Schema {
+        match self {
+            RowEncoderWrapper::Json(json) => json.schema(),
+            RowEncoderWrapper::Proto(proto) => proto.schema(),
+        }
+    }
+
+    fn col_indices(&self) -> Option<&[usize]> {
+        match self {
+            RowEncoderWrapper::Json(json) => json.col_indices(),
+            RowEncoderWrapper::Proto(proto) => proto.col_indices(),
+        }
+    }
+
+    fn encode(&self, row: impl Row) -> Result<Self::Output> {
+        match self {
+            RowEncoderWrapper::Json(json) => json.encode(row)?.ser_to(),
+            RowEncoderWrapper::Proto(proto) => proto.encode(row)?.ser_to(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct MqttSink {
     pub config: MqttConfig,
     schema: Schema,
-    pk_indices: Vec<usize>,
     format_desc: SinkFormatDesc,
-    db_name: String,
-    sink_from_name: String,
     is_append_only: bool,
 }
 
@@ -76,22 +118,15 @@ pub struct MqttSinkWriter {
     pub config: MqttConfig,
     payload_writer: MqttSinkPayloadWriter,
     schema: Schema,
-    formatter: SinkFormatterImpl,
+    encoder: RowEncoderWrapper,
     stopped: Arc<AtomicBool>,
 }
 
 /// Basic data types for use with the mqtt interface
 impl MqttConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<MqttConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.r#type != SINK_TYPE_APPEND_ONLY {
-            Err(SinkError::Config(anyhow!(
-                "Mqtt sink only support append-only mode"
-            )))
-        } else {
-            Ok(config)
-        }
+        serde_json::from_value::<MqttConfig>(serde_json::to_value(values).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))
     }
 }
 
@@ -104,12 +139,9 @@ impl TryFrom<SinkParam> for MqttSink {
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
-            db_name: param.db_name,
-            sink_from_name: param.sink_from_name,
             is_append_only: param.sink_type.is_append_only(),
         })
     }
@@ -136,6 +168,43 @@ impl Sink for MqttSink {
             )));
         }
 
+        if let Some(field) = &self.config.topic_field {
+            let mut iter = field.split('.');
+            let dt = iter
+                .next()
+                .and_then(|field| {
+                    self.schema
+                        .fields()
+                        .iter()
+                        .find(|f| f.name == field)
+                        .map(|f| &f.data_type)
+                })
+                .and_then(|dt| {
+                    iter.try_fold(dt, |dt, field| match dt {
+                        DataType::Struct(st) => {
+                            st.iter().find(|(s, _)| *s == field).map(|(_, dt)| dt)
+                        }
+                        _ => None,
+                    })
+                });
+            match dt {
+                Some(DataType::Varchar) => (),
+                Some(dt) => {
+                    return Err(SinkError::Config(anyhow!(
+                        "topic field `{}` must be of type string but got {:?}",
+                        field,
+                        dt
+                    )))
+                }
+                None => {
+                    return Err(SinkError::Config(anyhow!(
+                        "topic field `{}`  not found",
+                        field
+                    )))
+                }
+            }
+        }
+
         let _client = (self.config.common.build_client(0, 0))
             .context("validate mqtt sink error")
             .map_err(SinkError::Mqtt)?;
@@ -147,10 +216,7 @@ impl Sink for MqttSink {
         Ok(MqttSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
-            self.pk_indices.clone(),
             &self.format_desc,
-            self.db_name.clone(),
-            self.sink_from_name.clone(),
             writer_param.executor_id,
         )
         .await?
@@ -162,22 +228,90 @@ impl MqttSinkWriter {
     pub async fn new(
         config: MqttConfig,
         schema: Schema,
-        pk_indices: Vec<usize>,
         format_desc: &SinkFormatDesc,
-        db_name: String,
-        sink_from_name: String,
         id: u64,
     ) -> Result<Self> {
-        let formatter = SinkFormatterImpl::new(
-            format_desc,
-            schema.clone(),
-            pk_indices.clone(),
-            db_name,
-            sink_from_name,
-            &config.common.topic,
-        )
-        .await?;
+        let mut path = vec![];
+        if let Some(field) = &config.topic_field {
+            let mut iter = field.split('.');
+            let dt = iter
+                .next()
+                .and_then(|field| {
+                    schema
+                        .fields()
+                        .iter()
+                        .enumerate()
+                        .find(|(_, f)| f.name == field)
+                        .map(|(pos, f)| {
+                            path.push(pos);
+                            &f.data_type
+                        })
+                })
+                .and_then(|dt| {
+                    iter.try_fold(dt, |dt, field| match dt {
+                        DataType::Struct(st) => {
+                            st.iter().enumerate().find(|(_, (s, _))| *s == field).map(
+                                |(pos, (_, dt))| {
+                                    path.push(pos);
+                                    dt
+                                },
+                            )
+                        }
+                        _ => None,
+                    })
+                });
+            if !matches!(dt, Some(DataType::Varchar)) {
+                return Err(SinkError::Config(anyhow!(
+                    "topic field must be of type string but got {:?}",
+                    dt
+                )));
+            }
+        }
 
+        let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
+
+        let encoder = match format_desc.format {
+            SinkFormat::AppendOnly => match format_desc.encode {
+                SinkEncode::Json => RowEncoderWrapper::Json(JsonEncoder::new(
+                    schema.clone(),
+                    None,
+                    DateHandlingMode::FromCe,
+                    TimestampHandlingMode::Milli,
+                    timestamptz_mode,
+                    TimeHandlingMode::Milli,
+                )),
+                SinkEncode::Protobuf => {
+                    let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
+                        &format_desc.options,
+                        &config.common.topic,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                    let header = match sid {
+                        None => ProtoHeader::None,
+                        Some(sid) => ProtoHeader::ConfluentSchemaRegistry(sid),
+                    };
+                    RowEncoderWrapper::Proto(ProtoEncoder::new(
+                        schema.clone(),
+                        None,
+                        descriptor,
+                        header,
+                    )?)
+                }
+                _ => {
+                    return Err(SinkError::Config(anyhow!(
+                        "mqtt sink encode unsupported: {:?}",
+                        format_desc.encode,
+                    )))
+                }
+            },
+            _ => {
+                return Err(SinkError::Config(anyhow!(
+                    "Mqtt sink only support append-only mode"
+                )))
+            }
+        };
         let qos = config.common.qos();
 
         let (client, mut eventloop) = config
@@ -214,6 +348,7 @@ impl MqttSinkWriter {
             config: config.clone(),
             qos,
             retain: config.retain,
+            path,
         };
 
         Ok::<_, SinkError>(Self {
@@ -221,7 +356,7 @@ impl MqttSinkWriter {
             payload_writer,
             schema: schema.clone(),
             stopped,
-            formatter,
+            encoder,
         })
     }
 }
@@ -232,9 +367,7 @@ impl AsyncTruncateSinkWriter for MqttSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
-            self.payload_writer.write_chunk(chunk, formatter).await
-        })
+        self.payload_writer.write_chunk(chunk, &self.encoder).await
     }
 }
 
@@ -251,37 +384,55 @@ struct MqttSinkPayloadWriter {
     config: MqttConfig,
     qos: QoS,
     retain: bool,
+    path: Vec<usize>,
 }
 
 impl MqttSinkPayloadWriter {}
 
 impl MqttSinkPayloadWriter {
-    async fn write_chunk<F: SinkFormatter>(
-        &mut self,
-        chunk: StreamChunk,
-        formatter: &F,
-    ) -> Result<()>
-    where
-        F::K: SerTo<Vec<u8>>,
-        F::V: SerTo<Vec<u8>> + QueryField,
-    {
-        for r in formatter.format_chunk(&chunk) {
-            let (_, event_object) = r?;
-            let topic = {
-                if let Some(name) = &self.config.topic_field {
-                    match &event_object {
-                        Some(event_object) => {
-                            event_object.get_field(name).context("column not found")?
+    async fn write_chunk(&mut self, chunk: StreamChunk, encoder: &RowEncoderWrapper) -> Result<()> {
+        for (op, row) in chunk.rows() {
+            if op != Op::Insert {
+                continue;
+            }
+
+            let topic = if self.path.is_empty() {
+                self.config.common.topic.as_str()
+            } else {
+                let mut iter = self.path.iter();
+
+                let scalar = iter
+                    .next()
+                    .and_then(|pos| row.datum_at(*pos))
+                    .and_then(|d| {
+                        iter.try_fold(d, |d, pos| match d {
+                            ScalarRefImpl::Struct(struct_ref) => {
+                                struct_ref.iter_fields_ref().nth(*pos).flatten()
+                            }
+                            _ => None,
+                        })
+                    });
+                match scalar {
+                    Some(ScalarRefImpl::Utf8(s)) => s,
+                    _ => {
+                        if self.config.fallback_to_default {
+                            self.config.common.topic.as_str()
+                        } else {
+                            return Err(SinkError::Mqtt(anyhow!(
+                                "topic field not found or not a string"
+                            )));
                         }
-                        None => self.config.common.topic.clone(),
                     }
-                } else {
-                    self.config.common.topic.clone()
                 }
             };
 
-            self.write_one(&topic, event_object.map(SerTo::ser_to).transpose()?)
-                .await?;
+            let v = encoder.encode(row)?;
+
+            self.client
+                .publish(topic, self.qos, self.retain, v)
+                .await
+                .context("mqtt sink error")
+                .map_err(SinkError::Mqtt)?;
         }
 
         Ok(())

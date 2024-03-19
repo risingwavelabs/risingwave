@@ -6,7 +6,6 @@ WITH
     connector='mqtt',
     url='tcp://mqtt-server',
     topic= 'test',
-    type = 'append-only',
     retain = 'true',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON (

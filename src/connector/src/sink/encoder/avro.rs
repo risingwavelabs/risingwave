@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use thiserror_ext::AsReport;
 
-use super::{FieldEncodeError, QueryField, Result as SinkResult, RowEncoder, SerTo};
+use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
 
 type Result<T> = std::result::Result<T, FieldEncodeError>;
 
@@ -142,20 +142,6 @@ impl SerTo<Vec<u8>> for AvroEncoded {
         buf.put_slice(&raw);
 
         Ok(buf)
-    }
-}
-
-impl QueryField for AvroEncoded {
-    fn get_field(&self, name: &str) -> Option<String> {
-        name.split('.')
-            .try_fold(&self.value, |val, field| match val {
-                Value::Record(fields) => fields.iter().find(|(n, _)| n == field).map(|(_, v)| v),
-                _ => None,
-            })
-            .and_then(|v| match v {
-                Value::String(s) => Some(s.clone()),
-                _ => None,
-            })
     }
 }
 
