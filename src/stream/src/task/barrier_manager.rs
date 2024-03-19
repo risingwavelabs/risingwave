@@ -221,6 +221,12 @@ pub(super) enum LocalActorOperation {
     },
     #[cfg(test)]
     GetCurrentSharedContext(oneshot::Sender<Arc<SharedContext>>),
+    #[cfg(test)]
+    RegisterSenders {
+        actor_id: ActorId,
+        senders: Vec<UnboundedSender<Barrier>>,
+        result_sender: oneshot::Sender<()>,
+    },
 }
 
 pub(super) struct CreateActorOutput {
@@ -486,6 +492,15 @@ impl LocalBarrierWorker {
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
                 let _ = sender.send(self.current_shared_context.clone());
+            }
+            #[cfg(test)]
+            LocalActorOperation::RegisterSenders {
+                actor_id,
+                senders,
+                result_sender,
+            } => {
+                self.register_sender(actor_id, senders);
+                let _ = result_sender.send(());
             }
         }
     }
