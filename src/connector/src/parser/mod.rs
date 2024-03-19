@@ -80,6 +80,7 @@ mod upsert_parser;
 mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
+use risingwave_common::buffer::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
@@ -87,6 +88,8 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
+    // index to empty rows in a batch from upstream
+    empty_row_index: Vec<usize>,
 }
 
 impl SourceStreamChunkBuilder {
@@ -100,6 +103,7 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
+            empty_row_index: vec![],
         }
     }
 
@@ -108,18 +112,25 @@ impl SourceStreamChunkBuilder {
             descs: &self.descs,
             builders: &mut self.builders,
             op_builder: &mut self.op_builder,
+            empty_row_indices: &mut self.empty_row_index,
             row_meta: None,
         }
     }
 
     /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
-        StreamChunk::new(
+        let mut visibility = BitmapBuilder::filled(self.op_builder.len());
+        // mark empty rows from upstream as invisible
+        for i in self.empty_row_index {
+            visibility.set(i, false);
+        }
+        StreamChunk::with_visibility(
             self.op_builder,
             self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
+            visibility.finish(),
         )
     }
 
@@ -154,6 +165,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
+    empty_row_indices: &'a mut Vec<usize>,
 
     /// An optional meta data of the original message.
     ///
@@ -315,6 +327,10 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
             row_meta: Some(row_meta),
             ..self
         }
+    }
+
+    pub fn record_empty_row_idx(&mut self, index: usize) {
+        self.empty_row_indices.push(index)
     }
 }
 
@@ -665,12 +681,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     offset = msg.offset,
                     "got a empty message, could be a heartbeat"
                 );
-                parser.emit_empty_row(builder.row_writer().with_meta(MessageMeta {
+                let mut writer = builder.row_writer().with_meta(MessageMeta {
                     meta: &msg.meta,
                     split_id: &msg.split_id,
                     offset: &msg.offset,
-                }));
-
+                });
+                writer.record_empty_row_idx(i);
+                parser.emit_empty_row(writer);
                 continue;
             }
 
