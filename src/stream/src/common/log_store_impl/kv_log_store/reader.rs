@@ -18,11 +18,11 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use foyer::memory::CacheContext;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
@@ -216,7 +216,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
                         ReadOptions {
                             // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                             prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                            cache_policy: CachePolicy::Fill(CachePriority::Low),
+                            cache_policy: CachePolicy::Fill(CacheContext::LruPriorityLow),
                             table_id,
                             ..Default::default()
                         },
@@ -358,7 +358,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             ReadOptions {
                                                 prefetch_options:
                                                     PrefetchOptions::prefetch_for_large_range_scan(),
-                                                cache_policy: CachePolicy::Fill(CachePriority::Low),
+                                                cache_policy: CachePolicy::Fill(CacheContext::LruPriorityLow),
                                                 table_id,
                                                 ..Default::default()
                                             },

@@ -329,7 +329,7 @@ export default function Streaming() {
         clearInterval(interval)
       }
     }
-  }, [backPressureDataSource])
+  }, [backPressureDataSource, toast])
 
   const backPressures = useMemo(() => {
     if (promethusMetrics || embeddedBackPressureInfo) {

@@ -136,7 +136,12 @@ to RiseDev directory."
             }
             Self::Dashboard => {
                 "
-Required if you want to build dashboard from source."
+Required if you want to build dashboard from source.
+This is generally not the option you want to use to develop the
+dashboard. Instead, directly run `npm run dev` in the dashboard
+directory to start the development server, set the API endpoint
+to a running RisingWave cluster in the settings page.
+"
             }
             Self::Tracing => {
                 "

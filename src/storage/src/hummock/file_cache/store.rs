@@ -279,7 +279,6 @@ where
                 catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
-                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
                 reclaimers: config.reclaimers,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,

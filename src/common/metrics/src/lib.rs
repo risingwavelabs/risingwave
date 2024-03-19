@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(lazy_cell)]
+#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(array_methods)]
 use std::ops::Deref;
 use std::sync::LazyLock;
 
@@ -23,10 +27,9 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
-use crate::monitor::GLOBAL_METRICS_REGISTRY;
-
 mod error_metrics;
 mod guarded_metrics;
+pub mod monitor;
 mod relabeled_metric;
 
 pub use error_metrics::*;
@@ -87,7 +90,7 @@ impl MetricsLayer {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         static AWS_SDK_RETRY_COUNTS: LazyLock<GenericCounter<AtomicU64>> = LazyLock::new(|| {
-            let registry = GLOBAL_METRICS_REGISTRY.deref();
+            let registry = crate::monitor::GLOBAL_METRICS_REGISTRY.deref();
             register_int_counter_with_registry!(
                 "aws_sdk_retry_counts",
                 "Total number of aws sdk retry happens",
@@ -99,5 +102,41 @@ impl MetricsLayer {
         Self {
             aws_sdk_retry_counts: AWS_SDK_RETRY_COUNTS.deref().clone(),
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum MetricLevel {
+    #[default]
+    Disabled = 0,
+    Critical = 1,
+    Info = 2,
+    Debug = 3,
+}
+
+impl clap::ValueEnum for MetricLevel {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
+    }
+
+    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
+            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
+            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
+            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
+        }
+    }
+}
+
+impl PartialEq<Self> for MetricLevel {
+    fn eq(&self, other: &Self) -> bool {
+        (*self as u8).eq(&(*other as u8))
+    }
+}
+
+impl PartialOrd for MetricLevel {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        (*self as u8).partial_cmp(&(*other as u8))
     }
 }

@@ -45,6 +45,7 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    // TODO(eric): remove me
     // TODO: This is currently unused.
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
@@ -71,24 +72,24 @@ pub struct CompactorOpts {
     pub config_path: String,
 
     /// Used for control the metrics level, similar to log level.
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[clap(long, hide = true, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
 
     #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
     pub compactor_mode: Option<CompactorMode>,
 
-    #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
+    #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
 }
 

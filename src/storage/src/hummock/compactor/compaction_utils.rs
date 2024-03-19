@@ -394,12 +394,6 @@ pub async fn check_compaction_result(
         u64::MAX,
         0,
         None,
-        del_iter,
-    );
-    let mut del_iter = ForwardMergeRangeIterator::default();
-    del_iter.add_concat_iter(
-        compact_task.sorted_output_ssts.clone(),
-        context.sstable_store.clone(),
     );
     let iter = ConcatSstableIterator::new(
         compact_task.existing_table_ids.clone(),
@@ -415,7 +409,6 @@ pub async fn check_compaction_result(
         u64::MAX,
         0,
         None,
-        del_iter,
     );
 
     check_result(left_iter, right_iter).await
@@ -427,8 +420,6 @@ pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
     sort_ssts: Vec<SstableInfo>,
     context: CompactorContext,
 ) -> HummockResult<bool> {
-    let mut del_iter = ForwardMergeRangeIterator::default();
-    del_iter.add_concat_iter(sort_ssts.clone(), context.sstable_store.clone());
     let iter = ConcatSstableIterator::new(
         existing_table_ids.clone(),
         sort_ssts.clone(),
@@ -443,7 +434,6 @@ pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
         u64::MAX,
         0,
         None,
-        del_iter,
     );
     check_result(left_iter, right_iter).await
 }

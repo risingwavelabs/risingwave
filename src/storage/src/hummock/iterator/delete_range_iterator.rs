@@ -266,10 +266,7 @@ impl ForwardMergeRangeIterator {
 }
 
 impl ForwardMergeRangeIterator {
-    pub(super) async fn next_until(
-        &mut self,
-        target_user_key: UserKey<&[u8]>,
-    ) -> HummockResult<()> {
+    pub async fn next_until(&mut self, target_user_key: UserKey<&[u8]>) -> HummockResult<()> {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
         while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
             self.next().await?;

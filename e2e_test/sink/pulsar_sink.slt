@@ -21,7 +21,7 @@ WITH (
     type='upsert',
     primary_key='id',
     topic='persistent://public/default/rw',
-    service.url='pulsar://pulsar:6650',
+    service.url='pulsar://pulsar-server:6650',
 );
 
 statement ok
@@ -32,7 +32,7 @@ CREATE TABLE pulsar_source (
 WITH (
    connector='pulsar',
    topic='persistent://public/default/rw',
-   service.url='pulsar://pulsar:6650',
+   service.url='pulsar://pulsar-server:6650',
    scan.startup.mode='earliest',
 ) FORMAT PLAIN ENCODE JSON;
 

@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::source::cdc::external::CdcTableType;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
@@ -79,7 +80,7 @@ impl Get for BTreeMap<String, String> {
 }
 
 /// Utility methods for `WITH` properties (`HashMap` and `BTreeMap`).
-pub trait WithPropertiesExt: Get {
+pub trait WithPropertiesExt: Get + Sized {
     #[inline(always)]
     fn get_connector(&self) -> Option<String> {
         self.get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase())
@@ -99,6 +100,10 @@ pub trait WithPropertiesExt: Get {
             return false;
         };
         connector.contains("-cdc")
+    }
+
+    fn is_backfillable_cdc_connector(&self) -> bool {
+        self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
     }
 
     #[inline(always)]

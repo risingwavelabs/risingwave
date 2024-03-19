@@ -51,7 +51,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_storage::hummock::compactor::{
-    start_compactor, CompactionExecutor, CompactorContext,
+    new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
@@ -69,7 +69,7 @@ use tokio::task::JoinHandle;
 use tower::Layer;
 
 use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
-use crate::memory::manager::MemoryManager;
+use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
@@ -180,6 +180,14 @@ pub async fn compute_node_serve(
 
     let mut join_handle_vec = vec![];
 
+    let await_tree_config = match &config.streaming.async_stack_trace {
+        AsyncStackTraceOption::Off => None,
+        c => await_tree::ConfigBuilder::default()
+            .verbose(c.is_verbose().unwrap())
+            .build()
+            .ok(),
+    };
+
     let state_store = StateStoreImpl::new(
         state_store_url,
         storage_opts.clone(),
@@ -188,6 +196,7 @@ pub async fn compute_node_serve(
         object_store_metrics,
         storage_metrics.clone(),
         compactor_metrics.clone(),
+        await_tree_config.clone(),
     )
     .await
     .unwrap();
@@ -224,7 +233,9 @@ pub async fn compute_node_serve(
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
-                await_tree_reg: None,
+                await_tree_reg: await_tree_config
+                    .clone()
+                    .map(new_compaction_await_tree_reg_ref),
                 running_task_parallelism: Arc::new(AtomicU32::new(0)),
                 max_task_parallelism,
             };
@@ -259,14 +270,6 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
-    let await_tree_config = match &config.streaming.async_stack_trace {
-        AsyncStackTraceOption::Off => None,
-        c => await_tree::ConfigBuilder::default()
-            .verbose(c.is_verbose().unwrap())
-            .build()
-            .ok(),
-    };
-
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(
         config.batch.clone(),
@@ -280,10 +283,22 @@ pub async fn compute_node_serve(
     // Related issues:
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
-    let memory_mgr = MemoryManager::new(
-        streaming_metrics.clone(),
-        compute_memory_bytes + storage_memory_bytes,
-    );
+    let memory_mgr = MemoryManager::new(MemoryManagerConfig {
+        total_memory: compute_memory_bytes + storage_memory_bytes,
+        threshold_aggressive: config
+            .streaming
+            .developer
+            .memory_controller_threshold_aggressive,
+        threshold_graceful: config
+            .streaming
+            .developer
+            .memory_controller_threshold_graceful,
+        threshold_stable: config
+            .streaming
+            .developer
+            .memory_controller_threshold_stable,
+        metrics: streaming_metrics.clone(),
+    });
 
     // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(

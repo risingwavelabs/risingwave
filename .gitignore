@@ -34,6 +34,7 @@ go/bin/
 src/**/target
 src/**/target_tarpaulin
 target/
+target-bisector-*/
 src/proto/
 src/prost/src/*.rs
 src/prost/src/sim/*.rs

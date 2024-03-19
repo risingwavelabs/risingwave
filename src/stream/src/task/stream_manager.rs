@@ -77,6 +77,7 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 #[derive(Clone)]
 pub struct LocalStreamManager {
     await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 
     pub env: StreamEnvironment,
 
@@ -160,7 +161,10 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        let await_tree_reg =
+        let await_tree_reg = await_tree_config
+            .clone()
+            .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
+        let barrier_await_tree_reg =
             await_tree_config.map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
@@ -169,11 +173,13 @@ impl LocalStreamManager {
             env.clone(),
             streaming_metrics,
             await_tree_reg.clone(),
+            barrier_await_tree_reg.clone(),
             watermark_epoch,
             actor_op_rx,
         );
         Self {
             await_tree_reg,
+            barrier_await_tree_reg,
             env,
             actor_op_tx: EventSender(actor_op_tx),
         }
@@ -195,6 +201,16 @@ impl LocalStreamManager {
                 {
                     writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
                 }
+
+                for (e, trace) in self
+                    .barrier_await_tree_reg
+                    .as_ref()
+                    .expect("async stack trace not enabled")
+                    .lock()
+                    .iter()
+                {
+                    writeln!(o, ">> Barrier {}\n\n{}", e, trace).ok();
+                }
             }
         })
     }
@@ -202,6 +218,14 @@ impl LocalStreamManager {
     /// Get await-tree contexts for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
         match &self.await_tree_reg.as_ref() {
+            Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
+            None => Default::default(),
+        }
+    }
+
+    /// Get await-tree contexts for all barrier.
+    pub fn get_barrier_traces(&self) -> HashMap<u64, await_tree::TreeContext> {
+        match &self.barrier_await_tree_reg.as_ref() {
             Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }

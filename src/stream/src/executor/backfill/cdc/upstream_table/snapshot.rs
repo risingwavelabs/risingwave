@@ -30,6 +30,7 @@ pub trait UpstreamTableRead {
     fn snapshot_read(
         &self,
         args: SnapshotReadArgs,
+        limit: u32,
     ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_;
 
     fn current_binlog_offset(
@@ -75,7 +76,7 @@ impl<T> UpstreamTableReader<T> {
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(&self, args: SnapshotReadArgs) {
+    async fn snapshot_read(&self, args: SnapshotReadArgs, limit: u32) {
         let primary_keys = self
             .inner
             .pk_indices()
@@ -96,6 +97,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             self.inner.schema_table_name(),
             args.current_pos,
             primary_keys,
+            limit,
         );
 
         pin_mut!(row_stream);

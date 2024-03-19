@@ -47,8 +47,12 @@ pub struct StorageOpts {
     pub write_conflict_detection_enabled: bool,
     /// Capacity of sstable block cache.
     pub block_cache_capacity_mb: usize,
+    /// the number of block-cache shard. Less shard means that more concurrent-conflict.
+    pub block_shard_num: usize,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
+    /// the number of meta-cache shard. Less shard means that more concurrent-conflict.
+    pub meta_shard_num: usize,
     /// Percent of the ratio of high priority data in block-cache
     pub high_priority_ratio: usize,
     /// max memory usage for large query.
@@ -170,6 +174,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
+            block_shard_num: s.block_shard_num,
+            meta_shard_num: s.meta_shard_num,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,

@@ -27,7 +27,7 @@ use crate::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 pub fn place_vnode(
     hint_pu_mapping: Option<&ParallelUnitMapping>,
     new_workers: &[WorkerNode],
-    max_parallelism: usize,
+    max_parallelism: Option<usize>,
 ) -> Option<ParallelUnitMapping> {
     // Get all serving parallel units from all available workers, grouped by worker id and ordered
     // by parallel unit id in each group.
@@ -42,7 +42,7 @@ pub fn place_vnode(
     // `max_parallelism` and total number of virtual nodes.
     let serving_parallelism = std::cmp::min(
         new_pus.iter().map(|pus| pus.len()).sum(),
-        std::cmp::min(max_parallelism, VirtualNode::COUNT),
+        std::cmp::min(max_parallelism.unwrap_or(usize::MAX), VirtualNode::COUNT),
     );
 
     // Select `serving_parallelism` parallel units in a round-robin fashion, to distribute workload
@@ -236,11 +236,11 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            place_vnode(None, &[worker_1.clone()], 0).is_none(),
+            place_vnode(None, &[worker_1.clone()], Some(0)).is_none(),
             "max_parallelism should >= 0"
         );
 
-        let re_pu_mapping_2 = place_vnode(None, &[worker_1.clone()], 10000).unwrap();
+        let re_pu_mapping_2 = place_vnode(None, &[worker_1.clone()], None).unwrap();
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 1);
         let worker_2 = WorkerNode {
             id: 2,
@@ -251,7 +251,7 @@ mod tests {
         let re_pu_mapping = place_vnode(
             Some(&re_pu_mapping_2),
             &[worker_1.clone(), worker_2.clone()],
-            10000,
+            None,
         )
         .unwrap();
 
@@ -269,7 +269,7 @@ mod tests {
         let re_pu_mapping_2 = place_vnode(
             Some(&re_pu_mapping),
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            10000,
+            None,
         )
         .unwrap();
 
@@ -281,7 +281,7 @@ mod tests {
         let re_pu_mapping = place_vnode(
             Some(&re_pu_mapping_2),
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            50,
+            Some(50),
         )
         .unwrap();
         // limited by max_parallelism
@@ -292,7 +292,7 @@ mod tests {
         let re_pu_mapping_2 = place_vnode(
             Some(&re_pu_mapping),
             &[worker_1.clone(), worker_2, worker_3.clone()],
-            10000,
+            None,
         )
         .unwrap();
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
@@ -300,15 +300,15 @@ mod tests {
         let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
         assert!(score >= 50 * 2);
         let re_pu_mapping =
-            place_vnode(Some(&re_pu_mapping_2), &[worker_1, worker_3.clone()], 10000).unwrap();
+            place_vnode(Some(&re_pu_mapping_2), &[worker_1, worker_3.clone()], None).unwrap();
         // limited by total pu number
         assert_eq!(re_pu_mapping.iter_unique().count(), 61);
         // 111 * 2 + 34 -> 61 * 4 + 12
         let score = count_same_vnode_mapping(&re_pu_mapping, &re_pu_mapping_2);
         assert!(score >= 61 * 2);
-        assert!(place_vnode(Some(&re_pu_mapping), &[], 10000).is_none());
-        let re_pu_mapping = place_vnode(Some(&re_pu_mapping), &[worker_3], 10000).unwrap();
+        assert!(place_vnode(Some(&re_pu_mapping), &[], None).is_none());
+        let re_pu_mapping = place_vnode(Some(&re_pu_mapping), &[worker_3], None).unwrap();
         assert_eq!(re_pu_mapping.iter_unique().count(), 60);
-        assert!(place_vnode(Some(&re_pu_mapping), &[], 10000).is_none());
+        assert!(place_vnode(Some(&re_pu_mapping), &[], None).is_none());
     }
 }

@@ -670,6 +670,7 @@ impl DiagnoseCommand {
             a.actor_traces.extend(b.actor_traces);
             a.rpc_traces.extend(b.rpc_traces);
             a.compaction_task_traces.extend(b.compaction_task_traces);
+            a.inflight_barrier_traces.extend(b.inflight_barrier_traces);
         }
 
         let compute_clients = ComputeClientPool::default();
@@ -699,6 +700,14 @@ impl DiagnoseCommand {
             let _ = writeln!(s, "--- Compactor Traces ---");
             for (name, trace) in &all.compaction_task_traces {
                 let _ = writeln!(s, ">> Compaction Task {name}");
+                let _ = writeln!(s, "{trace}");
+            }
+        }
+
+        if !all.inflight_barrier_traces.is_empty() {
+            let _ = writeln!(s, "--- Inflight Barrier Traces ---");
+            for (name, trace) in &all.inflight_barrier_traces {
+                let _ = writeln!(s, ">> Barrier {name}");
                 let _ = writeln!(s, "{trace}");
             }
         }

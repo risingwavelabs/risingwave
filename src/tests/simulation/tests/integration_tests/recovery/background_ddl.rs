@@ -15,7 +15,7 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use risingwave_common::error::v2::AsReport;
+use risingwave_common::error::AsReport;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 

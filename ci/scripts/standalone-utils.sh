@@ -20,8 +20,7 @@ start_standalone_without_compactor() {
         --backend etcd \
         --etcd-endpoints 127.0.0.1:2388 \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-        --data-directory hummock_001 \
-        --dashboard-ui-path $RW_PREFIX/ui" \
+        --data-directory hummock_001" \
      --compute-opts=" \
         --listen-addr 127.0.0.1:5688 \
         --prometheus-listener-addr 127.0.0.1:1222 \
@@ -55,8 +54,7 @@ start_standalone() {
         --backend etcd \
         --etcd-endpoints 127.0.0.1:2388 \
         --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-        --data-directory hummock_001 \
-        --dashboard-ui-path $RW_PREFIX/ui" \
+        --data-directory hummock_001" \
      --compute-opts=" \
         --listen-addr 127.0.0.1:5688 \
         --prometheus-listener-addr 127.0.0.1:1222 \

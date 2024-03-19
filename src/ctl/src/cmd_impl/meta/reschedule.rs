@@ -293,6 +293,10 @@ pub async fn unregister_workers(
     }
 
     if target_worker_ids.is_empty() {
+        if ignore_not_found {
+            println!("Warn: No worker provided, ignored");
+            return Ok(());
+        }
         println!("No worker provided");
         exit(1);
     }

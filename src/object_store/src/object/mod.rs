@@ -817,9 +817,13 @@ pub async fn build_remote_object_store(
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
             let (namenode, root) = hdfs.split_once('@').unwrap_or((hdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_hdfs_engine(
+                    namenode.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         gcs if gcs.starts_with("gcs://") => {
@@ -871,7 +875,7 @@ pub async fn build_remote_object_store(
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string())
+                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone())
                     .unwrap()
                     .monitored(metrics, config),
             )

@@ -1,0 +1,18 @@
+[package]
+name = "rw_iter_util"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+itertools = "0.12"
+
+[lints]
+workspace = true

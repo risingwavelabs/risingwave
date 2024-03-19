@@ -22,8 +22,7 @@ start_standalone() {
                     --etcd-endpoints 127.0.0.1:2388 \
                     --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
                     --data-directory hummock_001 \
-                    --config-path src/config/standalone-example.toml \
-                    --dashboard-ui-path $RW_PREFIX/ui" \
+                    --config-path src/config/standalone-example.toml" \
                  --compute-opts=" \
                     --config-path src/config/standalone-example.toml \
                     --listen-addr 127.0.0.1:5688 \

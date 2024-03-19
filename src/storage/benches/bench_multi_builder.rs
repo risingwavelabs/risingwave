@@ -147,6 +147,8 @@ fn bench_builder(
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 128 << 20,
         high_priority_ratio: 0,
+        meta_shard_num: 2,
+        block_shard_num: 2,
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),

@@ -127,7 +127,7 @@ function get_max_committed_epoch_in_backup() {
 function get_safe_epoch_in_backup() {
   local id
   id=$1
-  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\)}.*/\1/p"
+  sed_str="s/.*{\"id\":${id},\"hummock_version_id\":.*,\"ssts\":\[.*\],\"max_committed_epoch\":.*,\"safe_epoch\":\([[:digit:]]*\).*}.*/\1/p"
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
   cat "hummock-minio/hummock001/backup/manifest.json" | sed -n "${sed_str}"
 }

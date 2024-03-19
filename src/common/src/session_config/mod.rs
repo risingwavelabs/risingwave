@@ -141,7 +141,7 @@ pub struct ConfigMap {
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
     #[parameter(default = false)]
-    streaming_enable_arrangement_backfill: bool,
+    streaming_use_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
     #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]

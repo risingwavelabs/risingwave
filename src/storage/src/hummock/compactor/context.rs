@@ -25,6 +25,12 @@ use crate::hummock::MemoryLimiter;
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 
+pub type CompactionAwaitTreeRegRef = Arc<RwLock<await_tree::Registry<String>>>;
+
+pub fn new_compaction_await_tree_reg_ref(config: await_tree::Config) -> CompactionAwaitTreeRegRef {
+    Arc::new(RwLock::new(await_tree::Registry::new(config)))
+}
+
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {
@@ -46,7 +52,7 @@ pub struct CompactorContext {
 
     pub task_progress_manager: TaskProgressManagerRef,
 
-    pub await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    pub await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 
     pub running_task_parallelism: Arc<AtomicU32>,
 
@@ -58,6 +64,7 @@ impl CompactorContext {
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         compactor_metrics: Arc<CompactorMetrics>,
+        await_tree_reg: Option<CompactionAwaitTreeRegRef>,
     ) -> Self {
         let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {
@@ -77,7 +84,7 @@ impl CompactorContext {
             compaction_executor,
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
-            await_tree_reg: None,
+            await_tree_reg,
             running_task_parallelism: Arc::new(AtomicU32::new(0)),
             max_task_parallelism: Arc::new(AtomicU32::new(u32::MAX)),
         }

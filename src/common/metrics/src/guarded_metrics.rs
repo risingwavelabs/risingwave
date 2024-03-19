@@ -58,9 +58,8 @@ macro_rules! register_guarded_histogram_vec_with_registry {
     ($HOPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::HistogramVec::new($HOPTS, $LABELS_NAMES);
         inner.and_then(|inner| {
-            let inner = $crate::metrics::__extract_histogram_builder(inner);
-            let label_guarded =
-                $crate::metrics::LabelGuardedHistogramVec::new(inner, { $LABELS_NAMES });
+            let inner = $crate::__extract_histogram_builder(inner);
+            let label_guarded = $crate::LabelGuardedHistogramVec::new(inner, { $LABELS_NAMES });
             let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
             result.map(move |()| label_guarded)
         })
@@ -72,9 +71,8 @@ macro_rules! register_guarded_gauge_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::GaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
         inner.and_then(|inner| {
-            let inner = $crate::metrics::__extract_gauge_builder(inner);
-            let label_guarded =
-                $crate::metrics::LabelGuardedGaugeVec::new(inner, { $LABELS_NAMES });
+            let inner = $crate::__extract_gauge_builder(inner);
+            let label_guarded = $crate::LabelGuardedGaugeVec::new(inner, { $LABELS_NAMES });
             let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
             result.map(move |()| label_guarded)
         })
@@ -86,9 +84,8 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::IntGaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
         inner.and_then(|inner| {
-            let inner = $crate::metrics::__extract_gauge_builder(inner);
-            let label_guarded =
-                $crate::metrics::LabelGuardedIntGaugeVec::new(inner, { $LABELS_NAMES });
+            let inner = $crate::__extract_gauge_builder(inner);
+            let label_guarded = $crate::LabelGuardedIntGaugeVec::new(inner, { $LABELS_NAMES });
             let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
             result.map(move |()| label_guarded)
         })
@@ -100,9 +97,8 @@ macro_rules! register_guarded_int_counter_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::IntCounterVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
         inner.and_then(|inner| {
-            let inner = $crate::metrics::__extract_counter_builder(inner);
-            let label_guarded =
-                $crate::metrics::LabelGuardedIntCounterVec::new(inner, { $LABELS_NAMES });
+            let inner = $crate::__extract_counter_builder(inner);
+            let label_guarded = $crate::LabelGuardedIntCounterVec::new(inner, { $LABELS_NAMES });
             let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
             result.map(move |()| label_guarded)
         })
@@ -396,7 +392,7 @@ impl<T: MetricWithLocal, const N: usize> LabelGuardedMetric<T, N> {
 mod tests {
     use prometheus::core::Collector;
 
-    use crate::metrics::LabelGuardedIntCounterVec;
+    use crate::LabelGuardedIntCounterVec;
 
     #[test]
     fn test_label_guarded_metrics_drop() {

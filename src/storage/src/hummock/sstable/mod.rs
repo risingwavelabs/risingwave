@@ -17,6 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
+use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
@@ -38,6 +39,7 @@ mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
+use tracing::warn;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{
@@ -485,6 +487,16 @@ impl SstableMeta {
             monotonic_tombstone_events.push(monotonic_tombstone_event);
         }
         let meta_offset = buf.get_u64_le();
+
+        if !monotonic_tombstone_events.is_empty() {
+            warn!(
+                count = monotonic_tombstone_events.len(),
+                tables = ?monotonic_tombstone_events
+                    .iter()
+                    .map(|event| event.event_key.left_user_key.table_id)
+                    .collect::<HashSet<_>>(),
+                "read non-empty range tombstones");
+        }
 
         Ok(Self {
             block_metas,

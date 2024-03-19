@@ -196,9 +196,6 @@ impl Task for MetaNodeService {
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
 
-        cmd.arg("--dashboard-ui-path")
-            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
-
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");

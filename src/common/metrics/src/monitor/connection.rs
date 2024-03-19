@@ -38,9 +38,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tracing::{debug, info, warn};
 
-use crate::metrics::LabelGuardedIntCounterVec;
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::register_guarded_int_counter_vec_with_registry;
+use crate::{register_guarded_int_counter_vec_with_registry, LabelGuardedIntCounterVec};
 
 pub trait MonitorAsyncReadWrite {
     fn on_read(&mut self, _size: usize) {}

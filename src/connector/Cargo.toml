@@ -106,7 +106,7 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
-redis = { version = "0.24.0", features = [
+redis = { version = "0.25", features = [
     "aio",
     "tokio-comp",
     "async-std-comp",

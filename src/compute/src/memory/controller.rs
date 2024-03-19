@@ -18,6 +18,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
+use super::manager::MemoryManagerConfig;
+
 /// Internal state of [`LruWatermarkController`] that saves the state in previous tick.
 struct State {
     pub used_memory_bytes: usize,
@@ -34,6 +36,19 @@ impl Default for State {
             lru_watermark_time_ms: physical_now,
         }
     }
+}
+
+/// - `allocated`: Total number of bytes allocated by the application.
+/// - `active`: Total number of bytes in active pages allocated by the application. This is a multiple of the page size, and greater than or equal to `stats.allocated`. This does not include `stats.arenas.<i>.pdirty`, `stats.arenas.<i>.pmuzzy`, nor pages entirely devoted to allocator metadata.
+/// - `resident`: Total number of bytes in physically resident data pages mapped by the allocator.
+/// - `metadata`: Total number of bytes dedicated to jemalloc metadata.
+///
+/// Reference: <https://jemalloc.net/jemalloc.3.html>
+pub struct MemoryStats {
+    pub allocated: usize,
+    pub active: usize,
+    pub resident: usize,
+    pub metadata: usize,
 }
 
 /// `LruWatermarkController` controls LRU Watermark (epoch) according to actual memory usage statistics
@@ -65,18 +80,14 @@ pub struct LruWatermarkController {
 }
 
 impl LruWatermarkController {
-    // TODO(eric): make them configurable
-    const THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const THRESHOLD_GRACEFUL: f64 = 0.8;
-    const THRESHOLD_STABLE: f64 = 0.7;
-
-    pub fn new(total_memory: usize, metrics: Arc<StreamingMetrics>) -> Self {
-        let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
-        let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
-        let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
+    pub fn new(config: &MemoryManagerConfig) -> Self {
+        let threshold_stable = (config.total_memory as f64 * config.threshold_stable) as usize;
+        let threshold_graceful = (config.total_memory as f64 * config.threshold_graceful) as usize;
+        let threshold_aggressive =
+            (config.total_memory as f64 * config.threshold_aggressive) as usize;
 
         Self {
-            metrics,
+            metrics: config.metrics.clone(),
             threshold_stable,
             threshold_graceful,
             threshold_aggressive,
@@ -103,7 +114,7 @@ impl std::fmt::Debug for LruWatermarkController {
 /// - `stats.metadata`: Total number of bytes dedicated to jemalloc metadata.
 ///
 /// Reference: <https://jemalloc.net/jemalloc.3.html>
-fn jemalloc_memory_stats() -> (usize, usize, usize, usize) {
+fn jemalloc_memory_stats() -> MemoryStats {
     if let Err(e) = tikv_jemalloc_ctl::epoch::advance() {
         tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
     }
@@ -111,18 +122,23 @@ fn jemalloc_memory_stats() -> (usize, usize, usize, usize) {
     let active = tikv_jemalloc_ctl::stats::active::read().unwrap();
     let resident = tikv_jemalloc_ctl::stats::resident::read().unwrap();
     let metadata = tikv_jemalloc_ctl::stats::metadata::read().unwrap();
-    (allocated, active, resident, metadata)
+    MemoryStats {
+        allocated,
+        active,
+        resident,
+        metadata,
+    }
 }
 
 impl LruWatermarkController {
     pub fn tick(&mut self, interval_ms: u32) -> Epoch {
         // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
-        let (
-            jemalloc_allocated_bytes,
-            jemalloc_active_bytes,
-            jemalloc_resident_bytes,
-            jemalloc_metadata_bytes,
-        ) = jemalloc_memory_stats();
+        let MemoryStats {
+            allocated: jemalloc_allocated_bytes,
+            active: jemalloc_active_bytes,
+            resident: jemalloc_resident_bytes,
+            metadata: jemalloc_metadata_bytes,
+        } = jemalloc_memory_stats();
         let (jvm_allocated_bytes, jvm_active_bytes) = load_jvm_memory_stats();
 
         let cur_used_memory_bytes = jemalloc_active_bytes + jvm_allocated_bytes;

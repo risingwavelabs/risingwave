@@ -71,6 +71,13 @@ impl MonitorService for MonitorServiceImpl {
             .map(|(k, v)| (k, v.to_string()))
             .collect();
 
+        let barrier_traces = self
+            .stream_mgr
+            .get_barrier_traces()
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect();
+
         let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
             m.lock()
                 .await
@@ -81,10 +88,23 @@ impl MonitorService for MonitorServiceImpl {
             Default::default()
         };
 
+        let compaction_task_traces = if let Some(hummock) =
+            self.stream_mgr.env.state_store().as_hummock()
+            && let Some(m) = hummock.compaction_await_tree_reg()
+        {
+            m.read()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
-            compaction_task_traces: Default::default(),
+            compaction_task_traces,
+            inflight_barrier_traces: barrier_traces,
         }))
     }
 
