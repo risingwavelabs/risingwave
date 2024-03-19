@@ -163,7 +163,10 @@ impl SessionImpl {
             }
             State::Explicit(ctx) => match ctx.access_mode {
                 AccessMode::ReadWrite => unimplemented!(),
-                AccessMode::ReadOnly => *txn = State::Initial,
+                AccessMode::ReadOnly => {
+                    *txn = State::Initial;
+                    self.drop_cursors();
+                }
             },
         }
     }
@@ -181,7 +184,10 @@ impl SessionImpl {
             }
             State::Explicit(ctx) => match ctx.access_mode {
                 AccessMode::ReadWrite => unimplemented!(),
-                AccessMode::ReadOnly => *txn = State::Initial,
+                AccessMode::ReadOnly => {
+                    *txn = State::Initial;
+                    self.drop_cursors();
+                }
             },
         }
     }

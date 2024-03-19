@@ -53,11 +53,12 @@ pub async fn handle_begin(
                 // issue `BEGIN` implicitly for users. Not actually starting a transaction is okay
                 // since `COMMIT` and `ROLLBACK` are no-ops (except for warnings) when there is no
                 // active transaction.
-                const MESSAGE: &str = "\
-                    Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
-                    For compatibility, this statement will still succeed but no transaction is actually started.";
+                // const MESSAGE: &str = "\
+                //     Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
+                //     For compatibility, this statement will still succeed but no transaction is actually started.";
 
-                return Ok(RwPgResponse::builder(stmt_type).notice(MESSAGE).into());
+                // return Ok(RwPgResponse::builder(stmt_type).notice(MESSAGE).into());
+                AccessMode::ReadOnly
             }
         }
     };

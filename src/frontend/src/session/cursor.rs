@@ -102,14 +102,9 @@ impl Cursor {
             self.create_stream(session).await?;
         }
 
-        if self.remaining_rows.is_empty() {
-            let rows = self.row_stream.as_mut().unwrap().next().await;
-            let rows = match rows {
-                None => return Ok(()),
-                Some(row) => {
-                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
-                }
-            };
+        while let Some(rows) = self.row_stream.as_mut().unwrap().next().await {
+            let rows =
+                rows.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
             self.all_rows.extend(rows);
         }
         Ok(())
@@ -148,6 +143,10 @@ impl SessionImpl {
             transaction::State::Initial | transaction::State::Implicit(_) => false,
             transaction::State::Explicit(_) => true,
         }
+    }
+
+    pub fn drop_cursors(&self) {
+        self.cursors.lock().clear();
     }
 
     pub fn add_cursor(&self, cursor_name: ObjectName, cursor: Cursor) -> Result<()> {
