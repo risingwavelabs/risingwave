@@ -63,10 +63,18 @@ pub fn get_split_offset_mapping_from_chunk(
     // iterate all rows including the invisible ones,
     // which contain offset from upstream heartbeat message
     for i in 0..chunk.capacity() {
-        let (_, row, _) = chunk.row_at(i);
+        let (_, row, vis) = chunk.row_at(i);
         let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-        split_offset_mapping.insert(split_id, offset.to_string());
+        if vis {
+            split_offset_mapping.insert(split_id, offset.to_string());
+        } else {
+            // invisible rows are assume to be heartbeat messages from upstream,
+            // which should not overwrite the offset of data messages
+            split_offset_mapping
+                .entry(split_id)
+                .or_insert(offset.to_string());
+        }
     }
     Some(split_offset_mapping)
 }
