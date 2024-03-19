@@ -14207,7 +14207,9 @@ dependencies = [
 name = "workspace-config"
 version = "1.7.0-alpha"
 dependencies = [
+ "libz-sys",
  "log",
+ "lzma-sys",
  "openssl-sys",
  "sasl2-sys",
  "tracing",
