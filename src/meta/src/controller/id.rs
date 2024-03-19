@@ -37,7 +37,7 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
                 .select_only()
                 .expr(Func::if_null(
                     Expr::col(fragment::Column::FragmentId).max().add(1),
-                    0,
+                    1,
                 ))
                 .into_tuple()
                 .one(conn)
@@ -47,7 +47,7 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
                 .select_only()
                 .expr(Func::if_null(
                     Expr::col(actor::Column::ActorId).max().add(1),
-                    0,
+                    1,
                 ))
                 .into_tuple()
                 .one(conn)
