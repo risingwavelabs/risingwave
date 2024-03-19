@@ -90,6 +90,7 @@ batch_chunk_size = 1024
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
+strict_consistency = "On"
 
 [streaming.developer]
 stream_enable_executor_row_count = false

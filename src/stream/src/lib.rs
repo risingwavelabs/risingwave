@@ -68,6 +68,7 @@ mod consistency {
 
     use std::sync::LazyLock;
 
+    use risingwave_common::config::StrictConsistencyOption;
     use risingwave_common::util::env_var::env_var_is_true;
 
     static INSANE_MODE: LazyLock<bool> =
@@ -75,5 +76,9 @@ mod consistency {
 
     pub fn insane() -> bool {
         *INSANE_MODE
+    }
+
+    pub fn strict_consistency() -> StrictConsistencyOption {
+        crate::CONFIG.with(|config| config.strict_consistency)
     }
 }
