@@ -19,7 +19,7 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use foyer::memory::CacheContext;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::config::{EvictionConfig, MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
@@ -27,7 +27,6 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::ValueRowSerializer;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo, TableSchema};
@@ -36,7 +35,7 @@ use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator, MergeIterator,
+    ConcatIterator, Forward, HummockIterator, MergeIterator,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -45,8 +44,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRangeIterator, FileCache, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableStore, SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
+    CachePolicy, FileCache, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
+    SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, CompactorMetrics, StoreLocalStatistic,
@@ -64,7 +63,10 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         path,
         block_cache_capacity: 64 << 20,
         meta_cache_capacity: 128 << 20,
-        high_priority_ratio: 0,
+        meta_cache_shard_num: 2,
+        block_cache_shard_num: 2,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
         data_file_cache: FileCache::none(),
@@ -271,7 +273,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
     });
     compact_and_build_sst(
         &mut builder,
-        CompactionDeleteRangeIterator::new(ForwardMergeRangeIterator::new(HummockEpoch::MAX)),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,

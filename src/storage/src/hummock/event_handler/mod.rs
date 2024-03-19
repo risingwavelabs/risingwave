@@ -20,7 +20,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::HummockResult;
@@ -35,6 +35,7 @@ pub use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -194,25 +195,28 @@ impl<T> ReadOnlyRwLockRef<T> {
 pub struct LocalInstanceGuard {
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
-    event_sender: mpsc::UnboundedSender<HummockEvent>,
+    // Only send destroy event when event_sender when is_some
+    event_sender: Option<HummockEventSender>,
 }
 
 impl Drop for LocalInstanceGuard {
     fn drop(&mut self) {
-        // If sending fails, it means that event_handler and event_channel have been destroyed, no
-        // need to handle failure
-        self.event_sender
-            .send(HummockEvent::DestroyReadVersion {
-                table_id: self.table_id,
-                instance_id: self.instance_id,
-            })
-            .unwrap_or_else(|err| {
-                tracing::error!(
-                    error = %err.as_report(),
-                    table_id = %self.table_id,
-                    instance_id = self.instance_id,
-                    "LocalInstanceGuard Drop SendError",
-                )
-            })
+        if let Some(sender) = self.event_sender.take() {
+            // If sending fails, it means that event_handler and event_channel have been destroyed, no
+            // need to handle failure
+            sender
+                .send(HummockEvent::DestroyReadVersion {
+                    table_id: self.table_id,
+                    instance_id: self.instance_id,
+                })
+                .unwrap_or_else(|err| {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        table_id = %self.table_id,
+                        instance_id = self.instance_id,
+                        "LocalInstanceGuard Drop SendError",
+                    )
+                })
+        }
     }
 }
