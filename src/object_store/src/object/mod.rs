@@ -796,6 +796,14 @@ pub async fn build_remote_object_store(
                 .map(|v| v != "false")
                 .unwrap_or(true)
             {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
+                )
+            } else {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
                         s3.strip_prefix("s3://").unwrap().to_string(),
@@ -804,14 +812,6 @@ pub async fn build_remote_object_store(
                     )
                     .await
                     .monitored(metrics, config),
-                )
-            } else {
-                let bucket = s3.strip_prefix("s3://").unwrap();
-
-                ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
                 )
             }
         }
