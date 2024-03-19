@@ -409,6 +409,10 @@ impl UnsealedEpochData {
         }
     }
 
+    fn get_imm_data_size(&self) -> usize {
+        self.imms.iter().map(|imm| imm.size()).sum()
+    }
+
     fn add_table_watermarks(
         &mut self,
         table_id: TableId,
@@ -887,6 +891,7 @@ impl HummockUploader {
         } else {
             debug!("epoch {} to seal has no data", epoch);
         }
+        self.buffer_tracker().get_memory_limiter().seal_epoch(epoch);
     }
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
@@ -1061,7 +1066,15 @@ impl HummockUploader {
 
         if self.context.buffer_tracker.need_more_flush() {
             // iterate from older epoch to newer epoch
-            for unsealed_data in self.unsealed_data.values_mut() {
+            let mut unseal_epochs = vec![];
+            for (epoch, unsealed_data) in self.unsealed_data.iter() {
+                unseal_epochs.push((unsealed_data.get_imm_data_size(), *epoch));
+            }
+            // flush large data at first to avoid generate small files.
+            unseal_epochs.sort_by_key(|item| item.0);
+            unseal_epochs.reverse();
+            for (_, epoch) in unseal_epochs {
+                let unsealed_data = self.unsealed_data.get_mut(&epoch).unwrap();
                 unsealed_data.flush(&self.context);
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
@@ -1803,8 +1816,12 @@ mod tests {
         impl Fn(Vec<ImmId>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
     ) {
         // flush threshold is 0. Flush anyway
-        let buffer_tracker =
-            BufferTracker::new(usize::MAX, 0, GenericGauge::new("test", "test").unwrap());
+        let buffer_tracker = BufferTracker::new(
+            usize::MAX,
+            0,
+            100,
+            GenericGauge::new("test", "test").unwrap(),
+        );
         // (the started task send the imm ids of payload, the started task wait for finish notify)
         #[allow(clippy::type_complexity)]
         let task_notifier_holder: Arc<
