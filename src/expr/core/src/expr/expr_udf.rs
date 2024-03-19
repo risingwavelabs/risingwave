@@ -53,7 +53,7 @@ pub struct UserDefinedFunction {
     /// Number of remaining successful calls until retry is enabled.
     /// This parameter is designed to prevent continuous retry on every call, which would increase delay.
     /// Logic:
-    /// It resets to INITIAL_RETRY_COUNT after a single failure and then decrements with each call, enabling retry when it reaches zero.
+    /// It resets to `INITIAL_RETRY_COUNT` after a single failure and then decrements with each call, enabling retry when it reaches zero.
     /// If non-zero, we will not retry on connection errors to prevent blocking the stream.
     /// On each connection error, the count will be reset to `INITIAL_RETRY_COUNT`.
     /// On each successful call, the count will be decreased by 1.

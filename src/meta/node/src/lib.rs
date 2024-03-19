@@ -78,14 +78,14 @@ pub struct MetaNodeOpts {
     pub sql_endpoint: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
-    /// This address is used to serve PromQL queries to Prometheus.
+    /// This address is used to serve `PromQL` queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
     ///
-    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
     #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
     pub prometheus_selector: Option<String>,
 

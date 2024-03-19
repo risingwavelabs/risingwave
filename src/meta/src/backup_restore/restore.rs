@@ -35,7 +35,7 @@ use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBa
 #[derive(clap::Args, Debug, Clone)]
 pub struct RestoreOpts {
     /// Id of snapshot used to restore. Available snapshots can be found in
-    /// <storage_directory>/manifest.json.
+    /// <`storage_directory>/manifest.json`.
     #[clap(long)]
     pub meta_snapshot_id: u64,
     /// Type of meta store to restore.

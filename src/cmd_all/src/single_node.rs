@@ -84,14 +84,14 @@ pub struct NodeSpecificOpts {
 
     // ------- Meta Node Options -------
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
-    /// This address is used to serve PromQL queries to Prometheus.
+    /// This address is used to serve `PromQL` queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long)]
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
     ///
-    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
     #[clap(long)]
     pub prometheus_selector: Option<String>,
 
@@ -111,15 +111,21 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
 
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
         meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
-        compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
-        frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
-        compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        compute_opts
+            .prometheus_listener_addr
+            .clone_from(prometheus_listener_addr);
+        frontend_opts
+            .prometheus_listener_addr
+            .clone_from(prometheus_listener_addr);
+        compactor_opts
+            .prometheus_listener_addr
+            .clone_from(prometheus_listener_addr);
     }
     if let Some(config_path) = &opts.config_path {
-        meta_opts.config_path = config_path.clone();
-        compute_opts.config_path = config_path.clone();
-        frontend_opts.config_path = config_path.clone();
-        compactor_opts.config_path = config_path.clone();
+        meta_opts.config_path.clone_from(config_path);
+        compute_opts.config_path.clone_from(config_path);
+        frontend_opts.config_path.clone_from(config_path);
+        compactor_opts.config_path.clone_from(config_path);
     }
 
     let store_directory = opts.store_directory.unwrap_or_else(|| {
@@ -160,7 +166,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     compute_opts.listen_addr = "0.0.0.0:5688".to_string();
     compactor_opts.listen_addr = "0.0.0.0:6660".to_string();
     if let Some(frontend_addr) = &opts.node_opts.listen_addr {
-        frontend_opts.listen_addr = frontend_addr.clone();
+        frontend_opts.listen_addr.clone_from(frontend_addr);
     }
 
     // Set Meta addresses for all nodes (force to override)

@@ -53,7 +53,7 @@ pub struct Args {
 
     /// The number of CPU cores for each compute node.
     ///
-    /// This determines worker_node_parallelism.
+    /// This determines `worker_node_parallelism`.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 

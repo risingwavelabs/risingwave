@@ -142,11 +142,11 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     bound_relations: Vec<Table>,
 
     /// Columns bound in generated query.
-    /// May not contain all columns from Self::bound_relations.
-    /// e.g. GROUP BY clause will constrain bound_columns.
+    /// May not contain all columns from `Self::bound_relations`.
+    /// e.g. GROUP BY clause will constrain `bound_columns`.
     bound_columns: Vec<Column>,
 
-    /// SqlGenerator can be used in two execution modes:
+    /// `SqlGenerator` can be used in two execution modes:
     /// 1. Generating Query Statements.
     /// 2. Generating queries for CREATE MATERIALIZED VIEW.
     ///    Under this mode certain restrictions and workarounds are applied
