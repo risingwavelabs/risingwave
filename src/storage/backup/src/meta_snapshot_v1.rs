@@ -101,7 +101,7 @@ impl Metadata for ClusterMetadata {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ClusterMetadata {
     /// Unlike other metadata that has implemented `MetadataModel`,
-    /// DEFAULT_COLUMN_FAMILY stores various single row metadata, e.g. id offset and epoch offset.
+    /// `DEFAULT_COLUMN_FAMILY` stores various single row metadata, e.g. id offset and epoch offset.
     /// So we use `default_cf` stores raw KVs for them.
     pub default_cf: HashMap<Vec<u8>, Vec<u8>>,
     pub hummock_version: HummockVersion,

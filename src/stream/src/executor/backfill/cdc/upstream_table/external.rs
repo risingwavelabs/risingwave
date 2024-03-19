@@ -29,7 +29,7 @@ pub struct ExternalStorageTable {
     table_reader: ExternalTableReaderImpl,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
-    /// RowSeqScanExecutor.
+    /// `RowSeqScanExecutor`.
     /// todo: the schema of the external table defined in the CREATE TABLE DDL
     schema: Schema,
 

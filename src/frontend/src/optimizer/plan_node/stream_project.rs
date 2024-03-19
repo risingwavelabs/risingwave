@@ -35,7 +35,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct StreamProject {
     pub base: PlanBase<Stream>,
     core: generic::Project<PlanRef>,
-    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// All the watermark derivations, (`input_column_index`, `output_column_index`). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: Vec<(usize, usize)>,
     /// Nondecreasing expression indices. `Project` can produce watermarks for these expressions.

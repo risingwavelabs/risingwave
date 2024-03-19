@@ -37,16 +37,16 @@ pub struct CommandActorChanges {
 /// [`crate::barrier::GlobalBarrierManager`].
 #[derive(Default, Clone)]
 pub struct InflightActorInfo {
-    /// node_id => node
+    /// `node_id` => node
     pub node_map: HashMap<WorkerId, PbWorkerNode>,
 
-    /// node_id => actors
+    /// `node_id` => actors
     pub actor_map: HashMap<WorkerId, HashSet<ActorId>>,
 
-    /// node_id => barrier inject actors
+    /// `node_id` => barrier inject actors
     pub actor_map_to_send: HashMap<WorkerId, HashSet<ActorId>>,
 
-    /// actor_id => WorkerId
+    /// `actor_id` => `WorkerId`
     pub actor_location_map: HashMap<ActorId, WorkerId>,
 }
 

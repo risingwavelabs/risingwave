@@ -755,7 +755,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
         for i in 0..row_matched.len() {
-            new_row[i + matched_start_pos] = row_matched[i].clone();
+            new_row[i + matched_start_pos].clone_from(&row_matched[i]);
         }
         OwnedRow::new(new_row)
     }

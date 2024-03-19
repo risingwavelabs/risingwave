@@ -40,7 +40,8 @@ impl FsListInner for S3SplitEnumerator {
             .await
             .with_context(|| format!("failed to list objects in bucket `{}`", self.bucket_name))?;
         if res.is_truncated().unwrap_or_default() {
-            self.next_continuation_token = res.next_continuation_token.clone();
+            self.next_continuation_token
+                .clone_from(&res.next_continuation_token);
         } else {
             has_finished = true;
             self.next_continuation_token = None;

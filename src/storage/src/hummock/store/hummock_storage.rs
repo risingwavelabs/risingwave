@@ -47,6 +47,7 @@ use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, Hummoc
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
+use crate::hummock::iterator::ChangeLogIterator;
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
@@ -107,7 +108,7 @@ pub struct HummockStorage {
 
     backup_reader: BackupReaderRef,
 
-    /// current_epoch < min_current_epoch cannot be read.
+    /// `current_epoch` < `min_current_epoch` cannot be read.
     min_current_epoch: Arc<AtomicU64>,
 
     write_limiter: WriteLimiterRef,
@@ -601,8 +602,6 @@ impl StateStore for HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::version::HummockVersion;
-
-use crate::hummock::iterator::ChangeLogIterator;
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {

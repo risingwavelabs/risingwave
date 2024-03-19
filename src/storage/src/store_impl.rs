@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,7 +59,7 @@ pub enum StateStoreImpl {
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
-    /// state. (e.g., no read_epoch support, no async checkpoint)
+    /// state. (e.g., no `read_epoch` support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
     SledStateStore(Monitored<SledStateStoreType>),
 }
@@ -84,6 +83,8 @@ fn may_verify(state_store: impl StateStore + AsHummock) -> impl StateStore + AsH
     }
     #[cfg(debug_assertions)]
     {
+        use std::marker::PhantomData;
+
         use risingwave_common::util::env_var::env_var_is_true;
         use tracing::info;
 
@@ -652,10 +653,11 @@ impl StateStoreImpl {
                     store: Arc::new(object_store),
                     path: opts.data_directory.to_string(),
                     block_cache_capacity: opts.block_cache_capacity_mb * (1 << 20),
+                    block_cache_shard_num: opts.block_cache_shard_num,
+                    block_cache_eviction: opts.block_cache_eviction_config.clone(),
                     meta_cache_capacity: opts.meta_cache_capacity_mb * (1 << 20),
-                    high_priority_ratio: opts.high_priority_ratio,
-                    meta_shard_num: opts.meta_shard_num,
-                    block_shard_num: opts.block_shard_num,
+                    meta_cache_shard_num: opts.meta_cache_shard_num,
+                    meta_cache_eviction: opts.meta_cache_eviction_config.clone(),
                     prefetch_buffer_capacity: opts.prefetch_buffer_capacity_mb * (1 << 20),
                     max_prefetch_block_number: opts.max_prefetch_block_number,
                     data_file_cache,

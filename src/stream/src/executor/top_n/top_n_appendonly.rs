@@ -74,7 +74,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     /// TODO: support WITH TIES
     cache: TopNCache<WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 }
 

@@ -52,7 +52,7 @@ pub struct NestedLoopJoinExecutor {
     /// Actual output schema
     schema: Schema,
     /// We may only need certain columns.
-    /// output_indices are the indices of the columns that we needed.
+    /// `output_indices` are the indices of the columns that we needed.
     output_indices: Vec<usize>,
     /// Left child executor
     left_child: BoxedExecutor,

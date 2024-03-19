@@ -34,7 +34,7 @@ pub struct VacuumManager {
     env: MetaSrvEnv,
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
-    /// Use the CompactorManager to dispatch VacuumTask.
+    /// Use the `CompactorManager` to dispatch `VacuumTask`.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,

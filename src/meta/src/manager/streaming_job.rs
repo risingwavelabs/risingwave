@@ -78,7 +78,9 @@ impl StreamingJob {
             StreamingJob::Sink(table, _) => table.created_at_epoch = created_at_epoch,
             StreamingJob::Table(source, table, ..) => {
                 table.created_at_epoch = created_at_epoch;
-                table.created_at_cluster_version = created_at_cluster_version.clone();
+                table
+                    .created_at_cluster_version
+                    .clone_from(&created_at_cluster_version);
                 if let Some(source) = source {
                     source.created_at_epoch = created_at_epoch;
                     source.created_at_cluster_version = created_at_cluster_version;
@@ -113,7 +115,9 @@ impl StreamingJob {
             }
             StreamingJob::Table(source, table, ..) => {
                 table.initialized_at_epoch = initialized_at_epoch;
-                table.initialized_at_cluster_version = initialized_at_cluster_version.clone();
+                table
+                    .initialized_at_cluster_version
+                    .clone_from(&initialized_at_cluster_version);
 
                 if let Some(source) = source {
                     source.initialized_at_epoch = initialized_at_epoch;

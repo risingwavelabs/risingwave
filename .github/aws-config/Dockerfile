@@ -4,8 +4,8 @@ CMD bash
 # Commands:
 #   aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/x5u3w5h
 #   docker build -t risingwave-build-env .
-#   docker tag risingwave-build-env:latest public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
-#   docker push public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+#   docker tag risingwave-build-env:latest public.ecr.aws/w1p7b4n3/risingwave-build-env:latest
+#   docker push public.ecr.aws/w1p7b4n3/risingwave-build-env:latest
 
 # Install Ubuntu packages.
 # Please add packages in alphabetical order.

@@ -36,7 +36,7 @@ use crate::monitor::BatchMetricsWithTaskLabels;
 
 pub struct GenericExchangeExecutor<CS, C> {
     proto_sources: Vec<PbExchangeSource>,
-    /// Mock-able CreateSource.
+    /// Mock-able `CreateSource`.
     source_creators: Vec<CS>,
     sequential: bool,
     context: C,

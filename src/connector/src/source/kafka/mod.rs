@@ -117,7 +117,7 @@ pub struct KafkaProperties {
     )]
     pub time_offset: Option<String>,
 
-    /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
+    /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
     /// TODO: Currently, `Option<bool>` can not be parsed here.
     #[serde(rename = "upsert")]

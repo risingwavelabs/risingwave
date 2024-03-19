@@ -107,7 +107,7 @@ impl<S: StateStore> CdcBackfillState<S> {
         let state = self.cached_state.as_mut_slice();
         let split_id = Some(ScalarImpl::from(self.split_id.clone()));
         let state_len = state.len();
-        state[0] = split_id.clone();
+        state[0].clone_from(&split_id);
         if let Some(current_pk_pos) = &current_pk_pos {
             state[1..=current_pk_pos.len()].clone_from_slice(current_pk_pos.as_inner());
         }

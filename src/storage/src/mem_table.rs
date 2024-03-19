@@ -52,7 +52,7 @@ pub type ImmId = SharedBufferBatchId;
 pub enum KeyOp {
     Insert(Bytes),
     Delete(Bytes),
-    /// (old_value, new_value)
+    /// (`old_value`, `new_value`)
     Update((Bytes, Bytes)),
 }
 

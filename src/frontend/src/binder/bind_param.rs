@@ -104,7 +104,7 @@ impl ExprRewriter for ParamRewriter {
             None
         };
 
-        self.parsed_params[parameter_index] = datum.clone();
+        self.parsed_params[parameter_index].clone_from(&datum);
         Literal::new(datum, data_type).into()
     }
 }

@@ -43,11 +43,11 @@ pub struct ProjectSetExecutor {
 struct Inner {
     _ctx: ActorContextRef,
 
-    /// Expressions of the current project_section.
+    /// Expressions of the current `project_section`.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
-    /// All the watermark derivations, (input_column_index, expr_idx). And the
-    /// derivation expression is the project_set's expression itself.
+    /// All the watermark derivations, (`input_column_index`, `expr_idx`). And the
+    /// derivation expression is the `project_set`'s expression itself.
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.
     nondecreasing_expr_indices: Vec<usize>,

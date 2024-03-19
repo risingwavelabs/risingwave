@@ -42,7 +42,7 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
     Name(&'a str),
-    /// (search_path, user_name).
+    /// (`search_path`, `user_name`).
     Path(&'a SearchPath, &'a str),
 }
 
@@ -297,7 +297,7 @@ impl Catalog {
         let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
         if old_database_name != name {
             let mut database = self.database_by_name.remove(&old_database_name).unwrap();
-            database.name = name.clone();
+            database.name.clone_from(&name);
             database.owner = proto.owner;
             self.database_by_name.insert(name.clone(), database);
             self.db_name_by_id.insert(id, name);

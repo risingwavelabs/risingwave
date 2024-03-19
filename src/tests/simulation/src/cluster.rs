@@ -81,7 +81,7 @@ pub struct Configuration {
 
     /// The number of CPU cores for each compute node.
     ///
-    /// This determines worker_node_parallelism.
+    /// This determines `worker_node_parallelism`.
     pub compute_node_cores: usize,
 
     /// The probability of etcd request timeout.

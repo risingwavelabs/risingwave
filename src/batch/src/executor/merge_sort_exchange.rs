@@ -45,7 +45,7 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     min_heap: MemMonitoredHeap<HeapElem>,
     proto_sources: Vec<PbExchangeSource>,
     sources: Vec<ExchangeSourceImpl>, // impl
-    /// Mock-able CreateSource.
+    /// Mock-able `CreateSource`.
     source_creators: Vec<CS>,
     schema: Schema,
     task_id: TaskId,

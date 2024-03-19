@@ -502,7 +502,9 @@ impl HummockVersion {
                 );
                 let parent_group_id = group_construct.parent_group_id;
                 new_levels.parent_group_id = parent_group_id;
-                new_levels.member_table_ids = group_construct.table_ids.clone();
+                new_levels
+                    .member_table_ids
+                    .clone_from(&group_construct.table_ids);
                 self.levels.insert(*compaction_group_id, new_levels);
                 sst_split_info.extend(self.init_with_parent_group(
                     parent_group_id,

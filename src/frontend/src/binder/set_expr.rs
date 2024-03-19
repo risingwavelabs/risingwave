@@ -138,7 +138,9 @@ impl Binder {
                         let mut left = self.bind_set_expr(*left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
-                        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+                        self.context
+                            .cte_to_relation
+                            .clone_from(&new_context.cte_to_relation);
                         let mut right = self.bind_set_expr(*right)?;
 
                         if left.schema().fields.len() != right.schema().fields.len() {

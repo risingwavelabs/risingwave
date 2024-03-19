@@ -46,7 +46,7 @@ pub struct LogicalApply {
     join_type: JoinType,
 
     /// Id of the Apply operator.
-    /// So correlated_input_ref can refer the Apply operator exactly by correlated_id.
+    /// So `correlated_input_ref` can refer the Apply operator exactly by `correlated_id`.
     correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,

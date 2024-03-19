@@ -300,9 +300,11 @@ impl TestCase {
 
         let mut result = result.unwrap_or_default();
         result.input = self.input.clone();
-        result.create_source = self.create_source().clone();
-        result.create_table_with_connector = self.create_table_with_connector().clone();
-        result.with_config_map = self.with_config_map().clone();
+        result.create_source.clone_from(self.create_source());
+        result
+            .create_table_with_connector
+            .clone_from(self.create_table_with_connector());
+        result.with_config_map.clone_from(self.with_config_map());
 
         Ok(result)
     }

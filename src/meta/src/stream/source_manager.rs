@@ -230,7 +230,7 @@ pub struct SourceManagerCore {
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
     /// Fragments associated with each source
     source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-    /// Revert index for source_fragments
+    /// Revert index for `source_fragments`
     fragment_sources: HashMap<FragmentId, SourceId>,
 
     /// Splits assigned per actor

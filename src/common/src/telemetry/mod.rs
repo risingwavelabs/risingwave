@@ -52,19 +52,19 @@ pub enum TelemetryNodeType {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TelemetryReportBase {
-    /// tracking_id is persistent in etcd
+    /// `tracking_id` is persistent in etcd
     pub tracking_id: String,
-    /// session_id is reset every time node restarts
+    /// `session_id` is reset every time node restarts
     pub session_id: String,
-    /// system_data is hardware and os info
+    /// `system_data` is hardware and os info
     pub system_data: SystemData,
-    /// up_time is how long the node has been running
+    /// `up_time` is how long the node has been running
     pub up_time: u64,
-    /// time_stamp is when the report is created
+    /// `time_stamp` is when the report is created
     pub time_stamp: u64,
-    /// node_type is the node that creates the report
+    /// `node_type` is the node that creates the report
     pub node_type: TelemetryNodeType,
-    /// is_test is whether the report is from a test environment, default to be false
+    /// `is_test` is whether the report is from a test environment, default to be false
     /// needed in CI for compatible tests with telemetry backend
     pub is_test: bool,
 }

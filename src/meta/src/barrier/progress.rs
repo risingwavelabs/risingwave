@@ -262,7 +262,7 @@ pub(super) struct TrackingCommand {
 /// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 pub(super) struct CreateMviewProgressTracker {
-    /// Progress of the create-mview DDL indicated by the TableId.
+    /// Progress of the create-mview DDL indicated by the `TableId`.
     progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the backfill executors.

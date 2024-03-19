@@ -380,7 +380,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             self.actor_ctx.id,
                             splits
                         );
-                        boot_state = splits.clone();
+                        boot_state.clone_from(splits);
                     }
                 }
                 _ => {}

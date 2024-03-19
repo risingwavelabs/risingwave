@@ -113,7 +113,7 @@ pub struct OpendalS3Properties {
     #[serde(flatten)]
     pub s3_properties: S3PropertiesCommon,
 
-    /// The following are only supported by s3_v2 (opendal) source.
+    /// The following are only supported by `s3_v2` (opendal) source.
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 

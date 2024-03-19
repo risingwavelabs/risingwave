@@ -96,7 +96,7 @@ KafkaProperties:
     alias: scan.startup.timestamp_millis
   - name: upsert
     field_type: String
-    comments: 'This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
+    comments: 'This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which  combine both key and value fields of the Kafka message.  TODO: Currently, `Option<bool>` can not be parsed here.'
     required: false
   - name: properties.bootstrap.server
     field_type: String
@@ -551,7 +551,7 @@ OpendalS3Properties:
     required: false
   - name: s3.assume_role
     field_type: String
-    comments: The following are only supported by s3_v2 (opendal) source.
+    comments: The following are only supported by `s3_v2` (opendal) source.
     required: false
     default: Default::default
 PosixFsProperties:

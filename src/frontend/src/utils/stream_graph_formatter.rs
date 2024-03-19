@@ -39,7 +39,7 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> St
 /// A formatter to display the final stream plan graph, used for `explain (distsql) create
 /// materialized view ...`
 struct StreamGraphFormatter {
-    /// exchange's operator_id -> edge
+    /// exchange's `operator_id` -> edge
     edges: HashMap<u64, StreamFragmentEdge>,
     verbose: bool,
     tables: BTreeMap<u32, Table>,

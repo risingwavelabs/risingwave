@@ -158,18 +158,18 @@ pub struct MetaOpts {
     /// connection`.
     pub privatelink_endpoint_default_tags: Option<Vec<(String, String)>>,
 
-    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `space_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
     /// telemetry enabled in config file or not
     pub telemetry_enabled: bool,
-    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `ttl_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule tombstone_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule split_compaction_group for all compaction groups with this interval.
+    /// Schedule `split_compaction_group` for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
 
     /// The size limit to split a large compaction group.
@@ -196,11 +196,11 @@ pub struct MetaOpts {
 
     /// hybird compaction group config
     ///
-    /// hybird_partition_vnode_count determines the granularity of vnodes in the hybrid compaction group for SST alignment.
-    /// When hybird_partition_vnode_count > 0, in hybrid compaction group
+    /// `hybird_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When `hybird_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When hybird_partition_vnode_count = 0,no longer be special alignment operations for the hybird compaction group
+    /// When `hybird_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
     pub hybird_partition_vnode_count: u32,
 
     pub event_log_enabled: bool,

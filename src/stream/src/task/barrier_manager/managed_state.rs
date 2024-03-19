@@ -128,7 +128,7 @@ fn sync_epoch(
 pub(super) struct ManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
-    /// The key is prev_epoch, and the first value is curr_epoch
+    /// The key is `prev_epoch`, and the first value is `curr_epoch`
     epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.

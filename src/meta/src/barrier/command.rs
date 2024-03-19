@@ -192,7 +192,7 @@ pub enum Command {
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of FlowControl Executor after StreamScan or Source.
+    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
 }
 

@@ -199,7 +199,7 @@ pub struct GlobalBarrierManager {
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
-    /// Key is the prev_epoch.
+    /// Key is the `prev_epoch`.
     command_ctx_queue: BTreeMap<u64, EpochNode>,
 
     /// Command that has been collected but is still completing.

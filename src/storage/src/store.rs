@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
 };
@@ -191,8 +191,24 @@ impl<T> ChangeLogValue<T> {
     }
 }
 
-pub type StateStoreReadLogItem = (UserKey<Bytes>, ChangeLogValue<Bytes>);
-pub type StateStoreReadLogItemRef<'a> = (UserKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
+impl<T: AsRef<[u8]>> ChangeLogValue<T> {
+    pub fn to_ref(&self) -> ChangeLogValue<&[u8]> {
+        match self {
+            ChangeLogValue::Insert(val) => ChangeLogValue::Insert(val.as_ref()),
+            ChangeLogValue::Update {
+                new_value,
+                old_value,
+            } => ChangeLogValue::Update {
+                new_value: new_value.as_ref(),
+                old_value: old_value.as_ref(),
+            },
+            ChangeLogValue::Delete(val) => ChangeLogValue::Delete(val.as_ref()),
+        }
+    }
+}
+
+pub type StateStoreReadLogItem = (TableKey<Bytes>, ChangeLogValue<Bytes>);
+pub type StateStoreReadLogItemRef<'a> = (TableKey<&'a [u8]>, ChangeLogValue<&'a [u8]>);
 #[derive(Clone)]
 pub struct ReadLogOptions {
     pub table_id: TableId,
@@ -299,7 +315,7 @@ pub trait StateStoreWrite: StaticSendSync {
 pub struct SyncResult {
     /// The size of all synced shared buffers.
     pub sync_size: usize,
-    /// The sst_info of sync.
+    /// The `sst_info` of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -598,7 +614,7 @@ pub struct NewLocalOptions {
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
-    /// upload its ReadVersions.
+    /// upload its `ReadVersions`.
     pub is_replicated: bool,
 
     /// The vnode bitmap for the local state store instance

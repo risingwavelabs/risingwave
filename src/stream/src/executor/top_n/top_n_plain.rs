@@ -90,7 +90,7 @@ pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache<WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 }
 

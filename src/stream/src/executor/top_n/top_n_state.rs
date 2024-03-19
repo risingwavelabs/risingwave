@@ -36,7 +36,7 @@ pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     state_table: StateTable<S>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 }
 

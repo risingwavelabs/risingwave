@@ -121,7 +121,7 @@ pub struct StateTableInner<
 
     prefix_hint_len: usize,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
@@ -141,7 +141,7 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
-    /// "i" here refers to the base state_table's actual schema.
+    /// "i" here refers to the base `state_table`'s actual schema.
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
@@ -150,7 +150,7 @@ pub struct StateTableInner<
 
     /// Output indices
     /// Used for:
-    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
@@ -409,15 +409,16 @@ where
             .collect_vec();
 
         // Compute i2o mapping
+        // Note that this can be a partial mapping, since we use the i2o mapping to get
+        // any 1 of the output columns, and use that to fill the input column.
         let mut i2o_mapping = vec![None; columns.len()];
-        let mut output_column_indices = vec![];
         for (i, column) in columns.iter().enumerate() {
             if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
                 i2o_mapping[i] = Some(*pos);
-                output_column_indices.push(i);
             }
         }
-        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+        // We can prune any duplicate column indices
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_ids.len());
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);

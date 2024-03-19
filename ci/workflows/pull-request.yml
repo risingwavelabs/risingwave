@@ -430,7 +430,7 @@ steps:
             - "v1-cache-{{ id }}-"
           backend: s3
           s3:
-            bucket: ci-cache-bucket
+            bucket: rw-ci-cache-bucket
             args: "--no-progress"
           paths:
             - ".cargo/advisory-db"
@@ -455,7 +455,7 @@ steps:
             - "v1-cache-{{ id }}-"
           backend: s3
           s3:
-            bucket: ci-cache-bucket
+            bucket: rw-ci-cache-bucket
             args: "--no-progress"
           paths:
             - ".cargo/advisory-db"

@@ -487,6 +487,10 @@ impl<T: AsRef<[u8]>> TableKey<T> {
     pub fn key_part(&self) -> &[u8] {
         self.split_vnode().1
     }
+
+    pub fn to_ref(&self) -> TableKey<&[u8]> {
+        TableKey(self.0.as_ref())
+    }
 }
 
 impl<T: AsRef<[u8]>> Borrow<[u8]> for TableKey<T> {
