@@ -331,7 +331,6 @@ use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::PlanRef;
 
-
 pub fn infer_kv_log_store_table_catalog_inner(
     input: &PlanRef,
     columns: &[ColumnCatalog],

@@ -24,7 +24,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::derive::{derive_columns, derive_pk};
 use super::expr_visitable::ExprVisitable;
 use super::stream::prelude::{GenericPlanRef, PhysicalPlanRef};
-use super::utils::{childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay};
+use super::utils::{
+    childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
+};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode};
 use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
 use crate::error::Result;
@@ -142,10 +144,7 @@ impl StreamSubscription {
     /// The table schema is: | epoch | seq id | row op | subscription columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        infer_kv_log_store_table_catalog_inner(
-            &self.input,
-            &self.subscription_catalog.columns,
-        )
+        infer_kv_log_store_table_catalog_inner(&self.input, &self.subscription_catalog.columns)
     }
 }
 

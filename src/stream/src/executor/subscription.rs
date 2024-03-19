@@ -53,20 +53,19 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         let retention_seconds_str = properties.get(RETENTION_SECONDS_KEY).ok_or_else(|| {
             StreamExecutorError::serde_error("Subscription retention time not set.".to_string())
         })?;
-        let retention_seconds_interval = Interval::from_str(retention_seconds_str).map_err(|_| {
-            StreamExecutorError::serde_error(
-                "Retention needs to be set in Interval format".to_string(),
-            )
-        })?;
+        let retention_seconds_interval =
+            Interval::from_str(retention_seconds_str).map_err(|_| {
+                StreamExecutorError::serde_error(
+                    "Retention needs to be set in Interval format".to_string(),
+                )
+            })?;
         if retention_seconds_interval.days() > MAX_RETENTION_DAYS {
             return Err(StreamExecutorError::serde_error(format!(
                 "Retention time cannot exceed {} days",
                 MAX_RETENTION_DAYS
             )));
         }
-        let retention_seconds = (retention_seconds_interval
-            .epoch_in_micros()
-            / 1000000) as i64;
+        let retention_seconds = (retention_seconds_interval.epoch_in_micros() / 1000000) as i64;
 
         Ok(Self {
             actor_context,
