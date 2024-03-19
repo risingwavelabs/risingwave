@@ -792,15 +792,10 @@ pub async fn build_remote_object_store(
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => {
-            if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
-                let bucket = s3.strip_prefix("s3://").unwrap();
-
-                ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
-                )
-            } else {
+            if std::env::var("RW_USE_OPENDAL_FOR_S3")
+                .map(|v| v != "false")
+                .unwrap_or(true)
+            {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
                         s3.strip_prefix("s3://").unwrap().to_string(),
@@ -809,6 +804,14 @@ pub async fn build_remote_object_store(
                     )
                     .await
                     .monitored(metrics, config),
+                )
+            } else {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
                 )
             }
         }
