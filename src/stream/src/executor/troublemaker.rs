@@ -24,7 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
-/// TroublemakerExecutor is used to make some trouble in the stream graph. Specifically,
+/// [`TroublemakerExecutor`] is used to make some trouble in the stream graph. Specifically,
 /// it is attached to `StreamScan` and `Source` executors in **insane mode**. It randomly
 /// corrupts the stream chunks it receives and sends them downstream, making the stream
 /// inconsistent. This should ONLY BE USED IN INSANE MODE FOR TESTING PURPOSES.
@@ -48,6 +48,7 @@ impl TroublemakerExecutor {
             crate::consistency::insane(),
             "we should only make trouble in insane mode"
         );
+        tracing::info!("we got a troublemaker");
         Self {
             input,
             inner: Inner { chunk_size },
@@ -151,14 +152,14 @@ fn randomize_row(data_types: &[DataType], row: OwnedRow) -> OwnedRow {
     let mut data = row.into_inner();
 
     for (datum, data_type) in data.iter_mut().zip_eq_fast(data_types) {
-        match rand::thread_rng().gen_range(0..3) {
-            0 => {
+        match rand::thread_rng().gen_range(0..4) {
+            0 | 1 => {
                 // don't change the value
             }
-            1 => {
+            2 => {
                 *datum = None;
             }
-            2 => {
+            3 => {
                 *datum = match data_type {
                     DataType::Boolean => Some(ScalarImpl::Bool(rand::random())),
                     DataType::Int16 => Some(ScalarImpl::Int16(rand::random())),
