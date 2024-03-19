@@ -22,6 +22,7 @@ use futures::StreamExt;
 use futures_async_stream::for_await;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::config::StrictConsistencyOption;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -667,10 +668,28 @@ impl JoinEntryState {
         key: PkType,
         value: StateValueType,
     ) -> Result<&mut StateValueType, JoinEntryError> {
+        let mut removed = false;
+        if !crate::consistency::strict_consistency().is_on() {
+            // strict consistency is off, let's remove existing (if any) first
+            if let Some(old_value) = self.cached.remove(&key) {
+                self.kv_heap_size.sub(&key, &old_value);
+                removed = true;
+            }
+        }
+
         self.kv_heap_size.add(&key, &value);
-        self.cached
-            .try_insert(key, value)
-            .map_err(|_| JoinEntryError::OccupiedError)
+
+        let ret = self.cached.try_insert(key.clone(), value);
+
+        if !crate::consistency::strict_consistency().is_on() {
+            assert!(ret.is_ok(), "we have removed existing entry, if any");
+            if removed && crate::consistency::strict_consistency().is_off() {
+                // if not silent, we should log the error
+                tracing::error!(key=?key, "double inserting a join state entry");
+            }
+        }
+
+        ret.map_err(|_| JoinEntryError::OccupiedError)
     }
 
     /// Delete from the cache.
@@ -679,7 +698,14 @@ impl JoinEntryState {
             self.kv_heap_size.sub(&pk, &value);
             Ok(())
         } else {
-            Err(JoinEntryError::RemoveError)
+            match crate::consistency::strict_consistency() {
+                StrictConsistencyOption::On => Err(JoinEntryError::RemoveError),
+                StrictConsistencyOption::Off => {
+                    tracing::error!(key=?pk, "removing a join state entry but it is not in the cache");
+                    Ok(())
+                }
+                StrictConsistencyOption::OffSilent => Ok(()),
+            }
         }
     }
 
