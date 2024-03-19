@@ -38,7 +38,6 @@ use risingwave_connector::schema::schema_registry::{
     name_strategy_from_str, SchemaRegistryAuth, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
 };
 use risingwave_connector::sink::iceberg::IcebergConfig;
-use risingwave_connector::source::cdc::external::CdcTableType;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CDC_TRANSACTIONAL_KEY,
     CITUS_CDC_CONNECTOR, MONGODB_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -353,8 +352,12 @@ pub(crate) async fn bind_columns_from_source(
             )?;
 
             stream_source_info.use_schema_registry = protobuf_schema.use_schema_registry;
-            stream_source_info.row_schema_location = protobuf_schema.row_schema_location.0.clone();
-            stream_source_info.proto_message_name = protobuf_schema.message_name.0.clone();
+            stream_source_info
+                .row_schema_location
+                .clone_from(&protobuf_schema.row_schema_location.0);
+            stream_source_info
+                .proto_message_name
+                .clone_from(&protobuf_schema.message_name.0);
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
             stream_source_info.name_strategy =
@@ -389,7 +392,9 @@ pub(crate) async fn bind_columns_from_source(
             )?;
 
             stream_source_info.use_schema_registry = use_schema_registry;
-            stream_source_info.row_schema_location = row_schema_location.0.clone();
+            stream_source_info
+                .row_schema_location
+                .clone_from(&row_schema_location.0);
             stream_source_info.proto_message_name = message_name.unwrap_or(AstString("".into())).0;
             stream_source_info.key_message_name =
                 get_key_message_name(&mut format_encode_options_to_consume);
@@ -1307,12 +1312,7 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    // gated the feature with a session variable
-    let create_cdc_source_job = if with_properties.is_cdc_connector() {
-        CdcTableType::from_properties(&with_properties).can_backfill()
-    } else {
-        false
-    };
+    let create_cdc_source_job = with_properties.is_backfillable_cdc_connector();
 
     let (columns_from_resolve_source, source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &source_schema, &with_properties)?

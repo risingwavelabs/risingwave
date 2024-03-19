@@ -20,12 +20,13 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
+use foyer::memory::CacheContext;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, RwConfig,
+    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
+    RwConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
@@ -213,7 +214,10 @@ async fn compaction_test(
         path: system_params.data_directory().to_string(),
         block_cache_capacity: storage_memory_config.block_cache_capacity_mb * (1 << 20),
         meta_cache_capacity: storage_memory_config.meta_cache_capacity_mb * (1 << 20),
-        high_priority_ratio: 0,
+        block_cache_shard_num: storage_memory_config.block_cache_shard_num,
+        meta_cache_shard_num: storage_memory_config.meta_cache_shard_num,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_memory_config.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         data_file_cache: FileCache::none(),
@@ -230,6 +234,7 @@ async fn compaction_test(
         Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
+        None,
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();
@@ -439,7 +444,7 @@ impl NormalState {
                 ReadOptions {
                     ignore_range_tombstone,
                     table_id: self.table_id,
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -465,7 +470,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -496,7 +501,7 @@ impl CheckState for NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::default(),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )

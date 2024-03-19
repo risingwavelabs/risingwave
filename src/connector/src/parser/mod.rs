@@ -1085,7 +1085,7 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.topic.clone_from(get_kafka_topic(with_properties)?);
                     config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
@@ -1115,7 +1115,7 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.topic.clone_from(get_kafka_topic(with_properties)?);
                     config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(

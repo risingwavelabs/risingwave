@@ -71,7 +71,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240229
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
     depends_on:
       - mysql
       - db
@@ -81,7 +81,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240229
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
     depends_on:
       - mysql
       - db
@@ -98,12 +98,12 @@ services:
 
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240229
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240229
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -114,7 +114,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20240229
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240313
     depends_on:
       db:
         condition: service_healthy

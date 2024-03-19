@@ -13,20 +13,25 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::future::pending;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use futures::stream::FuturesUnordered;
+use futures::stream::{BoxStream, FuturesUnordered};
 use futures::StreamExt;
+use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    GroupedSstableInfo, PbCreateMviewProgress,
+};
 use rw_futures_util::{pending_on_none, AttachedFuture};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tonic::Status;
 
 use self::managed_state::ManagedBarrierState;
 use crate::error::{IntoUnexpectedExit, StreamError, StreamResult};
@@ -41,14 +46,22 @@ mod tests;
 
 pub use progress::CreateMviewProgress;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
+use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
+use risingwave_pb::stream_service::{
+    streaming_control_stream_response, BarrierCompleteResponse, StreamingControlStreamRequest,
+    StreamingControlStreamResponse,
+};
 use risingwave_storage::store::SyncResult;
 
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Actor, Barrier, DispatchExecutor};
+use crate::executor::{Actor, Barrier, DispatchExecutor, Mutation};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -65,6 +78,71 @@ pub struct BarrierCompleteResult {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 }
 
+pub(super) struct ControlStreamHandle {
+    #[expect(clippy::type_complexity)]
+    pair: Option<(
+        UnboundedSender<Result<StreamingControlStreamResponse, Status>>,
+        BoxStream<'static, Result<StreamingControlStreamRequest, Status>>,
+    )>,
+}
+
+impl ControlStreamHandle {
+    fn empty() -> Self {
+        Self { pair: None }
+    }
+
+    pub(super) fn new(
+        sender: UnboundedSender<Result<StreamingControlStreamResponse, Status>>,
+        request_stream: BoxStream<'static, Result<StreamingControlStreamRequest, Status>>,
+    ) -> Self {
+        Self {
+            pair: Some((sender, request_stream)),
+        }
+    }
+
+    fn reset_stream_with_err(&mut self, err: Status) {
+        if let Some((sender, _)) = self.pair.take() {
+            warn!("control stream reset with: {:?}", err.as_report());
+            if sender.send(Err(err)).is_err() {
+                warn!("failed to notify finish of control stream");
+            }
+        }
+    }
+
+    fn inspect_result(&mut self, result: StreamResult<()>) {
+        if let Err(e) = result {
+            self.reset_stream_with_err(Status::internal(format!("get error: {:?}", e.as_report())));
+        }
+    }
+
+    fn send_response(&mut self, response: StreamingControlStreamResponse) {
+        if let Some((sender, _)) = self.pair.as_ref() {
+            if sender.send(Ok(response)).is_err() {
+                self.pair = None;
+                warn!("fail to send response. control stream reset");
+            }
+        } else {
+            debug!(?response, "control stream has been reset. ignore response");
+        }
+    }
+
+    async fn next_request(&mut self) -> StreamingControlStreamRequest {
+        if let Some((_, stream)) = &mut self.pair {
+            match stream.next().await {
+                Some(Ok(request)) => {
+                    return request;
+                }
+                Some(Err(e)) => self.reset_stream_with_err(Status::internal(format!(
+                    "failed to get request: {:?}",
+                    e.as_report()
+                ))),
+                None => self.reset_stream_with_err(Status::internal("end of stream")),
+            }
+        }
+        pending().await
+    }
+}
+
 pub(super) enum LocalBarrierEvent {
     RegisterSender {
         actor_id: ActorId,
@@ -79,24 +157,18 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
+    ReadBarrierMutation {
+        barrier: Barrier,
+        mutation_sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    },
     #[cfg(test)]
     Flush(oneshot::Sender<()>),
 }
 
 pub(super) enum LocalActorOperation {
-    InjectBarrier {
-        barrier: Barrier,
-        actor_ids_to_send: HashSet<ActorId>,
-        actor_ids_to_collect: HashSet<ActorId>,
-        result_sender: oneshot::Sender<StreamResult<()>>,
-    },
-    Reset {
-        prev_epoch: u64,
-        result_sender: oneshot::Sender<()>,
-    },
-    AwaitEpochCompleted {
-        epoch: u64,
-        result_sender: oneshot::Sender<StreamResult<BarrierCompleteResult>>,
+    NewControlStream {
+        handle: ControlStreamHandle,
+        init_request: InitRequest,
     },
     DropActors {
         actors: Vec<ActorId>,
@@ -194,7 +266,7 @@ pub(super) struct LocalBarrierWorker {
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
 
-    epoch_result_sender: HashMap<u64, oneshot::Sender<StreamResult<BarrierCompleteResult>>>,
+    control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
 
@@ -210,7 +282,10 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    ) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -227,8 +302,9 @@ impl LocalBarrierWorker {
             state: ManagedBarrierState::new(
                 actor_manager.env.state_store(),
                 actor_manager.streaming_metrics.clone(),
+                barrier_await_tree_reg,
             ),
-            epoch_result_sender: HashMap::default(),
+            control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
             actor_manager_state: StreamActorManagerState::new(),
             current_shared_context: shared_context,
@@ -246,7 +322,8 @@ impl LocalBarrierWorker {
                     self.handle_actor_created(sender, create_actors_result);
                 }
                 completed_epoch = self.state.next_completed_epoch() => {
-                    self.on_epoch_completed(completed_epoch);
+                    let result = self.on_epoch_completed(completed_epoch);
+                    self.control_stream_handle.inspect_result(result);
                 },
                 // Note: it's important to select in a biased way to ensure that
                 // barrier event is handled before actor_op, because we must ensure
@@ -261,10 +338,13 @@ impl LocalBarrierWorker {
                 actor_op = actor_op_rx.recv() => {
                     if let Some(actor_op) = actor_op {
                         match actor_op {
-                            LocalActorOperation::Reset {
-                                result_sender, prev_epoch} => {
-                                self.reset(prev_epoch).await;
-                                let _ = result_sender.send(());
+                            LocalActorOperation::NewControlStream { handle, init_request  } => {
+                                self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
+                                self.reset(init_request.prev_epoch).await;
+                                self.control_stream_handle = handle;
+                                self.control_stream_handle.send_response(StreamingControlStreamResponse {
+                                    response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
+                                });
                             }
                             actor_op => {
                                 self.handle_actor_op(actor_op);
@@ -274,7 +354,11 @@ impl LocalBarrierWorker {
                     else {
                         break;
                     }
-                }
+                },
+                request = self.control_stream_handle.next_request() => {
+                    let result = self.handle_streaming_control_request(request);
+                    self.control_stream_handle.inspect_result(result);
+                },
             }
         }
     }
@@ -289,6 +373,26 @@ impl LocalBarrierWorker {
         });
 
         let _ = sender.send(result);
+    }
+
+    fn handle_streaming_control_request(
+        &mut self,
+        request: StreamingControlStreamRequest,
+    ) -> StreamResult<()> {
+        match request.request.expect("should not be empty") {
+            Request::InjectBarrier(req) => {
+                let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+                self.send_barrier(
+                    &barrier,
+                    req.actor_ids_to_send.into_iter().collect(),
+                    req.actor_ids_to_collect.into_iter().collect(),
+                )?;
+                Ok(())
+            }
+            Request::Init(_) => {
+                unreachable!()
+            }
+        }
     }
 
     fn handle_barrier_event(&mut self, event: LocalBarrierEvent) {
@@ -306,6 +410,12 @@ impl LocalBarrierWorker {
             } => {
                 self.update_create_mview_progress(current_epoch, actor, state);
             }
+            LocalBarrierEvent::ReadBarrierMutation {
+                barrier,
+                mutation_sender,
+            } => {
+                self.read_barrier_mutation(barrier, mutation_sender);
+            }
             #[cfg(test)]
             LocalBarrierEvent::Flush(sender) => sender.send(()).unwrap(),
         }
@@ -313,26 +423,8 @@ impl LocalBarrierWorker {
 
     fn handle_actor_op(&mut self, actor_op: LocalActorOperation) {
         match actor_op {
-            LocalActorOperation::InjectBarrier {
-                barrier,
-                actor_ids_to_send,
-                actor_ids_to_collect,
-                result_sender,
-            } => {
-                let result = self.send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect);
-                let _ = result_sender.send(result).inspect_err(|e| {
-                    warn!(err=?e, "fail to send inject barrier result");
-                });
-            }
-            LocalActorOperation::Reset { .. } => {
-                unreachable!("Reset event should be handled separately in async context")
-            }
-
-            LocalActorOperation::AwaitEpochCompleted {
-                epoch,
-                result_sender,
-            } => {
-                self.await_epoch_completed(epoch, result_sender);
+            LocalActorOperation::NewControlStream { .. } => {
+                unreachable!("NewControlStream event should be handled separately in async context")
             }
             LocalActorOperation::DropActors {
                 actors,
@@ -371,17 +463,64 @@ impl LocalBarrierWorker {
 
 // event handler
 impl LocalBarrierWorker {
-    fn on_epoch_completed(&mut self, epoch: u64) {
-        if let Some(sender) = self.epoch_result_sender.remove(&epoch) {
-            let result = self
-                .state
-                .pop_completed_epoch(epoch)
-                .expect("should exist")
-                .expect("should have completed");
-            if sender.send(result).is_err() {
-                warn!(epoch, "fail to send epoch complete result");
-            }
-        }
+    fn on_epoch_completed(&mut self, epoch: u64) -> StreamResult<()> {
+        let result = self
+            .state
+            .pop_completed_epoch(epoch)
+            .expect("should exist")
+            .expect("should have completed")?;
+
+        let BarrierCompleteResult {
+            create_mview_progress,
+            sync_result,
+        } = result;
+
+        let (synced_sstables, table_watermarks) = sync_result
+            .map(|sync_result| (sync_result.uncommitted_ssts, sync_result.table_watermarks))
+            .unwrap_or_default();
+
+        let result = StreamingControlStreamResponse {
+            response: Some(
+                streaming_control_stream_response::Response::CompleteBarrier(
+                    BarrierCompleteResponse {
+                        request_id: "todo".to_string(),
+                        status: None,
+                        create_mview_progress,
+                        synced_sstables: synced_sstables
+                            .into_iter()
+                            .map(
+                                |LocalSstableInfo {
+                                     compaction_group_id,
+                                     sst_info,
+                                     table_stats,
+                                 }| GroupedSstableInfo {
+                                    compaction_group_id,
+                                    sst: Some(sst_info),
+                                    table_stats_map: to_prost_table_stats_map(table_stats),
+                                },
+                            )
+                            .collect_vec(),
+                        worker_id: self.actor_manager.env.worker_id(),
+                        table_watermarks: table_watermarks
+                            .into_iter()
+                            .map(|(key, value)| (key.table_id, value.to_protobuf()))
+                            .collect(),
+                    },
+                ),
+            ),
+        };
+
+        self.control_stream_handle.send_response(result);
+        Ok(())
+    }
+
+    /// Read mutation from barrier state.
+    fn read_barrier_mutation(
+        &mut self,
+        barrier: Barrier,
+        sender: oneshot::Sender<Option<Arc<Mutation>>>,
+    ) {
+        self.state.read_barrier_mutation(&barrier, sender);
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -407,7 +546,6 @@ impl LocalBarrierWorker {
     ) -> StreamResult<()> {
         #[cfg(not(test))]
         {
-            use itertools::Itertools;
             // The barrier might be outdated and been injected after recovery in some certain extreme
             // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
             // recovery. Check it here and return an error here if some actors are not found to
@@ -492,39 +630,12 @@ impl LocalBarrierWorker {
         Ok(())
     }
 
-    /// Use `prev_epoch` to remove collect rx and return rx.
-    fn await_epoch_completed(
-        &mut self,
-        prev_epoch: u64,
-        result_sender: oneshot::Sender<StreamResult<BarrierCompleteResult>>,
-    ) {
-        match self.state.pop_completed_epoch(prev_epoch) {
-            Err(e) => {
-                let _ = result_sender.send(Err(e));
-            }
-            Ok(Some(result)) => {
-                if result_sender.send(result).is_err() {
-                    warn!(prev_epoch, "failed to send completed epoch result");
-                }
-            }
-            Ok(None) => {
-                if let Some(prev_sender) =
-                    self.epoch_result_sender.insert(prev_epoch, result_sender)
-                {
-                    warn!(?prev_epoch, "duplicate await_collect_barrier on epoch");
-                    let _ = prev_sender.send(Err(anyhow!(
-                        "duplicate await_collect_barrier on epoch {}",
-                        prev_epoch
-                    )
-                    .into()));
-                }
-            }
-        }
-    }
-
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+        *self = Self::new(
+            self.actor_manager.clone(),
+            self.state.reset_and_take_barrier_await_tree_reg(),
+        );
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -538,12 +649,14 @@ impl LocalBarrierWorker {
     async fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
         self.add_failure(actor_id, err.clone());
         let root_err = self.try_find_root_failure(err).await;
-        for fail_epoch in self.state.epochs_await_on_actor(actor_id) {
-            if let Some(result_sender) = self.epoch_result_sender.remove(&fail_epoch) {
-                if result_sender.send(Err(root_err.clone())).is_err() {
-                    warn!(fail_epoch, actor_id, err = %root_err.as_report(), "fail to notify actor failure");
-                }
-            }
+        let failed_epochs = self.state.epochs_await_on_actor(actor_id).collect_vec();
+        if !failed_epochs.is_empty() {
+            self.control_stream_handle
+                .reset_stream_with_err(Status::internal(format!(
+                    "failed to collect barrier. epoch: {:?}, err: {:?}",
+                    failed_epochs,
+                    root_err.as_report()
+                )));
         }
     }
 
@@ -586,6 +699,7 @@ impl LocalBarrierWorker {
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
@@ -608,7 +722,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -648,40 +762,7 @@ impl LocalBarrierManager {
     pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
         self.send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
     }
-}
 
-impl EventSender<LocalActorOperation> {
-    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
-    /// barrier is finished, in managed mode.
-    pub(super) async fn send_barrier(
-        &self,
-        barrier: Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
-        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> StreamResult<()> {
-        self.send_and_await(move |result_sender| LocalActorOperation::InjectBarrier {
-            barrier,
-            actor_ids_to_send: actor_ids_to_send.into_iter().collect(),
-            actor_ids_to_collect: actor_ids_to_collect.into_iter().collect(),
-            result_sender,
-        })
-        .await?
-    }
-
-    /// Use `prev_epoch` to remove collect rx and return rx.
-    pub(super) async fn await_epoch_completed(
-        &self,
-        prev_epoch: u64,
-    ) -> StreamResult<BarrierCompleteResult> {
-        self.send_and_await(|result_sender| LocalActorOperation::AwaitEpochCompleted {
-            epoch: prev_epoch,
-            result_sender,
-        })
-        .await?
-    }
-}
-
-impl LocalBarrierManager {
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
     pub fn collect(&self, actor_id: ActorId, barrier: &Barrier) {
@@ -695,6 +776,20 @@ impl LocalBarrierManager {
     /// will notice actor's exit while collecting.
     pub fn notify_failure(&self, actor_id: ActorId, err: StreamError) {
         let _ = self.actor_failure_sender.send((actor_id, err));
+    }
+
+    /// When a `RemoteInput` get a barrier, it should wait and read the barrier mutation from the barrier manager.
+    pub async fn read_barrier_mutation(
+        &self,
+        barrier: &Barrier,
+    ) -> StreamResult<Option<Arc<Mutation>>> {
+        let (tx, rx) = oneshot::channel();
+        self.send_event(LocalBarrierEvent::ReadBarrierMutation {
+            barrier: barrier.clone(),
+            mutation_sender: tx,
+        });
+        rx.await
+            .map_err(|_| anyhow!("barrier manager maybe reset").into())
     }
 }
 
@@ -727,23 +822,18 @@ pub fn try_find_root_actor_failure<'a>(
 
 #[cfg(test)]
 impl LocalBarrierManager {
-    pub(super) async fn spawn_for_test() -> (EventSender<LocalActorOperation>, Self) {
+    pub(super) fn spawn_for_test() -> EventSender<LocalActorOperation> {
         use std::sync::atomic::AtomicU64;
         let (tx, rx) = unbounded_channel();
         let _join_handle = LocalBarrierWorker::spawn(
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
             None,
+            None,
             Arc::new(AtomicU64::new(0)),
             rx,
         );
-        let sender = EventSender(tx);
-        let context = sender
-            .send_and_await(LocalActorOperation::GetCurrentSharedContext)
-            .await
-            .unwrap();
-
-        (sender, context.local_barrier_manager.clone())
+        EventSender(tx)
     }
 
     pub fn for_test() -> Self {
