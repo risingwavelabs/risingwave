@@ -47,7 +47,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tonic::Status;
 
-use super::{unique_executor_id, unique_operator_id};
+use super::{unique_executor_id, unique_operator_id, UpDownFragmentIds};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
@@ -283,10 +283,15 @@ impl LocalStreamManager {
             .await?
     }
 
-    pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+    pub async fn take_receiver(
+        &self,
+        actor_ids: UpDownActorIds,
+        fragment_ids: UpDownFragmentIds,
+    ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
-                ids,
+                actor_ids,
+                fragment_ids,
                 result_sender,
             })
             .await?
@@ -390,7 +395,9 @@ impl StreamActorManager {
     ) -> StreamResult<DispatchExecutor> {
         let dispatcher_impls = dispatchers
             .iter()
-            .map(|dispatcher| DispatcherImpl::new(shared_context, actor_id, dispatcher))
+            .map(|dispatcher| {
+                DispatcherImpl::new(shared_context, actor_id, fragment_id, dispatcher)
+            })
             .try_collect()?;
 
         Ok(DispatchExecutor::new(

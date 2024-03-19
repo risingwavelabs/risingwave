@@ -1662,22 +1662,22 @@ def section_streaming_exchange(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Actor-level Exchange Memory Size",
+                    "Fragment-level Local Exchange Memory Size",
                     "",
                     [
                         panels.target(
                             f"{metric('stream_exchange_memory_size')}",
-                            "actor {{up_actor_id}} -> actor {{down_actor_id}}",
+                            "fragment {{up_fragment_id}} -> fragment {{down_fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
-                    "Actor-level Exchange Number of Rows",
+                    "Fragment-level Local Exchange Number of Rows",
                     "",
                     [
                         panels.target(
                             f"{metric('stream_exchange_num_rows')}",
-                            "actor {{up_actor_id}} -> actor {{down_actor_id}}",
+                            "fragment {{up_fragment_id}} -> fragment {{down_fragment_id}}",
                         ),
                     ],
                 ),

@@ -135,33 +135,42 @@ impl SharedContext {
     /// with the configured permits.
     fn get_or_insert_channels(
         &self,
-        ids: UpDownActorIds,
+        actor_ids: UpDownActorIds,
+        fragment_ids: UpDownFragmentIds,
     ) -> MappedMutexGuard<'_, ConsumableChannelPair> {
         MutexGuard::map(self.channel_map.lock(), |map| {
-            map.entry(ids).or_insert_with(|| {
+            map.entry(actor_ids).or_insert_with(|| {
                 let (tx, rx) = permit::channel(
                     self.config.developer.exchange_initial_permits,
                     self.config.developer.exchange_batched_permits,
                     self.config.developer.exchange_concurrent_barriers,
-                    ids,
+                    fragment_ids,
                 );
                 (Some(tx), Some(rx))
             })
         })
     }
 
-    pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
-        self.get_or_insert_channels(*ids)
+    pub fn take_sender(
+        &self,
+        actor_ids: UpDownActorIds,
+        fragment_ids: UpDownFragmentIds,
+    ) -> StreamResult<Sender> {
+        self.get_or_insert_channels(actor_ids, fragment_ids)
             .0
             .take()
-            .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
+            .ok_or_else(|| anyhow!("sender for {actor_ids:?} has already been taken").into())
     }
 
-    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
-        self.get_or_insert_channels(ids)
+    pub fn take_receiver(
+        &self,
+        actor_ids: UpDownActorIds,
+        fragment_ids: UpDownFragmentIds,
+    ) -> StreamResult<Receiver> {
+        self.get_or_insert_channels(actor_ids, fragment_ids)
             .1
             .take()
-            .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
+            .ok_or_else(|| anyhow!("receiver for {actor_ids:?} has already been taken").into())
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {

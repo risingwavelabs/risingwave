@@ -23,7 +23,7 @@ use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 
 use crate::executor::Message;
-use crate::task::UpDownActorIds;
+use crate::task::UpDownFragmentIds;
 
 /// Message with its required permits.
 ///
@@ -40,7 +40,7 @@ pub fn channel(
     initial_permits: usize,
     batched_permits: usize,
     concurrent_barriers: usize,
-    ids: UpDownActorIds,
+    fragment_ids: UpDownFragmentIds,
 ) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
@@ -51,8 +51,9 @@ pub fn channel(
 
     let max_chunk_permits: usize = initial_permits - batched_permits;
     let metric_memory_size =
-        MEMORY_SIZE.with_label_values(&[&ids.0.to_string(), &ids.1.to_string()]);
-    let metric_num_rows = NUM_ROWS.with_label_values(&[&ids.0.to_string(), &ids.1.to_string()]);
+        MEMORY_SIZE.with_label_values(&[&fragment_ids.0.to_string(), &fragment_ids.1.to_string()]);
+    let metric_num_rows =
+        NUM_ROWS.with_label_values(&[&fragment_ids.0.to_string(), &fragment_ids.1.to_string()]);
 
     (
         Sender {
@@ -75,7 +76,7 @@ static MEMORY_SIZE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     register_int_gauge_vec_with_registry!(
         "stream_exchange_memory_size",
         "Total size of memory in the exchange channel",
-        &["up_actor_id", "down_actor_id"],
+        &["up_fragment_id", "down_fragment_id"],
         GLOBAL_METRICS_REGISTRY,
     )
     .unwrap()
@@ -85,7 +86,7 @@ static NUM_ROWS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     register_int_gauge_vec_with_registry!(
         "stream_exchange_num_rows",
         "Total number of rows in the exchange channel",
-        &["up_actor_id", "down_actor_id"],
+        &["up_fragment_id", "down_fragment_id"],
         GLOBAL_METRICS_REGISTRY,
     )
     .unwrap()
