@@ -607,6 +607,7 @@ impl StreamActorManager {
                 subtasks,
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
+                self.env.config().clone(),
                 expr_context,
                 shared_context.local_barrier_manager.clone(),
             );
@@ -626,6 +627,7 @@ impl LocalBarrierWorker {
             let monitor = tokio_metrics::TaskMonitor::new();
             let actor_context = actor.actor_context.clone();
             let actor_id = actor_context.id;
+            let config = actor.config.clone();
 
             let handle = {
                 let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
@@ -647,13 +649,16 @@ impl LocalBarrierWorker {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
+                let with_config = crate::CONFIG.scope(config.clone(), instrumented);
+
+                // TODO: are the following lines still useful?
                 #[cfg(enable_task_local_alloc)]
                 {
                     let metrics = streaming_metrics.clone();
                     let actor_id_str = actor_id.to_string();
                     let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
-                        instrumented,
+                        with_config,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
@@ -664,11 +669,11 @@ impl LocalBarrierWorker {
                             actor_context.store_mem_usage(bytes);
                         },
                     );
-                    self.runtime.spawn(allocation_stated)
+                    self.actor_manager.runtime.spawn(allocation_stated)
                 }
                 #[cfg(not(enable_task_local_alloc))]
                 {
-                    self.actor_manager.runtime.spawn(instrumented)
+                    self.actor_manager.runtime.spawn(with_config)
                 }
             };
             self.actor_manager_state.handles.insert(actor_id, handle);

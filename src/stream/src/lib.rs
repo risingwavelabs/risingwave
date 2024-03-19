@@ -42,6 +42,10 @@
 #![feature(assert_matches)]
 #![feature(try_blocks)]
 
+use std::sync::Arc;
+
+use risingwave_common::config::StreamingConfig;
+
 #[macro_use]
 extern crate tracing;
 
@@ -54,6 +58,10 @@ pub mod task;
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
+
+tokio::task_local! {
+    pub static CONFIG: Arc<StreamingConfig>;
+}
 
 mod consistency {
     //! This module contains global variables and methods to access the stream consistency settings.
