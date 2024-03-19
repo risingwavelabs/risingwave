@@ -746,7 +746,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                         assert_eq!(encoded_current_state.len(), state_len);
                     }
                     None => {
-                        panic!("row {:#?} not found", pk);
+                        bail!("row {:#?} not found", pk);
                     }
                 }
             }
