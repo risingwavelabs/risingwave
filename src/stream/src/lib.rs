@@ -54,3 +54,15 @@ pub mod task;
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
+
+mod consistency {
+    use std::sync::LazyLock;
+
+    use risingwave_common::util::env_var::env_var_is_true;
+
+    static INSANE_MODE: LazyLock<bool> = LazyLock::new(|| env_var_is_true("RW_ENABLE_INSANE_MODE"));
+
+    pub fn insane() -> bool {
+        *INSANE_MODE
+    }
+}
