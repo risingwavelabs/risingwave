@@ -79,11 +79,8 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
 fn insane_random_drop() -> bool {
-    const INSANE_RANDOM_DROP_PROB: f64 = 0.4;
-
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    rng.gen_bool(INSANE_RANDOM_DROP_PROB)
+    rand::thread_rng().gen_bool(0.3)
 }
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
