@@ -96,7 +96,7 @@ impl Planner {
                 .ctx()
                 .session_ctx()
                 .config()
-                .rw_enable_reusable_source()
+                .rw_enable_shared_source()
         {
             Ok(LogicalSourceScan::new(Rc::new(source.catalog), self.ctx())?.into())
         } else {
