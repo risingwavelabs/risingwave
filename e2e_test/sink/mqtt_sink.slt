@@ -15,7 +15,6 @@ WITH
     url='tcp://mqtt-server',
     topic = 'not_used',
     topic.field = 'topic',
-    type = 'append-only',
     retain = 'true',
     qos = 'at_least_once',
   ) FORMAT PLAIN ENCODE JSON (

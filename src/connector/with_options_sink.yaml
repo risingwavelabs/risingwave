@@ -405,9 +405,11 @@ MqttConfig:
   - name: topic.field
     field_type: String
     required: false
-  - name: r#type
-    field_type: String
-    required: true
+  - name: fallback_to_default
+    field_type: bool
+    comments: If set to true, and topic_field is set, will fallback to the default topic if the field is not found
+    required: false
+    default: Default::default
 NatsConfig:
   fields:
   - name: server_url

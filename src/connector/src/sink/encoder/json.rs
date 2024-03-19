@@ -30,8 +30,8 @@ use serde_json::{json, Map, Value};
 use thiserror_ext::AsReport;
 
 use super::{
-    CustomJsonType, DateHandlingMode, KafkaConnectParams, KafkaConnectParamsRef, QueryField,
-    Result, RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    CustomJsonType, DateHandlingMode, KafkaConnectParams, KafkaConnectParamsRef, Result,
+    RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::sink::SinkError;
 
@@ -190,26 +190,6 @@ impl SerTo<String> for Map<String, Value> {
 impl SerTo<String> for Value {
     fn ser_to(self) -> Result<String> {
         Ok(self.to_string())
-    }
-}
-
-impl QueryField for Value {
-    fn get_field(&self, name: &str) -> Option<String> {
-        name.split('.')
-            .try_fold(self, |val, field| {
-                val.as_object().and_then(|map| map.get(field))
-            })
-            .and_then(|v| v.as_str().map(ToOwned::to_owned))
-    }
-}
-
-impl QueryField for Map<String, Value> {
-    fn get_field(&self, name: &str) -> Option<String> {
-        let mut iter = name.split('.');
-        iter.next().and_then(|field| self.get(field)).and_then(|v| {
-            iter.try_fold(v, |v, field| v.as_object().and_then(|map| map.get(field)))
-                .and_then(|v| v.as_str().map(ToOwned::to_owned))
-        })
     }
 }
 
@@ -876,31 +856,5 @@ mod tests {
             .to_string();
         let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"int32"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
-    }
-
-    #[test]
-    fn test_query_field() {
-        let json = json!({
-            "a": {
-                "b": {
-                    "c": "d"
-                }
-            }
-        });
-        assert_eq!(json.get_field("a.b.c"), Some("d".to_string()));
-        assert_eq!(json.get_field("a.b"), None);
-        assert_eq!(json.get_field("a"), None);
-        assert_eq!(json.get_field("a.b.c.d"), None);
-        assert_eq!(json.get_field("b"), None);
-
-        let map = json.as_object().unwrap();
-        assert_eq!(map.get_field("a.b.c"), Some("d".to_string()));
-        assert_eq!(map.get_field("a.b"), None);
-        assert_eq!(map.get_field("a"), None);
-        assert_eq!(map.get_field("a.b.c.d"), None);
-        assert_eq!(map.get_field("b"), None);
-
-        let str = json!("a");
-        assert_eq!(str.get_field("a"), None);
     }
 }
