@@ -42,7 +42,7 @@ pub struct RestoreOpts {
     #[clap(long, value_enum, default_value_t = MetaBackend::Etcd)]
     pub meta_store_type: MetaBackend,
     /// Etcd endpoints.
-    #[clap(long, default_value_t = String::from(""))]
+    #[clap(long)]
     pub etcd_endpoints: String,
     /// Whether etcd auth has been enabled.
     #[clap(long)]
