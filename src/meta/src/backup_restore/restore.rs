@@ -176,13 +176,14 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
     if opts.dry_run {
         return Ok(());
     }
+    let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
+    writer.write(target_snapshot).await?;
     restore_hummock_version(
         &opts.hummock_storage_url,
         &opts.hummock_storage_directory,
-        target_snapshot.metadata.hummock_version_ref(),
+        &hummock_version,
     )
     .await?;
-    writer.write(target_snapshot).await?;
     Ok(())
 }
 
