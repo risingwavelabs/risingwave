@@ -74,11 +74,25 @@ mod consistency {
     static INSANE_MODE: LazyLock<bool> =
         LazyLock::new(|| env_var_is_true("RW_UNSAFE_ENABLE_INSANE_MODE"));
 
-    pub fn insane() -> bool {
+    pub(crate) fn insane() -> bool {
         *INSANE_MODE
     }
 
-    pub fn strict_consistency() -> StrictConsistencyOption {
+    pub(crate) fn strict_consistency() -> StrictConsistencyOption {
         crate::CONFIG.with(|config| config.strict_consistency)
     }
+
+    macro_rules! inconsistency_panic {
+        ($($arg:tt)*) => {
+            match crate::consistency::strict_consistency() {
+                risingwave_common::config::StrictConsistencyOption::On => {
+                    tracing::error!($($arg)*);
+                    panic!("inconsisteny happened, see error log for details");
+                }
+                risingwave_common::config::StrictConsistencyOption::Off => tracing::error!($($arg)*),
+                risingwave_common::config::StrictConsistencyOption::OffSilent => {}
+            }
+        };
+    }
+    pub(crate) use inconsistency_panic;
 }
