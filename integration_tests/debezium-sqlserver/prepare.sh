@@ -8,6 +8,7 @@ docker compose exec sqlserver bash -c "/opt/mssql-tools/bin/sqlcmd -S localhost 
 
 echo "Deploying Debezium Sqlserver connector"
 
+# default handling mode
 curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connectors/sqlserver-default/config \
   -d '{
     "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
@@ -23,7 +24,7 @@ curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connect
     "database.encrypt": false,
     "decimal.handling.mode": "precise",
     "binary.handling.mode": "bytes",
-    "time.precision.mode": "connect",
+    "time.precision.mode": "adaptive",
     "table.include.list": "dbo.orders,dbo.sqlserver_all_data_types"
 }'
 
