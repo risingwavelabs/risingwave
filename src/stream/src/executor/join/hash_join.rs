@@ -685,7 +685,7 @@ impl JoinEntryState {
             assert!(ret.is_ok(), "we have removed existing entry, if any");
             if removed && crate::consistency::strict_consistency().is_off() {
                 // if not silent, we should log the error
-                tracing::error!(key=?key, "double inserting a join state entry");
+                tracing::error!(?key, "double inserting a join state entry");
             }
         }
 
@@ -701,7 +701,10 @@ impl JoinEntryState {
             match crate::consistency::strict_consistency() {
                 StrictConsistencyOption::On => Err(JoinEntryError::RemoveError),
                 StrictConsistencyOption::Off => {
-                    tracing::error!(key=?pk, "removing a join state entry but it is not in the cache");
+                    tracing::error!(
+                        ?pk,
+                        "removing a join state entry but it is not in the cache"
+                    );
                     Ok(())
                 }
                 StrictConsistencyOption::OffSilent => Ok(()),
