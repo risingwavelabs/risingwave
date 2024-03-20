@@ -472,6 +472,116 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     }
 }
 
+pub struct FromRustRevIterator<'a, B: RustIteratorBuilder> {
+    inner: &'a B::Iterable,
+    #[expect(clippy::type_complexity)]
+    iter: Option<(
+        RustIteratorOfBuilder<'a, B>,
+        TableKey<&'a [u8]>,
+        HummockValue<&'a [u8]>,
+    )>,
+    epoch: EpochWithGap,
+    table_id: TableId,
+}
+
+impl<'a, B: RustIteratorBuilder> FromRustRevIterator<'a, B> {
+    pub fn new(inner: &'a B::Iterable, epoch: EpochWithGap, table_id: TableId) -> Self {
+        Self {
+            inner,
+            iter: None,
+            epoch,
+            table_id,
+        }
+    }
+}
+
+impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustRevIterator<'a, B> {
+    type Direction = Backward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        let (iter, key, value) = self.iter.as_mut().expect("should be valid");
+        if let Some((new_key, new_value)) = iter.next() {
+            *key = new_key;
+            *value = new_value;
+        } else {
+            self.iter = None;
+        }
+        Ok(())
+    }
+
+    fn key(&self) -> FullKey<&[u8]> {
+        let (_, key, _) = self.iter.as_ref().expect("should be valid");
+        FullKey {
+            epoch_with_gap: self.epoch,
+            user_key: UserKey {
+                table_id: self.table_id,
+                table_key: *key,
+            },
+        }
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        let (_, _, value) = self.iter.as_ref().expect("should be valid");
+        *value
+    }
+
+    fn is_valid(&self) -> bool {
+        self.iter.is_some()
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        let mut iter = B::rewind(self.inner);
+        if let Some((key, value)) = iter.next() {
+            self.iter = Some((RustIteratorOfBuilder::Rewind(iter), key, value));
+        } else {
+            self.iter = None;
+        }
+        Ok(())
+    }
+
+    async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+        if self.table_id > key.user_key.table_id {
+            // returns None when the range of self.table_id must not include the given key
+            self.iter = None;
+            return Ok(());
+        }
+        if self.table_id < key.user_key.table_id {
+            return self.rewind().await;
+        }
+        let mut iter = B::seek(self.inner, key.user_key.table_key);
+        match iter.next() {
+            Some((first_key, first_value)) => {
+                let first_full_key = FullKey {
+                    epoch_with_gap: self.epoch,
+                    user_key: UserKey {
+                        table_id: self.table_id,
+                        table_key: first_key,
+                    },
+                };
+                if first_full_key > key {
+                    // The semantic of `seek_fn` will ensure that `first_key` <= table_key of `key`.
+                    // At the beginning we have checked that `self.table_id` <= table_id of `key`.
+                    // Therefore, when `first_full_key` > `key`, the only possibility is that
+                    // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
+                    // the `self.epoch` > epoch of `key`.
+                    assert_eq!(first_key, key.user_key.table_key);
+                }
+                self.iter = Some((RustIteratorOfBuilder::Seek(iter), first_key, first_value));
+            }
+            None => {
+                self.iter = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn value_meta(&self) -> ValueMeta {
+        ValueMeta::default()
+    }
+}
+
 #[derive(PartialEq, Eq, Debug)]
 pub enum DirectionEnum {
     Forward,

@@ -40,7 +40,9 @@ use risingwave_pb::hummock::{LevelType, SstableInfo};
 use sync_point::sync_point;
 
 use crate::error::StorageResult;
-use crate::hummock::iterator::{ConcatIteratorInner, IteratorFactory, UserIterator};
+use crate::hummock::iterator::{
+    BackwardUserIterator, ConcatIteratorInner, IteratorFactory, UserIterator,
+};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -49,11 +51,14 @@ use crate::hummock::utils::{
     prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, ForwardIteratorFactory,
-    HummockStorageIterator, HummockStorageIteratorInner, LocalHummockStorageIterator,
-    ReadVersionTuple, Sstable,
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, BackwardIteratorFactory,
+    ForwardIteratorFactory, HummockStorageIterator, HummockStorageIteratorInner,
+    HummockStorageRevIterator, HummockStorageRevIteratorInner, LocalHummockStorageIterator,
+    LocalHummockStorageRevIterator, ReadVersionTuple, Sstable,
 };
-use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
+use crate::mem_table::{
+    ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
+};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
@@ -144,11 +149,11 @@ pub struct StagingVersion {
 impl StagingVersion {
     /// Get the overlapping `imm`s and `sst`s that overlap respectively with `table_key_range` and
     /// the user key range derived from `table_id`, `epoch` and `table_key_range`.
-    pub fn prune_overlap<'a, 'b>(
+    pub fn prune_overlap<'a>(
         &'a self,
         max_epoch_inclusive: HummockEpoch,
         table_id: TableId,
-        user_key_range_ref: &'a UserKeyRangeRef<'b>,
+        user_key_range_ref: &'a UserKeyRangeRef<'_>,
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
@@ -182,7 +187,7 @@ impl StagingVersion {
                     .iter()
                     .map(|sstable| &sstable.sst_info)
                     .filter(move |sstable: &&SstableInfo| {
-                        filter_single_sst(sstable, table_id, &user_key_range_ref)
+                        filter_single_sst(sstable, table_id, user_key_range_ref)
                     })
             });
         (overlapped_imms, overlapped_ssts)
@@ -751,7 +756,7 @@ impl HummockVersionReader {
             user_key_range_ref.0.map(|key| key.cloned()),
             user_key_range_ref.1.map(|key| key.cloned()),
         );
-        let mut factory = ForwardIteratorFactory::new();
+        let mut factory = ForwardIteratorFactory::default();
         let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
         let table_id = read_options.table_id;
@@ -777,11 +782,6 @@ impl HummockVersionReader {
             Some(committed),
         );
         user_iter.rewind().await?;
-        local_stats.found_key = user_iter.is_valid();
-        local_stats.sub_iter_count = local_stats.staging_imm_iter_count
-            + local_stats.staging_sst_iter_count
-            + local_stats.overlapping_iter_count
-            + local_stats.non_overlapping_iter_count;
         Ok(HummockStorageIteratorInner::new(
             user_iter,
             self.state_store_metrics.clone(),
@@ -803,7 +803,7 @@ impl HummockVersionReader {
             user_key_range_ref.0.map(|key| key.cloned()),
             user_key_range_ref.1.map(|key| key.cloned()),
         );
-        let mut factory = ForwardIteratorFactory::new();
+        let mut factory = ForwardIteratorFactory::default();
         let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
         let table_id = read_options.table_id;
@@ -829,12 +829,100 @@ impl HummockVersionReader {
             Some(committed),
         );
         user_iter.rewind().await?;
-        local_stats.found_key = user_iter.is_valid();
-        local_stats.sub_iter_count = local_stats.staging_imm_iter_count
-            + local_stats.staging_sst_iter_count
-            + local_stats.overlapping_iter_count
-            + local_stats.non_overlapping_iter_count;
         Ok(HummockStorageIteratorInner::new(
+            user_iter,
+            self.state_store_metrics.clone(),
+            table_id,
+            local_stats,
+        ))
+    }
+
+    pub async fn rev_iter(
+        &self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+        read_version_tuple: ReadVersionTuple,
+    ) -> StorageResult<HummockStorageRevIterator> {
+        let user_key_range_ref = bound_table_key_range(read_options.table_id, &table_key_range);
+        let user_key_range = (
+            user_key_range_ref.0.map(|key| key.cloned()),
+            user_key_range_ref.1.map(|key| key.cloned()),
+        );
+        let mut factory = BackwardIteratorFactory::default();
+        let mut local_stats = StoreLocalStatistic::default();
+        let (imms, uncommitted_ssts, committed) = read_version_tuple;
+        let table_id = read_options.table_id;
+        // the epoch_range left bound for iterator read
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        self.iter_inner(
+            &user_key_range,
+            epoch,
+            read_options,
+            imms,
+            uncommitted_ssts,
+            &committed,
+            &mut local_stats,
+            &mut factory,
+        )
+        .await?;
+        let merge_iter = factory.build(None);
+        let mut user_iter = BackwardUserIterator::new(
+            merge_iter,
+            user_key_range,
+            epoch,
+            min_epoch,
+            Some(committed),
+        );
+        user_iter.rewind().await?;
+        Ok(HummockStorageRevIterator::new(
+            user_iter,
+            self.state_store_metrics.clone(),
+            table_id,
+            local_stats,
+        ))
+    }
+
+    pub async fn rev_iter_with_memtable<'a>(
+        &'a self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        memtable_iter: MemTableHummockRevIterator<'a>,
+    ) -> StorageResult<LocalHummockStorageRevIterator<'_>> {
+        let user_key_range_ref = bound_table_key_range(read_options.table_id, &table_key_range);
+        let user_key_range = (
+            user_key_range_ref.0.map(|key| key.cloned()),
+            user_key_range_ref.1.map(|key| key.cloned()),
+        );
+        let mut factory = BackwardIteratorFactory::default();
+        let mut local_stats = StoreLocalStatistic::default();
+        let (imms, uncommitted_ssts, committed) = read_version_tuple;
+        let table_id = read_options.table_id;
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        self.iter_inner(
+            &user_key_range,
+            epoch,
+            read_options,
+            imms,
+            uncommitted_ssts,
+            &committed,
+            &mut local_stats,
+            &mut factory,
+        )
+        .await?;
+        let merge_iter = factory.build(Some(memtable_iter));
+        // the epoch_range left bound for iterator read
+        let mut user_iter = BackwardUserIterator::new(
+            merge_iter,
+            user_key_range,
+            epoch,
+            min_epoch,
+            Some(committed),
+        );
+        user_iter.rewind().await?;
+        Ok(HummockStorageRevIteratorInner::new(
             user_iter,
             self.state_store_metrics.clone(),
             table_id,

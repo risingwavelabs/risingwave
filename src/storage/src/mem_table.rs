@@ -35,7 +35,7 @@ use thiserror_ext::AsReport;
 use tracing::error;
 
 use crate::error::{StorageError, StorageResult};
-use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
+use crate::hummock::iterator::{FromRustIterator, FromRustRevIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, ENABLE_SANITY_CHECK,
@@ -78,6 +78,7 @@ type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
 pub type MemTableStore = BTreeMap<TableKey<Bytes>, KeyOp>;
 pub struct MemTableIteratorBuilder;
+pub struct MemTableRevIteratorBuilder;
 
 fn map_to_hummock_value<'a>(
     (key, op): (&'a TableKey<Bytes>, &'a KeyOp),
@@ -89,6 +90,26 @@ fn map_to_hummock_value<'a>(
             KeyOp::Delete(_) => HummockValue::Delete,
         },
     )
+}
+
+impl RustIteratorBuilder for MemTableRevIteratorBuilder {
+    type Iterable = MemTableStore;
+
+    type RewindIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+    type SeekIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
+        iterable
+            .range::<[u8], _>((Unbounded, Included(seek_key.0)))
+            .rev()
+            .map(map_to_hummock_value)
+    }
+
+    fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_> {
+        iterable.iter().rev().map(map_to_hummock_value)
+    }
 }
 
 impl RustIteratorBuilder for MemTableIteratorBuilder {
@@ -111,7 +132,7 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 }
 
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
-pub type MemTableHummockRevIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
+pub type MemTableHummockRevIterator<'a> = FromRustRevIterator<'a, MemTableRevIteratorBuilder>;
 
 impl MemTable {
     pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
@@ -315,6 +336,16 @@ impl MemTable {
         self.buffer.range(key_range)
     }
 
+    pub fn rev_iter<'a, R>(
+        &'a self,
+        key_range: R,
+    ) -> impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)>
+    where
+        R: RangeBounds<TableKey<Bytes>> + 'a,
+    {
+        self.buffer.range(key_range).rev()
+    }
+
     fn sub_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
         if let Some(origin_value) = origin_value {
             self.kv_size.sub_val(&origin_value);
@@ -460,6 +491,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
     type Iter<'a> = impl StateStoreIter + 'a;
+    type RevIter<'a> = impl StateStoreIter + 'a;
 
     #[allow(clippy::unused_async)]
     async fn may_exist(
@@ -497,6 +529,26 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 .await?;
             Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
                 self.mem_table.iter(key_range),
+                iter.into_stream(to_owned_item),
+                self.table_id,
+                self.epoch(),
+            ))))
+        }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter<'_>>> + Send + '_ {
+        async move {
+            let iter = self
+                .inner
+                .rev_iter(key_range.clone(), self.epoch(), read_options)
+                .await?;
+            Ok(FromStreamStateStoreIter::new(Box::pin(merge_stream(
+                self.mem_table.rev_iter(key_range),
                 iter.into_stream(to_owned_item),
                 self.table_id,
                 self.epoch(),
