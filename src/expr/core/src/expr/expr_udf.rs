@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Error};
 use arrow_schema::{Field, Fields, Schema};
-#[cfg(feature = "embedded-deno-udf")]
-use arrow_udf_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+#[cfg(feature = "embedded-deno-udf")]
+use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use arrow_udf_wasm::Runtime as WasmRuntime;
