@@ -14,18 +14,21 @@
 
 use std::collections::HashMap;
 use std::default::Default;
-use std::ops::Bound;
+use std::future::Future;
 use std::ops::Bound::*;
+use std::ops::{Bound, Index};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
 use foyer::memory::CacheContext;
+use futures::future::try_join_all;
 use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, RowRef, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
@@ -38,7 +41,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::{
+    deserialize_datum, serialize_datum_into, BasicSerde,
+};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range_with_vnode, range_of_prefix,
     start_bound_of_excluded_prefix, TableKey, TableKeyRange,
@@ -51,6 +56,7 @@ use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
+    serialize_pk_with_vnode_and_column_id,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
@@ -137,6 +143,8 @@ pub struct StateTableInner<
     table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
+    column_ids: Vec<ColumnId>,
+    is_columnar_store: bool,
 
     /// Strategy to buffer watermark for lazy state cleaning.
     watermark_buffer_strategy: W,
@@ -441,7 +449,7 @@ where
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
-
+        let column_ids = columns.iter().map(|c| c.column_id).collect_vec();
         Self {
             table_id,
             local_store: local_state_store,
@@ -461,6 +469,8 @@ where
             output_indices,
             i2o_mapping,
             is_consistent_op,
+            column_ids,
+            is_columnar_store: table_catalog.is_columnar_store.unwrap_or(false),
         }
     }
 
@@ -624,6 +634,7 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
+        let column_ids = table_columns.iter().map(|c| c.column_id).collect_vec();
         Self {
             table_id,
             local_store: local_state_store,
@@ -643,6 +654,9 @@ where
             output_indices: vec![],
             i2o_mapping: ColIndexMapping::new(vec![], 0),
             is_consistent_op,
+            column_ids,
+            // TODO(columnar_store): confirm that new_with_distribution_inner is for unit test only.
+            is_columnar_store: false,
         }
     }
 
@@ -740,6 +754,7 @@ where
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
+        assert!(!self.is_columnar_store);
         let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
         match encoded_row {
             Some(encoded_row) => {
@@ -759,6 +774,7 @@ where
 
     /// Get a raw encoded row from state table.
     pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
+        assert!(!self.is_columnar_store);
         assert!(pk.len() <= self.pk_indices.len());
 
         if self.prefix_hint_len != 0 {
@@ -793,6 +809,10 @@ where
         &self,
         pk: impl Row,
     ) -> StreamExecutorResult<Option<CompactedRow>> {
+        // TODO(columnar_store): Confirm that this is the only path that reads state table as columnar store.
+        if self.is_columnar_store {
+            return self.columnar_store_get_row(pk).await;
+        }
         if self.row_serde.kind().is_basic() {
             // Basic serde is in value-encoding format, which is compatible with the compacted row.
             self.get_encoded_row(pk)
@@ -805,6 +825,79 @@ where
                 .await
                 .map(|row| row.map(CompactedRow::from))
         }
+    }
+
+    // TODO(columnar_store): avoid code duplication when compared to StorageTableInner::columnar_store_get_row
+    async fn columnar_store_get_row(
+        &self,
+        pk: impl Row,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
+        tracing::debug!(pk=?pk, "columnar_store_get_row");
+        assert!(pk.len() <= self.pk_indices.len());
+        let vnode = self.compute_vnode_by_pk(&pk);
+        // TODO(columnar_store): reuse serde result
+        let sentinel_pk =
+            serialize_pk_with_vnode_and_column_id(&pk, &self.pk_serde, vnode, &ColumnId::new(0));
+        let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+            Some(sentinel_pk.slice(VirtualNode::SIZE..))
+        } else {
+            None
+        };
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.table_id,
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            ..Default::default()
+        };
+
+        tracing::debug!(sentinel_pk=?sentinel_pk, "read sentinel_pk");
+        if self
+            .local_store
+            .get(sentinel_pk, read_options.clone())
+            .await?
+            .is_none()
+        {
+            tracing::debug!("skip by sentinel_pk");
+            return Ok(None);
+        }
+        // TODO(columnar_store): to_owned_row can be optimized out
+        let owned_pk = pk.to_owned_row();
+        let mut iter_fut: Vec<Pin<Box<dyn Future<Output = StreamExecutorResult<Datum>> + Send>>> =
+            Vec::with_capacity(self.output_indices.len());
+        for pos in 0..self.column_ids.len() {
+            if let Some(i) = self.pk_indices.iter().position(|pk_idx| *pk_idx == pos) {
+                let col_val = owned_pk.index(i).clone();
+                let fut = async move { Ok::<_, StreamExecutorError>(col_val) };
+                iter_fut.push(Box::pin(fut));
+                continue;
+            }
+            let column_id = self.column_ids[pos];
+            let col_pk =
+                serialize_pk_with_vnode_and_column_id(&pk, &self.pk_serde, vnode, &column_id);
+            let col_prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+                Some(col_pk.slice(VirtualNode::SIZE..))
+            } else {
+                None
+            };
+            let col_read_options = ReadOptions {
+                prefix_hint: col_prefix_hint,
+                ..read_options.clone()
+            };
+            let fut = async move {
+                let col_val_bytes = self
+                    .local_store
+                    .get(col_pk, col_read_options)
+                    .await?
+                    .unwrap_or_else(|| panic!("missing col val, column_id={}", column_id));
+                // TODO(columnar_store): use a deserializer
+                let col_val = deserialize_datum(col_val_bytes, &self.data_types[pos])?;
+                Ok::<_, StreamExecutorError>(col_val)
+            };
+            iter_fut.push(Box::pin(fut));
+        }
+        let result_row_vec = try_join_all(iter_fut).await?;
+        Ok(Some(OwnedRow::new(result_row_vec).into()))
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
@@ -988,6 +1081,10 @@ where
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        if self.is_columnar_store {
+            self.columnar_store_write_chunk(chunk);
+            return;
+        }
         let chunk = if IS_REPLICATED {
             self.fill_non_output_indices(chunk)
         } else {
@@ -1058,6 +1155,103 @@ where
                             self.watermark_cache.delete(pk);
                         }
                         self.delete_inner(TableKey(key_bytes), value);
+                    }
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::disallowed_methods)]
+    fn columnar_store_write_chunk(&mut self, chunk: StreamChunk) {
+        tracing::debug!("columnar_store_write_chunk");
+        let chunk = if IS_REPLICATED {
+            // TODO(columnar_store): handle IS_REPLICATED
+            unimplemented!()
+        } else {
+            chunk
+        };
+        let (chunk, op) = chunk.into_parts();
+        assert!(
+            self.value_indices.is_none()
+                || self.value_indices.as_ref().unwrap().len() == self.column_ids.len()
+        );
+        let non_pk_indices = (0..self.column_ids.len())
+            .into_iter()
+            .filter(|idx| !self.pk_indices.contains(idx))
+            .collect_vec();
+        let non_pk_column_ids = self
+            .column_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, col)| {
+                if non_pk_indices.contains(&idx) {
+                    Some(*col)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+        // TODO(columnar_store): chunk.project can be optimized out.
+        let key_chunk = chunk.project(self.pk_indices());
+        let vnodes = self
+            .distribution
+            .compute_chunk_vnode(&chunk, &self.pk_indices);
+        for (key, vnode, op, chunk) in izip!(
+            key_chunk.rows_with_holes(),
+            vnodes,
+            op.iter(),
+            chunk.rows_with_holes()
+        ) {
+            let Some(pk) = key else {
+                continue;
+            };
+            // TODO(columnar_store): fix storage compaction when handling per vnode watermark
+            if USE_WATERMARK_CACHE {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        self.watermark_cache.insert(&pk);
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        self.watermark_cache.delete(&pk);
+                    }
+                }
+            }
+            // TODO(columnar_store): reuse serde result
+            let sentinel_key =
+                serialize_pk_with_vnode_and_column_id(pk, &self.pk_serde, vnode, &ColumnId::new(0));
+            let value = Bytes::new();
+            tracing::debug!(sentinel_pk=?sentinel_key, op=?op, "write sentinel_pk");
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    self.insert_inner(sentinel_key, value);
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    self.delete_inner(sentinel_key, value);
+                }
+            }
+
+            let chunk: RowRef<'_> = chunk.unwrap();
+            for (col_index, col_id) in non_pk_indices.iter().zip_eq_debug(non_pk_column_ids.iter())
+            {
+                // skip auto gen pk
+                if col_id.get_id() == 0 {
+                    continue;
+                }
+                let key = serialize_pk_with_vnode_and_column_id(&pk, &self.pk_serde, vnode, col_id);
+                // TODO(columnar_store): add support for column family.
+                // TODO(columnar_store): add support for add/drop column.
+                // TODO(columnar_store): fix storage compaction, which must not rewrite these KV entries when GC stale columns.
+                let col_datum = chunk.datum_at(*col_index);
+                let mut value_buffer = BytesMut::new();
+                // TODO(columnar_store): use a serializer
+                serialize_datum_into(col_datum, &mut value_buffer);
+                let value = value_buffer.freeze();
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        self.insert_inner(key, value);
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        self.delete_inner(key, value);
                     }
                 }
             }
@@ -1306,6 +1500,7 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        assert!(!self.is_columnar_store);
         Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
@@ -1319,6 +1514,7 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + '_> {
+        assert!(!self.is_columnar_store);
         assert!(IS_REPLICATED);
         let stream = self
             .iter_with_vnode(vnode, pk_range, prefetch_options)
@@ -1338,6 +1534,7 @@ where
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
+        assert!(!self.is_columnar_store);
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1362,6 +1559,7 @@ where
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        assert!(!self.is_columnar_store);
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
 
@@ -1423,6 +1621,7 @@ where
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
+        assert!(!self.is_columnar_store);
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
@@ -1436,6 +1635,7 @@ where
     /// false: the provided pk prefix is absent in state store.
     /// true: the provided pk prefix may or may not be present in state store.
     pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
+        assert!(!self.is_columnar_store);
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

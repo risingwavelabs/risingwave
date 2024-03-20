@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -42,4 +43,17 @@ pub fn deserialize_pk_with_vnode(
     let vnode = VirtualNode::from_be_bytes(key[0..VirtualNode::SIZE].try_into().unwrap());
     let pk = deserializer.deserialize(&key[VirtualNode::SIZE..])?;
     Ok((vnode, pk))
+}
+
+pub fn serialize_pk_with_vnode_and_column_id(
+    pk: impl Row,
+    serializer: &OrderedRowSerde,
+    vnode: VirtualNode,
+    column_id: &ColumnId,
+) -> TableKey<Bytes> {
+    let mut buffer = BytesMut::new();
+    buffer.put_slice(&vnode.to_be_bytes()[..]);
+    buffer.put_slice(&column_id.get_id().to_be_bytes()[..]);
+    pk.memcmp_serialize_into(serializer, &mut buffer);
+    TableKey(buffer.freeze())
 }

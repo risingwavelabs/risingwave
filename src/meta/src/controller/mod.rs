@@ -138,6 +138,8 @@ impl From<ObjectModel<table::Model>> for PbTable {
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
+            // TODO(columnar_store): handle model v2
+            is_columnar_store: None,
         }
     }
 }

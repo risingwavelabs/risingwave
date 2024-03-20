@@ -95,6 +95,7 @@ message StorageTableDesc {
   repeated uint32 stream_key = 9;
   optional uint32 vnode_col_idx_in_pk = 10;
   optional uint32 retention_seconds = 11;
+  optional bool is_columnar_store = 12;
 }
 
 // Represents a table in external database for CDC scenario

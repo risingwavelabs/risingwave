@@ -21,7 +21,7 @@ use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common_estimate_size::EstimateSize;
 
@@ -397,6 +397,65 @@ pub fn prefixed_range_with_vnode<B: AsRef<[u8]>>(
             Excluded(prefixed(b))
         }
         Unbounded => end_bound_of_vnode(vnode),
+    };
+
+    map_table_key_range((start, end))
+}
+
+// TODO(columnar_store): avoid code duplication when compared to prefixed_range_with_vnode
+pub fn prefixed_range_with_vnode_and_column_id<B: AsRef<[u8]>>(
+    range: impl RangeBounds<B>,
+    vnode: VirtualNode,
+    column_id: ColumnId,
+) -> TableKeyRange {
+    // TODO(columnar_store): avoid code duplication when compared to prefix_slice_with_vnode
+    pub fn prefix_slice_with_vnode_and_column_id(
+        vnode: VirtualNode,
+        column_id: ColumnId,
+        slice: &[u8],
+    ) -> Bytes {
+        let prefix = vnode.to_be_bytes();
+        let column_id_slice = column_id.get_id().to_be_bytes();
+        let mut buf = BytesMut::with_capacity(prefix.len() + column_id_slice.len() + slice.len());
+        buf.extend_from_slice(&prefix);
+        buf.extend_from_slice(&column_id_slice);
+        buf.extend_from_slice(slice);
+        buf.freeze()
+    }
+
+    fn add_column_id(slice: &[u8], column_id: ColumnId) -> Bytes {
+        let column_id_slice = column_id.get_id().to_be_bytes();
+        let mut buf = BytesMut::with_capacity(slice.len() + column_id_slice.len());
+        buf.extend_from_slice(slice);
+        buf.extend_from_slice(&column_id_slice);
+        buf.freeze()
+    }
+
+    pub fn end_bound_of_vnode_and_column_id(
+        vnode: VirtualNode,
+        column_id: ColumnId,
+    ) -> Bound<Bytes> {
+        // column_id.next() mut not overflow
+        Excluded(add_column_id(&vnode.to_be_bytes(), column_id.next()))
+    }
+
+    let prefixed =
+        |b: &B| -> Bytes { prefix_slice_with_vnode_and_column_id(vnode, column_id, b.as_ref()) };
+    let start: Bound<Bytes> = match range.start_bound() {
+        Included(b) => Included(prefixed(b)),
+        Excluded(b) => {
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
+        }
+        Unbounded => Included(add_column_id(&vnode.to_be_bytes(), column_id)),
+    };
+    let end = match range.end_bound() {
+        Included(b) => Included(prefixed(b)),
+        Excluded(b) => {
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
+        }
+        Unbounded => end_bound_of_vnode_and_column_id(vnode, column_id),
     };
 
     map_table_key_range((start, end))

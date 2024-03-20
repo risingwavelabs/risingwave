@@ -161,6 +161,8 @@ pub struct TableCatalog {
     pub created_at_cluster_version: Option<String>,
 
     pub initialized_at_cluster_version: Option<String>,
+
+    pub is_columnar_store: Option<bool>,
 }
 
 // How the stream job was created will determine
@@ -371,6 +373,7 @@ impl TableCatalog {
             watermark_columns: self.watermark_columns.clone(),
             versioned: self.version.is_some(),
             vnode_col_index: self.vnode_col_index,
+            is_columnar_store: self.is_columnar_store,
         }
     }
 
@@ -449,6 +452,7 @@ impl TableCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             retention_seconds: self.retention_seconds,
+            is_columnar_store: self.is_columnar_store,
         }
     }
 
@@ -580,6 +584,7 @@ impl From<PbTable> for TableCatalog {
                 .into_iter()
                 .map(TableId::from)
                 .collect_vec(),
+            is_columnar_store: tb.is_columnar_store,
         }
     }
 }
