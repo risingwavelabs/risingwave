@@ -78,9 +78,13 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
-fn insane_random_drop() -> bool {
-    use rand::Rng;
-    rand::thread_rng().gen_bool(0.3)
+macro_rules! insane_mode_discard_point {
+    () => {{
+        use rand::Rng;
+        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+            return;
+        }
+    }};
 }
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
@@ -875,18 +879,14 @@ where
     }
 
     fn insert_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
-        if crate::consistency::insane() && insane_random_drop() {
-            return;
-        }
+        insane_mode_discard_point!();
         self.local_store
             .insert(key, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     fn delete_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
-        if crate::consistency::insane() && insane_random_drop() {
-            return;
-        }
+        insane_mode_discard_point!();
         self.local_store
             .delete(key, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -898,9 +898,7 @@ where
         old_value_bytes: Option<Bytes>,
         new_value_bytes: Bytes,
     ) {
-        if crate::consistency::insane() && insane_random_drop() {
-            return;
-        }
+        insane_mode_discard_point!();
         self.local_store
             .insert(key_bytes, new_value_bytes, old_value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
