@@ -17,9 +17,9 @@ use std::sync::Arc;
 use anyhow::Context;
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
-#[cfg(feature = "embedded-deno-udf")]
-use arrow_udf_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 use arrow_udf_js::{CallMode as JsCallMode, Runtime as JsRuntime};
+#[cfg(feature = "embedded-deno-udf")]
+use arrow_udf_js_deno::{CallMode as DenoCallMode, Runtime as DenoRuntime};
 #[cfg(feature = "embedded-python-udf")]
 use arrow_udf_python::{CallMode as PythonCallMode, Runtime as PythonRuntime};
 use cfg_or_panic::cfg_or_panic;

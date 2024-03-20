@@ -682,16 +682,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "arrow-udf-deno"
+name = "arrow-udf-js"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "252b6355ad1e57eb6454b705c51652de55aa22eb018cdb95be0dbf62ee3ec78f"
+dependencies = [
+ "anyhow",
+ "arrow-array 50.0.0",
+ "arrow-buffer 50.0.0",
+ "arrow-schema 50.0.0",
+ "rquickjs",
+]
+
+[[package]]
+name = "arrow-udf-js-deno"
 version = "0.0.1"
-source = "git+https://github.com/bakjos/arrow-udf.git?rev=3a00425#3a004252471c47d68211b050c614372c498ac5b3"
+source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=1381842#13818424f07d4494509ae82dfb4fab9ef105b90e"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
  "arrow-buffer 50.0.0",
  "arrow-data 50.0.0",
  "arrow-schema 50.0.0",
- "arrow-udf-deno-runtime",
+ "arrow-udf-js-deno-runtime",
  "async-trait",
  "deno_core",
  "futures",
@@ -704,9 +717,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "arrow-udf-deno-runtime"
+name = "arrow-udf-js-deno-runtime"
 version = "0.0.1"
-source = "git+https://github.com/bakjos/arrow-udf.git?rev=3a00425#3a004252471c47d68211b050c614372c498ac5b3"
+source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=1381842#13818424f07d4494509ae82dfb4fab9ef105b90e"
 dependencies = [
  "anyhow",
  "deno_ast",
@@ -716,7 +729,6 @@ dependencies = [
  "deno_fetch",
  "deno_http",
  "deno_io",
- "deno_napi",
  "deno_net",
  "deno_tls",
  "deno_url",
@@ -730,19 +742,6 @@ dependencies = [
  "signal-hook-registry",
  "tokio",
  "v8",
-]
-
-[[package]]
-name = "arrow-udf-js"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "252b6355ad1e57eb6454b705c51652de55aa22eb018cdb95be0dbf62ee3ec78f"
-dependencies = [
- "anyhow",
- "arrow-array 50.0.0",
- "arrow-buffer 50.0.0",
- "arrow-schema 50.0.0",
- "rquickjs",
 ]
 
 [[package]]
@@ -3662,16 +3661,6 @@ dependencies = [
  "data-url",
  "serde",
  "url",
-]
-
-[[package]]
-name = "deno_napi"
-version = "0.72.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13553afb6cc3292b96c989abd3ee9e9cdb58ba703c2b69941c1b9392839372f9"
-dependencies = [
- "deno_core",
- "libloading",
 ]
 
 [[package]]
@@ -10316,8 +10305,8 @@ dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
  "arrow-schema 50.0.0",
- "arrow-udf-deno",
  "arrow-udf-js",
+ "arrow-udf-js-deno",
  "arrow-udf-python",
  "arrow-udf-wasm",
  "async-trait",
