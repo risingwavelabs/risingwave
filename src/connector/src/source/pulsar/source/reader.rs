@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use arrow_array::{Int32Array, Int64Array, RecordBatch};
