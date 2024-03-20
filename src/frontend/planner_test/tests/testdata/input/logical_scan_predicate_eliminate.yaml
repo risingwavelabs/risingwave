@@ -1,0 +1,48 @@
+- id: create_table
+  sql: |
+    create table t1 (c1 INT, c2 INT, c3 INT);
+  expected_outputs: []
+
+- id: basic_optimizable_pattern
+  before:
+  - create_table
+  sql: |
+    select c1 from t1 where not(c1 > 1) and (c1 > 1);
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+- id: complicated_optimizable_pattern
+  before:
+  - create_table
+  sql: |
+    select
+      c1, c2, c3 from t1
+    where
+      not(c1 > 1 or c2 > 2 or c3 > 3)
+      and (c1 > 1 or c2 > 2)
+      and (c2 > 2 or c3 > 3)
+      and (c3 > 3 or c1 > 1)
+      and (c1 > 1 or c2 > 2 or c3 > 3);
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+# Leave the non-optimizable pattern(s) intact
+- id: corner_case
+  before:
+  - create_table
+  sql: |
+    select
+      c1, c2, c3 from t1
+    where
+      (c1 > 1)
+      and (c2 > 2)
+      and (c3 > 3)
+      and not(c1 < 1)
+      and not(c2 < 2)
+      and not(c3 < 3)
+      and not(c1 > 1 or c2 > 2 or c3 > 3);
+  expected_outputs:
+  - logical_plan
+  - batch_plan
