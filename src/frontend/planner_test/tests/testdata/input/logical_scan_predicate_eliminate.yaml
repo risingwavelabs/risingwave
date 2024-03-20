@@ -12,24 +12,9 @@
   - logical_plan
   - batch_plan
 
-- id: complicated_optimizable_pattern
-  before:
-  - create_table
-  sql: |
-    select
-      c1, c2, c3 from t1
-    where
-      not(c1 > 1 or c2 > 2 or c3 > 3)
-      and (c1 > 1 or c2 > 2)
-      and (c2 > 2 or c3 > 3)
-      and (c3 > 3 or c1 > 1)
-      and (c1 > 1 or c2 > 2 or c3 > 3);
-  expected_outputs:
-  - logical_plan
-  - batch_plan
-
-# Leave the non-optimizable pattern(s) intact
-- id: corner_case
+# Since condition will be decomposed, this is something
+# we could take advantages of.
+- id: non_trivial_optimizable_case
   before:
   - create_table
   sql: |
@@ -43,6 +28,27 @@
       and not(c2 < 2)
       and not(c3 < 3)
       and not(c1 > 1 or c2 > 2 or c3 > 3);
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+
+# This pattern seems optimizable at the first glance,
+# but unfortunately the `and (c1 > 1 or c2 > 2 or c3 > 3)`
+# will be decomposed to `not(c1 > 1) or not(c2 > 2) or not(c3 > 3)`
+# which can't be optimized under current condition rewriter
+# and we will just leave it intact.
+- id: corner_case
+  before:
+  - create_table
+  sql: |
+    select
+      c1, c2, c3 from t1
+    where
+      not(c1 > 1 or c2 > 2 or c3 > 3)
+      and (c1 > 1 or c2 > 2)
+      and (c2 > 2 or c3 > 3)
+      and (c3 > 3 or c1 > 1)
+      and (c1 > 1 or c2 > 2 or c3 > 3);
   expected_outputs:
   - logical_plan
   - batch_plan

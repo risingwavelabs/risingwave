@@ -258,7 +258,7 @@ impl LogicalScan {
         (scan_without_predicate, predicate, project_expr)
     }
 
-    pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
+    fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::Scan::new_inner(
             self.table_name().to_string(),
             self.output_col_idx().to_vec(),
@@ -462,7 +462,9 @@ impl PredicatePushdown for LogicalScan {
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));
+        println!("before: {}", predicate);
         let predicate = ConditionRewriter::rewrite(predicate);
+        println!("after: {}", predicate);
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()
