@@ -90,7 +90,6 @@ impl JoinEntryState {
                     tracing::error!(key=?pk, "removing a join state entry but it is not in the cache");
                     Ok(())
                 }
-                StrictConsistencyOption::OffSilent => Ok(()),
             }
         }
     }

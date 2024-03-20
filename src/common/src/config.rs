@@ -837,8 +837,6 @@ pub enum StrictConsistencyOption {
     On,
     /// Disabled, warn on inconsistency.
     Off,
-    /// Disabled, ignore inconsistency.
-    Ignore,
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum)]

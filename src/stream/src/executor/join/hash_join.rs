@@ -708,7 +708,6 @@ impl JoinEntryState {
                     );
                     Ok(())
                 }
-                StrictConsistencyOption::OffSilent => Ok(()),
             }
         }
     }

@@ -90,7 +90,6 @@ mod consistency {
                     panic!("inconsistency happened, see error log for details");
                 }
                 risingwave_common::config::StrictConsistencyOption::Off => tracing::error!($($arg)*),
-                risingwave_common::config::StrictConsistencyOption::OffSilent => {}
             }
         };
     }
