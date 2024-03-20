@@ -35,18 +35,17 @@ pub async fn handle_fetch_cursor(
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
     let cursor_manager = session.get_cursor_manager();
     let mut cursor_manager = cursor_manager.lock().await;
+    // Fetch data from the Cursor. There are three cases
     match cursor_manager
         .get_row_with_cursor(cursor_name.clone())
         .await?
     {
         CursorRowValue::Row((row, pg_descs)) => {
+            // Normal row
             return Ok(build_fetch_cursor_response(vec![row], pg_descs));
         }
-        CursorRowValue::QueryWithNextRwTimestamp(
-            rw_timestamp,
-            subscription_name,
-            cursor_retention_secs,
-        ) => {
+        CursorRowValue::QueryWithNextRwTimestamp(rw_timestamp, subscription_name) => {
+            // Returned the rw_timestamp of the next cursor, query data and update the cursor
             let query_stmt =
                 gen_query_from_logstore_ge_rw_timestamp(subscription_name.clone(), rw_timestamp)?;
             let res = handle_query(handle_args, query_stmt, formats).await?;
@@ -58,16 +57,12 @@ pub async fn handle_fetch_cursor(
                 false,
                 true,
                 subscription_name.clone(),
-                cursor_retention_secs,
             )
             .await?;
             cursor_manager.update_cursor(cursor)?;
         }
-        CursorRowValue::QueryWithStartRwTimestamp(
-            rw_timestamp,
-            subscription_name,
-            cursor_retention_secs,
-        ) => {
+        CursorRowValue::QueryWithStartRwTimestamp(rw_timestamp, subscription_name) => {
+            // The rw_timestamp for the next cursor has not been returned, and +1 query it.
             let query_stmt = gen_query_from_logstore_ge_rw_timestamp(
                 subscription_name.clone(),
                 rw_timestamp + 1,
@@ -81,21 +76,21 @@ pub async fn handle_fetch_cursor(
                 false,
                 false,
                 subscription_name.clone(),
-                cursor_retention_secs,
             )
             .await?;
             cursor_manager.update_cursor(cursor)?;
         }
     };
 
+    // Try fetch data after update cursor
     match cursor_manager.get_row_with_cursor(cursor_name).await? {
         CursorRowValue::Row((row, pg_descs)) => {
             Ok(build_fetch_cursor_response(vec![row], pg_descs))
         }
-        CursorRowValue::QueryWithStartRwTimestamp(_, _, _) => {
+        CursorRowValue::QueryWithStartRwTimestamp(_, _) => {
             Ok(build_fetch_cursor_response(vec![], vec![]))
         }
-        CursorRowValue::QueryWithNextRwTimestamp(_, _, _) => Err(ErrorCode::InternalError(
+        CursorRowValue::QueryWithNextRwTimestamp(_, _) => Err(ErrorCode::InternalError(
             "Fetch cursor, one must get a row or null".to_string(),
         )
         .into()),

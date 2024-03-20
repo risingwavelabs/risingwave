@@ -47,10 +47,8 @@ pub async fn handle_declare_cursor(
     let is_snapshot = start_rw_timestamp == 0;
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
-    let cursor_retention_secs = std::cmp::min(
-        session.statement_timeout(),
-        Duration::from_secs(subscription.get_retention_seconds()?),
-    );
+
+    // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let (start_rw_timestamp, res) = if is_snapshot {
         let subscription_from_table_name = ObjectName(vec![Ident::from(
             subscription.subscription_from_name.as_ref(),
@@ -70,6 +68,13 @@ pub async fn handle_declare_cursor(
         let res = handle_query(handle_args, query_stmt, formats).await?;
         (start_rw_timestamp, res)
     };
+    // Create cursor based on the response
+    let cursor_retention_secs = std::cmp::min(
+        session.statement_timeout(),
+        Duration::from_secs(subscription.get_retention_seconds()?),
+    );
+    let cursor_manager = session.get_cursor_manager();
+    let mut cursor_manager = cursor_manager.lock().await;
     let cursor = Cursor::new(
         cursor_name.clone(),
         res,
@@ -77,14 +82,10 @@ pub async fn handle_declare_cursor(
         is_snapshot,
         true,
         stmt.cursor_from.clone(),
-        cursor_retention_secs,
     )
     .await?;
-    session
-        .get_cursor_manager()
-        .lock()
-        .await
-        .add_cursor(cursor)?;
+    cursor_manager.add_cursor_retention_secs(stmt.cursor_from.clone(), cursor_retention_secs);
+    cursor_manager.add_cursor(cursor)?;
 
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
