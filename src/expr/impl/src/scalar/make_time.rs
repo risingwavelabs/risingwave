@@ -129,8 +129,6 @@ mod tests {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use risingwave_common::types::{Date, Timestamp};
 
-    /// This test is to testify that our `Date` expressess a year `-X` as `X+1 BC`, while `Timestamp` expresses it as `-X`.
-    /// Can be removed if we change the `ToText` implementation of `Date` or `Timestamp`.
     #[test]
     fn test_naive_date_and_time() {
         let year = -1973;
@@ -154,7 +152,7 @@ mod tests {
         let date_time = Timestamp(NaiveDateTime::new(naive_date, naive_time));
         assert_eq!(
             date_time.to_string(),
-            String::from("-1973-02-02 12:34:56.789")
+            String::from("1974-02-02 12:34:56.789 BC")
         );
     }
 }

@@ -186,7 +186,7 @@ impl SystemParamsController {
             .await?
         else {
             return Err(MetaError::system_params(format!(
-                "unrecognized system parameter {}",
+                "unrecognized system parameter {:?}",
                 name
             )));
         };

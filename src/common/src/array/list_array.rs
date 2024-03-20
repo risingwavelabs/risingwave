@@ -612,6 +612,24 @@ impl Debug for ListRef<'_> {
     }
 }
 
+impl Row for ListRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        self.array.value_at(self.start as usize + index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        self.array.value_at_unchecked(self.start as usize + index)
+    }
+
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        (*self).iter()
+    }
+}
+
 impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.

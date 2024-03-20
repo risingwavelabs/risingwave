@@ -42,15 +42,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private final boolean pubAutoCreate;
 
-    private static final String AWS_RDS_HOST = "rds.amazonaws.com";
+    private static final String AWS_RDS_HOST = "amazonaws.com";
     private final boolean isAwsRds;
 
     // Whether the properties to validate is shared by multiple tables.
     // If true, we will skip validation check for table
-    private final boolean isMultiTableShared;
+    private final boolean isCdcSourceJob;
 
     public PostgresValidator(
-            Map<String, String> userProps, TableSchema tableSchema, boolean isMultiTableShared)
+            Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
         this.userProps = userProps;
         this.tableSchema = tableSchema;
@@ -74,7 +74,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         this.pubAutoCreate =
                 userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
-        this.isMultiTableShared = isMultiTableShared;
+        this.isCdcSourceJob = isCdcSourceJob;
     }
 
     @Override
@@ -136,6 +136,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
+    @Override
+    boolean isCdcSourceJob() {
+        return isCdcSourceJob;
+    }
+
     /** For Citus which is a distributed version of PG */
     public void validateDistributedTable() throws SQLException {
         try (var stmt =
@@ -152,7 +157,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTableSchema() throws SQLException {
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             return;
         }
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table"))) {
@@ -280,7 +285,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTablePrivileges(boolean isSuperUser) throws SQLException {
-        if (isSuperUser || isMultiTableShared) {
+        // cdc source job doesn't have table schema to validate, since its schema is fixed to jsonb
+        if (isSuperUser || isCdcSourceJob) {
             return;
         }
 
@@ -334,9 +340,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
         }
 
-        // If the source properties is shared by multiple tables, skip the following
+        // If the source properties is created by share source, skip the following
         // check of publication
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             return;
         }
 
@@ -419,7 +425,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validatePublicationPrivileges() throws SQLException {
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             throw ValidatorUtils.invalidArgument(
                     "The connector properties is shared by multiple tables unexpectedly");
         }
@@ -491,9 +497,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     protected void alterPublicationIfNeeded() throws SQLException {
-        if (isMultiTableShared) {
+        if (isCdcSourceJob) {
             throw ValidatorUtils.invalidArgument(
-                    "The connector properties is shared by multiple tables unexpectedly");
+                    "The connector properties is created by a shared source unexpectedly");
         }
 
         String alterPublicationSql =

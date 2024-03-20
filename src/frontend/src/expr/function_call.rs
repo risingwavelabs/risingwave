@@ -425,7 +425,7 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
 
 #[derive(Debug, Error)]
 #[error("{0}")]
-pub struct CastError(String);
+pub struct CastError(pub(super) String);
 
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {

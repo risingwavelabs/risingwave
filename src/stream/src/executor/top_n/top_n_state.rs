@@ -36,7 +36,7 @@ pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     state_table: StateTable<S>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 }
 
@@ -319,6 +319,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::*;
@@ -348,7 +349,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
             tb
         };
 
@@ -364,8 +365,8 @@ mod tests {
         let row2_bytes = serialize_pk_to_cache_key(row2.clone(), &cache_key_serde);
         let row3_bytes = serialize_pk_to_cache_key(row3.clone(), &cache_key_serde);
         let row4_bytes = serialize_pk_to_cache_key(row4.clone(), &cache_key_serde);
-        let rows = vec![row1, row2, row3, row4];
-        let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes];
+        let rows = [row1, row2, row3, row4];
+        let ordered_rows = [row1_bytes, row2_bytes, row3_bytes, row4_bytes];
         managed_state.insert(rows[3].clone());
 
         // now ("ab", 4)
@@ -428,7 +429,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
             tb
         };
 
@@ -446,7 +447,7 @@ mod tests {
         let row3_bytes = serialize_pk_to_cache_key(row3.clone(), &cache_key_serde);
         let row4_bytes = serialize_pk_to_cache_key(row4.clone(), &cache_key_serde);
         let row5_bytes = serialize_pk_to_cache_key(row5.clone(), &cache_key_serde);
-        let rows = vec![row1, row2, row3, row4, row5];
+        let rows = [row1, row2, row3, row4, row5];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
         let mut cache = TopNCache::<false>::new(1, 1, data_types);
@@ -475,7 +476,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
             tb
         };
 

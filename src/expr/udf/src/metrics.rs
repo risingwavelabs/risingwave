@@ -27,6 +27,8 @@ pub struct Metrics {
     pub udf_success_count: IntCounterVec,
     /// Number of failed UDF calls.
     pub udf_failure_count: IntCounterVec,
+    /// Total number of retried UDF calls.
+    pub udf_retry_count: IntCounterVec,
     /// Input chunk rows of UDF calls.
     pub udf_input_chunk_rows: HistogramVec,
     /// The latency of UDF calls in seconds.
@@ -43,7 +45,7 @@ pub static GLOBAL_METRICS: LazyLock<Metrics> =
 
 impl Metrics {
     fn new(registry: &Registry) -> Self {
-        let labels = &["link", "name"];
+        let labels = &["link", "language", "name", "fragment_id"];
         let udf_success_count = register_int_counter_vec_with_registry!(
             "udf_success_count",
             "Total number of successful UDF calls",
@@ -54,6 +56,13 @@ impl Metrics {
         let udf_failure_count = register_int_counter_vec_with_registry!(
             "udf_failure_count",
             "Total number of failed UDF calls",
+            labels,
+            registry
+        )
+        .unwrap();
+        let udf_retry_count = register_int_counter_vec_with_registry!(
+            "udf_retry_count",
+            "Total number of retried UDF calls",
             labels,
             registry
         )
@@ -92,6 +101,7 @@ impl Metrics {
         Metrics {
             udf_success_count,
             udf_failure_count,
+            udf_retry_count,
             udf_input_chunk_rows,
             udf_latency,
             udf_input_rows,

@@ -280,9 +280,7 @@ fn strip_outer_type<'a>(ty: &'a syn::Type, type_: &str) -> Option<&'a syn::Type>
     let syn::Type::Path(path) = ty else {
         return None;
     };
-    let Some(seg) = path.path.segments.last() else {
-        return None;
-    };
+    let seg = path.path.segments.last()?;
     if seg.ident != type_ {
         return None;
     }

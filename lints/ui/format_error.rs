@@ -55,4 +55,29 @@ fn main() {
     let _ = anyhow!("{:?}", err);
     let _ = anyhow!("some error occurred: {}", err);
     let _ = anyhow!("some error occurred: {:?}", err);
+
+    // `anyhow::Error` does not implement `Error` trait, test the special path here.
+    let make_anyhow_err = || anyhow!("foobar");
+    let anyhow_err = make_anyhow_err();
+
+    let _ = format!("{}", anyhow_err);
+    let _ = format!("{}", &anyhow_err);
+    let _ = format!("{}", &&anyhow_err);
+    let _ = format!("{}", Box::new(&anyhow_err)); // TODO: fail to lint
+
+    tracing::field::display(&anyhow_err);
+    tracing::field::debug(make_anyhow_err());
+
+    let _ = anyhow_err.to_string();
+    let _ = (&&anyhow_err).to_string();
+
+    let _ = anyhow!("{}", anyhow_err);
+    let _ = anyhow!("some error occurred: {:?}", anyhow_err);
+
+    use thiserror_ext::AsReport;
+
+    let _ = anyhow!("{}", err.as_report());
+    let _ = anyhow!("some error occurred: {}", err.as_report());
+    let _ = anyhow!("{:?}", anyhow_err.as_report());
+    let _ = anyhow!("some error occurred: {:?}", anyhow_err.as_report());
 }

@@ -19,10 +19,9 @@ use futures_async_stream::try_stream;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ConnectorResult, ExternalTableReader, MySqlOffset,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, ExternalTableReader, MySqlOffset, SchemaTableName,
 };
 
 #[derive(Debug)]
@@ -112,6 +111,7 @@ impl ExternalTableReader for MockExternalTableReader {
         _table_name: SchemaTableName,
         _start_pk: Option<OwnedRow>,
         _primary_keys: Vec<String>,
+        _limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner()
     }

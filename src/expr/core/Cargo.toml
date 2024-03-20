@@ -15,11 +15,15 @@ ignored = ["workspace-hack", "ctor"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack", "ctor"]
 
+[features]
+embedded-python-udf = ["arrow-udf-python"]
+
 [dependencies]
 anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-udf-js = { workspace = true }
+arrow-udf-python = { workspace = true, optional = true }
 arrow-udf-wasm = { workspace = true }
 async-trait = "0.1"
 auto_impl = "1"
@@ -38,14 +42,14 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 itertools = "0.12"
 linkme = { version = "0.3", features = ["used_linker"] }
-moka = { version = "0.12", features = ["future"] }
+md5 = "0.7"
+moka = { version = "0.12", features = ["sync"] }
 num-traits = "0.2"
 openssl = { version = "0.10", features = ["vendored"] }
 parse-display = "0.9"
 paste = "1"
 risingwave_common = { workspace = true }
 risingwave_expr_macro = { path = "../macro" }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_udf = { workspace = true }
 smallvec = "1"
@@ -57,6 +61,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "macros",
 ] }
 tracing = "0.1"
+zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

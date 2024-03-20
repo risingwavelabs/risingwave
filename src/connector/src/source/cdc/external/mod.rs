@@ -17,7 +17,7 @@ mod postgres;
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -32,12 +32,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
-
-pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
+use crate::WithPropertiesExt;
 
 #[derive(Debug)]
 pub enum CdcTableType {
@@ -48,11 +47,8 @@ pub enum CdcTableType {
 }
 
 impl CdcTableType {
-    pub fn from_properties(with_properties: &HashMap<String, String>) -> Self {
-        let connector = with_properties
-            .get("connector")
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
+    pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
+        let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
             "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
@@ -77,10 +73,7 @@ impl CdcTableType {
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(with_properties, schema).await?,
             )),
-            _ => bail!(ConnectorError::Config(anyhow!(
-                "invalid external table type: {:?}",
-                *self
-            ))),
+            _ => bail!("invalid external table type: {:?}", *self),
         }
     }
 }
@@ -219,6 +212,7 @@ pub trait ExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 }
 
@@ -281,8 +275,9 @@ impl ExternalTableReader for MySqlExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 }
 
@@ -334,6 +329,7 @@ impl MySqlExternalTableReader {
         table_name: SchemaTableName,
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let order_key = primary_keys
             .iter()
@@ -341,19 +337,19 @@ impl MySqlExternalTableReader {
             .join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
-                order_key
+                order_key,
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
-                order_key
+                order_key,
             )
         };
 
@@ -363,21 +359,18 @@ impl MySqlExternalTableReader {
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
         if start_pk_row.is_none() {
-            let mut result_set = conn.query_iter(sql).await?;
-            let rs_stream = result_set.stream::<mysql_async::Row>().await?;
-            if let Some(rs_stream) = rs_stream {
-                let row_stream = rs_stream.map(|row| {
-                    // convert mysql row into OwnedRow
-                    let mut row = row?;
-                    Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-                });
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
 
-                pin_mut!(row_stream);
-                #[for_await]
-                for row in row_stream {
-                    let row = row?;
-                    yield row;
-                }
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                yield row;
             }
         } else {
             let field_map = self
@@ -405,22 +398,14 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
-                            _ => {
-                                return Err(ConnectorError::Internal(anyhow!(
-                                    "unsupported primary key data type: {}",
-                                    ty
-                                )))
-                            }
+                            _ => bail!("unsupported primary key data type: {}", ty),
                         };
-                        Ok((pk.clone(), val))
+                        ConnectorResult::Ok((pk.clone(), val))
                     } else {
-                        Err(ConnectorError::Internal(anyhow!(
-                            "primary key {} cannot be null",
-                            pk
-                        )))
+                        bail!("primary key {} cannot be null", pk);
                     }
                 })
-                .try_collect()?;
+                .try_collect::<_, _, ConnectorError>()?;
 
             let rs_stream = sql
                 .with(Params::from(params))
@@ -507,8 +492,9 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 }
 
@@ -529,16 +515,17 @@ impl ExternalTableReaderImpl {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let stream = match self {
             ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.snapshot_read(table_name, start_pk, primary_keys)
+                mysql.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
-                postgres.snapshot_read(table_name, start_pk, primary_keys)
+                postgres.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Mock(mock) => {
-                mock.snapshot_read(table_name, start_pk, primary_keys)
+                mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
         };
 
@@ -634,7 +621,7 @@ mod tests {
             table_name: "t1".to_string(),
         };
 
-        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()]);
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()], 1000);
         pin_mut!(stream);
         #[for_await]
         for row in stream {

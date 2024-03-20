@@ -24,7 +24,7 @@ use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{Executor, ExecutorInfo, Message};
+use super::{Execute, Message};
 use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
@@ -34,18 +34,18 @@ pub struct BatchQueryExecutor<S: StateStore> {
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
 
-    info: ExecutorInfo,
+    schema: Schema,
 }
 
 impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    pub fn new(table: StorageTable<S>, batch_size: usize, info: ExecutorInfo) -> Self {
+    pub fn new(table: StorageTable<S>, batch_size: usize, schema: Schema) -> Self {
         Self {
             table,
             batch_size,
-            info,
+            schema,
         }
     }
 
@@ -62,7 +62,7 @@ where
         pin_mut!(iter);
 
         while let Some(data_chunk) =
-            collect_data_chunk(&mut iter, self.schema(), Some(self.batch_size))
+            collect_data_chunk(&mut iter, &self.schema, Some(self.batch_size))
                 .instrument_await("batch_query_executor_collect_chunk")
                 .await?
         {
@@ -73,24 +73,12 @@ where
     }
 }
 
-impl<S> Executor for BatchQueryExecutor<S>
+impl<S> Execute for BatchQueryExecutor<S>
 where
     S: StateStore,
 {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         unreachable!("should call `execute_with_epoch`")
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
@@ -100,9 +88,6 @@ where
 
 #[cfg(test)]
 mod test {
-
-    use std::vec;
-
     use futures_async_stream::for_await;
 
     use super::*;
@@ -114,15 +99,10 @@ mod test {
         let test_batch_count = 5;
         let table = gen_basic_table(test_batch_count * test_batch_size).await;
 
-        let info = ExecutorInfo {
-            schema: table.schema().clone(),
-            pk_indices: vec![0, 1],
-            identity: "BatchQuery".to_owned(),
-        };
-
-        let executor = Box::new(BatchQueryExecutor::new(table, test_batch_size, info));
-
-        let stream = executor.execute_with_epoch(u64::MAX);
+        let schema = table.schema().clone();
+        let stream = BatchQueryExecutor::new(table, test_batch_size, schema)
+            .boxed()
+            .execute_with_epoch(u64::MAX);
         let mut batch_cnt = 0;
 
         #[for_await]

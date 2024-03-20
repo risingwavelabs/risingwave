@@ -29,7 +29,11 @@ pub struct DebeziumCdcMeta {
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
-            key: None,
+            key: if message.key.is_empty() {
+                None // only data message has key
+            } else {
+                Some(message.key.as_bytes().to_vec())
+            },
             payload: if message.payload.is_empty() {
                 None // heartbeat message
             } else {

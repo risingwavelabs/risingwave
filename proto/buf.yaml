@@ -1,7 +1,8 @@
 version: v1
 breaking:
   use:
-    - WIRE # https://docs.buf.build/breaking/rules
+    - WIRE_JSON # https://docs.buf.build/breaking/rules
+                # https://github.com/risingwavelabs/risingwave/issues/15030
 lint:
   use:
     - DEFAULT

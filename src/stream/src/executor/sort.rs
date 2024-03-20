@@ -20,23 +20,23 @@ use risingwave_storage::StateStore;
 
 use super::sort_buffer::SortBuffer;
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, Watermark,
+    expect_first_barrier, ActorContextRef, BoxedMessageStream, Execute, Executor, Message,
+    StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 
 pub struct SortExecutor<S: StateStore> {
-    input: BoxedExecutor,
+    input: Executor,
     inner: ExecutorInner<S>,
 }
 
 pub struct SortExecutorArgs<S: StateStore> {
     pub actor_ctx: ActorContextRef,
-    pub info: ExecutorInfo,
 
-    pub input: BoxedExecutor,
+    pub input: Executor,
 
+    pub schema: Schema,
     pub buffer_table: StateTable<S>,
     pub chunk_size: usize,
     pub sort_column_index: usize,
@@ -44,8 +44,8 @@ pub struct SortExecutorArgs<S: StateStore> {
 
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
-    info: ExecutorInfo,
 
+    schema: Schema,
     buffer_table: StateTable<S>,
     chunk_size: usize,
     sort_column_index: usize,
@@ -55,21 +55,9 @@ struct ExecutionVars<S: StateStore> {
     buffer: SortBuffer<S>,
 }
 
-impl<S: StateStore> Executor for SortExecutor<S> {
+impl<S: StateStore> Execute for SortExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.inner.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.inner.info.identity
     }
 }
 
@@ -79,7 +67,7 @@ impl<S: StateStore> SortExecutor<S> {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: args.info,
+                schema: args.schema,
                 buffer_table: args.buffer_table,
                 chunk_size: args.chunk_size,
                 sort_column_index: args.sort_column_index,
@@ -114,7 +102,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if col_idx == this.sort_column_index =>
                 {
                     let mut chunk_builder =
-                        StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types());
+                        StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
                     #[for_await]
                     for row in vars
@@ -167,12 +155,13 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BoxedMessageStream, Executor};
+    use crate::executor::{ActorContext, BoxedMessageStream, Execute};
 
     async fn create_executor<S: StateStore>(
         sort_column_index: usize,
@@ -202,15 +191,12 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(input_schema, input_pk_indices);
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(input_schema, input_pk_indices);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
             actor_ctx: ActorContext::for_test(123),
-            info: ExecutorInfo {
-                schema: source.schema().clone(),
-                pk_indices: source.pk_indices().to_vec(),
-                identity: "SortExecutor".to_string(),
-            },
-            input: source.boxed(),
+            schema: source.schema().clone(),
+            input: source,
             buffer_table,
             chunk_size: 1024,
             sort_column_index,
@@ -226,7 +212,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -276,7 +262,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -311,7 +297,7 @@ mod tests {
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, store.clone()).await;
 
         // Init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -333,7 +319,7 @@ mod tests {
         ));
 
         // Push barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
 
         // Consume the barrier
         sort_executor.expect_barrier().await;
@@ -343,7 +329,7 @@ mod tests {
             create_executor(sort_column_index, store).await;
 
         // Push barrier
-        recovered_tx.push_barrier(3, false);
+        recovered_tx.push_barrier(test_epoch(3), false);
 
         // Consume the barrier
         recovered_sort_executor.expect_barrier().await;

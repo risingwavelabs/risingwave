@@ -41,7 +41,7 @@ use crate::executor::{DataChunk, Executor};
 /// async fn test_iceberg_scan() {
 ///     let iceberg_scan_executor = IcebergScanExecutor::new(
 ///         IcebergConfig {
-///             database_name: "demo_db".into(),
+///             database_name: Some("demo_db".into()),
 ///             table_name: "demo_table".into(),
 ///             catalog_type: Some("storage".into()),
 ///             path: "s3a://hummock001/".into(),
@@ -116,11 +116,7 @@ impl IcebergScanExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let table = self
-            .iceberg_config
-            .load_table()
-            .await
-            .map_err(BatchError::Internal)?;
+        let table = self.iceberg_config.load_table().await?;
 
         let table_scan: TableScan = table
             .new_scan_builder()

@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableId, UserId, OBJECT_ID_PLACEHOLDER};
 use risingwave_common::types::Interval;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
 
@@ -42,15 +43,12 @@ pub struct SubscriptionCatalog {
     /// Primiary keys of the subscription. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
-    /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
+    /// Distribution key indices of the subscription. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
     /// The properties of the subscription, only `retention`.
     pub properties: BTreeMap<String, String>,
-
-    /// Name of the database
-    pub db_name: String,
 
     /// The upstream table name on which the subscription depends
     pub subscription_from_name: String,
@@ -66,6 +64,12 @@ pub struct SubscriptionCatalog {
 
     /// The user id
     pub owner: UserId,
+
+    pub initialized_at_epoch: Option<Epoch>,
+    pub created_at_epoch: Option<Epoch>,
+
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -114,6 +118,10 @@ impl SubscriptionCatalog {
         Ok(retention_seconds)
     }
 
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
+    }
+
     pub fn to_proto(&self) -> PbSubscription {
         assert!(!self.dependent_relations.is_empty());
         PbSubscription {
@@ -129,7 +137,6 @@ impl SubscriptionCatalog {
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             subscription_from_name: self.subscription_from_name.clone(),
             properties: self.properties.clone().into_iter().collect(),
-            db_name: self.db_name.clone(),
             database_id: self.database_id,
             schema_id: self.schema_id,
             dependent_relations: self
@@ -137,10 +144,12 @@ impl SubscriptionCatalog {
                 .iter()
                 .map(|k| k.table_id)
                 .collect_vec(),
-            initialized_at_epoch: None,
-            created_at_epoch: None,
+            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
+            created_at_epoch: self.created_at_epoch.map(|e| e.0),
             owner: self.owner.into(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
+            created_at_cluster_version: self.created_at_cluster_version.clone(),
         }
     }
 }
@@ -164,7 +173,6 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             distribution_key: prost.distribution_key.iter().map(|k| *k as _).collect_vec(),
             subscription_from_name: prost.subscription_from_name.clone(),
             properties: prost.properties.clone().into_iter().collect(),
-            db_name: prost.db_name.clone(),
             database_id: prost.database_id,
             schema_id: prost.schema_id,
             dependent_relations: prost
@@ -173,6 +181,10 @@ impl From<&PbSubscription> for SubscriptionCatalog {
                 .map(|k| TableId::new(*k))
                 .collect_vec(),
             owner: prost.owner.into(),
+            created_at_epoch: prost.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
+            created_at_cluster_version: prost.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
         }
     }
 }

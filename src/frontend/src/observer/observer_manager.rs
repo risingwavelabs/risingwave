@@ -116,7 +116,7 @@ impl ObserverState for FrontendObserverNode {
             tables,
             indexes,
             views,
-            subscriptions: _,
+            subscriptions,
             functions,
             connections,
             users,
@@ -141,6 +141,9 @@ impl ObserverState for FrontendObserverNode {
         }
         for sink in sinks {
             catalog_guard.create_sink(&sink)
+        }
+        for subscription in subscriptions {
+            catalog_guard.create_subscription(&subscription)
         }
         for table in tables {
             catalog_guard.create_table(&table)

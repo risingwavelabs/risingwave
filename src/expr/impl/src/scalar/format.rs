@@ -23,11 +23,25 @@ use thiserror_ext::AsReport;
 use super::string::quote_ident;
 
 /// Formats arguments according to a format string.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select format('%s %s', 'Hello', 'World');
+/// ----
+/// Hello World
+///
+/// query T
+/// select format('%s %s', variadic array['Hello', 'World']);
+/// ----
+/// Hello World
+/// ```
 #[function(
-    "format(varchar, ...) -> varchar",
+    "format(varchar, variadic anyarray) -> varchar",
     prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
 )]
-fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Result<()> {
+fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Result<()> {
     let mut args = row.iter();
     for node in &formatter.nodes {
         match node {

@@ -12,26 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::types::DataType;
-
-use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
-
-pub const PG_INHERITS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "inhrelid"),
-    (DataType::Int32, "inhparent"),
-    (DataType::Int32, "inhseqno"),
-    (DataType::Boolean, "inhdetachpending"),
-];
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_inherits` records information about table and index inheritance hierarchies.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-inherits.html`]
 /// This is introduced only for pg compatibility and is not used in our system.
-pub static PG_INHERITS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
-    name: "pg_inherits",
-    schema: PG_CATALOG_SCHEMA_NAME,
-    columns: PG_INHERITS_COLUMNS,
-    sql: infer_dummy_view_sql(PG_INHERITS_COLUMNS),
-});
+#[system_catalog(view, "pg_catalog.pg_inherits")]
+#[derive(Fields)]
+struct PgInherits {
+    inhrelid: i32,
+    inhparent: i32,
+    inhseqno: i32,
+    inhdetachpending: bool,
+}

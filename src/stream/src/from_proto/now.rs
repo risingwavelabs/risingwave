@@ -19,7 +19,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, NowExecutor};
+use crate::executor::{Executor, NowExecutor};
 use crate::task::ExecutorParams;
 
 pub struct NowExecutorBuilder;
@@ -31,19 +31,20 @@ impl ExecutorBuilder for NowExecutorBuilder {
         params: ExecutorParams,
         node: &NowNode,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let (sender, barrier_receiver) = unbounded_channel();
         params
-            .local_barrier_manager
+            .create_actor_context
             .register_sender(params.actor_context.id, sender);
 
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
 
-        Ok(Box::new(NowExecutor::new(
-            params.info,
+        let exec = NowExecutor::new(
+            params.info.schema.data_types(),
             barrier_receiver,
             state_table,
-        )))
+        );
+        Ok((params.info, exec).into())
     }
 }

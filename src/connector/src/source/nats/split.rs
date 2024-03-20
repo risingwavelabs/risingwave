@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Ok};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
@@ -43,15 +43,15 @@ impl SplitMetaData for NatsSplit {
         format!("{}", self.split_id).into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_sequence: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_sequence: String) -> ConnectorResult<()> {
         let start_sequence = if start_sequence.is_empty() {
             NatsOffset::Earliest
         } else {

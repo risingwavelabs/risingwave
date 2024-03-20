@@ -1,4 +1,5 @@
 impl ::risingwave_common::types::Fields for Data {
+    const PRIMARY_KEY: Option<&'static [usize]> = Some(&[1usize, 0usize]);
     fn fields() -> Vec<(&'static str, ::risingwave_common::types::DataType)> {
         vec![
             ("v1", < i16 as ::risingwave_common::types::WithDataType >
@@ -20,9 +21,6 @@ impl ::risingwave_common::types::Fields for Data {
                 ::risingwave_common::types::ToOwnedDatum::to_owned_datum(self.r#type)
             ],
         )
-    }
-    fn primary_key() -> &'static [usize] {
-        &[1usize, 0usize]
     }
 }
 impl From<Data> for ::risingwave_common::types::ScalarImpl {

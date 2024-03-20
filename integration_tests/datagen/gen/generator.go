@@ -6,6 +6,7 @@ import (
 	"datagen/sink/kafka"
 	"datagen/sink/kinesis"
 	"datagen/sink/mysql"
+	"datagen/sink/nats"
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
 	"datagen/sink/s3"
@@ -21,6 +22,7 @@ type GeneratorConfig struct {
 	Pulsar   pulsar.PulsarConfig
 	Kinesis  kinesis.KinesisConfig
 	S3       s3.S3Config
+	Nats     nats.NatsConfig
 
 	// Whether to print the content of every event.
 	PrintInsert bool

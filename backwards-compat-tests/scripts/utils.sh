@@ -49,6 +49,23 @@ kill_zookeeper() {
   wait_zookeeper_exit
 }
 
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
+        sleep 1
+    done
+}
+
+wait_all_process_exit() {
+  wait_for_process meta-node
+  wait_for_process compute-node
+  wait_for_process frontend
+  wait_for_process compactor
+  echo "All processes has exited."
+}
+
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
@@ -75,6 +92,7 @@ kill_cluster() {
 
   tmux kill-session -t risedev
   test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
+  wait_all_process_exit
 }
 
 run_sql () {
@@ -103,19 +121,21 @@ insert_json_kafka() {
   local JSON=$1
   echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
     --topic backwards_compat_test_kafka_source \
-    --bootstrap-server localhost:29092
+    --bootstrap-server localhost:29092 \
+    --property "parse.key=true" \
+    --property "key.separator=,"
 }
 
 seed_json_kafka() {
-  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 1, "page_id": 1, "action": "gtrgretrg"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 2, "page_id": 1, "action": "fsdfgerrg"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 07:11:00", "user_id": 3, "page_id": 1, "action": "sdfergtth"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 4, "page_id": 2, "action": "erwerhghj"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 5, "page_id": 2, "action": "kiku7ikkk"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 6, "page_id": 3, "action": "6786745ge"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 7, "page_id": 3, "action": "fgbgfnyyy"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 8, "page_id": 4, "action": "werwerwwe"}'
-  insert_json_kafka '{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
+  insert_json_kafka '{"user_id": 1},{"timestamp": "2023-07-28 07:11:00", "user_id": 1, "page_id": 1, "action": "gtrgretrg"}'
+  insert_json_kafka '{"user_id": 2},{"timestamp": "2023-07-28 07:11:00", "user_id": 2, "page_id": 1, "action": "fsdfgerrg"}'
+  insert_json_kafka '{"user_id": 3},{"timestamp": "2023-07-28 07:11:00", "user_id": 3, "page_id": 1, "action": "sdfergtth"}'
+  insert_json_kafka '{"user_id": 4},{"timestamp": "2023-07-28 06:54:00", "user_id": 4, "page_id": 2, "action": "erwerhghj"}'
+  insert_json_kafka '{"user_id": 5},{"timestamp": "2023-07-28 06:54:00", "user_id": 5, "page_id": 2, "action": "kiku7ikkk"}'
+  insert_json_kafka '{"user_id": 6},{"timestamp": "2023-07-28 06:54:00", "user_id": 6, "page_id": 3, "action": "6786745ge"}'
+  insert_json_kafka '{"user_id": 7},{"timestamp": "2023-07-28 06:54:00", "user_id": 7, "page_id": 3, "action": "fgbgfnyyy"}'
+  insert_json_kafka '{"user_id": 8},{"timestamp": "2023-07-28 06:54:00", "user_id": 8, "page_id": 4, "action": "werwerwwe"}'
+  insert_json_kafka '{"user_id": 9},{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
 }
 
 # https://stackoverflow.com/a/4024263
@@ -225,6 +245,12 @@ seed_old_cluster() {
   create_kafka_topic
   seed_json_kafka
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/seed.slt"
+  # use the old syntax for version at most 1.5.4
+  if version_le "$OLD_VERSION" "1.5.4" ; then
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/deprecate_upsert.slt"
+  else
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/upsert/include_key_as.slt"
+  fi
 
   echo "--- KAFKA TEST: wait 5s for kafka to process data"
   sleep 5

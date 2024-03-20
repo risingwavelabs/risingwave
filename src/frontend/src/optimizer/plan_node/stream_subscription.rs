@@ -24,15 +24,17 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::derive::{derive_columns, derive_pk};
 use super::expr_visitable::ExprVisitable;
 use super::stream::prelude::{GenericPlanRef, PhysicalPlanRef};
-use super::utils::{childless_record, Distill, IndicesDisplay};
-use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamSink};
+use super::utils::{
+    childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
+};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode};
 use crate::catalog::subscription_catalog::{SubscriptionCatalog, SubscriptionId};
 use crate::error::Result;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{PlanRef, TableCatalog, WithOptions};
 
-/// [`StreamSink`] represents a subscription at the very end of the graph.
+/// [`StreamSubscription`] represents a subscription at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSubscription {
     pub base: PlanBase<Stream>,
@@ -66,7 +68,6 @@ impl StreamSubscription {
         dependent_relations: HashSet<TableId>,
         input: PlanRef,
         name: String,
-        db_name: String,
         subscription_from_name: String,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
@@ -77,14 +78,13 @@ impl StreamSubscription {
         user_id: UserId,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (input, sink) = Self::derive_subscription_catalog(
+        let (input, subscription) = Self::derive_subscription_catalog(
             database_id,
             schema_id,
             dependent_relations,
             input,
             user_distributed_by,
             name,
-            db_name,
             subscription_from_name,
             user_order_by,
             columns,
@@ -92,7 +92,7 @@ impl StreamSubscription {
             properties,
             user_id,
         )?;
-        Ok(Self::new(input, sink))
+        Ok(Self::new(input, subscription))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -103,7 +103,6 @@ impl StreamSubscription {
         input: PlanRef,
         user_distributed_by: RequiredDist,
         name: String,
-        db_name: String,
         subscription_from_name: String,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
@@ -121,13 +120,12 @@ impl StreamSubscription {
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let sink_desc = SubscriptionCatalog {
+        let subscription_desc = SubscriptionCatalog {
             database_id,
             schema_id,
             dependent_relations: dependent_relations.into_iter().collect(),
             id: SubscriptionId::placeholder(),
             name,
-            db_name,
             subscription_from_name,
             definition,
             columns,
@@ -135,17 +133,18 @@ impl StreamSubscription {
             distribution_key,
             properties: properties.into_inner(),
             owner: user_id,
+            initialized_at_epoch: None,
+            created_at_epoch: None,
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         };
-        Ok((input, sink_desc))
+        Ok((input, subscription_desc))
     }
 
-    /// The table schema is: | epoch | seq id | row op | sink columns |
+    /// The table schema is: | epoch | seq id | row op | subscription columns |
     /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
-        StreamSink::infer_kv_log_store_table_catalog_inner(
-            &self.input,
-            &self.subscription_catalog.columns,
-        )
+        infer_kv_log_store_table_catalog_inner(&self.input, &self.subscription_catalog.columns)
     }
 }
 

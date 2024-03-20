@@ -23,6 +23,7 @@ use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
+use crate::error::ConnectorResult;
 use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -37,7 +38,7 @@ pub struct UpsertParser {
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
-) -> anyhow::Result<AccessBuilderImpl> {
+) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Json(_)
         | EncodingProperties::Protobuf(_)
@@ -66,7 +67,7 @@ impl UpsertParser {
         props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         // check whether columns has Key as AdditionalColumnType, if so, the key accessor should be
         // bytes
         let key_builder = if let Some(key_column_name) = get_key_column_name(&rw_columns) {
@@ -95,7 +96,7 @@ impl UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
         let mut change_event_op = ChangeEventOperation::Delete;
@@ -133,7 +134,7 @@ impl ByteStreamSourceParser for UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> anyhow::Result<()> {
+    ) -> ConnectorResult<()> {
         self.parse_inner(key, payload, writer).await
     }
 }

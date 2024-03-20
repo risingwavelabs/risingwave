@@ -28,7 +28,8 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: gRPC request to meta service failed: Internal error
   2: failed to create source worker
-  3: missing field `properties.bootstrap.server`
+  3: failed to parse json
+  4: missing field `properties.bootstrap.server`
 
 
 statement error

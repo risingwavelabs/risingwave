@@ -78,7 +78,9 @@ impl StreamingJob {
             StreamingJob::Sink(table, _) => table.created_at_epoch = created_at_epoch,
             StreamingJob::Table(source, table, ..) => {
                 table.created_at_epoch = created_at_epoch;
-                table.created_at_cluster_version = created_at_cluster_version.clone();
+                table
+                    .created_at_cluster_version
+                    .clone_from(&created_at_cluster_version);
                 if let Some(source) = source {
                     source.created_at_epoch = created_at_epoch;
                     source.created_at_cluster_version = created_at_cluster_version;
@@ -94,6 +96,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.created_at_epoch = created_at_epoch;
+                subscription.created_at_cluster_version = created_at_cluster_version;
             }
         }
     }
@@ -112,7 +115,9 @@ impl StreamingJob {
             }
             StreamingJob::Table(source, table, ..) => {
                 table.initialized_at_epoch = initialized_at_epoch;
-                table.initialized_at_cluster_version = initialized_at_cluster_version.clone();
+                table
+                    .initialized_at_cluster_version
+                    .clone_from(&initialized_at_cluster_version);
 
                 if let Some(source) = source {
                     source.initialized_at_epoch = initialized_at_epoch;
@@ -129,6 +134,7 @@ impl StreamingJob {
             }
             StreamingJob::Subscription(subscription) => {
                 subscription.initialized_at_epoch = initialized_at_epoch;
+                subscription.initialized_at_cluster_version = initialized_at_cluster_version;
             }
         }
     }
@@ -265,20 +271,6 @@ impl StreamingJob {
         }
     }
 
-    // <<<<<<< HEAD
-    //     pub fn properties(&self) -> HashMap<String, String> {
-    //         match self {
-    //             Self::MaterializedView(table) => table.properties.clone(),
-    //             Self::Sink(sink, _) => sink.properties.clone(),
-    //             Self::Table(_, table, ..) => table.properties.clone(),
-    //             Self::Index(_, index_table) => index_table.properties.clone(),
-    //             Self::Source(source) => source.with_properties.clone(),
-    //             Self::Subscription(subscription) => subscription.properties.clone(),
-    //         }
-    //     }
-
-    // =======
-    // >>>>>>> main
     /// Returns the [`TableVersionId`] if this job is `Table`.
     pub fn table_version_id(&self) -> Option<TableVersionId> {
         if let Self::Table(_, table, ..) = self {

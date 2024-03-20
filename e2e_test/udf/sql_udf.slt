@@ -274,29 +274,115 @@ select type_match(114514);
 ----
 $1 + 114514 + $1
 
-#################################################################################
-# Invalid definition (and maybe not yet supported features 🤪) / use case tests #
-#################################################################################
+##################################################
+# Invalid definition tests when creating sql udf #
+##################################################
 
 # Named sql udf with invalid parameter in body definition
 # Will be rejected at creation time
-statement error failed to find named parameter aa
+statement error
 create function unknown_parameter(a INT) returns int language sql as 'select a + aa + a';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter aa
+In SQL UDF definition: `select a + aa + a`
+                                   ^^
+
+
+# With unnamed parameter
+statement error
+create function unnamed_param_hint(INT, INT) returns int language sql as 'select $1 + $3 + $2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find unnamed parameter $3
+In SQL UDF definition: `select $1 + $3 + $2`
+                                    ^^
+
+
+# A mixture of both
+statement error
+create function mix_hint(INT, aa INT, INT) returns int language sql as 'select $1 + aa + a + $2';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter a
+In SQL UDF definition: `select $1 + aa + a + $2`
+                                         ^
+
+
+# Long invalid parameter
+statement error
+create function long_invalid_param(i_am_valid INT) returns int language sql as
+  'select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_
+In SQL UDF definition: `select i_am_valid + _this_is_invalid_please_properly_mark_the_boundary_of_this_invalid_paramerter_ + i_am_valid`
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# sql udf with non-existent function
+statement error
+create function call_non_existent_function(INT) returns int language sql as 'select 1 + non_existent(1) + 1';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+function non_existent(integer) does not exist
+In SQL UDF definition: `select 1 + non_existent(1) + 1`
+                                   ^^^^^^^^^^^^
+
+
+# First display invalid parameter
+# if not found, try displaying non-existent functions
+# if still not found, display default error message without hint
+statement error
+create function param_func_mix(a INT, b INT) returns int language sql as 'select a + b + c + not_be_displayed(c)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter c
+In SQL UDF definition: `select a + b + c + not_be_displayed(c)`
+                                       ^
+
 
 statement error Expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
 
 # Recursive definition can NOT be accepted at present due to semantic check
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error
 create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+function recursive(integer, integer) does not exist
+In SQL UDF definition: `select recursive($1, $2) + recursive($1, $2)`
+                               ^^^^^^^^^
+
 
 # Complex but error-prone definition, recursive & normal sql udfs interleaving
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error Failed to conduct semantic check
 create function recursive_non_recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + sub($1, $2)';
 
 # Create a valid recursive function
 # Please note we do NOT support actual running the recursive sql udf at present
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error Failed to conduct semantic check
 create function fib(INT) returns int
  language sql as 'select case
         when $1 = 0 then 0
@@ -306,16 +392,8 @@ create function fib(INT) returns int
       else fib($1 - 1) + fib($1 - 2)
       end;';
 
-# The execution will eventually exceed the pre-defined max stack depth
-# statement error function fib calling stack depth limit exceeded
-# select fib(100);
-
-# Currently create a materialized view with a recursive sql udf will be rejected
-# statement error function fib calling stack depth limit exceeded
-# create materialized view foo_mv as select fib(100);
-
 # Calling a non-existent function
-statement error failed to conduct semantic check, please see if you are calling non-existent functions
+statement error Failed to conduct semantic check
 create function non_exist(INT) returns int language sql as 'select yo(114514)';
 
 # Try to create an sql udf with unnamed parameters whose return type mismatches with the sql body definition
@@ -325,6 +403,20 @@ create function type_mismatch(INT) returns varchar language sql as 'select $1 + 
 # Invalid function body syntax
 statement error Expected an expression:, found: EOF at the end
 create function add_error(INT, INT) returns int language sql as $$select $1 + $2 +$$;
+
+######################################################################
+# Not yet supported features 🤪 (and potential basic use case tests) #
+######################################################################
+
+# 1. Recursion Support for SQL UDF
+
+# The execution will eventually exceed the pre-defined max stack depth
+# statement error function fib calling stack depth limit exceeded
+# select fib(100);
+
+# Currently create a materialized view with a recursive sql udf will be rejected
+# statement error function fib calling stack depth limit exceeded
+# create materialized view foo_mv as select fib(100);
 
 # Rejected deep calling stack
 # statement error function recursive calling stack depth limit exceeded
@@ -341,6 +433,116 @@ create function add_error(INT, INT) returns int language sql as $$select $1 + $2
 # Recursive sql udf with materialized view
 # statement error function fib calling stack depth limit exceeded
 # create materialized view bar_mv as select fib(c1) from t1;
+
+# 2. Select from table inside SQL UDF (potential concerns: naming conflict)
+
+# statment ok
+# create funciton from_table_single_row() returns int language sql as 'select c1 from t1';
+
+# Do NOT need explicit `select ... from ...`
+# query I
+# select from_table_single_row();
+# ----
+# 1
+
+# statement ok
+# create function from_table_single_row_1() returns int language sql as 'select c1 from t1 order by c1 desc';
+
+# Need explict `select ... from ...`
+# query I
+# select * from from_table_single_row_1();
+# ----
+# 5
+
+# Should add parser support
+# statement ok
+# create function from_table_multiple_rows() returns setof int language sql as 'select c1 from t1';
+
+# P.S. postgres shadows the `c1` parameter by the actual column `c1` to resolve the naming conflict
+# statement ok
+# create function from_table_conflict(c1 INT) returns int language sql as 'select c1 from t1';
+
+# 3. Output multiple columns / expressions from a single SQL UDF
+
+# Parser support is needed
+# statement ok
+# create function out_parameters_without_name(out INT, out INT) language sql as 'select 1919810, 114514';
+
+# query II
+# select out_parameters_without_name();
+# ----
+# 1919810 114514
+
+# query II
+# select * out_parameters_without_name();
+# ----
+# 1919810 114514
+
+# statement error non-existent column
+# select a, b from out_parameters_without_name();
+# ----
+# 1919810 114514
+
+# statement ok
+# create function out_parameters_with_name(out a INT, out b INT) language sql as 'select 1919810, 114514';
+
+# query II
+# select out_parameters_with_name();
+# ----
+# 1919810 114514
+
+# query II
+# select a, b from out_parameters_with_name();
+# ----
+# 1919810 114514
+
+# statement ok
+# create function multiple_cols() returns setof record as 'select c1, c2, c3 from t2' language sql;
+
+# query III
+# select * from multiple_cols() as t(c1 INT, c2 FLOAT, c3 INT);
+# ----
+# corresponding results
+# may need to order the sequence
+
+# 4. Polymorphic arguments
+
+# statement ok
+# create function is_greater(anyelement, anyelement) returns boolean language sql as 'select $1 > $2';
+
+# query I
+# select is_greater(1, 2);
+# ----
+# f
+
+# query I
+# select is_greater(3.14, 2.95);
+# ----
+# t
+
+# 5. Overloading functions
+
+# statement ok
+# create function overload(c1 INT) returns int language sql as 'select c1';
+
+# statement ok
+# create function overload(c1 VARCHAR) returns varchar language sql as 'select c1';
+
+# query I
+# select overload(114514), overload('114514');
+# ----
+# 114514 114514
+
+# statement error naming conflict with first overload
+# create function overload(c1 INT, out VARCHAR)
+
+# This definition will cause ambiguity with the second overload during runtime if `c2` is not specified
+# statement ok
+# create function overload(c1 VARCHAR, c2 VARCHAR default '114514', out VARCHAR, out VARCHAR) language sql as 'select c1, c2';
+
+# statement error can not choose a best candidate function, need explicit type cast
+# query TT
+# select overload('114514');
 
 ##################################################
 # Clean up the funtions / mock tables at the end #

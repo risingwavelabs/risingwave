@@ -31,9 +31,9 @@ use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
+use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-use crate::row::OwnedRow;
 use crate::types::DataType;
 
 /// The global version of the catalog.
@@ -61,7 +61,9 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
+
+pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
+pub const SYS_CATALOG_START_ID: i32 = i32::MAX - MAX_SYS_CATALOG_NUM;
 
 pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 
@@ -146,7 +148,7 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError>;
+    async fn read_table(&self, table_id: &TableId) -> Result<DataChunk, BoxedError>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;

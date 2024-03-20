@@ -44,14 +44,13 @@ either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.4", features = ["std"] }
-fs-err = "2"
+fixedbitset = { version = "0.5", features = ["std"] }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
-hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.12"
 itoa = "1.0"
@@ -61,7 +60,8 @@ memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
-opentelemetry = { version = "0.20", default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 parking_lot = "0.12"
 parse-display = "0.9"
 paste = "1"
@@ -78,11 +78,13 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
+risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { path = "./proc_macro" }
 risingwave_error = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
-rw_futures_util = { workspace = true }
+rw_iter_util = { workspace = true }
+rw_resource_util = { workspace = true }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
@@ -92,7 +94,7 @@ serde_with = "3"
 smallbitset = "0.7.1"
 speedate = "0.13.0"
 static_assertions = "1"
-strum = "0.25"
+strum = "0.26"
 strum_macros = "0.26"
 sysinfo = { version = "0.30", default-features = false }
 thiserror = "1"
@@ -106,11 +108,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-retry = "0.3"
 toml = "0.8"
-tonic = { workspace = true }
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
-tracing-opentelemetry = "0.21"
+tracing-opentelemetry = { workspace = true }
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
@@ -128,7 +130,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.148"
+libc = "0.2"
 mach2 = "0.4"
 
 [dev-dependencies]

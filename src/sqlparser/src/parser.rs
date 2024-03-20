@@ -819,7 +819,7 @@ impl Parser {
     pub fn parse_function(&mut self, name: ObjectName) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
         let distinct = self.parse_all_or_distinct()?;
-        let (args, order_by) = self.parse_optional_args()?;
+        let (args, order_by, variadic) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
             // TBD: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -877,6 +877,7 @@ impl Parser {
         Ok(Expr::Function(Function {
             name,
             args,
+            variadic,
             over,
             distinct,
             order_by,
@@ -2260,7 +2261,8 @@ impl Parser {
         };
 
         let params = self.parse_create_function_body()?;
-
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        let with_options = with_options.try_into()?;
         Ok(Statement::CreateFunction {
             or_replace,
             temporary,
@@ -2268,6 +2270,7 @@ impl Parser {
             args,
             returns: return_type,
             params,
+            with_options,
         })
     }
 
@@ -2417,7 +2420,7 @@ impl Parser {
     //     | CREATEDB | NOCREATEDB
     //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
@@ -3118,6 +3121,8 @@ impl Parser {
                 );
             };
             AlterTableOperation::AlterColumn { column_name, op }
+        } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
+            AlterTableOperation::RefreshSchema
         } else {
             return self.expected(
                 "ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE",
@@ -3365,6 +3370,8 @@ impl Parser {
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
             AlterSourceOperation::FormatEncode { connector_schema }
+        } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
+            AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",
@@ -4557,13 +4564,12 @@ impl Parser {
                 Keyword::INDEX => ShowCreateType::Index,
                 Keyword::SOURCE => ShowCreateType::Source,
                 Keyword::SINK => ShowCreateType::Sink,
+                Keyword::SUBSCRIPTION => ShowCreateType::Subscription,
                 Keyword::FUNCTION => ShowCreateType::Function,
-                _ => {
-                    return self.expected(
-                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
-                        self.peek_token(),
-                    )
-                }
+                _ => return self.expected(
+                    "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
+                    self.peek_token(),
+                ),
             };
             return Ok(Statement::ShowCreateObject {
                 create_type: show_type,
@@ -4571,7 +4577,7 @@ impl Parser {
             });
         }
         self.expected(
-            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
+            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
             self.peek_token(),
         )
     }
@@ -4735,7 +4741,8 @@ impl Parser {
             let name = self.parse_object_name()?;
             // Postgres,table-valued functions:
             if self.consume_token(&Token::LParen) {
-                let (args, order_by) = self.parse_optional_args()?;
+                // ignore VARIADIC here
+                let (args, order_by, _variadic) = self.parse_optional_args()?;
                 // Table-valued functions do not support ORDER BY, should return error if it appears
                 if !order_by.is_empty() {
                     return parser_err!("Table-valued functions do not support ORDER BY clauses");
@@ -5018,33 +5025,46 @@ impl Parser {
         Ok(Assignment { id, value })
     }
 
-    fn parse_function_args(&mut self) -> Result<FunctionArg, ParserError> {
-        if self.peek_nth_token(1) == Token::RArrow {
+    /// Parse a `[VARIADIC] name => expr`.
+    fn parse_function_args(&mut self) -> Result<(bool, FunctionArg), ParserError> {
+        let variadic = self.parse_keyword(Keyword::VARIADIC);
+        let arg = if self.peek_nth_token(1) == Token::RArrow {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
             let arg = self.parse_wildcard_or_expr()?.into();
 
-            Ok(FunctionArg::Named { name, arg })
+            FunctionArg::Named { name, arg }
         } else {
-            Ok(FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into()))
-        }
+            FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into())
+        };
+        Ok((variadic, arg))
     }
 
     pub fn parse_optional_args(
         &mut self,
-    ) -> Result<(Vec<FunctionArg>, Vec<OrderByExpr>), ParserError> {
+    ) -> Result<(Vec<FunctionArg>, Vec<OrderByExpr>, bool), ParserError> {
         if self.consume_token(&Token::RParen) {
-            Ok((vec![], vec![]))
+            Ok((vec![], vec![], false))
         } else {
             let args = self.parse_comma_separated(Parser::parse_function_args)?;
+            if args
+                .iter()
+                .take(args.len() - 1)
+                .any(|(variadic, _)| *variadic)
+            {
+                return parser_err!("VARIADIC argument must be last");
+            }
+            let variadic = args.last().map(|(variadic, _)| *variadic).unwrap_or(false);
+            let args = args.into_iter().map(|(_, arg)| arg).collect();
+
             let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
                 self.parse_comma_separated(Parser::parse_order_by_expr)?
             } else {
                 vec![]
             };
             self.expect_token(&Token::RParen)?;
-            Ok((args, order_by))
+            Ok((args, order_by, variadic))
         }
     }
 

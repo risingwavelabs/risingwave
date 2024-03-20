@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use redis::aio::Connection;
+use redis::aio::MultiplexedConnection;
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -30,6 +30,7 @@ use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
 use crate::dispatch_sink_formatter_str_key_impl;
+use crate::error::ConnectorResult;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -47,7 +48,7 @@ pub struct RedisCommon {
 }
 
 impl RedisCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<RedisClient> {
+    pub(crate) fn build_client(&self) -> ConnectorResult<RedisClient> {
         let client = RedisClient::open(self.url.clone())?;
         Ok(client)
     }
@@ -169,14 +170,14 @@ pub struct RedisSinkWriter {
 
 struct RedisSinkPayloadWriter {
     // connection to redis, one per executor
-    conn: Option<Connection>,
+    conn: Option<MultiplexedConnection>,
     // the command pipeline for write-commit
     pipe: Pipeline,
 }
 impl RedisSinkPayloadWriter {
     pub async fn new(config: RedisConfig) -> Result<Self> {
         let client = config.common.build_client()?;
-        let conn = Some(client.get_async_connection().await?);
+        let conn = Some(client.get_multiplexed_async_connection().await?);
         let pipe = redis::pipe();
 
         Ok(Self { conn, pipe })

@@ -54,10 +54,8 @@ message ColumnDesc {
   // This field is used to represent the connector-spec additional column type.
   // UNSPECIFIED or unset for normal column.
 
-  // deprecated, use AdditionalColumn instead
-  // AdditionalColumnType additional_column_type = 9;
-  reserved "additional_column_type";
-  reserved 9;
+  // deprecated, use AdditionalColumn instead, keep for compatibility with v1.6.x
+  AdditionalColumnType additional_column_type = 9;
 
   ColumnDescVersion version = 10;
 
@@ -136,6 +134,7 @@ enum FormatType {
   FORMAT_TYPE_CANAL = 5;
   FORMAT_TYPE_UPSERT = 6;
   FORMAT_TYPE_PLAIN = 7;
+  FORMAT_TYPE_NONE = 8;
 }
 
 enum EncodeType {
@@ -147,6 +146,7 @@ enum EncodeType {
   ENCODE_TYPE_JSON = 5;
   ENCODE_TYPE_BYTES = 6;
   ENCODE_TYPE_TEMPLATE = 7;
+  ENCODE_TYPE_NONE = 8;
 }
 
 enum RowFormatType {
@@ -215,4 +215,15 @@ message AdditionalColumn {
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
   }
+}
+
+enum AdditionalColumnType {
+  ADDITIONAL_COLUMN_TYPE_UNSPECIFIED = 0;
+  ADDITIONAL_COLUMN_TYPE_KEY = 1;
+  ADDITIONAL_COLUMN_TYPE_TIMESTAMP = 2;
+  ADDITIONAL_COLUMN_TYPE_PARTITION = 3;
+  ADDITIONAL_COLUMN_TYPE_OFFSET = 4;
+  ADDITIONAL_COLUMN_TYPE_HEADER = 5;
+  ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
+  ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
 }

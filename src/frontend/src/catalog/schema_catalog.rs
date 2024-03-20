@@ -50,7 +50,7 @@ pub struct SchemaCatalog {
     sink_by_name: HashMap<String, Arc<SinkCatalog>>,
     sink_by_id: HashMap<SinkId, Arc<SinkCatalog>>,
     subscription_by_name: HashMap<String, Arc<SubscriptionCatalog>>,
-    subscription_by_id: HashMap<SinkId, Arc<SubscriptionCatalog>>,
+    subscription_by_id: HashMap<SubscriptionId, Arc<SubscriptionCatalog>>,
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
     index_by_id: HashMap<IndexId, Arc<IndexCatalog>>,
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,

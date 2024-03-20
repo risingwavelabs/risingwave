@@ -216,9 +216,9 @@ impl SessionTimezone {
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
-            // `to_timestamp1(input_string, format_string)`
-            // => `to_timestamp1(input_string, format_string, zone_string)`
-            ExprType::ToTimestamp1 => {
+            // `char_to_timestamptz(input_string, format_string)`
+            // => `char_to_timestamptz(input_string, format_string, zone_string)`
+            ExprType::CharToTimestamptz => {
                 if !(inputs.len() == 2
                     && inputs[0].return_type() == DataType::Varchar
                     && inputs[1].return_type() == DataType::Varchar)

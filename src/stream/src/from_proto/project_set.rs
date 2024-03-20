@@ -29,7 +29,7 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         _store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let select_list: Vec<_> = node
             .get_select_list()
@@ -55,15 +55,14 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
             .collect();
 
         let chunk_size = params.env.config().developer.chunk_size;
-        Ok(ProjectSetExecutor::new(
+        let exec = ProjectSetExecutor::new(
             params.actor_context,
-            params.info,
             input,
             select_list,
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,
-        )
-        .boxed())
+        );
+        Ok((params.info, exec).into())
     }
 }

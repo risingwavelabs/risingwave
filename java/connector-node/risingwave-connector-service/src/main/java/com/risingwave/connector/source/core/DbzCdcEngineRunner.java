@@ -47,12 +47,14 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                             config.getResolvedDebeziumProps(),
                             (success, message, error) -> {
                                 if (!success) {
-                                    responseObserver.onError(error);
                                     LOG.error(
                                             "engine#{} terminated with error. message: {}",
                                             sourceId,
                                             message,
                                             error);
+                                    if (error != null) {
+                                        responseObserver.onError(error);
+                                    }
                                 } else {
                                     LOG.info("engine#{} stopped normally. {}", sourceId, message);
                                     responseObserver.onCompleted();

@@ -106,8 +106,8 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .context()
-            .take_receiver((up_actor_id, down_actor_id))?;
+            .take_receiver((up_actor_id, down_actor_id))
+            .await?;
 
         // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
@@ -169,7 +169,14 @@ impl ExchangeServiceImpl {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
-                Either::Right(MessageWithPermits { message, permits }) => {
+                Either::Right(MessageWithPermits {
+                    mut message,
+                    permits,
+                }) => {
+                    // Erase the mutation of the barrier to avoid decoding in remote side.
+                    if let Message::Barrier(barrier) = &mut message {
+                        barrier.mutation = None;
+                    }
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {

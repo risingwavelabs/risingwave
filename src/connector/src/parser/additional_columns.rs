@@ -27,6 +27,7 @@ use risingwave_pb::plan_common::{
     AdditionalColumnTimestamp,
 };
 
+use crate::error::ConnectorResult;
 use crate::source::{
     GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, OPENDAL_S3_CONNECTOR, PULSAR_CONNECTOR,
     S3_CONNECTOR,
@@ -86,7 +87,7 @@ pub fn build_additional_column_catalog(
     inner_field_name: Option<&str>,
     data_type: Option<&str>,
     reject_unknown_connector: bool,
-) -> anyhow::Result<ColumnCatalog> {
+) -> ConnectorResult<ColumnCatalog> {
     let compatible_columns = match (
         COMPATIBLE_ADDITIONAL_COLUMNS.get(connector_name),
         reject_unknown_connector,

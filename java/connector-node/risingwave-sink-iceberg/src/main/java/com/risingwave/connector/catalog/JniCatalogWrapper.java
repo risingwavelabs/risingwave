@@ -74,6 +74,15 @@ public class JniCatalogWrapper {
         checkArgument(
                 props.length % 2 == 0,
                 "props should be key-value pairs, but length is: " + props.length);
+
+        //      Thread.currentThread().setContextClassLoader(ClassLoader.getSystemClassLoader());
+        System.out.println("Current thread name is: " + Thread.currentThread().getName());
+
+        //        try {
+        //            Thread.currentThread().getContextClassLoader().loadClass(klassName);
+        //        } catch (ClassNotFoundException e) {
+        //            throw new RuntimeException(e);
+        //        }
         try {
             HashMap<String, String> config = new HashMap<>(props.length / 2);
             for (int i = 0; i < props.length; i += 2) {

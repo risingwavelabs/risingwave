@@ -702,6 +702,23 @@ impl CatalogController {
         Ok(count > 0)
     }
 
+    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let inner = self.inner.read().await;
+        let actor_cnt: Vec<(WorkerId, i64)> = Actor::find()
+            .select_only()
+            .column(actor::Column::WorkerId)
+            .column_as(actor::Column::ActorId.count(), "count")
+            .group_by(actor::Column::WorkerId)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(actor_cnt
+            .into_iter()
+            .map(|(worker_id, count)| (worker_id, count as usize))
+            .collect())
+    }
+
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
     pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
         let inner = self.inner.read().await;

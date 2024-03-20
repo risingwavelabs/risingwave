@@ -29,7 +29,7 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub version: PbAggNodeVersion,
 
     // basic
-    pub input: Box<dyn Executor>,
+    pub input: Executor,
     pub actor_ctx: ActorContextRef,
     pub info: ExecutorInfo,
 

@@ -24,12 +24,13 @@ use risingwave_pb::catalog::{
     StreamJobStatus, Subscription, Table, View,
 };
 use risingwave_pb::data::DataType;
+use risingwave_pb::user::grant_privilege::PbObject;
 
 use super::{
     ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, SubscriptionId,
     ViewId,
 };
-use crate::manager::{IndexId, MetaSrvEnv, TableId};
+use crate::manager::{IndexId, MetaSrvEnv, TableId, UserId};
 use crate::model::MetadataModel;
 use crate::{MetaError, MetaResult};
 
@@ -624,6 +625,52 @@ impl DatabaseManager {
                 "table, view or source",
                 *table_id,
             ))
+        }
+    }
+
+    pub fn get_object_owner(&self, object: &PbObject) -> MetaResult<UserId> {
+        match object {
+            PbObject::DatabaseId(id) => self
+                .databases
+                .get(id)
+                .map(|d| d.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("database", id)),
+            PbObject::SchemaId(id) => self
+                .schemas
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("schema", id)),
+            PbObject::TableId(id) => self
+                .tables
+                .get(id)
+                .map(|t| t.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", id)),
+            PbObject::SourceId(id) => self
+                .sources
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("source", id)),
+            PbObject::SinkId(id) => self
+                .sinks
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("sink", id)),
+            PbObject::SubscriptionId(id) => self
+                .subscriptions
+                .get(id)
+                .map(|s| s.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("subscription", id)),
+            PbObject::ViewId(id) => self
+                .views
+                .get(id)
+                .map(|v| v.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("view", id)),
+            PbObject::FunctionId(id) => self
+                .functions
+                .get(id)
+                .map(|f| f.owner)
+                .ok_or_else(|| MetaError::catalog_id_not_found("function", id)),
+            _ => unreachable!("unexpected object type: {:?}", object),
         }
     }
 }

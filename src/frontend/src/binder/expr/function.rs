@@ -37,11 +37,11 @@ use risingwave_sqlparser::parser::ParserError;
 use thiserror_ext::AsReport;
 
 use crate::binder::bind_context::Clause;
-use crate::binder::{Binder, BoundQuery, BoundSetExpr, UdfContext};
+use crate::binder::{Binder, UdfContext};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
-    Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -273,7 +273,7 @@ impl Binder {
             }
         }
 
-        self.bind_builtin_scalar_function(function_name.as_str(), inputs)
+        self.bind_builtin_scalar_function(function_name.as_str(), inputs, f.variadic)
     }
 
     fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
@@ -791,6 +791,7 @@ impl Binder {
         &mut self,
         function_name: &str,
         inputs: Vec<ExprImpl>,
+        variadic: bool,
     ) -> Result<ExprImpl> {
         type Inputs = Vec<ExprImpl>;
 
@@ -959,8 +960,8 @@ impl Binder {
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
-                        (1, raw_call(ExprType::ToTimestamp)),
-                        (2, raw_call(ExprType::ToTimestamp1)),
+                        (1, raw_call(ExprType::SecToTimestamptz)),
+                        (2, raw_call(ExprType::CharToTimestamptz)),
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
@@ -1075,7 +1076,7 @@ impl Binder {
                     guard_by_len(2, raw(|binder, inputs| {
                         let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
                         // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
-                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0], false)?;
                         let arg1 = arg1.cast_implicit(DataType::Int32)?;
 
                         FunctionCall::new(
@@ -1102,36 +1103,8 @@ impl Binder {
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccess)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
-                ("jsonb_extract_path", raw(|_binder, mut inputs| {
-                    // rewrite: jsonb_extract_path(jsonb, s1, s2...)
-                    // to:      jsonb_extract_path(jsonb, array[s1, s2...])
-                    if inputs.len() < 2 {
-                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
-                    }
-                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
-                    let mut variadic_inputs = inputs.split_off(1);
-                    for input in &mut variadic_inputs {
-                        input.cast_implicit_mut(DataType::Varchar)?;
-                    }
-                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
-                    inputs.push(array.into());
-                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPath, inputs, DataType::Jsonb).into())
-                })),
-                ("jsonb_extract_path_text", raw(|_binder, mut inputs| {
-                    // rewrite: jsonb_extract_path_text(jsonb, s1, s2...)
-                    // to:      jsonb_extract_path_text(jsonb, array[s1, s2...])
-                    if inputs.len() < 2 {
-                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
-                    }
-                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
-                    let mut variadic_inputs = inputs.split_off(1);
-                    for input in &mut variadic_inputs {
-                        input.cast_implicit_mut(DataType::Varchar)?;
-                    }
-                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
-                    inputs.push(array.into());
-                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPathText, inputs, DataType::Varchar).into())
-                })),
+                ("jsonb_extract_path", raw_call(ExprType::JsonbExtractPath)),
+                ("jsonb_extract_path_text", raw_call(ExprType::JsonbExtractPathText)),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 ("jsonb_concat", raw_call(ExprType::JsonbConcat)),
@@ -1230,112 +1203,28 @@ impl Binder {
                 ("current_role", current_user()),
                 ("current_user", current_user()),
                 ("user", current_user()),
-                ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_user_by_id_select(input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                ))),
+                ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
-                ("pg_relation_size", dispatch_by_len(vec![
-                    (1, raw(|binder, inputs|{
-                        let table_name = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    })),
-                    (2, raw(|binder, inputs|{
-                        let table_name = &inputs[0];
-                        match inputs[1].as_literal() {
-                            Some(literal) if literal.return_type() == DataType::Varchar => {
-                                match literal
-                                     .get_data()
-                                     .as_ref()
-                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
-                                     .as_utf8()
-                                     .as_ref() {
-                                        "main" => {
-                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
-                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                                                BoundQuery {
-                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
-                                                    order: vec![],
-                                                    limit: None,
-                                                    offset: None,
-                                                    with_ties: false,
-                                                    extra_order_exprs: vec![],
-                                                },
-                                                SubqueryKind::Scalar,
-                                            ))))
-                                        },
-                                        // These options are invalid in RW so we return 0 value as the result
-                                        "fsm"|"vm"|"init" => {
-                                            Ok(ExprImpl::literal_int(0))
-                                        },
-                                        _ => Err(ErrorCode::InvalidInputSyntax(
-                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
-                                    }
-                            },
-                            _ => Err(ErrorCode::ExprError(
-                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
-                            )
-                            .into())
-                        }
-                    })),
-                    ]
-                )),
-                ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
+                ("pg_relation_size", raw(|_binder, mut inputs|{
+                    if inputs.is_empty() {
+                        return Err(ErrorCode::ExprError(
+                            "function pg_relation_size() does not exist".into(),
+                        )
+                        .into());
                     }
-                ))),
-                ("pg_indexes_size", guard_by_len(1, raw(|binder, inputs|{
-                        let input = &inputs[0];
-                        let bound_query = binder.bind_get_indexes_size_select(input)?;
-                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                            BoundQuery {
-                                body: BoundSetExpr::Select(Box::new(bound_query)),
-                                order: vec![],
-                                limit: None,
-                                offset: None,
-                                with_ties: false,
-                                extra_order_exprs: vec![],
-                            },
-                            SubqueryKind::Scalar,
-                        ))))
-                    }
-                ))),
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
+                })),
+                ("pg_get_serial_sequence", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
+                ("pg_table_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgRelationSize, inputs)?.into())
+                }))),
+                ("pg_indexes_size", guard_by_len(1, raw(|_binder, mut inputs|{
+                    inputs[0].cast_to_regclass_mut()?;
+                    Ok(FunctionCall::new(ExprType::PgIndexesSize, inputs)?.into())
+                }))),
                 ("pg_get_expr", raw(|_binder, inputs|{
                     if inputs.len() == 2 || inputs.len() == 3 {
                         // TODO: implement pg_get_expr rather than just return empty as an workaround.
@@ -1408,8 +1297,10 @@ impl Binder {
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
+                ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_stat_get_numscans", raw_literal(ExprImpl::literal_bigint(0))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.
                     Ok(ExprImpl::literal_int(binder.session_id.0))
@@ -1470,6 +1361,26 @@ impl Binder {
 
             tree
         });
+
+        if variadic {
+            let func = match function_name {
+                "format" => ExprType::FormatVariadic,
+                "concat" => ExprType::ConcatVariadic,
+                "concat_ws" => ExprType::ConcatWsVariadic,
+                "jsonb_build_array" => ExprType::JsonbBuildArrayVariadic,
+                "jsonb_build_object" => ExprType::JsonbBuildObjectVariadic,
+                "jsonb_extract_path" => ExprType::JsonbExtractPathVariadic,
+                "jsonb_extract_path_text" => ExprType::JsonbExtractPathTextVariadic,
+                _ => {
+                    return Err(ErrorCode::BindError(format!(
+                        "VARIADIC argument is not allowed in function \"{}\"",
+                        function_name
+                    ))
+                    .into())
+                }
+            };
+            return Ok(FunctionCall::new(func, inputs)?.into());
+        }
 
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
@@ -1548,6 +1459,7 @@ impl Binder {
                 | Clause::Filter
                 | Clause::GeneratedColumn
                 | Clause::From
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -1600,6 +1512,7 @@ impl Binder {
                 | Clause::Values
                 | Clause::From
                 | Clause::GeneratedColumn
+                | Clause::Insert
                 | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
@@ -1621,6 +1534,7 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::Values
+                | Clause::Insert
                 | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",

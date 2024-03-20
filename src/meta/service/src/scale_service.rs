@@ -134,7 +134,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        self.barrier_manager.check_status_running().await?;
+        self.barrier_manager.check_status_running()?;
 
         let RescheduleRequest {
             reschedules,
@@ -210,6 +210,7 @@ impl ScaleService for ScaleServiceImpl {
                     .collect(),
                 RescheduleOptions {
                     resolve_no_shuffle_upstream,
+                    skip_create_new_actors: false,
                 },
                 Some(table_parallelisms),
             )
@@ -228,7 +229,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        self.barrier_manager.check_status_running().await?;
+        self.barrier_manager.check_status_running()?;
 
         let req = request.into_inner();
 

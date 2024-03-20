@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -22,7 +22,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
+use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, TableId, UserId};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
@@ -48,6 +48,7 @@ use super::util::gen_query_from_table_name;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
@@ -416,7 +417,9 @@ pub async fn handle_create_sink(
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
 
-        table.incoming_sinks = table_catalog.incoming_sinks.clone();
+        table
+            .incoming_sinks
+            .clone_from(&table_catalog.incoming_sinks);
 
         for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
             for fragment in graph.fragments.values_mut() {
@@ -461,59 +464,93 @@ fn check_cycle_for_sink(
     let reader = session.env().catalog_reader().read_guard();
 
     let mut sinks = HashMap::new();
+    let mut sources = HashMap::new();
     let db_name = session.database();
     for schema in reader.iter_schemas(db_name)? {
         for sink in schema.iter_sink() {
             sinks.insert(sink.id.sink_id, sink.as_ref());
         }
+
+        for source in schema.iter_source() {
+            sources.insert(source.id, source.as_ref());
+        }
     }
-    fn visit_sink(
-        session: &SessionImpl,
-        reader: &CatalogReadGuard,
-        sink_index: &HashMap<u32, &SinkCatalog>,
-        sink: &SinkCatalog,
-        visited_tables: &mut HashSet<u32>,
-    ) -> Result<()> {
-        for table_id in &sink.dependent_relations {
-            if let Ok(table) = reader.get_table_by_id(table_id) {
-                visit_table(session, reader, sink_index, table.as_ref(), visited_tables)?
-            } else {
-                bail!("table not found: {:?}", table_id);
+
+    struct Context<'a> {
+        reader: &'a CatalogReadGuard,
+        sink_index: &'a HashMap<u32, &'a SinkCatalog>,
+        source_index: &'a HashMap<u32, &'a SourceCatalog>,
+    }
+
+    impl Context<'_> {
+        fn visit_table(
+            &self,
+            table: &TableCatalog,
+            target_table_id: catalog::TableId,
+            path: &mut Vec<String>,
+        ) -> Result<()> {
+            if table.id == target_table_id {
+                path.reverse();
+                path.push(table.name.clone());
+                return Err(RwError::from(ErrorCode::BindError(
+                    format!(
+                        "Creating such a sink will result in circular dependency, path = [{}]",
+                        path.join(", ")
+                    )
+                    .to_string(),
+                )));
             }
-        }
 
-        Ok(())
-    }
-
-    fn visit_table(
-        session: &SessionImpl,
-        reader: &CatalogReadGuard,
-        sink_index: &HashMap<u32, &SinkCatalog>,
-        table: &TableCatalog,
-        visited_tables: &mut HashSet<u32>,
-    ) -> Result<()> {
-        if visited_tables.contains(&table.id.table_id) {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Creating such a sink will result in circular dependency.".to_string(),
-            )));
-        }
-
-        let _ = visited_tables.insert(table.id.table_id);
-        for sink_id in &table.incoming_sinks {
-            if let Some(sink) = sink_index.get(sink_id) {
-                visit_sink(session, reader, sink_index, sink, visited_tables)?
-            } else {
-                bail!("sink not found: {:?}", sink_id);
+            for sink_id in &table.incoming_sinks {
+                if let Some(sink) = self.sink_index.get(sink_id) {
+                    path.push(sink.name.clone());
+                    self.visit_dependent_jobs(&sink.dependent_relations, target_table_id, path)?;
+                    path.pop();
+                } else {
+                    bail!("sink not found: {:?}", sink_id);
+                }
             }
+
+            self.visit_dependent_jobs(&table.dependent_relations, target_table_id, path)?;
+
+            Ok(())
         }
 
-        Ok(())
+        fn visit_dependent_jobs(
+            &self,
+            dependent_jobs: &[TableId],
+            target_table_id: TableId,
+            path: &mut Vec<String>,
+        ) -> Result<()> {
+            for table_id in dependent_jobs {
+                if let Ok(table) = self.reader.get_table_by_id(table_id) {
+                    path.push(table.name.clone());
+                    self.visit_table(table.as_ref(), target_table_id, path)?;
+                    path.pop();
+                } else if self.source_index.get(&table_id.table_id).is_some() {
+                    continue;
+                } else {
+                    bail!("streaming job not found: {:?}", table_id);
+                }
+            }
+
+            Ok(())
+        }
     }
 
-    let mut visited_tables = HashSet::new();
-    visited_tables.insert(table_id.table_id);
+    let mut path = vec![];
 
-    visit_sink(session, &reader, &sinks, &sink_catalog, &mut visited_tables)
+    path.push(sink_catalog.name.clone());
+
+    let ctx = Context {
+        reader: &reader,
+        sink_index: &sinks,
+        source_index: &sources,
+    };
+
+    ctx.visit_dependent_jobs(&sink_catalog.dependent_relations, table_id, &mut path)?;
+
+    Ok(())
 }
 
 pub(crate) async fn reparse_table_for_sink(
@@ -667,7 +704,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         F::Plain => SinkFormat::AppendOnly,
         F::Upsert => SinkFormat::Upsert,
         F::Debezium => SinkFormat::Debezium,
-        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal | F::None) => {
             return Err(ErrorCode::BindError(format!("sink format unsupported: {f}")).into());
         }
     };
@@ -676,7 +713,7 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
-        e @ (E::Native | E::Csv | E::Bytes) => {
+        e @ (E::Native | E::Csv | E::Bytes | E::None) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -697,6 +734,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
     LazyLock::new(|| {
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
+        use risingwave_connector::sink::mqtt::MqttSink;
         use risingwave_connector::sink::pulsar::PulsarSink;
         use risingwave_connector::sink::redis::RedisSink;
         use risingwave_connector::sink::Sink as _;
@@ -708,6 +746,11 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                    Format::Upsert => vec![Encode::Json],
+                    Format::Debezium => vec![Encode::Json],
+                ),
+                MqttSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],
                     Format::Upsert => vec![Encode::Json],
                     Format::Debezium => vec![Encode::Json],

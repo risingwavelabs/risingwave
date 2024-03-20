@@ -44,7 +44,7 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
     Name(&'a str),
-    /// (search_path, user_name).
+    /// (`search_path`, `user_name`).
     Path(&'a SearchPath, &'a str),
 }
 
@@ -143,23 +143,19 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_tables_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|sys_table| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_table(sys_table);
-            });
+        for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_table(sys_table);
         }
-        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
-            sys_views.into_iter().for_each(|sys_view| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_view(sys_view);
-            });
+        for sys_view in get_sys_views_in_schema(proto.name.as_str()) {
+            self.get_database_mut(proto.database_id)
+                .unwrap()
+                .get_schema_mut(proto.id)
+                .unwrap()
+                .create_sys_view(sys_view);
         }
     }
 
@@ -311,7 +307,7 @@ impl Catalog {
         let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
         if old_database_name != name {
             let mut database = self.database_by_name.remove(&old_database_name).unwrap();
-            database.name = name.clone();
+            database.name.clone_from(&name);
             database.owner = proto.owner;
             self.database_by_name.insert(name.clone(), database);
             self.db_name_by_id.insert(id, name);
@@ -909,6 +905,11 @@ impl Catalog {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("view", relation_name.to_string()))
+        } else if schema.get_subscription_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "subscription",
+                relation_name.to_string(),
+            ))
         } else {
             Ok(())
         }

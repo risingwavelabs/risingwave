@@ -620,6 +620,7 @@ pub mod tests {
         );
         let mut picker =
             LevelCompactionPicker::new(1, config, Arc::new(CompactionDeveloperConfig::default()));
+
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();

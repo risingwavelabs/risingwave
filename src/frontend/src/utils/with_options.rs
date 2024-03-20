@@ -19,7 +19,7 @@ use std::num::NonZeroU32;
 use risingwave_connector::source::kafka::{
     insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
 };
-use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     CreateSubscriptionStatement, SqlOption, Statement, Value,
@@ -28,7 +28,6 @@ use risingwave_sqlparser::ast::{
 use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::session::SessionImpl;
 
 mod options {
@@ -103,13 +102,6 @@ impl WithOptions {
         Self { inner }
     }
 
-    /// Get the subset of the options for internal table catalogs.
-    ///
-    /// Currently only `retention_seconds` is included.
-    pub fn internal_table_subset(&self) -> Self {
-        self.subset([options::RETENTION_SECONDS])
-    }
-
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
         if let Some(inner_val) = self.inner.get(key) {
             if inner_val.eq_ignore_ascii_case(val) {
@@ -120,24 +112,12 @@ impl WithOptions {
     }
 }
 
-#[inline(always)]
-fn is_kafka_connector(with_options: &WithOptions) -> bool {
-    let Some(connector) = with_options
-        .inner()
-        .get(UPSTREAM_SOURCE_KEY)
-        .map(|s| s.to_lowercase())
-    else {
-        return false;
-    };
-    connector == KAFKA_CONNECTOR
-}
-
 pub(crate) fn resolve_privatelink_in_with_option(
     with_options: &mut WithOptions,
     schema_name: &Option<String>,
     session: &SessionImpl,
 ) -> RwResult<Option<ConnectionId>> {
-    let is_kafka = is_kafka_connector(with_options);
+    let is_kafka = with_options.is_kafka_connector();
     let privatelink_endpoint = with_options.remove(PRIVATELINK_ENDPOINT_KEY);
 
     // if `privatelink.endpoint` is provided in WITH, use it to rewrite broker address directly

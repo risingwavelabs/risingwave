@@ -36,7 +36,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -56,7 +56,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -162,56 +162,58 @@ async fn test_table_materialize() -> StreamResult<()> {
     let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
-    let source_executor = SourceExecutor::<PanicStateStore>::new(
-        actor_ctx.clone(),
+    let source_executor = Executor::new(
         ExecutorInfo {
             schema: all_schema.clone(),
             pk_indices: pk_indices.clone(),
             identity: format!("SourceExecutor {:X}", 1),
         },
-        None, // There is no external stream source.
-        Arc::new(StreamingMetrics::unused()),
-        barrier_rx,
-        system_params_manager.get_params(),
-        SourceCtrlOpts::default(),
-        ConnectorParams::default(),
+        SourceExecutor::<PanicStateStore>::new(
+            actor_ctx.clone(),
+            None, // There is no external stream source.
+            Arc::new(StreamingMetrics::unused()),
+            barrier_rx,
+            system_params_manager.get_params(),
+            SourceCtrlOpts::default(),
+            ConnectorParams::default(),
+        )
+        .boxed(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
-    let dml_executor = DmlExecutor::new(
+    let dml_executor = Executor::new(
         ExecutorInfo {
             schema: all_schema.clone(),
             pk_indices: pk_indices.clone(),
             identity: format!("DmlExecutor {:X}", 2),
         },
-        Box::new(source_executor),
-        dml_manager.clone(),
-        table_id,
-        INITIAL_TABLE_VERSION_ID,
-        column_descs.clone(),
-        1024,
+        DmlExecutor::new(
+            source_executor,
+            dml_manager.clone(),
+            table_id,
+            INITIAL_TABLE_VERSION_ID,
+            column_descs.clone(),
+            1024,
+        )
+        .boxed(),
     );
 
-    let row_id_gen_executor = RowIdGenExecutor::new(
-        actor_ctx,
+    let row_id_gen_executor = Executor::new(
         ExecutorInfo {
             schema: all_schema.clone(),
             pk_indices: pk_indices.clone(),
             identity: format!("RowIdGenExecutor {:X}", 3),
         },
-        Box::new(dml_executor),
-        row_id_index,
-        vnodes,
+        RowIdGenExecutor::new(actor_ctx, dml_executor, row_id_index, vnodes).boxed(),
     );
 
     // Create a `MaterializeExecutor` to write the changes to storage.
     let mut materialize = MaterializeExecutor::for_test(
-        Box::new(row_id_gen_executor),
+        row_id_gen_executor,
         memory_state_store.clone(),
         table_id,
         vec![ColumnOrder::new(0, OrderType::ascending())],
         all_column_ids.clone(),
-        4,
         Arc::new(AtomicU64::new(0)),
         ConflictBehavior::NoCheck,
     )
@@ -273,7 +275,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     assert!(result.is_none());
 
     // Send a barrier to start materialized view.
-    let mut curr_epoch = 1919;
+    let mut curr_epoch = test_epoch(1919);
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -287,7 +289,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         }) if epoch.curr == curr_epoch
     ));
 
-    curr_epoch += 1;
+    curr_epoch.inc_epoch();
     let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = insert.execute();
@@ -369,7 +371,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         0,
     ));
 
-    curr_epoch += 1;
+    curr_epoch.inc_epoch();
     let barrier_tx_clone = barrier_tx.clone();
     tokio::spawn(async move {
         let mut stream = delete.execute();
@@ -462,7 +464,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         vec![0, 1, 2],
     );
 
-    let mut epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
     state.init_epoch(epoch);
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -475,7 +477,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         Some(8_i64.into()),
     ]));
 
-    epoch.inc();
+    epoch.inc_for_test();
     state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(

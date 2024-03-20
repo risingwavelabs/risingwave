@@ -20,10 +20,12 @@ use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, User
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::error::ErrorCode::{InternalError, PermissionDenied};
+use crate::error::ErrorCode::{self, InternalError, PermissionDenied};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
-use crate::user::user_authentication::encrypted_password;
+use crate::user::user_authentication::{
+    build_oauth_info, encrypted_password, OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY,
+};
 use crate::user::user_catalog::UserCatalog;
 
 fn alter_prost_user_info(
@@ -111,6 +113,16 @@ fn alter_prost_user_info(
                 }
                 update_fields.push(UpdateField::AuthInfo);
             }
+            UserOption::OAuth(options) => {
+                let auth_info = build_oauth_info(options).ok_or_else(|| {
+                    ErrorCode::InvalidParameterValue(format!(
+                        "{} and {} must be provided",
+                        OAUTH_JWKS_URL_KEY, OAUTH_ISSUER_KEY
+                    ))
+                })?;
+                user_info.auth_info = Some(auth_info);
+                update_fields.push(UpdateField::AuthInfo)
+            }
         }
     }
     Ok((user_info, update_fields))
@@ -181,6 +193,8 @@ pub async fn handle_alter_user(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_pb::user::auth_info::EncryptionType;
     use risingwave_pb::user::AuthInfo;
 
@@ -219,7 +233,8 @@ mod tests {
             user_info.auth_info,
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
-                encrypted_value: b"9f2fa6a30871a92249bdd2f1eeee4ef6".to_vec()
+                encrypted_value: b"9f2fa6a30871a92249bdd2f1eeee4ef6".to_vec(),
+                metadata: HashMap::new(),
             })
         );
     }

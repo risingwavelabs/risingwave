@@ -30,10 +30,10 @@ import Head from "next/head"
 import { Fragment, useEffect, useState } from "react"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
+import api from "../lib/api/api"
+import { getClusterInfoComputeNode } from "../lib/api/cluster"
+import useFetch from "../lib/api/fetch"
 import { StackTraceResponse } from "../proto/gen/monitor_service"
-import api from "./api/api"
-import { getClusterInfoComputeNode } from "./api/cluster"
-import useFetch from "./api/fetch"
 
 const SIDEBAR_WIDTH = 200
 const ALL_COMPUTE_NODES = ""
@@ -78,8 +78,16 @@ export default function AwaitTreeDump() {
         .entries()
         .map(([k, v]) => `[RPC ${k}]\n${v}`)
         .join("\n")
+      const compactionTraces = _(response.compactionTaskTraces)
+        .entries()
+        .map(([k, v]) => `[Compaction ${k}]\n${v}`)
+        .join("\n")
+      const barrierTraces = _(response.inflightBarrierTraces)
+        .entries()
+        .map(([k, v]) => `[Barrier ${k}]\n${v}`)
+        .join("\n")
 
-      result = `${title}\n\n${actorTraces}\n${rpcTraces}`
+      result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}\n${barrierTraces}`
     } catch (e: any) {
       result = `${title}\n\nERROR: ${e.message}\n${e.cause}`
     }

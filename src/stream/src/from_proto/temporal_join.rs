@@ -35,7 +35,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
         let table = {
             let column_ids = table_desc
@@ -101,7 +101,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
 
         let dispatcher_args = TemporalJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
-            info: params.info,
+            info: params.info.clone(),
             left: source_l,
             right: source_r,
             right_table: table,
@@ -119,15 +119,15 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             join_key_data_types,
         };
 
-        dispatcher_args.dispatch()
+        Ok((params.info, dispatcher_args.dispatch()?).into())
     }
 }
 
 struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
-    left: BoxedExecutor,
-    right: BoxedExecutor,
+    left: Executor,
+    right: Executor,
     right_table: StorageTable<S>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
@@ -144,7 +144,7 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
 }
 
 impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> {
-    type Output = StreamResult<BoxedExecutor>;
+    type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.

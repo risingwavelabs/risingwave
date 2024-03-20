@@ -28,11 +28,11 @@ use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
 use tokio_postgres::NoTls;
 
-use crate::error::ConnectorError;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, ConnectorResult, DebeziumOffset, ExternalTableConfig,
-    ExternalTableReader, SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
+    SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -110,8 +110,9 @@ impl ExternalTableReader for PostgresExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 }
 
@@ -168,23 +169,24 @@ impl PostgresExternalTableReader {
         table_name: SchemaTableName,
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let order_key = primary_keys.iter().join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
-                order_key
+                order_key,
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
-                order_key
+                order_key,
             )
         };
 
@@ -199,7 +201,7 @@ impl PostgresExternalTableReader {
         let stream = client.query_raw(&sql, &params).await?;
         let row_stream = stream.map(|row| {
             let row = row?;
-            Ok::<_, anyhow::Error>(postgres_row_to_owned_row(row, &self.rw_schema))
+            Ok::<_, crate::error::ConnectorError>(postgres_row_to_owned_row(row, &self.rw_schema))
         });
 
         pin_mut!(row_stream);
@@ -305,6 +307,7 @@ mod tests {
             },
             Some(start_pk),
             vec!["v1".to_string(), "v2".to_string()],
+            1000,
         );
 
         pin_mut!(stream);

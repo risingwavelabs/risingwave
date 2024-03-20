@@ -20,7 +20,8 @@ macro_rules! for_all_classified_sources {
             {
                 { Mysql },
                 { Postgres },
-                { Citus }
+                { Citus },
+                { Mongodb }
             },
             // other sources
             // todo: file source do not nest with mq source.
@@ -31,12 +32,14 @@ macro_rules! for_all_classified_sources {
                 { Nexmark, $crate::source::nexmark::NexmarkProperties, $crate::source::nexmark::NexmarkSplit },
                 { Datagen, $crate::source::datagen::DatagenProperties, $crate::source::datagen::DatagenSplit },
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
+                { Mqtt, $crate::source::mqtt::MqttProperties, $crate::source::mqtt::split::MqttSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
                 { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
                 { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalGcs> },
                 { OpendalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3> },
                 { PosixFs, $crate::source::filesystem::opendal_source::PosixFsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalPosixFs> },
-                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
+                { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit},
+                { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit}
             }
             $(
                 ,$extra_args
@@ -167,12 +170,12 @@ macro_rules! impl_split {
 
         $(
             impl TryFrom<SplitImpl> for $split {
-                type Error = anyhow::Error;
+                type Error = $crate::error::ConnectorError;
 
                 fn try_from(split: SplitImpl) -> std::result::Result<Self, Self::Error> {
                     match split {
                         SplitImpl::$variant_name(inner) => Ok(inner),
-                        other => Err(anyhow::anyhow!("expect {} but get {:?}", stringify!($split), other))
+                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($split), other),
                     }
                 }
             }

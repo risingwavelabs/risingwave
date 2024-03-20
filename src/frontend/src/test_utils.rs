@@ -51,6 +51,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbTableParallelism, SystemParams};
@@ -606,7 +607,11 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn alter_subscription_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
+    async fn alter_subscription_name(
+        &self,
+        _subscription_id: u32,
+        _subscription_name: &str,
+    ) -> Result<()> {
         unreachable!()
     }
 
@@ -825,8 +830,8 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::Login => user_info.can_login = update_user.can_login,
             UpdateField::CreateDb => user_info.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user_info.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user_info.auth_info = update_user.auth_info.clone(),
-            UpdateField::Rename => user_info.name = update_user.name.clone(),
+            UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
+            UpdateField::Rename => user_info.name.clone_from(&update_user.name),
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
@@ -865,7 +870,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserId>,
+        _granted_by: UserId,
         _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,
@@ -953,6 +958,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {
+        Ok(vec![])
+    }
+
     async fn unpin_snapshot(&self) -> RpcResult<()> {
         Ok(())
     }
@@ -994,7 +1003,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
-        unimplemented!()
+        Ok(HummockVersion::default())
     }
 
     async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {

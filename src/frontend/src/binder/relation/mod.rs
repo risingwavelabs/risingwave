@@ -289,7 +289,7 @@ impl Binder {
                     .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
-            field.name = name.clone();
+            field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
                 begin + index,

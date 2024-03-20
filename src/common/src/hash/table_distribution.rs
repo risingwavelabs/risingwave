@@ -33,7 +33,7 @@ pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 enum ComputeVnode {
     Singleton,
     DistKeyIndices {
-        /// Indices of distribution key for computing vnode, based on the all columns of the table.
+        /// Indices of distribution key for computing vnode, based on the pk columns of the table.
         dist_key_in_pk_indices: Vec<usize>,
     },
     VnodeColumnIndex {
