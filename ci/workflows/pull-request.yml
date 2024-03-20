@@ -515,7 +515,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 21
+    timeout_in_minutes: 23
     cancel_on_build_failing: true
     retry: *auto-retry
 
