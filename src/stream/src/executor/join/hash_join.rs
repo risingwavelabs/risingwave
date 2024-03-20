@@ -38,6 +38,7 @@ use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
+use crate::consistency::strict_consistency;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -669,7 +670,7 @@ impl JoinEntryState {
         value: StateValueType,
     ) -> Result<&mut StateValueType, JoinEntryError> {
         let mut removed = false;
-        if !crate::consistency::strict_consistency().is_on() {
+        if !strict_consistency().is_on() {
             // strict consistency is off, let's remove existing (if any) first
             if let Some(old_value) = self.cached.remove(&key) {
                 self.kv_heap_size.sub(&key, &old_value);
@@ -681,9 +682,9 @@ impl JoinEntryState {
 
         let ret = self.cached.try_insert(key.clone(), value);
 
-        if !crate::consistency::strict_consistency().is_on() {
+        if !strict_consistency().is_on() {
             assert!(ret.is_ok(), "we have removed existing entry, if any");
-            if removed && crate::consistency::strict_consistency().is_off() {
+            if removed && strict_consistency().is_off() {
                 // if not silent, we should log the error
                 tracing::error!(?key, "double inserting a join state entry");
             }
@@ -698,7 +699,7 @@ impl JoinEntryState {
             self.kv_heap_size.sub(&pk, &value);
             Ok(())
         } else {
-            match crate::consistency::strict_consistency() {
+            match strict_consistency() {
                 StrictConsistencyOption::On => Err(JoinEntryError::RemoveError),
                 StrictConsistencyOption::Off => {
                     tracing::error!(

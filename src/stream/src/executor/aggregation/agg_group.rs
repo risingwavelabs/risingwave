@@ -20,7 +20,6 @@ use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::config::StrictConsistencyOption;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -31,6 +30,7 @@ use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
+use crate::consistency::inconsistency_panic;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -317,13 +317,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             .expect("row count state should not be NULL")
             .as_int64();
         if row_count < 0 {
-            match crate::consistency::strict_consistency() {
-                StrictConsistencyOption::On => panic!("row count should be non-negative"),
-                StrictConsistencyOption::Off => {
-                    tracing::error!(group = ?self.group_key_row(), row_count=row_count, "bad row count")
-                }
-                StrictConsistencyOption::OffSilent => {}
-            }
+            inconsistency_panic!(group = ?self.group_key_row(), row_count, "row count should be non-negative");
 
             // NOTE: Here is the case that an inconsistent `DELETE` arrives at HashAgg executor, and there's no
             // corresponding group existing before (or has been deleted). In this case, `prev_row_count()` will
