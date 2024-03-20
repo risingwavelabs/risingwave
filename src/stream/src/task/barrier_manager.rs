@@ -143,11 +143,40 @@ impl ControlStreamHandle {
     }
 }
 
+#[derive(Clone)]
+pub struct CreateActorContext {
+    #[expect(clippy::type_complexity)]
+    barrier_sender: Arc<Mutex<Option<HashMap<ActorId, Vec<UnboundedSender<Barrier>>>>>>,
+}
+
+impl Default for CreateActorContext {
+    fn default() -> Self {
+        Self {
+            barrier_sender: Arc::new(Mutex::new(Some(HashMap::new()))),
+        }
+    }
+}
+
+impl CreateActorContext {
+    pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
+        self.barrier_sender
+            .lock()
+            .as_mut()
+            .expect("should not register after collecting sender")
+            .entry(actor_id)
+            .or_default()
+            .push(sender)
+    }
+
+    pub(super) fn collect_senders(&self) -> HashMap<ActorId, Vec<UnboundedSender<Barrier>>> {
+        self.barrier_sender
+            .lock()
+            .take()
+            .expect("should not collect senders for twice")
+    }
+}
+
 pub(super) enum LocalBarrierEvent {
-    RegisterSender {
-        actor_id: ActorId,
-        sender: UnboundedSender<Barrier>,
-    },
     ReportActorCollected {
         actor_id: ActorId,
         barrier: Barrier,
@@ -192,6 +221,17 @@ pub(super) enum LocalActorOperation {
     },
     #[cfg(test)]
     GetCurrentSharedContext(oneshot::Sender<Arc<SharedContext>>),
+    #[cfg(test)]
+    RegisterSenders {
+        actor_id: ActorId,
+        senders: Vec<UnboundedSender<Barrier>>,
+        result_sender: oneshot::Sender<()>,
+    },
+}
+
+pub(super) struct CreateActorOutput {
+    pub(super) actors: Vec<Actor<DispatchExecutor>>,
+    pub(super) senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 }
 
 pub(crate) struct StreamActorManagerState {
@@ -209,7 +249,7 @@ pub(crate) struct StreamActorManagerState {
     #[expect(clippy::type_complexity)]
     pub(super) creating_actors: FuturesUnordered<
         AttachedFuture<
-            JoinHandle<StreamResult<Vec<Actor<DispatchExecutor>>>>,
+            JoinHandle<StreamResult<CreateActorOutput>>,
             oneshot::Sender<StreamResult<()>>,
         >,
     >,
@@ -229,7 +269,7 @@ impl StreamActorManagerState {
         &mut self,
     ) -> (
         oneshot::Sender<StreamResult<()>>,
-        StreamResult<Vec<Actor<DispatchExecutor>>>,
+        StreamResult<CreateActorOutput>,
     ) {
         let (join_result, sender) = pending_on_none(self.creating_actors.next()).await;
         (
@@ -325,9 +365,6 @@ impl LocalBarrierWorker {
                     let result = self.on_epoch_completed(completed_epoch);
                     self.control_stream_handle.inspect_result(result);
                 },
-                // Note: it's important to select in a biased way to ensure that
-                // barrier event is handled before actor_op, because we must ensure
-                // that register sender is handled before inject barrier.
                 event = self.barrier_event_rx.recv() => {
                     self.handle_barrier_event(event.expect("should not be none"));
                 },
@@ -366,10 +403,13 @@ impl LocalBarrierWorker {
     fn handle_actor_created(
         &mut self,
         sender: oneshot::Sender<StreamResult<()>>,
-        create_actor_result: StreamResult<Vec<Actor<DispatchExecutor>>>,
+        create_actor_result: StreamResult<CreateActorOutput>,
     ) {
-        let result = create_actor_result.map(|actors| {
-            self.spawn_actors(actors);
+        let result = create_actor_result.map(|output| {
+            for (actor_id, senders) in output.senders {
+                self.register_sender(actor_id, senders);
+            }
+            self.spawn_actors(output.actors);
         });
 
         let _ = sender.send(result);
@@ -397,9 +437,6 @@ impl LocalBarrierWorker {
 
     fn handle_barrier_event(&mut self, event: LocalBarrierEvent) {
         match event {
-            LocalBarrierEvent::RegisterSender { actor_id, sender } => {
-                self.register_sender(actor_id, sender);
-            }
             LocalBarrierEvent::ReportActorCollected { actor_id, barrier } => {
                 self.collect(actor_id, &barrier)
             }
@@ -456,6 +493,15 @@ impl LocalBarrierWorker {
             #[cfg(test)]
             LocalActorOperation::GetCurrentSharedContext(sender) => {
                 let _ = sender.send(self.current_shared_context.clone());
+            }
+            #[cfg(test)]
+            LocalActorOperation::RegisterSenders {
+                actor_id,
+                senders,
+                result_sender,
+            } => {
+                self.register_sender(actor_id, senders);
+                let _ = result_sender.send(());
             }
         }
     }
@@ -524,7 +570,7 @@ impl LocalBarrierWorker {
     }
 
     /// Register sender for source actors, used to send barriers.
-    fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
+    fn register_sender(&mut self, actor_id: ActorId, senders: Vec<UnboundedSender<Barrier>>) {
         tracing::debug!(
             target: "events::stream::barrier::manager",
             actor_id = actor_id,
@@ -533,7 +579,7 @@ impl LocalBarrierWorker {
         self.barrier_senders
             .entry(actor_id)
             .or_default()
-            .push(sender);
+            .extend(senders);
     }
 
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
@@ -756,11 +802,6 @@ impl LocalBarrierManager {
     fn send_event(&self, event: LocalBarrierEvent) {
         // ignore error, because the current barrier manager maybe a stale one
         let _ = self.barrier_event_sender.send(event);
-    }
-
-    /// Register sender for source actors, used to send barriers.
-    pub fn register_sender(&self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
-        self.send_event(LocalBarrierEvent::RegisterSender { actor_id, sender });
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
