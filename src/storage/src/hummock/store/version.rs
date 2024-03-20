@@ -116,7 +116,7 @@ impl StagingSstableInfo {
 pub enum StagingData {
     ImmMem(ImmutableMemtable),
     MergedImmMem(ImmutableMemtable, Vec<ImmId>),
-    Sst(StagingSstableInfo),
+    Sst(Arc<StagingSstableInfo>),
 }
 
 pub enum VersionUpdate {
@@ -139,7 +139,7 @@ pub struct StagingVersion {
     pub imm: VecDeque<ImmutableMemtable>,
 
     // newer data comes first
-    pub sst: VecDeque<StagingSstableInfo>,
+    pub sst: VecDeque<Arc<StagingSstableInfo>>,
 }
 
 impl StagingVersion {
@@ -285,7 +285,7 @@ impl HummockReadVersion {
                 StagingData::MergedImmMem(merged_imm, imm_ids) => {
                     self.add_merged_imm(merged_imm, imm_ids);
                 }
-                StagingData::Sst(staging_sst) => {
+                StagingData::Sst(staging_sst_ref) => {
                     // The following properties must be ensured:
                     // 1) self.staging.imm is sorted by imm id descendingly
                     // 2) staging_sst.imm_ids preserves the imm id partial
@@ -308,7 +308,7 @@ impl HummockReadVersion {
                         self.staging.imm.iter().map(|imm| imm.batch_id()).collect();
 
                     // intersected batch_id order from oldest to newest
-                    let intersect_imm_ids = staging_sst
+                    let intersect_imm_ids = staging_sst_ref
                         .imm_ids
                         .iter()
                         .rev()
@@ -343,15 +343,15 @@ impl HummockReadVersion {
                                     staging_sst.epochs {:?},
                                     local_imm_ids {:?},
                                     intersect_imm_ids {:?}",
-                                    staging_sst.imm_size,
-                                    staging_sst.imm_ids,
-                                    staging_sst.epochs,
+                                    staging_sst_ref.imm_size,
+                                    staging_sst_ref.imm_ids,
+                                    staging_sst_ref.epochs,
                                     local_imm_ids,
                                     intersect_imm_ids,
                                 );
                             }
                         }
-                        self.staging.sst.push_front(staging_sst);
+                        self.staging.sst.push_front(staging_sst_ref);
                     }
                 }
             },
