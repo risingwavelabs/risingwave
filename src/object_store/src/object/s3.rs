@@ -597,6 +597,13 @@ impl S3ObjectStore {
                     aws_sdk_s3::config::Builder::from(&sdk_config)
                         .endpoint_url(endpoint)
                         .force_path_style(is_force_path_style)
+                        .identity_cache(
+                            aws_sdk_s3::config::IdentityCache::lazy()
+                                .load_timeout(Duration::from_secs(
+                                    config.s3.identity_resolution_timeout_s,
+                                ))
+                                .build(),
+                        )
                         .build(),
                 );
                 client
@@ -655,6 +662,13 @@ impl S3ObjectStore {
                 .await,
         )
         .force_path_style(true)
+        .identity_cache(
+            aws_sdk_s3::config::IdentityCache::lazy()
+                .load_timeout(Duration::from_secs(
+                    s3_object_store_config.s3.identity_resolution_timeout_s,
+                ))
+                .build(),
+        )
         .http_client(Self::new_http_client(&s3_object_store_config))
         .behavior_version_latest();
         let config = builder
