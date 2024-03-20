@@ -222,6 +222,7 @@ impl From<&arrow_schema::DataType> for DataType {
             LargeUtf8 => Self::Jsonb,
             Struct(fields) => Self::Struct(fields.into()),
             List(field) => Self::List(Box::new(field.data_type().into())),
+            Decimal128(_, _) => Self::Decimal,
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }

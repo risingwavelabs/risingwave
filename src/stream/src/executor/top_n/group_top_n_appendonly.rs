@@ -93,7 +93,7 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
-    /// Used for serializing pk into CacheKey.
+    /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 
     ctx: ActorContextRef,
@@ -145,7 +145,7 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
-        let keys = K::build(&self.group_by, chunk.data_chunk())?;
+        let keys = K::build_many(&self.group_by, chunk.data_chunk());
 
         let data_types = self.schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());

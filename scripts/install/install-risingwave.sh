@@ -9,12 +9,13 @@ fi
 STATE_STORE_PATH="${HOME}/.risingwave/state_store"
 META_STORE_PATH="${HOME}/.risingwave/meta_store"
 
-VERSION="v1.7.0-single-node-2"
-HOMEBREW_VERSION="1.7-single-node"
+VERSION="v1.7.0-standalone"
 # TODO(kwannoel): re-enable it once we have stable release in latest for single node mode.
 #VERSION=$(curl -s https://api.github.com/repos/risingwavelabs/risingwave/releases/latest \
 # | grep '.tag_name' \
 # | sed -E -n 's/.*(v[0-9]+.[0-9]+.[0-9])\",/\1/p')
+HOMEBREW_VERSION="1.7-standalone"
+
 BASE_URL="https://github.com/risingwavelabs/risingwave/releases/download"
 
 if [ "${OS}" = "Linux" ]; then
@@ -48,37 +49,25 @@ if [ -z "$USE_BREW" ]; then
   exit 1
 fi
 
-############# Setup data directories
-echo
-echo "Setting up data directories."
-echo "- ${STATE_STORE_PATH}"
-echo "- ${META_STORE_PATH}"
-mkdir -p "${STATE_STORE_PATH}"
-mkdir -p "${META_STORE_PATH}"
-echo
-
 ############# BREW INSTALL
 if [ "${USE_BREW}" -eq 1 ]; then
   echo "Installing RisingWave@${HOMEBREW_VERSION} using Homebrew."
   brew tap risingwavelabs/risingwave
   brew install risingwave@${HOMEBREW_VERSION}
+  echo
   echo "Successfully installed RisingWave@${HOMEBREW_VERSION} using Homebrew."
   echo
-  echo "You can run it as:"
+  echo "Run RisingWave:"
   echo
-  echo "  risingwave >risingwave.log 2>&1 &"
+  echo "  risingwave"
   echo
-  echo
-  echo "You can attach a psql client to the standalone server using:"
+  echo "Start a psql session:"
   echo
   echo "  psql -h localhost -p 4566 -d dev -U root"
   echo
-  echo
   echo "To start a fresh cluster, you can just delete the data directory contents:"
   echo
-  echo "  rm -r ~/.risingwave/state_store/*"
-  echo "  rm -r ~/.risingwave/meta_store/*"
-  echo
+  echo "  rm -r ~/.risingwave"
   echo
   echo "To view available options, run:"
   echo
@@ -95,24 +84,22 @@ echo
 curl -L "${URL}" | tar -zx || exit 1
 chmod +x risingwave
 echo
-echo "Successfully downloaded the RisingWave binary, you can run it as:"
+echo "Successfully installed RisingWave@${VERSION} binary."
 echo
-echo "  ./risingwave >risingwave.log 2>&1 &"
+echo "Run RisingWave:"
 echo
+echo "  ./risingwave"
 echo
-echo "You can connect a psql client to the standalone server using:"
+echo "Start a psql session:"
 echo
 echo "  psql -h localhost -p 4566 -d dev -U root"
 echo
-echo
 echo "To start a fresh cluster, you can just delete the data directory contents:"
 echo
-echo "  rm -r ~/.risingwave/state_store/*"
-echo "  rm -r ~/.risingwave/meta_store/*"
+echo "  rm -r ~/.risingwave"
 echo
+echo "To view available options, run:"
 echo
-echo "To view other available options, run:"
-echo
-echo "  ./risingwave single-node --help"
+echo "  risingwave single-node --help"
 echo
 # TODO(kwannoel): Include link to our docs.

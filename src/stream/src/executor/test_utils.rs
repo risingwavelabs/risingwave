@@ -17,6 +17,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -159,10 +160,10 @@ impl MockSource {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
-        let mut epoch = 1;
+        let mut epoch = test_epoch(1);
 
         while let Some(msg) = self.rx.recv().await {
-            epoch += 1;
+            epoch.inc_epoch();
             yield msg;
         }
 

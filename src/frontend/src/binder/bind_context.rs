@@ -57,6 +57,7 @@ pub enum Clause {
     Filter,
     From,
     GeneratedColumn,
+    Insert,
 }
 
 /// A `BindContext` that is only visible if the `LATERAL` keyword
@@ -78,7 +79,7 @@ pub struct BindContext {
     pub clause: Option<Clause>,
     // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
-    /// Map the cte's name to its Relation::Subquery.
+    /// Map the cte's name to its `Relation::Subquery`.
     /// The `ShareId` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<(ShareId, BoundQuery, TableAlias)>>,
     /// Current lambda functions's arguments

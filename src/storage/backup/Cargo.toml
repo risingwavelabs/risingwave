@@ -32,7 +32,7 @@ thiserror = "1"
 twox-hash = "1"
 
 [dev-dependencies]
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

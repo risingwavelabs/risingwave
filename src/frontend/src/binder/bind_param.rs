@@ -65,6 +65,11 @@ impl ExprRewriter for ParamRewriter {
         }
     }
 
+    fn rewrite_subquery(&mut self, mut subquery: crate::expr::Subquery) -> ExprImpl {
+        subquery.query.rewrite_exprs_recursive(self);
+        subquery.into()
+    }
+
     fn rewrite_parameter(&mut self, parameter: crate::expr::Parameter) -> ExprImpl {
         let data_type = parameter.return_type();
 
@@ -99,7 +104,7 @@ impl ExprRewriter for ParamRewriter {
             None
         };
 
-        self.parsed_params[parameter_index] = datum.clone();
+        self.parsed_params[parameter_index].clone_from(&datum);
         Literal::new(datum, data_type).into()
     }
 }
@@ -218,6 +223,19 @@ mod test {
             create_expect_bound("select 1,1::INT4"),
             create_actual_bound(
                 "select $1,$1::INT4",
+                vec![],
+                vec![Some("1".into())],
+                vec![Format::Text],
+            ),
+        );
+    }
+
+    #[tokio::test]
+    async fn subquery() {
+        expect_actual_eq(
+            create_expect_bound("select (select '1')"),
+            create_actual_bound(
+                "select (select $1)",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],

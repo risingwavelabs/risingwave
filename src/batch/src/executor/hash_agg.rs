@@ -224,7 +224,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = StreamChunk::from(chunk?);
-            let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
+            let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
             let mut memory_usage_diff = 0;
             for (row_id, (key, visible)) in keys
                 .into_iter()
@@ -466,6 +466,7 @@ mod tests {
 
     /// A test to verify that `HashMap` may leak memory counter when using `into_iter`.
     #[test]
+    #[should_panic] // TODO(MrCroxx): This bug is fixed and the test should panic. Remove the test and fix the related code later.
     fn test_hashmap_into_iter_bug() {
         let dropped: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 

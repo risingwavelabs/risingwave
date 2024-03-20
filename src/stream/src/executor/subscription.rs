@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::str::FromStr;
 use core::time::Duration;
+use std::collections::HashMap;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::types::Timestamptz;
+use risingwave_common::types::{Interval, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::store::LocalStateStore;
 use tokio::time::Instant;
@@ -29,12 +31,14 @@ use crate::common::log_store_impl::kv_log_store::ReaderTruncationOffsetType;
 use crate::common::log_store_impl::subscription_log_store::SubscriptionLogStoreWriter;
 
 const EXECUTE_GC_INTERVAL: u64 = 3600;
+const MAX_RETENTION_DAYS: i32 = 365;
+const RETENTION_SECONDS_KEY: &str = "retention";
 
 pub struct SubscriptionExecutor<LS: LocalStateStore> {
     actor_context: ActorContextRef,
     input: Executor,
     log_store: SubscriptionLogStoreWriter<LS>,
-    retention_seconds: u64,
+    retention_seconds: i64,
 }
 
 impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
@@ -44,8 +48,25 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
         actor_context: ActorContextRef,
         input: Executor,
         log_store: SubscriptionLogStoreWriter<LS>,
-        retention_seconds: u64,
+        properties: HashMap<String, String>,
     ) -> StreamExecutorResult<Self> {
+        let retention_seconds_str = properties.get(RETENTION_SECONDS_KEY).ok_or_else(|| {
+            StreamExecutorError::serde_error("Subscription retention time not set.".to_string())
+        })?;
+        let retention_seconds_interval =
+            Interval::from_str(retention_seconds_str).map_err(|_| {
+                StreamExecutorError::serde_error(
+                    "Retention needs to be set in Interval format".to_string(),
+                )
+            })?;
+        if retention_seconds_interval.days() > MAX_RETENTION_DAYS {
+            return Err(StreamExecutorError::serde_error(format!(
+                "Retention time cannot exceed {} days",
+                MAX_RETENTION_DAYS
+            )));
+        }
+        let retention_seconds = (retention_seconds_interval.epoch_in_micros() / 1000000) as i64;
+
         Ok(Self {
             actor_context,
             input,
@@ -83,7 +104,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                     let truncate_offset: Option<ReaderTruncationOffsetType> = if next_truncate_time
                         < Instant::now()
                     {
-                        let truncate_timestamptz = Timestamptz::from_secs(barrier.get_curr_epoch().as_timestamptz().timestamp() - (self.retention_seconds as i64)).ok_or_else(||{StreamExecutorError::from("Subscription retention time calculation error: timestamp is out of range.".to_string())})?;
+                        let truncate_timestamptz = Timestamptz::from_secs(barrier.get_curr_epoch().as_timestamptz().timestamp() - self.retention_seconds).ok_or_else(||{StreamExecutorError::from("Subscription retention time calculation error: timestamp is out of range.".to_string())})?;
                         let epoch =
                             Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64);
                         next_truncate_time =

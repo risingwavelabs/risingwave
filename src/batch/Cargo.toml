@@ -21,6 +21,7 @@ assert_matches = "1"
 async-recursion = "1"
 async-trait = "0.1"
 either = "1"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
@@ -70,7 +71,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 risingwave_expr_impl = { workspace = true }
-risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 

@@ -288,6 +288,10 @@ message TableOption {
   optional uint32 retention_seconds = 2;
 }
 
+message TableSchema {
+  repeated int32 column_ids = 1;
+}
+
 message CompactTask {
   enum TaskStatus {
     UNSPECIFIED = 0;
@@ -356,6 +360,8 @@ message CompactTask {
   // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
   // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
   map<uint32, TableWatermarks> table_watermarks = 24;
+  // The table schemas that are at least as new as the one used to create `input_ssts`.
+  map<uint32, TableSchema> table_schemas = 25;
 }
 
 message LevelHandler {

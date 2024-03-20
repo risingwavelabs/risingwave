@@ -116,6 +116,7 @@ impl ObserverState for FrontendObserverNode {
             tables,
             indexes,
             views,
+            subscriptions,
             functions,
             connections,
             users,
@@ -140,6 +141,9 @@ impl ObserverState for FrontendObserverNode {
         }
         for sink in sinks {
             catalog_guard.create_sink(&sink)
+        }
+        for subscription in subscriptions {
+            catalog_guard.create_subscription(&subscription)
         }
         for table in tables {
             catalog_guard.create_table(&table)
@@ -268,6 +272,16 @@ impl FrontendObserverNode {
                                 catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
                             }
                             Operation::Update => catalog_guard.update_sink(sink),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        RelationInfo::Subscription(subscription) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_subscription(subscription),
+                            Operation::Delete => catalog_guard.drop_subscription(
+                                subscription.database_id,
+                                subscription.schema_id,
+                                subscription.id,
+                            ),
+                            Operation::Update => catalog_guard.update_subscription(subscription),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         RelationInfo::Index(index) => match resp.operation() {

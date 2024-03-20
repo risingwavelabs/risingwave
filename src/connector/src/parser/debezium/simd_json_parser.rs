@@ -19,6 +19,7 @@ use simd_json::prelude::MutableObject;
 use simd_json::BorrowedValue;
 
 use crate::error::ConnectorResult;
+use crate::parser::unified::debezium::MongoJsonAccess;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::AccessBuilder;
@@ -55,6 +56,37 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
     }
 }
 
+#[derive(Debug)]
+pub struct DebeziumMongoJsonAccessBuilder {
+    value: Option<Vec<u8>>,
+}
+
+impl DebeziumMongoJsonAccessBuilder {
+    pub fn new() -> anyhow::Result<Self> {
+        Ok(Self { value: None })
+    }
+}
+
+impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+        self.value = Some(payload);
+        let mut event: BorrowedValue<'_> =
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+                .context("failed to parse debezium mongo json payload")?;
+
+        let payload = if let Some(payload) = event.get_mut("payload") {
+            std::mem::take(payload)
+        } else {
+            event
+        };
+
+        Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
+            JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM),
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
@@ -70,8 +102,8 @@ mod tests {
     use thiserror_ext::AsReport;
 
     use crate::parser::{
-        DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
-        SourceStreamChunkBuilder, SpecificParserConfig,
+        DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
+        SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceContextRef;
 
@@ -97,7 +129,7 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         DebeziumParser::new(props, rw_columns, source_ctx)
             .await

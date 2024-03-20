@@ -64,6 +64,10 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             schema_catalog.iter_index().for_each(|t| {
                 table_ids.push(t.index_table.id.table_id);
             });
+
+            schema_catalog.iter_subscription().for_each(|t| {
+                table_ids.push(t.id.subscription_id);
+            });
         }
     }
 
@@ -166,6 +170,25 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
                 created_at_cluster_version: t.created_at_cluster_version.clone(),
             });
+        });
+
+        schema_catalog.iter_subscription().for_each(|t| {
+            if let Some(fragments) = table_fragments.get(&t.id.subscription_id) {
+                rows.push(RwRelationInfo {
+                    schemaname: schema.clone(),
+                    relationname: t.name.clone(),
+                    relationowner: t.owner.user_id as i32,
+                    definition: t.definition.clone(),
+                    relationtype: "SUBSCRIPTION".into(),
+                    relationid: t.id.subscription_id as i32,
+                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
+                    fragments: Some(json!(fragments.get_fragments()).to_string()),
+                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                    created_at_cluster_version: t.created_at_cluster_version.clone(),
+                });
+            }
         });
     }
 

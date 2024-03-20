@@ -25,6 +25,7 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
+use self::ddl::AlterSubscriptionOperation;
 use crate::ast::ddl::{
     AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
     AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
@@ -815,7 +816,7 @@ impl Parser {
     pub fn parse_function(&mut self, name: ObjectName) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
         let distinct = self.parse_all_or_distinct()?;
-        let (args, order_by) = self.parse_optional_args()?;
+        let (args, order_by, variadic) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
             // TBD: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -873,6 +874,7 @@ impl Parser {
         Ok(Expr::Function(Function {
             name,
             args,
+            variadic,
             over,
             distinct,
             order_by,
@@ -2086,6 +2088,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_create_subscription(or_replace)
         } else if self.parse_keyword(Keyword::CONNECTION) {
             self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
@@ -2185,6 +2189,22 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // SUBSCRIPTION
+    // [IF NOT EXISTS]?
+    // <subscription_name: Ident>
+    // FROM
+    // <materialized_view: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_subscription(
+        &mut self,
+        _or_replace: bool,
+    ) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSubscription {
+            stmt: CreateSubscriptionStatement::parse_to(self)?,
         })
     }
 
@@ -2379,7 +2399,7 @@ impl Parser {
     //     | CREATEDB | NOCREATEDB
     //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
@@ -2904,9 +2924,11 @@ impl Parser {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_alter_subscription()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
@@ -3069,6 +3091,8 @@ impl Parser {
                 );
             };
             AlterTableOperation::AlterColumn { column_name, op }
+        } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
+            AlterTableOperation::RefreshSchema
         } else {
             return self.expected(
                 "ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE",
@@ -3233,6 +3257,59 @@ impl Parser {
         })
     }
 
+    pub fn parse_alter_subscription(&mut self) -> Result<Statement, ParserError> {
+        let subscription_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let subscription_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::RenameSubscription { subscription_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSubscriptionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected(
+                        "TO or = after ALTER TABLE SET PARALLELISM",
+                        self.peek_token(),
+                    );
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
+            } else {
+                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                "RENAME or OWNER TO or SET after ALTER SUBSCRIPTION",
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterSubscription {
+            name: subscription_name,
+            operation,
+        })
+    }
+
     pub fn parse_alter_source(&mut self) -> Result<Statement, ParserError> {
         let source_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
@@ -3264,6 +3341,8 @@ impl Parser {
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
             AlterSourceOperation::FormatEncode { connector_schema }
+        } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
+            AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",
@@ -4295,6 +4374,14 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::SUBSCRIPTIONS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Subscription {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects {
                         object: ShowObject::Database,
@@ -4448,13 +4535,12 @@ impl Parser {
                 Keyword::INDEX => ShowCreateType::Index,
                 Keyword::SOURCE => ShowCreateType::Source,
                 Keyword::SINK => ShowCreateType::Sink,
+                Keyword::SUBSCRIPTION => ShowCreateType::Subscription,
                 Keyword::FUNCTION => ShowCreateType::Function,
-                _ => {
-                    return self.expected(
-                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
-                        self.peek_token(),
-                    )
-                }
+                _ => return self.expected(
+                    "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
+                    self.peek_token(),
+                ),
             };
             return Ok(Statement::ShowCreateObject {
                 create_type: show_type,
@@ -4462,7 +4548,7 @@ impl Parser {
             });
         }
         self.expected(
-            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
+            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
             self.peek_token(),
         )
     }
@@ -4626,7 +4712,8 @@ impl Parser {
             let name = self.parse_object_name()?;
             // Postgres,table-valued functions:
             if self.consume_token(&Token::LParen) {
-                let (args, order_by) = self.parse_optional_args()?;
+                // ignore VARIADIC here
+                let (args, order_by, _variadic) = self.parse_optional_args()?;
                 // Table-valued functions do not support ORDER BY, should return error if it appears
                 if !order_by.is_empty() {
                     return parser_err!("Table-valued functions do not support ORDER BY clauses");
@@ -4909,33 +4996,46 @@ impl Parser {
         Ok(Assignment { id, value })
     }
 
-    fn parse_function_args(&mut self) -> Result<FunctionArg, ParserError> {
-        if self.peek_nth_token(1) == Token::RArrow {
+    /// Parse a `[VARIADIC] name => expr`.
+    fn parse_function_args(&mut self) -> Result<(bool, FunctionArg), ParserError> {
+        let variadic = self.parse_keyword(Keyword::VARIADIC);
+        let arg = if self.peek_nth_token(1) == Token::RArrow {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
             let arg = self.parse_wildcard_or_expr()?.into();
 
-            Ok(FunctionArg::Named { name, arg })
+            FunctionArg::Named { name, arg }
         } else {
-            Ok(FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into()))
-        }
+            FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into())
+        };
+        Ok((variadic, arg))
     }
 
     pub fn parse_optional_args(
         &mut self,
-    ) -> Result<(Vec<FunctionArg>, Vec<OrderByExpr>), ParserError> {
+    ) -> Result<(Vec<FunctionArg>, Vec<OrderByExpr>, bool), ParserError> {
         if self.consume_token(&Token::RParen) {
-            Ok((vec![], vec![]))
+            Ok((vec![], vec![], false))
         } else {
             let args = self.parse_comma_separated(Parser::parse_function_args)?;
+            if args
+                .iter()
+                .take(args.len() - 1)
+                .any(|(variadic, _)| *variadic)
+            {
+                return parser_err!("VARIADIC argument must be last");
+            }
+            let variadic = args.last().map(|(variadic, _)| *variadic).unwrap_or(false);
+            let args = args.into_iter().map(|(_, arg)| arg).collect();
+
             let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
                 self.parse_comma_separated(Parser::parse_order_by_expr)?
             } else {
                 vec![]
             };
             self.expect_token(&Token::RParen)?;
-            Ok((args, order_by))
+            Ok((args, order_by, variadic))
         }
     }
 

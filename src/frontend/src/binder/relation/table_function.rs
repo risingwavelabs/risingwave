@@ -108,6 +108,7 @@ impl Binder {
         let func = self.bind_function(Function {
             name,
             args,
+            variadic: false,
             over: None,
             distinct: false,
             order_by: vec![],

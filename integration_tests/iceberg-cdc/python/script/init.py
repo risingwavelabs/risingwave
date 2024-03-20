@@ -82,8 +82,11 @@ def init_risingwave_mv(args):
             s3.endpoint = 'http://minio-0:9301',
             s3.access.key = 'hummockadmin',
             s3.secret.key = 'hummockadmin',
-            database.name='demo',
-            table.name='s1.t1',warehouse.path = 's3://icebergdata/demo/s1/t1',s3.region = 'us-east-1'
+            catalog.name='demo',
+            database.name='s1',
+            table.name='t1',
+            warehouse.path = 's3://icebergdata/demo',
+            s3.region = 'us-east-1'
         );
         """
     ]

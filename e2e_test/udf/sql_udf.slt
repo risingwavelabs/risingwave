@@ -332,12 +332,49 @@ In SQL UDF definition: `select i_am_valid + _this_is_invalid_please_properly_mar
                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
+# sql udf with non-existent function
+statement error
+create function call_non_existent_function(INT) returns int language sql as 'select 1 + non_existent(1) + 1';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+function non_existent(integer) does not exist
+In SQL UDF definition: `select 1 + non_existent(1) + 1`
+                                   ^^^^^^^^^^^^
+
+
+# First display invalid parameter
+# if not found, try displaying non-existent functions
+# if still not found, display default error message without hint
+statement error
+create function param_func_mix(a INT, b INT) returns int language sql as 'select a + b + c + not_be_displayed(c)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+Bind error: [sql udf] failed to find named parameter c
+In SQL UDF definition: `select a + b + c + not_be_displayed(c)`
+                                       ^
+
+
 statement error Expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
 
 # Recursive definition can NOT be accepted at present due to semantic check
-statement error Failed to conduct semantic check
+statement error
 create function recursive(INT, INT) returns int language sql as 'select recursive($1, $2) + recursive($1, $2)';
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Failed to conduct semantic check
+function recursive(integer, integer) does not exist
+In SQL UDF definition: `select recursive($1, $2) + recursive($1, $2)`
+                               ^^^^^^^^^
+
 
 # Complex but error-prone definition, recursive & normal sql udfs interleaving
 statement error Failed to conduct semantic check

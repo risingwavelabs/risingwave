@@ -35,15 +35,9 @@ impl MetaNodeService {
     fn meta_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE")
-            && x == "true"
-        {
-            Ok(Command::new(
-                Path::new(&prefix_bin).join("risingwave").join("meta-node"),
-            ))
-        } else {
-            Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
-        }
+        Ok(Command::new(
+            Path::new(&prefix_bin).join("risingwave").join("meta-node"),
+        ))
     }
 
     /// Apply command args according to config
@@ -201,9 +195,6 @@ impl Task for MetaNodeService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-
-        cmd.arg("--dashboard-ui-path")
-            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

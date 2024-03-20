@@ -97,7 +97,7 @@ pub struct BackfillExecutor<S: StateStore> {
 
     /// Rate limit, just used to initialize the chunk size for
     /// snapshot read side.
-    /// If smaller than chunk_size, it will take precedence.
+    /// If smaller than `chunk_size`, it will take precedence.
     rate_limit: Option<usize>,
 }
 
@@ -216,6 +216,23 @@ where
         if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
+
+            let backfill_snapshot_read_row_count_metric = self
+                .metrics
+                .backfill_snapshot_read_row_count
+                .with_guarded_label_values(&[
+                    upstream_table_id.to_string().as_str(),
+                    self.actor_id.to_string().as_str(),
+                ]);
+
+            let backfill_upstream_output_row_count_metric = self
+                .metrics
+                .backfill_upstream_output_row_count
+                .with_guarded_label_values(&[
+                    upstream_table_id.to_string().as_str(),
+                    self.actor_id.to_string().as_str(),
+                ]);
+
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
@@ -301,7 +318,10 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-
+                                        backfill_snapshot_read_row_count_metric
+                                            .inc_by(cur_barrier_snapshot_processed_rows);
+                                        backfill_upstream_output_row_count_metric
+                                            .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
                                     Some(record) => {
@@ -403,20 +423,8 @@ where
                     upstream_chunk_buffer.clear()
                 }
 
-                self.metrics
-                    .backfill_snapshot_read_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
-                    .inc_by(cur_barrier_snapshot_processed_rows);
-
-                self.metrics
-                    .backfill_upstream_output_row_count
-                    .with_label_values(&[
-                        upstream_table_id.to_string().as_str(),
-                        self.actor_id.to_string().as_str(),
-                    ])
+                backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
+                backfill_upstream_output_row_count_metric
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.

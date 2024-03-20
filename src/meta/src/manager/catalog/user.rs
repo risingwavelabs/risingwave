@@ -55,6 +55,12 @@ impl UserManager {
             .chain(database.indexes.values().map(|index| index.owner))
             .chain(
                 database
+                    .subscriptions
+                    .values()
+                    .map(|subscriptions| subscriptions.owner),
+            )
+            .chain(
+                database
                     .tables
                     .values()
                     .filter(|table| table.table_type() != TableType::Internal)
@@ -136,6 +142,7 @@ impl UserManager {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID};
+    use risingwave_pb::catalog::PbTable;
     use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
     use risingwave_pb::user::GrantPrivilege;
 
@@ -189,6 +196,31 @@ mod tests {
 
         let users = catalog_manager.list_users().await;
         assert_eq!(users.len(), 4);
+
+        let table = PbTable {
+            id: 0,
+            name: "t1".to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
+            ..Default::default()
+        };
+        let other_table = PbTable {
+            id: 1,
+            name: "t2".to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
+            ..Default::default()
+        };
+        catalog_manager
+            .start_create_table_procedure(&table, vec![])
+            .await?;
+        catalog_manager
+            .finish_create_table_procedure(vec![], table)
+            .await?;
+        catalog_manager
+            .start_create_table_procedure(&other_table, vec![])
+            .await?;
+        catalog_manager
+            .finish_create_table_procedure(vec![], other_table)
+            .await?;
 
         let object = Object::TableId(0);
         let other_object = Object::TableId(1);

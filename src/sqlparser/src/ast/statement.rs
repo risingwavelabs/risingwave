@@ -133,9 +133,10 @@ impl Format {
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
+            "NONE" => Format::None, // used by iceberg
             _ => {
                 return Err(ParserError::ParserError(
-                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE after FORMAT"
+                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
                         .to_string(),
                 ))
             }
@@ -186,8 +187,9 @@ impl Encode {
             "JSON" => Encode::Json,
             "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native, // used internally for schema change
+            "NONE" => Encode::None, // used by iceberg
             _ => return Err(ParserError::ParserError(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | NONE after Encode"
                     .to_string(),
             )),
         })
@@ -219,12 +221,16 @@ impl Parser {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
+        // FIXME: parse input `connector` to enum type instead using string here
         if connector.contains("-cdc") {
             let expected = if cdc_source_job {
                 ConnectorSchema::plain_json()
+            } else if connector.contains("mongodb") {
+                ConnectorSchema::debezium_mongo_json()
             } else {
                 ConnectorSchema::debezium_json()
             };
+
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
@@ -270,7 +276,7 @@ impl Parser {
         }
     }
 
-    /// Parse `FORMAT ... ENCODE ... (...)` in `CREATE SOURCE` and `CREATE SINK`.
+    /// Parse `FORMAT ... ENCODE ... (...)`.
     pub fn parse_schema(&mut self) -> Result<Option<ConnectorSchema>, ParserError> {
         if !self.parse_keyword(Keyword::FORMAT) {
             return Ok(None);
@@ -306,6 +312,14 @@ impl ConnectorSchema {
     pub const fn debezium_json() -> Self {
         ConnectorSchema {
             format: Format::Debezium,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
+    pub const fn debezium_mongo_json() -> Self {
+        ConnectorSchema {
+            format: Format::DebeziumMongo,
             row_encode: Encode::Json,
             row_options: Vec::new(),
         }
@@ -554,6 +568,72 @@ impl fmt::Display for CreateSinkStatement {
     }
 }
 
+// sql_grammar!(CreateSubscriptionStatement {
+//     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
+//     subscription_name: Ident,
+//     [Keyword::FROM],
+//     materialized_view: Ident,
+//     with_properties: AstOption<WithProperties>,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateSubscriptionStatement {
+    pub if_not_exists: bool,
+    pub subscription_name: ObjectName,
+    pub with_properties: WithProperties,
+    pub subscription_from: ObjectName,
+    // pub emit_mode: Option<EmitMode>,
+}
+
+impl ParseTo for CreateSubscriptionStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
+        impl_parse_to!(subscription_name: ObjectName, p);
+
+        let subscription_from = if p.parse_keyword(Keyword::FROM) {
+            impl_parse_to!(from_name: ObjectName, p);
+            from_name
+        } else {
+            p.expected(
+                "FROM after CREATE SUBSCRIPTION subscription_name",
+                p.peek_token(),
+            )?
+        };
+
+        // let emit_mode = p.parse_emit_mode()?;
+
+        // This check cannot be put into the `WithProperties::parse_to`, since other
+        // statements may not need the with properties.
+        if !p.peek_nth_any_of_keywords(0, &[Keyword::WITH]) {
+            p.expected("WITH", p.peek_token())?
+        }
+        impl_parse_to!(with_properties: WithProperties, p);
+
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "subscription properties not provided".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            if_not_exists,
+            subscription_name,
+            with_properties,
+            subscription_from,
+        })
+    }
+}
+impl fmt::Display for CreateSubscriptionStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(subscription_name, v, self);
+        v.push(format!("FROM {}", self.subscription_from));
+        impl_fmt_display!(with_properties, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 // sql_grammar!(CreateConnectionStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     connection_name: Ident,
@@ -741,6 +821,7 @@ pub enum UserOption {
     NoLogin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
+    OAuth(Vec<SqlOption>),
 }
 
 impl fmt::Display for UserOption {
@@ -757,6 +838,9 @@ impl fmt::Display for UserOption {
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::OAuth(options) => {
+                write!(f, "({})", display_comma_separated(options.as_slice()))
+            }
         }
     }
 }
@@ -844,10 +928,14 @@ impl ParseTo for UserOptions {
                             UserOption::EncryptedPassword(AstString::parse_to(parser)?),
                         )
                     }
+                    Keyword::OAUTH => {
+                        let options = parser.parse_options()?;
+                        (&mut builder.password, UserOption::OAuth(options))
+                    }
                     _ => {
                         parser.expected(
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                             token,
                         )?;
                         unreachable!()
@@ -857,7 +945,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL | OAUTH",
                     token,
                 )?
             }

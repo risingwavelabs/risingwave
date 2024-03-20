@@ -34,6 +34,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::MetaResult;
 
 #[derive(Clone)]
@@ -319,6 +320,29 @@ impl MetadataManager {
                 .await),
             MetadataManager::V2(mgr) => {
                 mgr.cluster_controller.list_active_streaming_workers().await
+            }
+        }
+    }
+
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
+        match self {
+            MetadataManager::V1(mgr) => {
+                let tables = mgr.catalog_manager.list_creating_background_mvs().await;
+                Ok(tables
+                    .into_iter()
+                    .map(|table| TableId::from(table.id))
+                    .collect())
+            }
+            MetadataManager::V2(mgr) => {
+                let tables = mgr
+                    .catalog_controller
+                    .list_background_creating_mviews()
+                    .await?;
+
+                Ok(tables
+                    .into_iter()
+                    .map(|table| TableId::from(table.table_id as u32))
+                    .collect())
             }
         }
     }
@@ -661,16 +685,13 @@ impl MetadataManager {
         }
     }
 
-    pub async fn drop_streaming_job_by_ids(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+    pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
         match self {
-            MetadataManager::V1(mgr) => {
-                mgr.fragment_manager
-                    .drop_table_fragments_vec(table_ids)
+            MetadataManager::V1(mgr) => mgr.catalog_manager.list_stream_job_for_telemetry().await,
+            MetadataManager::V2(mgr) => {
+                mgr.catalog_controller
+                    .list_stream_job_desc_for_telemetry()
                     .await
-            }
-            MetadataManager::V2(_) => {
-                // Do nothing. Need to refine drop and cancel process.
-                Ok(())
             }
         }
     }

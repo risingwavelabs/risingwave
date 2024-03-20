@@ -28,7 +28,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
@@ -486,6 +486,17 @@ impl HummockIterator for ConcatSstableIterator {
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
     }
+
+    fn value_meta(&self) -> ValueMeta {
+        let iter = self.sstable_iter.as_ref().expect("no table iter");
+        // sstable_iter's seek_block_idx must have advanced at least one.
+        // See SstableStreamIterator::next_block.
+        assert!(iter.seek_block_idx >= 1);
+        ValueMeta {
+            object_id: Some(iter.sstable_info.object_id),
+            block_id: Some(iter.seek_block_idx as u64 - 1),
+        }
+    }
 }
 
 pub struct MonitoredCompactorIterator<I> {
@@ -546,6 +557,10 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats)
+    }
+
+    fn value_meta(&self) -> ValueMeta {
+        self.inner.value_meta()
     }
 }
 

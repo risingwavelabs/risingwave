@@ -113,7 +113,7 @@ pub struct FragmentManager {
 }
 
 pub struct ActorInfos {
-    /// node_id => actor_ids
+    /// `node_id` => `actor_ids`
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable barrier inject actors
@@ -439,8 +439,8 @@ impl FragmentManager {
                                 if m.upstream_fragment_id == merge_update.upstream_fragment_id {
                                     m.upstream_fragment_id =
                                         merge_update.new_upstream_fragment_id.unwrap();
-                                    m.upstream_actor_id =
-                                        merge_update.added_upstream_actor_id.clone();
+                                    m.upstream_actor_id
+                                        .clone_from(&merge_update.added_upstream_actor_id);
                                 }
                                 upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }
@@ -547,7 +547,10 @@ impl FragmentManager {
     /// tables.
     /// If table fragments already deleted, this should just be noop,
     /// the delete function (`table_fragments.remove`) will not return an error.
-    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<Vec<u32>> {
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -559,7 +562,9 @@ impl FragmentManager {
 
         let mut dirty_sink_into_table_upstream_fragment_id = HashSet::new();
         let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_ids_to_unregister_from_hummock = vec![];
         for table_fragment in &to_delete_table_fragments {
+            table_ids_to_unregister_from_hummock.extend(table_fragment.all_table_ids());
             table_fragments.remove(table_fragment.table_id());
             let to_remove_actor_ids: HashSet<_> = table_fragment.actor_ids().into_iter().collect();
             let dependent_table_ids = table_fragment.dependent_table_ids();
@@ -634,7 +639,7 @@ impl FragmentManager {
             }
         }
 
-        Ok(())
+        Ok(table_ids_to_unregister_from_hummock)
     }
 
     // When dropping sink into a table, there could be an unexpected meta reboot. At this time, the sink’s catalog might have been deleted,

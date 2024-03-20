@@ -576,6 +576,21 @@ where
     Ok(user_infos)
 }
 
+/// `get_object_owner` returns the owner of the given object.
+pub async fn get_object_owner<C>(object_id: ObjectId, db: &C) -> MetaResult<UserId>
+where
+    C: ConnectionTrait,
+{
+    let obj_owner: UserId = Object::find_by_id(object_id)
+        .select_only()
+        .column(object::Column::OwnerId)
+        .into_tuple()
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+    Ok(obj_owner)
+}
+
 /// `construct_privilege_dependency_query` constructs a query to find all privileges that are dependent on the given one.
 ///
 /// # Examples
@@ -716,6 +731,7 @@ where
                 ObjectType::Function => PbObject::FunctionId(oid),
                 ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
+                ObjectType::Subscription => PbObject::SubscriptionId(oid),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {

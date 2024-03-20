@@ -47,6 +47,7 @@ mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_system;
 mod alter_table_column;
+mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
 mod comment;
@@ -59,6 +60,7 @@ pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
+pub mod create_subscription;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
@@ -72,6 +74,7 @@ pub mod drop_mv;
 mod drop_schema;
 pub mod drop_sink;
 pub mod drop_source;
+pub mod drop_subscription;
 pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
@@ -205,6 +208,11 @@ impl HandlerArgs {
             } => {
                 *if_not_exists = false;
             }
+            Statement::CreateSubscription {
+                stmt: CreateSubscriptionStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
             Statement::CreateConnection {
                 stmt: CreateConnectionStatement { if_not_exists, .. },
             } => {
@@ -236,6 +244,9 @@ pub async fn handle(
             create_source::handle_create_source(handler_args, stmt).await
         }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateSubscription { stmt } => {
+            create_subscription::handle_create_subscription(handler_args, stmt).await
+        }
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
         }
@@ -373,6 +384,7 @@ pub async fn handle(
                     | ObjectType::View
                     | ObjectType::Sink
                     | ObjectType::Source
+                    | ObjectType::Subscription
                     | ObjectType::Index
                     | ObjectType::Table => {
                         cascade = true;
@@ -403,6 +415,15 @@ pub async fn handle(
                 }
                 ObjectType::Sink => {
                     drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
+                }
+                ObjectType::Subscription => {
+                    drop_subscription::handle_drop_subscription(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        cascade,
+                    )
+                    .await
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(
@@ -598,6 +619,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RefreshSchema,
+        } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -749,6 +774,52 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
+        } => alter_rename::handle_rename_subscription(handler_args, name, subscription_name).await,
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SUBSCRIPTION,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation: AlterSubscriptionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SUBSCRIPTION,
+                None,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation:
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism,
+                    deferred,
+                },
+        } => {
+            alter_parallelism::handle_alter_parallelism(
+                handler_args,
+                name,
+                parallelism,
+                StatementType::ALTER_SUBSCRIPTION,
+                deferred,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
@@ -789,6 +860,10 @@ pub async fn handle(
             alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
                 .await
         }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::RefreshSchema,
+        } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
         Statement::AlterFunction {
             name,
             args,

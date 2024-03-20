@@ -49,9 +49,13 @@ pub enum AlterTableOperation {
     /// `ADD <table_constraint>`
     AddConstraint(TableConstraint),
     /// `ADD [ COLUMN ] <column_def>`
-    AddColumn { column_def: ColumnDef },
+    AddColumn {
+        column_def: ColumnDef,
+    },
     /// TODO: implement `DROP CONSTRAINT <name>`
-    DropConstraint { name: Ident },
+    DropConstraint {
+        name: Ident,
+    },
     /// `DROP [ COLUMN ] [ IF EXISTS ] <column_name> [ CASCADE ]`
     DropColumn {
         column_name: Ident,
@@ -64,7 +68,9 @@ pub enum AlterTableOperation {
         new_column_name: Ident,
     },
     /// `RENAME TO <table_name>`
-    RenameTable { table_name: ObjectName },
+    RenameTable {
+        table_name: ObjectName,
+    },
     // CHANGE [ COLUMN ] <old_name> <new_name> <data_type> [ <options> ]
     ChangeColumn {
         old_name: Ident,
@@ -75,21 +81,29 @@ pub enum AlterTableOperation {
     /// `RENAME CONSTRAINT <old_constraint_name> TO <new_constraint_name>`
     ///
     /// Note: this is a PostgreSQL-specific operation.
-    RenameConstraint { old_name: Ident, new_name: Ident },
+    RenameConstraint {
+        old_name: Ident,
+        new_name: Ident,
+    },
     /// `ALTER [ COLUMN ]`
     AlterColumn {
         column_name: Ident,
         op: AlterColumnOperation,
     },
     /// `OWNER TO <owner_name>`
-    ChangeOwner { new_owner_name: Ident },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
     /// `SET SCHEMA <schema_name>`
-    SetSchema { new_schema_name: ObjectName },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    RefreshSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -149,12 +163,33 @@ pub enum AlterSinkOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSubscriptionOperation {
+    RenameSubscription {
+        subscription_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
+    RefreshSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -263,6 +298,9 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
+            }
         }
     }
 }
@@ -342,6 +380,33 @@ impl fmt::Display for AlterSinkOperation {
     }
 }
 
+impl fmt::Display for AlterSubscriptionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                write!(f, "RENAME TO {subscription_name}")
+            }
+            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+        }
+    }
+}
+
 impl fmt::Display for AlterSourceOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -359,6 +424,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::FormatEncode { connector_schema } => {
                 write!(f, "{connector_schema}")
+            }
+            AlterSourceOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
             }
         }
     }

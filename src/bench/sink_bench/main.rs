@@ -457,6 +457,7 @@ async fn main() {
         .unwrap();
         let sink_param = SinkParam {
             sink_id: SinkId::new(1),
+            sink_name: cfg.sink.clone(),
             properties,
             columns: table_schema.get_sink_schema(),
             downstream_pk: table_schema.pk_indices,

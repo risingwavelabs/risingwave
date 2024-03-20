@@ -55,7 +55,6 @@ use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
-
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
@@ -354,11 +353,21 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
-                    for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
+                    // For file source batch read, all the files  to be read  are divide into several parts to prevent the task from taking up too many resources.
+
+                    let chunk_size = (source_info.split_info().unwrap().len() as f32
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
+                        .ceil() as usize;
+                    for (id, split) in source_info
+                        .split_info()
+                        .unwrap()
+                        .chunks(chunk_size)
+                        .enumerate()
+                    {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
-                            Some(PartitionInfo::Source(split.clone())),
+                            Some(PartitionInfo::Source(split.to_vec())),
                             next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
@@ -470,7 +479,10 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_source()
                                 .expect("PartitionInfo should be SourcePartitionInfo here");
-                            source_node.split = partition.encode_to_bytes().into();
+                            source_node.split = partition
+                                .into_iter()
+                                .map(|split| split.encode_to_bytes().into())
+                                .collect_vec();
                         }
                     }
                     _ => unreachable!(),

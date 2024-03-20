@@ -147,6 +147,11 @@ impl BuildingFragment {
 
                 has_table = true;
             }
+            NodeBody::Subscription(subscription_node) => {
+                subscription_node.subscription_catalog.as_mut().unwrap().id = table_id;
+
+                has_table = true;
+            }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
@@ -654,7 +659,10 @@ impl CompleteStreamFragmentGraph {
 
                             (source_job_id, edge)
                         }
-                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
+                        DdlType::MaterializedView
+                        | DdlType::Sink
+                        | DdlType::Index
+                        | DdlType::Subscription => {
                             // handle MV on MV
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::v2::AsReport as _;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
@@ -64,16 +63,5 @@ pub fn compactor(opts: CompactorOpts) {
 
 pub fn ctl(opts: CtlOpts) {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-
-    // Note: Use a simple current thread runtime for ctl.
-    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
-    // further investigation.
-    if let Err(e) = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_ctl::start(opts))
-    {
-        eprintln!("Error: {:#?}", e.as_report());
-    }
+    main_okk(risingwave_ctl::start(opts));
 }

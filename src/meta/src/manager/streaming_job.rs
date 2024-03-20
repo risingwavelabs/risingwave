@@ -15,7 +15,7 @@
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
+use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Subscription, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use strum::EnumDiscriminants;
 
@@ -26,6 +26,7 @@ use crate::model::FragmentId;
 #[derive(Debug, Clone, EnumDiscriminants)]
 pub enum StreamingJob {
     MaterializedView(Table),
+    Subscription(Subscription),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
     Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
@@ -36,6 +37,7 @@ pub enum StreamingJob {
 pub enum DdlType {
     MaterializedView,
     Sink,
+    Subscription,
     Table(TableJobType),
     Index,
     Source,
@@ -49,6 +51,7 @@ impl From<&StreamingJob> for DdlType {
             StreamingJob::Table(_, _, ty) => DdlType::Table(*ty),
             StreamingJob::Index(_, _) => DdlType::Index,
             StreamingJob::Source(_) => DdlType::Source,
+            StreamingJob::Subscription(_) => DdlType::Subscription,
         }
     }
 }
@@ -75,7 +78,9 @@ impl StreamingJob {
             StreamingJob::Sink(table, _) => table.created_at_epoch = created_at_epoch,
             StreamingJob::Table(source, table, ..) => {
                 table.created_at_epoch = created_at_epoch;
-                table.created_at_cluster_version = created_at_cluster_version.clone();
+                table
+                    .created_at_cluster_version
+                    .clone_from(&created_at_cluster_version);
                 if let Some(source) = source {
                     source.created_at_epoch = created_at_epoch;
                     source.created_at_cluster_version = created_at_cluster_version;
@@ -88,6 +93,10 @@ impl StreamingJob {
             StreamingJob::Source(source) => {
                 source.created_at_epoch = created_at_epoch;
                 source.created_at_cluster_version = created_at_cluster_version;
+            }
+            StreamingJob::Subscription(subscription) => {
+                subscription.created_at_epoch = created_at_epoch;
+                subscription.created_at_cluster_version = created_at_cluster_version;
             }
         }
     }
@@ -106,7 +115,9 @@ impl StreamingJob {
             }
             StreamingJob::Table(source, table, ..) => {
                 table.initialized_at_epoch = initialized_at_epoch;
-                table.initialized_at_cluster_version = initialized_at_cluster_version.clone();
+                table
+                    .initialized_at_cluster_version
+                    .clone_from(&initialized_at_cluster_version);
 
                 if let Some(source) = source {
                     source.initialized_at_epoch = initialized_at_epoch;
@@ -120,6 +131,10 @@ impl StreamingJob {
             StreamingJob::Source(source) => {
                 source.initialized_at_epoch = initialized_at_epoch;
                 source.initialized_at_cluster_version = initialized_at_cluster_version;
+            }
+            StreamingJob::Subscription(subscription) => {
+                subscription.initialized_at_epoch = initialized_at_epoch;
+                subscription.initialized_at_cluster_version = initialized_at_cluster_version;
             }
         }
     }
@@ -139,6 +154,9 @@ impl StreamingJob {
             StreamingJob::Source(src) => {
                 src.id = id;
             }
+            StreamingJob::Subscription(subscription) => {
+                subscription.id = id;
+            }
         }
     }
 
@@ -148,7 +166,7 @@ impl StreamingJob {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
                 table.fragment_id = id;
             }
-            Self::Sink(_, _) | Self::Source(_) => {}
+            Self::Sink(_, _) | Self::Source(_) | Self::Subscription(_) => {}
         }
     }
 
@@ -158,7 +176,10 @@ impl StreamingJob {
             Self::Table(_, table, ..) => {
                 table.dml_fragment_id = id;
             }
-            Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_, _) => {}
+            Self::MaterializedView(_)
+            | Self::Index(_, _)
+            | Self::Sink(_, _)
+            | Self::Subscription(_) => {}
             Self::Source(_) => {}
         }
     }
@@ -170,6 +191,7 @@ impl StreamingJob {
             Self::Table(_, table, ..) => table.id,
             Self::Index(index, _) => index.id,
             Self::Source(source) => source.id,
+            Self::Subscription(subscription) => subscription.id,
         }
     }
 
@@ -180,6 +202,7 @@ impl StreamingJob {
             Self::Table(_, table, ..) => Some(table.id),
             Self::Index(_, table) => Some(table.id),
             Self::Source(_) => None,
+            Self::Subscription(_) => None,
         }
     }
 
@@ -189,7 +212,7 @@ impl StreamingJob {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
                 Some(table)
             }
-            Self::Sink(_, _) | Self::Source(_) => None,
+            Self::Sink(_, _) | Self::Source(_) | Self::Subscription(_) => None,
         }
     }
 
@@ -200,6 +223,7 @@ impl StreamingJob {
             Self::Table(_, table, ..) => table.schema_id,
             Self::Index(index, _) => index.schema_id,
             Self::Source(source) => source.schema_id,
+            Self::Subscription(subscription) => subscription.schema_id,
         }
     }
 
@@ -210,6 +234,7 @@ impl StreamingJob {
             Self::Table(_, table, ..) => table.database_id,
             Self::Index(index, _) => index.database_id,
             Self::Source(source) => source.database_id,
+            Self::Subscription(subscription) => subscription.database_id,
         }
     }
 
@@ -220,6 +245,7 @@ impl StreamingJob {
             Self::Table(_, table, ..) => table.name.clone(),
             Self::Index(index, _) => index.name.clone(),
             Self::Source(source) => source.name.clone(),
+            Self::Subscription(subscription) => subscription.name.clone(),
         }
     }
 
@@ -230,6 +256,7 @@ impl StreamingJob {
             StreamingJob::Table(_, table, ..) => table.owner,
             StreamingJob::Index(index, _) => index.owner,
             StreamingJob::Source(source) => source.owner,
+            StreamingJob::Subscription(subscription) => subscription.owner,
         }
     }
 
@@ -240,6 +267,7 @@ impl StreamingJob {
             Self::Index(_, table) => table.definition.clone(),
             Self::Sink(sink, _) => sink.definition.clone(),
             Self::Source(source) => source.definition.clone(),
+            Self::Subscription(subscription) => subscription.definition.clone(),
         }
     }
 
@@ -277,6 +305,7 @@ impl StreamingJob {
                 vec![]
             }
             StreamingJob::Source(_) => vec![],
+            Self::Subscription(subscription) => subscription.dependent_relations.clone(),
         }
     }
 

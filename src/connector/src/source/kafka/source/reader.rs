@@ -79,7 +79,7 @@ impl SplitReader for KafkaSplitReader {
             "group.id",
             format!(
                 "rw-consumer-{}-{}",
-                source_ctx.source_info.fragment_id, source_ctx.source_info.actor_id
+                source_ctx.fragment_id, source_ctx.actor_id
             ),
         );
 
@@ -87,9 +87,7 @@ impl SplitReader for KafkaSplitReader {
             broker_rewrite_map,
             Some(format!(
                 "fragment-{}-source-{}-actor-{}",
-                source_ctx.source_info.fragment_id,
-                source_ctx.source_info.source_id,
-                source_ctx.source_info.actor_id
+                source_ctx.fragment_id, source_ctx.source_id, source_ctx.actor_id
             )),
             // thread consumer will keep polling in the background, we don't need to call `poll`
             // explicitly
@@ -160,8 +158,8 @@ impl KafkaSplitReader {
             .latest_message_id
             .with_label_values(&[
                 // source name is not available here
-                &self.source_ctx.source_info.source_id.to_string(),
-                &self.source_ctx.source_info.actor_id.to_string(),
+                &self.source_ctx.source_id.to_string(),
+                &self.source_ctx.actor_id.to_string(),
                 split_id,
             ])
             .set(offset);

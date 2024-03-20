@@ -89,7 +89,7 @@ impl State {
             self.cur_item_freq = 1;
         }
         if self.cur_item_freq > self.cur_mode_freq {
-            self.cur_mode = self.cur_item.clone();
+            self.cur_mode.clone_from(&self.cur_item);
             self.cur_mode_freq = self.cur_item_freq;
         }
     }
