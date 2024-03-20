@@ -1842,6 +1842,8 @@ impl ScaleController {
                 }
             }
 
+            println!("actor map {:?}", actor_fragment_id_map_for_check);
+
             for (table_id, table_fragments) in table_fragments {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
@@ -1870,8 +1872,9 @@ impl ScaleController {
                                         dispatcher.dispatcher_id as FragmentId
                                     );
                                 } else {
-                                    tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
+                                    panic!(
+                                        "up {} downstream actor id {} not found in fragment_actor_id_map",
+                                        actor.actor_id,
                                         downstream_actor_id
                                     );
                                 }
