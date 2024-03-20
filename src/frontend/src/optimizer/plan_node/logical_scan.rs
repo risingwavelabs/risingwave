@@ -30,7 +30,7 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::error::Result;
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -428,7 +428,6 @@ impl ConditionRewriter {
         condition
     }
 }
-
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(
