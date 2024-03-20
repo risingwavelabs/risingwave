@@ -30,7 +30,7 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::error::Result;
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
@@ -384,6 +384,52 @@ impl ExprVisitable for LogicalScan {
     }
 }
 
+/// The condition rewriter *only* used by predicate push down (e.g., LogicalScan)
+/// we do not directly rewrite in `condition.rs` (i.e., the `simplify`) since
+/// this should only apply to the predicate, otherwise it may be *semantically*
+/// wrong especially when `null` is involved.
+///
+/// consider the following example, e.g.,
+/// ```sql
+///     create table t1 (c1 INT nullable);
+///     select c1 from t1 where not(c1 > 1) and (c1 > 1);
+/// ```
+///
+/// we can easily replace this predicate with `Condition::false_cond`,
+/// since both `null` and `false` will be *filtered* out
+/// from a `where clause / filter`'s perspective.
+struct ConditionRewriter {}
+impl ConditionRewriter {
+    pub fn rewrite(condition: Condition) -> Condition {
+        let conjunctions = condition.conjunctions.clone();
+        let mut set = HashSet::new();
+        let mut not_set = HashSet::new();
+        for expr in conjunctions {
+            let e;
+            let mut not_flag = false;
+            if let ExprImpl::FunctionCall(func_call) = expr.clone() {
+                // Not(e)
+                if func_call.func_type() == ExprType::Not && func_call.inputs().len() == 1 {
+                    e = func_call.inputs()[0].clone();
+                    not_set.insert(e.clone());
+                    not_flag = true;
+                } else {
+                    e = expr;
+                }
+            } else {
+                e = expr;
+            }
+            if (!not_flag && not_set.contains(&e)) || (not_flag && set.contains(&e)) {
+                return Condition::false_cond();
+            } else if !not_flag {
+                set.insert(e);
+            }
+        }
+        condition
+    }
+}
+
+
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(
         &self,
@@ -416,6 +462,7 @@ impl PredicatePushdown for LogicalScan {
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));
+        let predicate = ConditionRewriter::rewrite(predicate);
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()

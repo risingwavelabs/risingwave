@@ -416,14 +416,6 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
-static BATCH_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
-    OptimizationStage::new(
-        "Batch Filter Expression Simplify",
-        vec![BatchFilterExpressionSimplifyRule::create()],
-        ApplyOrder::TopDown,
-    )
-});
-
 static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Logical Filter Expression Simplify",
@@ -735,8 +727,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
-
-        plan = plan.optimize_by_rules(&BATCH_FILTER_EXPRESSION_SIMPLIFY);
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
