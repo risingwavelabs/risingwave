@@ -1842,8 +1842,6 @@ impl ScaleController {
                 }
             }
 
-            println!("actor map {:?}", actor_fragment_id_map_for_check);
-
             for (table_id, table_fragments) in table_fragments {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
