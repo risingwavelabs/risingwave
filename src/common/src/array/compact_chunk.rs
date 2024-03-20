@@ -28,15 +28,10 @@ use crate::array::{Op, RowRef, StreamChunk};
 use crate::row::{Project, RowExt};
 use crate::util::hash_util::Crc32FastBuilder;
 
-/// Compact the stream chunks with just modify the `Ops` and visibility of the chunk. Currently, two
-/// transformation will be applied
-/// - remove intermediate operation of the same key. The operations of the same stream key will only
-///   have three kind of patterns Insert, Delete or Update.
-/// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
-///   removed.
+/// A helper to compact the stream chunks with just modify the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
-    stream_key: Vec<usize>,
+    key: Vec<usize>,
 }
 
 struct OpRowMutRefTuple<'a> {
@@ -183,16 +178,21 @@ impl<'a, 'b> RowOpMap<'a, 'b> {
 }
 
 impl StreamChunkCompactor {
-    pub fn new(stream_key: Vec<usize>, chunks: Vec<StreamChunk>) -> Self {
-        Self { chunks, stream_key }
+    pub fn new(key: Vec<usize>, chunks: Vec<StreamChunk>) -> Self {
+        Self { chunks, key }
     }
 
     pub fn into_inner(self) -> (Vec<StreamChunk>, Vec<usize>) {
-        (self.chunks, self.stream_key)
+        (self.chunks, self.key)
     }
 
-    /// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT
-    /// and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
+    /// Compact a chunk by modifying the ops and the visibility of a stream chunk.
+    /// Currently, two transformation will be applied
+    /// - remove intermediate operation of the same key. The operations of the same stream key will only
+    ///   have three kind of patterns Insert, Delete or Update.
+    /// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
+    ///   removed.
+    /// All UPDATE INSERT and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
     /// certain rules (see `merge_insert` and `merge_delete` for more details).
     pub fn into_compacted_chunks(self) -> impl Iterator<Item = StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
@@ -216,8 +216,8 @@ impl StreamChunkCompactor {
             for (row, mut op_row) in c.to_rows_mut() {
                 op_row.set_op(op_row.op().normalize_update());
                 let hash = hash_values[row.index()];
-                let stream_key = row.project(&key_indices);
-                match op_row_map.entry(Prehashed::new(stream_key, hash)) {
+                let key = row.project(&key_indices);
+                match op_row_map.entry(Prehashed::new(key, hash)) {
                     Entry::Vacant(v) => {
                         v.insert(OpRowMutRefTuple {
                             previous: None,
@@ -247,7 +247,7 @@ impl StreamChunkCompactor {
         chunks.into_iter().map(|(_, c)| c.into())
     }
 
-    /// re-construct the stream chunks to compact them with the stream key.
+    /// re-construct the stream chunks to compact them with the key.
     pub fn reconstructed_compacted_chunks(
         self,
         chunk_size: usize,
@@ -273,8 +273,8 @@ impl StreamChunkCompactor {
             for row in c.rows() {
                 let hash = hash_values[row.index()];
                 let op = ops[row.index()];
-                let stream_key = row.project(&key_indices);
-                let k = Prehashed::new(stream_key, hash);
+                let key = row.project(&key_indices);
+                let k = Prehashed::new(key, hash);
                 match op {
                     Op::Insert | Op::UpdateInsert => map.insert(k, row),
                     Op::Delete | Op::UpdateDelete => map.delete(k, row),
