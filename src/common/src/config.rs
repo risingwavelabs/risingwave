@@ -1005,10 +1005,10 @@ pub struct S3ObjectStoreConfig {
         default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
     )]
     pub retry_unknown_service_error: bool,
-    #[serde(default)]
-    pub developer: S3ObjectStoreDeveloperConfig,
     #[serde(default = "default::object_store_config::s3::identity_resolution_timeout_s")]
     pub identity_resolution_timeout_s: u64,
+    #[serde(default)]
+    pub developer: S3ObjectStoreDeveloperConfig,
 }
 
 /// The subsections `[storage.object_store.s3.developer]`.
