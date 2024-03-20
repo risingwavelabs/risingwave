@@ -892,16 +892,17 @@ pub async fn build_remote_object_store(
             panic!("Passing s3-compatible is not supported, please modify the environment variable and pass in s3.");
         }
         minio if minio.starts_with("minio://") => {
-            if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
-                ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::with_minio(minio, config)
-                        .unwrap()
+            if env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) {
+                ObjectStoreImpl::S3(
+                    S3ObjectStore::with_minio(minio, metrics.clone(), config.clone())
+                        .await
                         .monitored(metrics, config),
                 )
             } else {
-                ObjectStoreImpl::S3(
-                    S3ObjectStore::with_minio(minio, metrics.clone(), config)
-                        .await
+                tracing::info!("Using OpenDAL to access minio.");
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::with_minio(minio, config.clone())
+                        .unwrap()
                         .monitored(metrics, config),
                 )
             }
