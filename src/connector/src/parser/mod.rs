@@ -141,7 +141,8 @@ impl SourceStreamChunkBuilder {
         let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
         StreamChunk::with_visibility(
             builder.op_builder,
-            builder.builders
+            builder
+                .builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),

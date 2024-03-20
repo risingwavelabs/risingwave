@@ -69,6 +69,10 @@ pub fn get_split_offset_mapping_from_chunk(
         if vis {
             split_offset_mapping.insert(split_id, offset.to_string());
         } else {
+            assert!(
+                row.iter().all(|d| d.is_none()),
+                "heartbeat row should be all nulls"
+            );
             // invisible rows are assume to be heartbeat messages from upstream,
             // which should not overwrite the offset of data messages
             split_offset_mapping
