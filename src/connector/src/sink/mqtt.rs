@@ -41,7 +41,7 @@ use crate::connector_common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
-use crate::sink::{Result, Sink, SinkError, SinkParam};
+use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 
 pub const MQTT_SINK: &str = "mqtt";
 
@@ -51,17 +51,19 @@ pub struct MqttConfig {
     #[serde(flatten)]
     pub common: MqttCommon,
 
+    /// The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
+    pub topic: Option<String>,
+
     /// Whether the message should be retained by the broker
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub retain: bool,
 
-    // if set, will use a field value as the topic name, and the topic will be ignored. can be specified as `field.property` or `field`
+    // accept "append-only"
+    pub r#type: String,
+
+    // if set, will use a field value as the topic name, if topic is also set it will be used as a fallback
     #[serde(rename = "topic.field")]
     pub topic_field: Option<String>,
-
-    /// If set to true, and topic_field is set, will fallback to the default topic if the field is not found
-    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
-    pub fallback_to_default: bool,
 }
 
 pub enum RowEncoderWrapper {
@@ -111,6 +113,7 @@ pub struct MqttSink {
     schema: Schema,
     format_desc: SinkFormatDesc,
     is_append_only: bool,
+    name: String,
 }
 
 // sink write
@@ -125,8 +128,15 @@ pub struct MqttSinkWriter {
 /// Basic data types for use with the mqtt interface
 impl MqttConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        serde_json::from_value::<MqttConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))
+        let config = serde_json::from_value::<MqttConfig>(serde_json::to_value(values).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        if config.r#type != SINK_TYPE_APPEND_ONLY {
+            Err(SinkError::Config(anyhow!(
+                "Mqtt sink only support append-only mode"
+            )))
+        } else {
+            Ok(config)
+        }
     }
 }
 
@@ -139,6 +149,7 @@ impl TryFrom<SinkParam> for MqttSink {
         Ok(Self {
             config,
             schema,
+            name: param.sink_name,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
@@ -203,6 +214,10 @@ impl Sink for MqttSink {
                     )))
                 }
             }
+        } else if self.config.topic.is_none() {
+            return Err(SinkError::Config(anyhow!(
+                "either topic or topic.field must be set"
+            )));
         }
 
         let _client = (self.config.common.build_client(0, 0))
@@ -217,6 +232,7 @@ impl Sink for MqttSink {
             self.config.clone(),
             self.schema.clone(),
             &self.format_desc,
+            &self.name,
             writer_param.executor_id,
         )
         .await?
@@ -229,6 +245,7 @@ impl MqttSinkWriter {
         config: MqttConfig,
         schema: Schema,
         format_desc: &SinkFormatDesc,
+        name: &str,
         id: u64,
     ) -> Result<Self> {
         let mut path = vec![];
@@ -283,7 +300,7 @@ impl MqttSinkWriter {
                 SinkEncode::Protobuf => {
                     let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
                         &format_desc.options,
-                        &config.common.topic,
+                        config.topic.as_deref().unwrap_or(name),
                         None,
                     )
                     .await
@@ -344,8 +361,8 @@ impl MqttSinkWriter {
         });
 
         let payload_writer = MqttSinkPayloadWriter {
+            topic: config.topic.clone(),
             client,
-            config: config.clone(),
             qos,
             retain: config.retain,
             path,
@@ -381,7 +398,7 @@ impl Drop for MqttSinkWriter {
 struct MqttSinkPayloadWriter {
     // connection to mqtt, one per executor
     client: rumqttc::v5::AsyncClient,
-    config: MqttConfig,
+    topic: Option<String>,
     qos: QoS,
     retain: bool,
     path: Vec<usize>,
@@ -396,8 +413,8 @@ impl MqttSinkPayloadWriter {
                 continue;
             }
 
-            let topic = if self.path.is_empty() {
-                self.config.common.topic.as_str()
+            let topic = if let Some(topic) = &self.topic {
+                topic.as_str()
             } else {
                 let mut iter = self.path.iter();
 
@@ -415,12 +432,11 @@ impl MqttSinkPayloadWriter {
                 match scalar {
                     Some(ScalarRefImpl::Utf8(s)) => s,
                     _ => {
-                        if self.config.fallback_to_default {
-                            self.config.common.topic.as_str()
+                        if let Some(topic) = &self.topic {
+                            topic.as_str()
                         } else {
-                            return Err(SinkError::Mqtt(anyhow!(
-                                "topic field not found or not a string"
-                            )));
+                            tracing::error!("topic field not found in row, skipping: {:?}", row);
+                            return Ok(());
                         }
                     }
                 }
@@ -436,17 +452,5 @@ impl MqttSinkPayloadWriter {
         }
 
         Ok(())
-    }
-
-    async fn write_one(&mut self, topic: &str, v: Option<Vec<u8>>) -> Result<()> {
-        match v {
-            Some(v) => self
-                .client
-                .publish(topic, self.qos, self.retain, v)
-                .await
-                .context("mqtt sink error")
-                .map_err(SinkError::Mqtt),
-            None => Ok(()),
-        }
     }
 }

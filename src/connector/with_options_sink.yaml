@@ -356,10 +356,6 @@ MqttConfig:
     field_type: String
     comments: The url of the broker to connect to. e.g. tcp://localhost.  Must be prefixed with one of either `tcp://`, `mqtt://`, `ssl://`,`mqtts://`,  to denote the protocol for establishing a connection with the broker.  `mqtts://`, `ssl://` will use the native certificates if no ca is specified
     required: true
-  - name: topic
-    field_type: String
-    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
-    required: true
   - name: qos
     field_type: QualityOfService
     comments: The quality of service to use when publishing messages. Defaults to at_most_once.  Could be at_most_once, at_least_once or exactly_once
@@ -397,19 +393,21 @@ MqttConfig:
     field_type: String
     comments: Path to client's private key file (PEM). Required for client authentication.  Can be a file path under fs:// or a string with the private key content.
     required: false
+  - name: topic
+    field_type: String
+    comments: The topic name to subscribe or publish to. When subscribing, it can be a wildcard topic. e.g /topic/#
+    required: false
   - name: retain
     field_type: bool
     comments: Whether the message should be retained by the broker
     required: false
     default: Default::default
+  - name: r#type
+    field_type: String
+    required: true
   - name: topic.field
     field_type: String
     required: false
-  - name: fallback_to_default
-    field_type: bool
-    comments: If set to true, and topic_field is set, will fallback to the default topic if the field is not found
-    required: false
-    default: Default::default
 NatsConfig:
   fields:
   - name: server_url

@@ -6,6 +6,12 @@ CREATE TABLE mqtt (
 );
 
 statement ok
+CREATE TABLE mqtt_nested (
+   info struct<device_id varchar, topic varchar>,
+   temperature double
+);
+
+statement ok
 CREATE SINK mqtt_sink
 FROM
   mqtt
@@ -13,13 +19,31 @@ WITH
   (
     connector='mqtt',
     url='tcp://mqtt-server',
-    topic = 'not_used',
+    type = 'append-only',
     topic.field = 'topic',
     retain = 'true',
     qos = 'at_least_once',
   ) FORMAT PLAIN ENCODE JSON (
       force_append_only='true',
   );
+
+statement ok
+CREATE SINK mqtt_nested_sink
+FROM
+  mqtt_nested
+WITH
+  (
+    connector='mqtt',
+    url='tcp://mqtt-server',
+    type = 'append-only',
+    topic = '/nested/fallback',
+    topic.field = 'info.topic',
+    retain = 'true',
+    qos = 'at_least_once',
+  ) FORMAT PLAIN ENCODE JSON (
+      force_append_only='true',
+  );
+
 
 statement ok
 CREATE TABLE mqtt_source
@@ -31,6 +55,19 @@ WITH (
     connector='mqtt',
     url='tcp://mqtt-server',
     topic= '/device/+',
+    qos = 'at_least_once',
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE TABLE mqtt_nested_source
+(
+   info struct<device_id varchar, topic varchar>,
+   temperature double
+)
+WITH (
+    connector='mqtt',
+    url='tcp://mqtt-server',
+    topic= '/nested/fallback',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
 
@@ -52,6 +89,14 @@ INSERT INTO mqtt (device_id, temperature)
 VALUES ( '13',  22.0 );
 
 statement ok
+INSERT INTO mqtt_nested (info, temperature)
+VALUES( ROW('12', '/nested/12'), 56.0 );
+
+statement ok
+INSERT INTO mqtt_nested (info, temperature)
+VALUES( ROW('13', null), 22.0 );
+
+statement ok
 FLUSH;
 
 sleep 15s
@@ -62,4 +107,9 @@ SELECT device_id, temperature FROM mqtt ORDER BY device_id, temperature;
 12 56
 12 59
 13 20
+13 22
+
+query IT rowsort
+SELECT (info).device_id device_id, temperature from mqtt_nested_source ORDER BY device_id, temperature ;
+----
 13 22
