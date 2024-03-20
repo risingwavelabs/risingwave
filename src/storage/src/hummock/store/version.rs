@@ -766,14 +766,14 @@ impl HummockVersionReader {
         .await
     }
 
-    pub async fn iter_inner<'a, 'b>(
-        &'a self,
+    pub async fn iter_inner<F: IteratorFactory>(
+        &self,
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-        mem_table: Option<MemTableHummockIterator<'b>>,
-    ) -> StorageResult<HummockStorageIteratorInner<'b>> {
+        factory: &mut F,
+    ) -> StorageResult<()> {
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();

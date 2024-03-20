@@ -18,7 +18,7 @@ use std::ops::{Deref, DerefMut};
 
 use more_asserts::assert_gt;
 
-use super::{HummockResult, HummockValue};
+use super::{HummockResult, HummockValue, SstableIteratorType};
 
 mod forward_concat;
 pub use forward_concat::*;
@@ -51,6 +51,7 @@ pub use delete_range_iterator::{
 };
 use risingwave_common::catalog::TableId;
 pub use skip_watermark::*;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 
 use crate::monitor::StoreLocalStatistic;
 
@@ -495,4 +496,13 @@ impl HummockIteratorDirection for Backward {
     fn direction() -> DirectionEnum {
         DirectionEnum::Backward
     }
+}
+
+pub trait IteratorFactory {
+    type Direction: HummockIteratorDirection;
+    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
+    fn add_batch_iter(&mut self, batch: SharedBufferBatch);
+    fn add_staging_sst_iter(&mut self, sst: Self::SstableIteratorType);
+    fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType);
+    fn add_concat_sst_iter(&mut self, iter: ConcatIteratorInner<Self::SstableIteratorType>);
 }
