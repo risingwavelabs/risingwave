@@ -196,9 +196,9 @@ pub struct RescheduleContext {
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
     /// Fragments with stream source
     stream_source_fragment_ids: HashSet<FragmentId>,
-    /// Target fragments in NoShuffle relation
+    /// Target fragments in `NoShuffle` relation
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
-    /// Source fragments in NoShuffle relation
+    /// Source fragments in `NoShuffle` relation
     no_shuffle_source_fragment_ids: HashSet<FragmentId>,
     // index for dispatcher type from upstream fragment to downstream fragment
     fragment_dispatcher_map: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
@@ -437,7 +437,7 @@ pub fn rebalance_actor_vnode(
 
 #[derive(Debug, Clone, Copy)]
 pub struct RescheduleOptions {
-    /// Whether to resolve the upstream of NoShuffle when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
+    /// Whether to resolve the upstream of `NoShuffle` when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
     pub resolve_no_shuffle_upstream: bool,
 
     /// Whether to skip creating new actors. If it is true, the scaling-out actors will not be created.

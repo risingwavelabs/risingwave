@@ -107,7 +107,7 @@ pub struct HummockStorage {
 
     backup_reader: BackupReaderRef,
 
-    /// current_epoch < min_current_epoch cannot be read.
+    /// `current_epoch` < `min_current_epoch` cannot be read.
     min_current_epoch: Arc<AtomicU64>,
 
     write_limiter: WriteLimiterRef,

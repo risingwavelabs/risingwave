@@ -312,7 +312,7 @@ pub struct HeapElem {
     chunk: DataChunk,
     chunk_idx: usize,
     elem_idx: usize,
-    /// DataChunk can be encoded to accelerate the comparison.
+    /// `DataChunk` can be encoded to accelerate the comparison.
     /// Use `risingwave_common::util::encoding_for_comparison::encode_chunk`
     /// to perform encoding, otherwise the comparison will be performed
     /// column by column.

@@ -27,13 +27,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_model_v2 = { workspace = true }
 risingwave_pb = { workspace = true }
-sea-orm = { version = "0.12.14", features = [
-    "sqlx-mysql",
-    "sqlx-postgres",
-    "sqlx-sqlite",
-    "runtime-tokio-native-tls",
-    "macros",
-] }
+sea-orm = { workspace = true }
 sync-point = { path = "../../utils/sync-point" }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [

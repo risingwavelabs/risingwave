@@ -58,11 +58,11 @@ use crate::executor::{
 };
 use crate::from_proto::create_executor;
 use crate::task::barrier_manager::{
-    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
+    ControlStreamHandle, CreateActorOutput, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
 use crate::task::{
-    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
-    StreamActorManagerState, StreamEnvironment, UpDownActorIds,
+    ActorId, CreateActorContext, FragmentId, LocalBarrierManager, SharedContext,
+    StreamActorManager, StreamActorManagerState, StreamEnvironment, UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -118,7 +118,7 @@ pub struct ExecutorParams {
     /// The input executor.
     pub input: Vec<Executor>,
 
-    /// FragmentId of the actor
+    /// `FragmentId` of the actor
     pub fragment_id: FragmentId,
 
     /// Metrics
@@ -139,6 +139,8 @@ pub struct ExecutorParams {
     pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
+
+    pub create_actor_context: CreateActorContext,
 }
 
 impl Debug for ExecutorParams {
@@ -417,6 +419,7 @@ impl StreamActorManager {
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
+        create_actor_context: &CreateActorContext,
     ) -> StreamResult<Executor> {
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
@@ -450,6 +453,7 @@ impl StreamActorManager {
                     has_stateful || is_stateful,
                     subtasks,
                     shared_context,
+                    create_actor_context,
                 )
                 .await?,
             );
@@ -497,6 +501,7 @@ impl StreamActorManager {
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
             local_barrier_manager: shared_context.local_barrier_manager.clone(),
+            create_actor_context: create_actor_context.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -526,6 +531,7 @@ impl StreamActorManager {
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
+    #[expect(clippy::too_many_arguments)]
     async fn create_nodes(
         &self,
         fragment_id: FragmentId,
@@ -534,6 +540,7 @@ impl StreamActorManager {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         shared_context: &Arc<SharedContext>,
+        create_actor_context: &CreateActorContext,
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
@@ -548,6 +555,7 @@ impl StreamActorManager {
                 false,
                 &mut subtasks,
                 shared_context,
+                create_actor_context,
             )
             .await
         })?;
@@ -559,8 +567,9 @@ impl StreamActorManager {
         self: Arc<Self>,
         actors: Vec<StreamActor>,
         shared_context: Arc<SharedContext>,
-    ) -> StreamResult<Vec<Actor<DispatchExecutor>>> {
+    ) -> StreamResult<CreateActorOutput> {
         let mut ret = Vec::with_capacity(actors.len());
+        let create_actor_context = CreateActorContext::default();
         for actor in actors {
             let actor_id = actor.actor_id;
             let actor_context = ActorContext::create(
@@ -580,6 +589,7 @@ impl StreamActorManager {
                     &actor_context,
                     vnode_bitmap,
                     &shared_context,
+                    &create_actor_context,
                 )
                 // If hummock tracing is not enabled, it directly returns wrapped future.
                 .may_trace_hummock()
@@ -603,7 +613,10 @@ impl StreamActorManager {
 
             ret.push(actor);
         }
-        Ok(ret)
+        Ok(CreateActorOutput {
+            actors: ret,
+            senders: create_actor_context.collect_senders(),
+        })
     }
 }
 

@@ -315,7 +315,7 @@ pub trait StateStoreWrite: StaticSendSync {
 pub struct SyncResult {
     /// The size of all synced shared buffers.
     pub sync_size: usize,
-    /// The sst_info of sync.
+    /// The `sst_info` of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -612,7 +612,7 @@ pub struct NewLocalOptions {
     pub table_option: TableOption,
 
     /// Indicate if this is replicated. If it is, we should not
-    /// upload its ReadVersions.
+    /// upload its `ReadVersions`.
     pub is_replicated: bool,
 
     /// The vnode bitmap for the local state store instance

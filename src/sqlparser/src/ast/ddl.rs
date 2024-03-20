@@ -163,6 +163,26 @@ pub enum AlterSinkOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSubscriptionOperation {
+    RenameSubscription {
+        subscription_name: ObjectName,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    SetSchema {
+        new_schema_name: ObjectName,
+    },
+    /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
@@ -346,6 +366,33 @@ impl fmt::Display for AlterSinkOperation {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
             AlterSinkOperation::SetParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET PARALLELISM TO {} {}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSubscriptionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSubscriptionOperation::RenameSubscription { subscription_name } => {
+                write!(f, "RENAME TO {subscription_name}")
+            }
+            AlterSubscriptionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSubscriptionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SetParallelism {
                 parallelism,
                 deferred,
             } => {
