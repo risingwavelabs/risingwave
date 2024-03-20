@@ -180,7 +180,7 @@ async fn main() {
         per_session_queries: if args.use_arrangement_backfill {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
         } else {
-            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;"].into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
         },
         ..Default::default()
     };
