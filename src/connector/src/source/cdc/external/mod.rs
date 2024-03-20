@@ -246,6 +246,9 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
+    /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
+    /// Choices include `disable`, `prefer`, and `require`.
+    /// This field is optional. `prefer` is used if not specified.
     #[serde(rename = "ssl.mode", default = "Default::default")]
     pub sslmode: SslMode,
 }
