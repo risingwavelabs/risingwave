@@ -61,6 +61,24 @@ public class EsSinkFactory implements SinkFactory {
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
+        if (config.getIndexColumn()!= null){
+            if (!tableSchema.getColumns().containsKey(config.getIndexColumn())) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Index column " + config.getIndexColumn() + " not found in schema")
+                        .asRuntimeException();
+            }
+            if (config.getIndex() != null) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("index and index_column cannot be set at the same time")
+                        .asRuntimeException();
+            }
+        }else{
+            if (config.getIndex() == null) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("index or index_column must be set")
+                        .asRuntimeException();
+            }
+        }
 
         // 2. check connection
         RestClientBuilder builder = RestClient.builder(host);

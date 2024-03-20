@@ -27,6 +27,7 @@ use super::encoder::{JsonEncoder, RowEncoder};
 use super::remote::ElasticSearchSink;
 use crate::sink::{Result, Sink};
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
+pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
 
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
@@ -44,6 +45,7 @@ impl StreamChunkConverter {
                 schema,
                 pk_indices.clone(),
                 properties.get(ES_OPTION_DELIMITER).cloned(),
+                properties.get(ES_OPTION_INDEX_COLUMN).cloned(),
             )?))
         } else {
             Ok(StreamChunkConverter::Other)
@@ -60,9 +62,10 @@ impl StreamChunkConverter {
 pub struct EsStreamChunkConverter {
     json_encoder: JsonEncoder,
     fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send>,
+    index_column: Option<usize>
 }
 impl EsStreamChunkConverter {
-    fn new(schema: Schema, pk_indices: Vec<usize>, delimiter: Option<String>) -> Result<Self> {
+    fn new(schema: Schema, pk_indices: Vec<usize>, delimiter: Option<String>, index_column: Option<usize>) -> Result<Self> {
         let fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send> = if pk_indices.is_empty()
         {
             Box::new(|row: RowRef<'_>| {
@@ -100,6 +103,7 @@ impl EsStreamChunkConverter {
         Ok(Self {
             json_encoder,
             fn_build_id,
+            index_column
         })
     }
 
@@ -109,6 +113,8 @@ impl EsStreamChunkConverter {
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut json_builder =
             <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
+        let mut index_builder =
+            <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         for (op, row) in chunk.rows() {
             ops.push(op);
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
@@ -120,6 +126,17 @@ impl EsStreamChunkConverter {
                 &mut json_builder,
                 Some(json.as_scalar_ref()),
             );
+            if let Some(index) = self.index_column{
+                risingwave_common::array::ArrayBuilder::append(
+                    &mut index_builder,
+                    Some(row.datum_at(index).ok_or_else(|| anyhow!("No value find in row, index is {}", index))?.into_utf8()),
+                );
+            }else{
+                risingwave_common::array::ArrayBuilder::append(
+                    &mut index_builder,
+                    None,
+                );
+            }
         }
         let json_array = risingwave_common::array::ArrayBuilder::finish(json_builder);
         let id_string_array = risingwave_common::array::ArrayBuilder::finish(id_string_builder);
