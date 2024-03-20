@@ -292,6 +292,12 @@ pub async fn handle_show_object(
             .iter_sink()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::Subscription { schema } => catalog_reader
+            .read_guard()
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_subscription()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Columns { table } => {
             let Ok(columns) = get_columns_from_table(&session, table.clone())
                 .or(get_columns_from_sink(&session, table.clone()))
@@ -505,6 +511,12 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Function => {
             bail_not_implemented!("show create on: {}", show_create_type);
+        }
+        ShowCreateType::Subscription => {
+            let subscription = schema
+                .get_subscription_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("subscription", name.to_string()))?;
+            subscription.create_sql()
         }
     };
     let name = format!("{}.{}", schema_name, object_name);

@@ -53,7 +53,8 @@ pub use self::value::{
     Value,
 };
 pub use crate::ast::ddl::{
-    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
+    AlterViewOperation,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
@@ -883,6 +884,7 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
+    Subscription { schema: Option<Ident> },
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
@@ -932,6 +934,7 @@ impl fmt::Display for ShowObject {
             }
             ShowObject::Jobs => write!(f, "JOBS"),
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
+            ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
         }
     }
 }
@@ -946,6 +949,7 @@ pub enum ShowCreateType {
     Source,
     Sink,
     Function,
+    Subscription,
 }
 
 impl fmt::Display for ShowCreateType {
@@ -958,6 +962,7 @@ impl fmt::Display for ShowCreateType {
             ShowCreateType::Source => f.write_str("SOURCE"),
             ShowCreateType::Sink => f.write_str("SINK"),
             ShowCreateType::Function => f.write_str("FUNCTION"),
+            ShowCreateType::Subscription => f.write_str("SUBSCRIPTION"),
         }
     }
 }
@@ -1154,6 +1159,10 @@ pub enum Statement {
     CreateSink {
         stmt: CreateSinkStatement,
     },
+    /// CREATE SUBSCRIPTION
+    CreateSubscription {
+        stmt: CreateSubscriptionStatement,
+    },
     /// CREATE CONNECTION
     CreateConnection {
         stmt: CreateConnectionStatement,
@@ -1217,6 +1226,10 @@ pub enum Statement {
         /// Sink name
         name: ObjectName,
         operation: AlterSinkOperation,
+    },
+    AlterSubscription {
+        name: ObjectName,
+        operation: AlterSubscriptionOperation,
     },
     /// ALTER SOURCE
     AlterSource {
@@ -1718,6 +1731,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
@@ -1736,6 +1750,9 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSubscription { name, operation } => {
+                write!(f, "ALTER SUBSCRIPTION {} {}", name, operation)
             }
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
@@ -2341,6 +2358,7 @@ pub enum ObjectType {
     Database,
     User,
     Connection,
+    Subscription,
 }
 
 impl fmt::Display for ObjectType {
@@ -2356,6 +2374,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
             ObjectType::Connection => "CONNECTION",
+            ObjectType::Subscription => "SUBSCRIPTION",
         })
     }
 }
@@ -2382,9 +2401,11 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
             ObjectType::Connection
+        } else if parser.parse_keyword(Keyword::SUBSCRIPTION) {
+            ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
