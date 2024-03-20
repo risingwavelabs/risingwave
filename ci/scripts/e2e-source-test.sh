@@ -72,9 +72,19 @@ echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
 
+echo "--- cdc share source test"
 # cdc share stream test cases
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
+
+# create a share source and check whether heartbeat message is received
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.create_source_job.slt'
+table_id=`psql -t -c "select id from rw_internal_tables where name like '%mysql_source%';" | xargs`;
+table_count=`psql -U root -h localhost -p 4566 -d dev -t -c "select count(*) from rw_table(${table_id}, public);" | xargs`;
+if [ $table_count -eq 0 ]; then
+    echo "ERROR: internal table of cdc share source is empty!"
+    exit 1
+fi
 
 echo "--- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'

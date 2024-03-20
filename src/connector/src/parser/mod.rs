@@ -88,8 +88,6 @@ pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
-    // index to empty rows in a batch from upstream
-    empty_row_index: Vec<usize>,
 }
 
 impl SourceStreamChunkBuilder {
@@ -103,7 +101,6 @@ impl SourceStreamChunkBuilder {
             descs,
             builders,
             op_builder: Vec::with_capacity(cap),
-            empty_row_index: vec![],
         }
     }
 
@@ -112,25 +109,18 @@ impl SourceStreamChunkBuilder {
             descs: &self.descs,
             builders: &mut self.builders,
             op_builder: &mut self.op_builder,
-            empty_row_indices: &mut self.empty_row_index,
             row_meta: None,
         }
     }
 
     /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
-        let mut visibility = BitmapBuilder::filled(self.op_builder.len());
-        // mark empty rows from upstream as invisible
-        for i in self.empty_row_index {
-            visibility.set(i, false);
-        }
-        StreamChunk::with_visibility(
+        StreamChunk::new(
             self.op_builder,
             self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
-            visibility.finish(),
         )
     }
 
@@ -141,6 +131,22 @@ impl SourceStreamChunkBuilder {
         let descs = std::mem::take(&mut self.descs);
         let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
         builder.finish()
+    }
+
+    fn take_heartbeat(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+
+        // heartbeat rows are empty, we set them invisible
+        let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
+        StreamChunk::with_visibility(
+            builder.op_builder,
+            builder.builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect(),
+            visibility.finish(),
+        )
     }
 
     pub fn op_num(&self) -> usize {
@@ -165,7 +171,6 @@ pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
-    empty_row_indices: &'a mut Vec<usize>,
 
     /// An optional meta data of the original message.
     ///
@@ -327,10 +332,6 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
             row_meta: Some(row_meta),
             ..self
         }
-    }
-
-    pub fn record_empty_row_idx(&mut self, index: usize) {
-        self.empty_row_indices.push(index)
     }
 }
 
@@ -636,6 +637,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
+    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
@@ -681,13 +683,11 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     offset = msg.offset,
                     "got a empty message, could be a heartbeat"
                 );
-                let mut writer = builder.row_writer().with_meta(MessageMeta {
+                parser.emit_empty_row(heartbeat_builder.row_writer().with_meta(MessageMeta {
                     meta: &msg.meta,
                     split_id: &msg.split_id,
                     offset: &msg.offset,
-                });
-                writer.record_empty_row_idx(i);
-                parser.emit_empty_row(writer);
+                }));
                 continue;
             }
 
@@ -778,6 +778,11 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
                 }
             }
+        }
+
+        // emit heartbeat for each message batch
+        if !heartbeat_builder.is_empty() {
+            yield heartbeat_builder.take_heartbeat(0);
         }
 
         // If we are not in a transaction, we should yield the chunk now.
