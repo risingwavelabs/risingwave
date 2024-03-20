@@ -203,3 +203,42 @@
                 └─StreamProject { exprs: [t2.p, t2.d, t2._row_id] }
                   └─StreamFilter { predicate: (t2.c = 'abc':Varchar) }
                     └─StreamTableScan { table: t2, columns: [t2.p, t2.d, t2._row_id, t2.c], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: https://github.com/risingwavelabs/risingwave/issues/15337
+  sql: |
+    CREATE TABLE t1 (c1 varchar, c2 bigint,c3 numeric, c4 timestamp) APPEND ONLY;
+    CREATE TABLE t2 (c5 timestamptz, c6 varchar, c7 numeric, c8 numeric, c1 varchar);
+    SELECT o.*, b.v1,b.v2
+    FROM t2 o
+    LEFT JOIN LATERAL (
+    SELECT
+      sum(t.c2 * t.c3) filter ( WHERE (o.c7) * t.c3 <= (o.c7) * o.c8 ) AS v1,
+      sum(t.c2) filter ( WHERE (o.c7) * t.c3 <= (o.c7) * o.c8) AS v2
+      FROM t1 t
+      WHERE t.c1 = o.c1 AND t.c4 >= o.c5 AND t.c4 :: date = o.c5 :: date
+    ) AS b ON TRUE;
+  stream_plan: |-
+    StreamMaterialize { columns: [c5, c6, c7, c8, c1, v1, v2, t2._row_id(hidden), t2.c7(hidden), t2.c7#1(hidden), t2.c8(hidden), t2.c7#2(hidden), t2.c7#3(hidden), t2.c8#1(hidden), t2.c1(hidden), t2.c5(hidden), t2.c5#1(hidden)], stream_key: [t2._row_id, c7, c8, c1, c5], pk_columns: [t2._row_id, c7, c8, c1, c5], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t2.c5, t2.c7, t2.c8, t2.c1, t2._row_id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c1 IS NOT DISTINCT FROM t2.c1 AND t2.c5 IS NOT DISTINCT FROM t2.c5 AND t2.c5 IS NOT DISTINCT FROM t2.c5, output: [t2.c5, t2.c6, t2.c7, t2.c8, t2.c1, sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), t2._row_id, t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5] }
+        ├─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
+        │ └─StreamTableScan { table: t2, columns: [t2.c5, t2.c6, t2.c7, t2.c8, t2.c1, t2._row_id], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8)))] }
+          └─StreamHashAgg { group_key: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], aggs: [sum($expr4) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), sum(t1.c2) filter(((t2.c7 * t1.c3) <= (t2.c7 * t2.c8))), count] }
+            └─StreamHashJoin { type: LeftOuter, predicate: t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c7 IS NOT DISTINCT FROM t2.c7 AND t2.c8 IS NOT DISTINCT FROM t2.c8 AND t2.c1 IS NOT DISTINCT FROM t2.c1 AND t2.c5 IS NOT DISTINCT FROM t2.c5 AND t2.c5 IS NOT DISTINCT FROM t2.c5, output: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t1.c3, $expr4, t1.c2, t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t1._row_id, $expr1] }
+              ├─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
+              │ └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5] }
+              │   └─StreamHashAgg { group_key: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], aggs: [count] }
+              │     └─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
+              │       └─StreamTableScan { table: t2, columns: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t2._row_id], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+              └─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
+                └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t1.c3, (t1.c2::Decimal * t1.c3) as $expr4, t1.c2, t1._row_id, $expr1] }
+                  └─StreamFilter { predicate: (t2.c5 <= $expr2) }
+                    └─StreamHashJoin { type: Inner, predicate: t2.c1 = t1.c1 AND $expr1 = $expr3, output: all }
+                      ├─StreamExchange { dist: HashShard(t2.c1, $expr1) }
+                      │ └─StreamProject { exprs: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, AtTimeZone(t2.c5, 'UTC':Varchar)::Date as $expr1] }
+                      │   └─StreamHashAgg { group_key: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5], aggs: [count] }
+                      │     └─StreamExchange { dist: HashShard(t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5) }
+                      │       └─StreamTableScan { table: t2, columns: [t2.c7, t2.c7, t2.c8, t2.c7, t2.c7, t2.c8, t2.c1, t2.c5, t2.c5, t2._row_id], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+                      └─StreamExchange { dist: HashShard(t1.c1, $expr3) }
+                        └─StreamProject { exprs: [t1.c1, t1.c2, t1.c3, AtTimeZone(t1.c4, 'UTC':Varchar) as $expr2, t1.c4::Date as $expr3, t1._row_id] }
+                          └─StreamTableScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1.c4, t1._row_id], stream_scan_type: Backfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }

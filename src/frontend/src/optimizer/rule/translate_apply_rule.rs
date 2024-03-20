@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::collections::HashMap;
 
 use risingwave_common::types::DataType;
@@ -59,7 +60,7 @@ impl Rule for TranslateApplyRule {
         let apply_left_len = left.schema().len();
         let correlated_indices = apply.correlated_indices();
 
-        let mut index_mapping = ColIndexMapping::new(vec![None; apply_left_len], apply_left_len);
+        let mut index_mapping = ColIndexMapping::new(vec![None; apply_left_len], max(apply_left_len, correlated_indices.len()));
         let mut data_types = HashMap::new();
         let mut index = 0;
 
