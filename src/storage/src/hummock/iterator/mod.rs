@@ -51,8 +51,8 @@ pub use delete_range_iterator::{
 };
 use risingwave_common::catalog::TableId;
 pub use skip_watermark::*;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::monitor::StoreLocalStatistic;
 
 #[derive(Default)]

@@ -111,6 +111,7 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 }
 
 pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
+pub type MemTableHummockRevIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
 
 impl MemTable {
     pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
