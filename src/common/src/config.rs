@@ -832,15 +832,12 @@ impl AsyncStackTraceOption {
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize, EnumAsInner)]
 pub enum StrictConsistencyOption {
-    /// Enabled.
+    /// Enabled, panic on inconsistency.
     #[default]
-    #[clap(aliases = &["true", "enabled"])]
     On,
-    /// Disabled, but warn on inconsistency.
-    #[clap(aliases = &["false", "disabled"])]
+    /// Disabled, warn on inconsistency.
     Off,
-    /// Disabled, and ignore inconsistency.
-    #[clap(aliases = &["silent", "ignore"])]
+    /// Disabled, ignore inconsistency.
     OffSilent,
 }
 
