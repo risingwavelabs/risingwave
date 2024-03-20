@@ -413,7 +413,9 @@ impl MqttSinkPayloadWriter {
                 continue;
             }
 
-            let topic = if let Some(topic) = &self.topic {
+            let topic = if let Some(topic) = &self.topic
+                && self.path.is_empty()
+            {
                 topic.as_str()
             } else {
                 let mut iter = self.path.iter();
