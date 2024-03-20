@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use arrow_array::{Int32Array, Int64Array, RecordBatch};
@@ -168,11 +167,8 @@ impl SplitReader for PulsarBrokerReader {
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
-                "consumer-{}",
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_micros()
+                "rw-consumer-{}-{}",
+                source_ctx.fragment_id, source_ctx.actor_id
             ));
 
         let builder = match split.start_offset.clone() {
