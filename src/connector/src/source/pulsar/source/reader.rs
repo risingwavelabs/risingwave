@@ -168,11 +168,8 @@ impl SplitReader for PulsarBrokerReader {
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
-                "consumer-{}",
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_micros()
+                "rw-consumer-{}-{}",
+                source_ctx.fragment_id, source_ctx.actor_id
             ));
 
         let builder = match split.start_offset.clone() {
