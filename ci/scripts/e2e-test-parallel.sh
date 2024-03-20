@@ -51,9 +51,13 @@ cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cargo make kill
 
 echo "--- Cleaning logs"
 cat /risingwave/.risingwave/log/compactor-6660.log | sed -E 's/Compaction task table_ids: \[[0-9, ]+\]/Compaction task table_ids: [hidden]/g' > tmp.log
 mv tmp.log /risingwave/.risingwave/log/compactor-6660.log
 
+echo "--- Checking logs"
+cargo make logs
+cargo make check-logs
+cargo make wait-processes-exit
