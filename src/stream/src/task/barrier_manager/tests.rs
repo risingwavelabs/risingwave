@@ -56,19 +56,25 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let manager = &context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        manager.register_sender(actor_id, barrier_tx);
-        (actor_id, barrier_rx)
+        let actor_op_tx = &actor_op_tx;
+        async move {
+            let (barrier_tx, barrier_rx) = unbounded_channel();
+            actor_op_tx
+                .send_and_await(move |result_sender| LocalActorOperation::RegisterSenders {
+                    result_sender,
+                    actor_id,
+                    senders: vec![barrier_tx],
+                })
+                .await
+                .unwrap();
+            (actor_id, barrier_rx)
+        }
     };
 
     // Register actors
     let actor_ids = vec![233, 234, 235];
     let count = actor_ids.len();
-    let mut rxs = actor_ids
-        .clone()
-        .into_iter()
-        .map(register_sender)
-        .collect_vec();
+    let mut rxs = join_all(actor_ids.clone().into_iter().map(register_sender)).await;
 
     // Send a barrier to all actors
     let curr_epoch = test_epoch(2);
@@ -145,9 +151,19 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     let manager = &context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        manager.register_sender(actor_id, barrier_tx);
-        (actor_id, barrier_rx)
+        let actor_op_tx = &actor_op_tx;
+        async move {
+            let (barrier_tx, barrier_rx) = unbounded_channel();
+            actor_op_tx
+                .send_and_await(move |result_sender| LocalActorOperation::RegisterSenders {
+                    result_sender,
+                    actor_id,
+                    senders: vec![barrier_tx],
+                })
+                .await
+                .unwrap();
+            (actor_id, barrier_rx)
+        }
     };
 
     let actor_ids_to_send = vec![233, 234, 235];
@@ -160,11 +176,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
 
     // Register actors
     let count = actor_ids_to_send.len();
-    let mut rxs = actor_ids_to_send
-        .clone()
-        .into_iter()
-        .map(register_sender)
-        .collect_vec();
+    let mut rxs = join_all(actor_ids_to_send.clone().into_iter().map(register_sender)).await;
 
     // Prepare the barrier
     let curr_epoch = test_epoch(2);
