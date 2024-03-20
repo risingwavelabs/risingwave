@@ -227,6 +227,9 @@ impl StreamMaterialize {
         // assert: `stream_key` is a subset of `table_pk`
 
         let read_prefix_len_hint = table_pk.len();
+        // TODO(columnar_store): should be user-defined
+        let is_columnar_store =
+            table_type == TableType::Table || table_type == TableType::MaterializedView;
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -260,6 +263,7 @@ impl StreamMaterialize {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
+            is_columnar_store: Some(is_columnar_store),
         })
     }
 

@@ -327,6 +327,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let table_id = full_key.user_key.table_id.table_id();
+        // TODO(columnar_store): fix bloom filter: only add sentinel key
         let mut extract_key = user_key(&self.raw_key);
         extract_key = self.filter_key_extractor.extract(extract_key);
         // add bloom_filter check

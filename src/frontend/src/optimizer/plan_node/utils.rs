@@ -137,6 +137,12 @@ impl TableCatalogBuilder {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
         };
+        // NOTE: This should be altered if `TableCatalogBuilder` is used to build something
+        // other than internal tables.
+        let table_type = TableType::Internal;
+        // internal table must not be columnar store
+        assert!(table_type == TableType::Internal);
+        let is_columnar_store = false;
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -146,9 +152,7 @@ impl TableCatalogBuilder {
             pk: self.pk,
             stream_key: vec![],
             distribution_key,
-            // NOTE: This should be altered if `TableCatalogBuilder` is used to build something
-            // other than internal tables.
-            table_type: TableType::Internal,
+            table_type,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             fragment_id: OBJECT_ID_PLACEHOLDER,
@@ -176,6 +180,7 @@ impl TableCatalogBuilder {
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: None,
+            is_columnar_store: Some(is_columnar_store),
         }
     }
 

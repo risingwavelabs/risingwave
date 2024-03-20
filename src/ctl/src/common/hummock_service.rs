@@ -90,6 +90,10 @@ impl HummockServiceOpts {
     fn get_storage_opts(&self) -> StorageOpts {
         let mut opts = StorageOpts {
             share_buffer_compaction_worker_threads_number: 0,
+            meta_cache_capacity_mb: 1,
+            block_cache_capacity_mb: 1,
+            meta_cache_shard_num: 1,
+            block_cache_shard_num: 1,
             ..Default::default()
         };
 

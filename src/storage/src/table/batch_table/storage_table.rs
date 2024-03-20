@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use std::default::Default;
+use std::future::Future;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::{iter, mem};
 
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
@@ -29,12 +32,15 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
+use risingwave_common::util::value_encoding::{deserialize_datum, BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode,
+    prefixed_range_with_vnode_and_column_id, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -42,7 +48,9 @@ use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
-use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
+use crate::row_serde::row_serde_util::{
+    serialize_pk, serialize_pk_with_vnode, serialize_pk_with_vnode_and_column_id,
+};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions, StateStoreIter};
@@ -95,6 +103,10 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     table_option: TableOption,
 
     read_prefix_len_hint: usize,
+
+    /// in default order
+    column_ids: Vec<ColumnId>,
+    is_columnar_store: bool,
 }
 
 /// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
@@ -156,7 +168,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         let versioned = table_desc.versioned;
         let distribution = TableDistribution::new_from_storage_table_desc(vnodes, table_desc);
-
+        let is_columnar_store = table_desc.is_columnar_store.unwrap_or(false);
         Self::new_inner(
             store,
             table_id,
@@ -169,6 +181,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             value_indices,
             prefix_hint_len,
             versioned,
+            is_columnar_store,
         )
     }
 
@@ -193,6 +206,8 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             value_indices,
             0,
             false,
+            // TODO(columnar_store): use is_columnar_store
+            true,
         )
     }
 
@@ -229,6 +244,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
         versioned: bool,
+        is_columnar_store: bool,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
@@ -262,7 +278,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-
+        let column_ids = table_columns.iter().map(|c| c.column_id).collect_vec();
         let row_serde = {
             if versioned {
                 ColumnAwareSerde::new(value_indices.into(), table_columns.into()).into()
@@ -290,6 +306,8 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             distribution,
             table_option,
             read_prefix_len_hint,
+            column_ids,
+            is_columnar_store,
         }
     }
 }
@@ -337,6 +355,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
+        if self.is_columnar_store {
+            return self.columnar_store_get_row(pk, wait_epoch).await;
+        }
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         self.store.try_wait_epoch(wait_epoch).await?;
@@ -404,6 +425,95 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         }
     }
 
+    // TODO(columnar_store): avoid code duplication when compared to get_row
+    async fn columnar_store_get_row(
+        &self,
+        pk: impl Row,
+        wait_epoch: HummockReadEpoch,
+    ) -> StorageResult<Option<OwnedRow>> {
+        tracing::debug!(pk=?pk, "columnar_store_get_row");
+        let epoch = wait_epoch.get_epoch();
+        let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
+        self.store.try_wait_epoch(wait_epoch).await?;
+        assert!(pk.len() <= self.pk_indices.len());
+        let vnode = self.distribution.compute_vnode_by_pk(&pk);
+        // TODO(columnar_store): reuse serde result
+        let sentinel_pk = serialize_pk_with_vnode_and_column_id(
+            &pk,
+            &self.pk_serializer,
+            vnode,
+            &ColumnId::new(0),
+        );
+        let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
+        {
+            Some(sentinel_pk.slice(VirtualNode::SIZE..))
+        } else {
+            None
+        };
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.table_id,
+            read_version_from_backup: read_backup,
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            ..Default::default()
+        };
+
+        tracing::debug!(sentinel_pk=?sentinel_pk, "read sentinel_pk");
+        if self
+            .store
+            .get(sentinel_pk, epoch, read_options.clone())
+            .await?
+            .is_none()
+        {
+            tracing::debug!("skip by sentinel_pk");
+            return Ok(None);
+        }
+        // TODO(columnar_store): to_owned_row can be optimized out
+        let owned_pk = pk.to_owned_row();
+        let mut iter_fut: Vec<
+            Pin<Box<dyn Future<Output = StorageResult<risingwave_common::types::Datum>> + Send>>,
+        > = Vec::with_capacity(self.output_indices.len());
+        for (pos, output_col_idx) in self.output_indices.iter().enumerate() {
+            if let Some(i) = self
+                .pk_indices
+                .iter()
+                .position(|pk_idx| *pk_idx == *output_col_idx)
+            {
+                let col_val = owned_pk.index(i).clone();
+                let fut = async move { Ok::<_, StorageError>(col_val) };
+                iter_fut.push(Box::pin(fut));
+                continue;
+            }
+            let column_id = self.column_ids[*output_col_idx];
+            let col_pk =
+                serialize_pk_with_vnode_and_column_id(&pk, &self.pk_serializer, vnode, &column_id);
+            let col_prefix_hint =
+                if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len() {
+                    Some(col_pk.slice(VirtualNode::SIZE..))
+                } else {
+                    None
+                };
+            let col_read_options = ReadOptions {
+                prefix_hint: col_prefix_hint,
+                ..read_options.clone()
+            };
+            let fut = async move {
+                let col_val_bytes = self
+                    .store
+                    .get(col_pk, epoch, col_read_options)
+                    .await?
+                    .unwrap_or_else(|| panic!("missing col val, column_id={}", column_id));
+                // TODO(columnar_store): use a deserializer
+                let col_val = deserialize_datum(col_val_bytes, &self.schema[pos].data_type)?;
+                Ok::<_, StorageError>(col_val)
+            };
+            iter_fut.push(Box::pin(fut));
+        }
+        let result_row_vec = try_join_all(iter_fut).await?;
+        Ok(Some(OwnedRow::new(result_row_vec)))
+    }
+
     /// Update the vnode bitmap of the storage table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
@@ -413,9 +523,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send;
 
-/// The row iterator of the storage table.
-/// The wrapper of [`StorageTableInnerIter`] if pk is not persisted.
-pub type StorageTableInnerIter<S: StateStore, SD: ValueRowSerde> = impl PkAndRowStream;
+pub type StorageTableInnerIter = Pin<Box<dyn PkAndRowStream>>;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -439,7 +547,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+    ) -> StorageResult<StorageTableInnerIter> {
         let cache_policy = match (
             encoded_key_range.start_bound(),
             encoded_key_range.end_bound(),
@@ -513,7 +621,93 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
 
-        Ok(iter)
+        Ok(Box::pin(iter))
+    }
+
+    async fn columnar_store_iter_with_encoded_key_range(
+        &self,
+        prefix_hint: Option<Bytes>,
+        encoded_key_range: (Bound<Bytes>, Bound<Bytes>),
+        wait_epoch: HummockReadEpoch,
+        vnode_hint: Option<VirtualNode>,
+        ordered: bool,
+        prefetch_options: PrefetchOptions,
+    ) -> StorageResult<StorageTableInnerIter> {
+        let cache_policy = match (
+            encoded_key_range.start_bound(),
+            encoded_key_range.end_bound(),
+        ) {
+            // To prevent unbounded range scan queries from polluting the block cache, use the
+            // low priority fill policy.
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheContext::LruPriorityLow),
+            _ => CachePolicy::Fill(CacheContext::Default),
+        };
+
+        let table_key_ranges = {
+            // Vnodes that are set and should be accessed.
+            let vnodes = match vnode_hint {
+                // If `vnode_hint` is set, we can only access this single vnode.
+                Some(vnode) => Either::Left(std::iter::once(vnode)),
+                // Otherwise, we need to access all vnodes of this table.
+                None => Either::Right(self.distribution.vnodes().iter_vnodes()),
+            };
+            vnodes.map(|vnode| (vnode, encoded_key_range.clone()))
+        };
+
+        // For each key range, construct an iterator.
+        let iterators: Vec<_> = try_join_all(table_key_ranges.map(|(vnode, table_key_range)| {
+            // this prefix_hint should be further prefixed with column id
+            let prefix_hint = prefix_hint.clone();
+            let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
+            async move {
+                let read_options = ReadOptions {
+                    prefix_hint,
+                    retention_seconds: self.table_option.retention_seconds,
+                    table_id: self.table_id,
+                    read_version_from_backup: read_backup,
+                    prefetch_options,
+                    cache_policy,
+                    ..Default::default()
+                };
+                let pk_serializer = self.pk_serializer.clone();
+                let iter = ColumnarStoreStorageTableInnerIterInner::<S>::new(
+                    &self.store,
+                    vnode,
+                    pk_serializer,
+                    self.output_indices.clone(),
+                    self.pk_indices.clone(),
+                    self.column_ids.clone(),
+                    self.schema
+                        .fields
+                        .iter()
+                        .map(|f| f.data_type.clone())
+                        .collect_vec(),
+                    table_key_range,
+                    read_options,
+                    wait_epoch,
+                )
+                .await?
+                .into_stream();
+
+                Ok::<_, StorageError>(iter)
+            }
+        }))
+        .await?;
+
+        #[auto_enum(futures03::Stream)]
+        let iter = match iterators.len() {
+            0 => unreachable!(),
+            1 => iterators.into_iter().next().unwrap(),
+            // Concat all iterators if not to preserve order.
+            _ if !ordered => {
+                futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
+                    .flatten_unordered(1024)
+            }
+            // Merge all iterators if to preserve order.
+            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
+        };
+
+        Ok(Box::pin(iter))
     }
 
     /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
@@ -524,7 +718,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+    ) -> StorageResult<StorageTableInnerIter> {
         // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
@@ -625,15 +819,27 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             pk_prefix_indices
         );
 
-        self.iter_with_encoded_key_range(
-            prefix_hint,
-            (start_key, end_key),
-            epoch,
-            self.distribution.try_compute_vnode_by_pk_prefix(pk_prefix),
-            ordered,
-            prefetch_options,
-        )
-        .await
+        if self.is_columnar_store {
+            self.columnar_store_iter_with_encoded_key_range(
+                prefix_hint,
+                (start_key, end_key),
+                epoch,
+                self.distribution.try_compute_vnode_by_pk_prefix(pk_prefix),
+                ordered,
+                prefetch_options,
+            )
+            .await
+        } else {
+            self.iter_with_encoded_key_range(
+                prefix_hint,
+                (start_key, end_key),
+                epoch,
+                self.distribution.try_compute_vnode_by_pk_prefix(pk_prefix),
+                ordered,
+                prefetch_options,
+            )
+            .await
+        }
     }
 
     /// Construct a [`StorageTableInnerIter`] for batch executors.
@@ -645,7 +851,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+    ) -> StorageResult<StorageTableInnerIter> {
         self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await
     }
@@ -656,7 +862,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         epoch: HummockReadEpoch,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+    ) -> StorageResult<StorageTableInnerIter> {
         self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered, prefetch_options)
             .await
     }
@@ -783,6 +989,167 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                         row: result_row_in_value,
                     }
                 }
+            }
+        }
+    }
+}
+
+struct ColumnarStoreStorageTableInnerIterInner<S: StateStore> {
+    iters: Vec<S::Iter>,
+    mapping: ColumnMapping,
+    output_indices: Vec<usize>,
+    output_pk_position_in_pk_indices: Vec<usize>,
+    non_pk_position_in_output_indices: Vec<usize>,
+    data_types: Vec<DataType>,
+    pk_serializer: OrderedRowSerde,
+    vnode: VirtualNode,
+}
+
+impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
+    async fn new(
+        store: &S,
+        vnode: VirtualNode,
+        pk_serializer: OrderedRowSerde,
+        output_indices: Vec<usize>,
+        pk_indices: Vec<usize>,
+        column_ids: Vec<ColumnId>,
+        data_types: Vec<DataType>,
+        encoded_key_range: (Bound<Bytes>, Bound<Bytes>),
+        read_options: ReadOptions,
+        epoch: HummockReadEpoch,
+    ) -> StorageResult<Self> {
+        assert_eq!(output_indices.len(), data_types.len());
+        let mut output_pk_position_in_pk_indices = vec![];
+        let mut non_pk_position_in_output_indices = vec![];
+        for (pos, col_idx) in output_indices.iter().enumerate() {
+            if let Some(pos_in_pk_indices) = pk_indices
+                .iter()
+                .position(|pk_col_idx| pk_col_idx == col_idx)
+            {
+                output_pk_position_in_pk_indices.push(pos_in_pk_indices);
+            } else {
+                non_pk_position_in_output_indices.push(pos);
+            }
+        }
+        let mut iter_to_output_mapping = vec![0; output_indices.len()];
+        let mut iter_output_pos = 0;
+        for pk_pos in &output_pk_position_in_pk_indices {
+            let output_pos = output_indices
+                .iter()
+                .position(|output_col_idx| *output_col_idx == pk_indices[*pk_pos])
+                .unwrap();
+            iter_to_output_mapping[output_pos] = iter_output_pos;
+            iter_output_pos += 1;
+        }
+        for non_pk_pos in &non_pk_position_in_output_indices {
+            iter_to_output_mapping[*non_pk_pos] = iter_output_pos;
+            iter_output_pos += 1;
+        }
+        let raw_epoch = epoch.get_epoch();
+        store.try_wait_epoch(epoch).await?;
+        let iter_ranges = iter::once(ColumnId::new(0))
+            .chain(
+                non_pk_position_in_output_indices
+                    .iter()
+                    .map(|pos| column_ids[output_indices[*pos]]),
+            )
+            .map(|column_id| {
+                (
+                    column_id,
+                    prefixed_range_with_vnode_and_column_id(
+                        encoded_key_range.clone(),
+                        vnode,
+                        column_id,
+                    ),
+                )
+            });
+        // .skip(if output_pk_position_in_pk_indices.is_empty() {
+        //     1
+        // } else {
+        //     0
+        // });
+        let mut iter_fut = Vec::with_capacity(1 + non_pk_position_in_output_indices.len());
+        for (column_id, table_key_range) in iter_ranges {
+            let col_prefix_hint = read_options.prefix_hint.as_ref().map(|bytes| {
+                let column_id_slice = column_id.get_id().to_be_bytes();
+                let mut buffer = BytesMut::with_capacity(column_id_slice.len() + bytes.len());
+                buffer.extend_from_slice(&column_id_slice);
+                buffer.extend_from_slice(bytes);
+                buffer.freeze()
+            });
+            let col_read_options = ReadOptions {
+                prefix_hint: col_prefix_hint,
+                ..read_options.clone()
+            };
+            let fut = store.iter(table_key_range, raw_epoch, col_read_options);
+            iter_fut.push(fut);
+        }
+        let iters = try_join_all(iter_fut).await?;
+
+        store.validate_read_epoch(epoch)?;
+        let iter = Self {
+            iters,
+            mapping: ColumnMapping::new(iter_to_output_mapping),
+            output_indices,
+            non_pk_position_in_output_indices,
+            output_pk_position_in_pk_indices,
+            data_types,
+            pk_serializer,
+            vnode,
+        };
+        Ok(iter)
+    }
+
+    #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
+    async fn into_stream(mut self) {
+        fn strip_vnode_and_column_id_from_table_key<T: AsRef<[u8]>>(
+            table_key: &TableKey<T>,
+        ) -> &[u8] {
+            &table_key.0.as_ref()[(VirtualNode::SIZE + mem::size_of::<ColumnId>())..]
+        }
+        loop {
+            let mut fut_iter = Vec::with_capacity(self.iters.len());
+            for iter in &mut self.iters {
+                let fut = iter.try_next();
+                fut_iter.push(fut);
+            }
+            let kvs = try_join_all(fut_iter).await?;
+            if kvs.iter().any(|kv| kv.is_none()) {
+                assert!(kvs.iter().all(|kv| kv.is_none()));
+                break;
+            }
+            let mut kvs = kvs.into_iter().map(|kv| kv.unwrap());
+            let mut iter_output = Vec::with_capacity(self.output_indices.len());
+            let table_key_with_vnode_and_column_id = kvs.next().unwrap().0.user_key.table_key;
+            let table_key =
+                strip_vnode_and_column_id_from_table_key(&table_key_with_vnode_and_column_id);
+            let pk = self.pk_serializer.deserialize(table_key)?;
+            // TODO(columnar_store): this serialize_pk_with_vnode can be optimized out.
+            let vnode_prefixed_key =
+                serialize_pk_with_vnode(pk.clone(), &self.pk_serializer, self.vnode);
+            for datum in pk
+                .project(&self.output_pk_position_in_pk_indices)
+                .into_owned_row()
+            {
+                iter_output.push(datum);
+            }
+            for (pos, (_, value)) in self
+                .non_pk_position_in_output_indices
+                .iter()
+                .zip_eq_debug(kvs)
+            {
+                // TODO(columnar_store): use a deserializer
+                let data_type = &self.data_types[*pos];
+                let col_val = deserialize_datum(value, data_type)?;
+                iter_output.push(col_val);
+            }
+            let row = self
+                .mapping
+                .project(OwnedRow::new(iter_output))
+                .into_owned_row();
+            yield KeyedRow {
+                vnode_prefixed_key,
+                row,
             }
         }
     }

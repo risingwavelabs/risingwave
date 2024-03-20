@@ -57,6 +57,8 @@ pub struct TableDesc {
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
 
+    pub is_columnar_store: Option<bool>,
+
     /// Whether the table is versioned. If `true`, column-aware row encoding will be used
     /// to be compatible with schema changes.
     ///
@@ -113,6 +115,7 @@ impl TableDesc {
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
             vnode_col_idx_in_pk,
+            is_columnar_store: self.is_columnar_store,
         })
     }
 
@@ -142,6 +145,7 @@ impl TableDesc {
             value_indices: table.value_indices.iter().map(|i| *i as _).collect(),
             read_prefix_len_hint: table.read_prefix_len_hint as _,
             watermark_columns: table.watermark_indices.iter().map(|i| *i as _).collect(),
+            is_columnar_store: table.is_columnar_store,
             versioned: table.version.is_some(),
         }
     }

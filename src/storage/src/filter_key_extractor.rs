@@ -14,11 +14,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::mem;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -131,6 +132,7 @@ pub struct SchemaFilterKeyExtractor {
     deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
+    is_columnar_store: bool,
 }
 
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
@@ -140,7 +142,12 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
-        let (_vnode_prefix, pk) = key.split_at(VirtualNode::SIZE);
+        let (_vnode_prefix, mut pk) = key.split_at(VirtualNode::SIZE);
+        let mut column_id_size = 0;
+        if self.is_columnar_store {
+            column_id_size = mem::size_of::<ColumnId>();
+            pk = pk.split_at(column_id_size).1;
+        }
 
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
@@ -150,7 +157,8 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
             .deserialize_prefix_len(pk, self.read_prefix_len)
             .unwrap();
 
-        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
+        let end_position =
+            TABLE_PREFIX_LEN + VirtualNode::SIZE + column_id_size + bloom_filter_key_len;
         &full_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
     }
 }
@@ -180,6 +188,7 @@ impl SchemaFilterKeyExtractor {
         Self {
             read_prefix_len,
             deserializer: OrderedRowSerde::new(data_types, order_types),
+            is_columnar_store: table_catalog.is_columnar_store.unwrap_or(false),
         }
     }
 }
