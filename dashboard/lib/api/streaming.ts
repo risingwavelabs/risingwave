@@ -18,13 +18,9 @@
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import { Sink, Source, Table, View } from "../../proto/gen/catalog"
-import { ActorLocation, TableFragments } from "../../proto/gen/meta"
+import { TableFragments } from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import api from "./api"
-
-export async function getActors(): Promise<ActorLocation[]> {
-  return (await api.get("/actors")).map(ActorLocation.fromJSON)
-}
 
 export async function getFragments(): Promise<TableFragments[]> {
   let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(

@@ -121,6 +121,7 @@ macro_rules! commit_meta {
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
@@ -130,6 +131,7 @@ use crate::manager::catalog::utils::{
     refcnt_inc_connection, ReplaceTableExprRewriter,
 };
 use crate::rpc::ddl_controller::DropMode;
+use crate::telemetry::MetaTelemetryJobDesc;
 
 pub type CatalogManagerRef = Arc<CatalogManager>;
 
@@ -3531,6 +3533,41 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_stream_job_for_telemetry(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        let tables = self.list_tables().await;
+        let mut res = Vec::with_capacity(tables.len());
+        let source_read_lock = self.core.lock().await;
+        for table_def in tables {
+            // filter out internal tables, only allow Table and MaterializedView
+            if !(table_def.table_type == TableType::Table as i32
+                || table_def.table_type == TableType::MaterializedView as i32)
+            {
+                continue;
+            }
+            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+                table_def.optional_associated_source_id
+                && let Some(source) = source_read_lock.database.sources.get(&source_id)
+            {
+                res.push(MetaTelemetryJobDesc {
+                    table_id: table_def.id as i32,
+                    connector: source
+                        .with_properties
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .map(|v| v.to_lowercase()),
+                    optimization: vec![],
+                })
+            } else {
+                res.push(MetaTelemetryJobDesc {
+                    table_id: table_def.id as i32,
+                    connector: None,
+                    optimization: vec![],
+                })
+            }
+        }
+
+        Ok(res)
+    }
+
     pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
         self.core
             .lock()
@@ -3639,6 +3676,39 @@ impl CatalogManager {
                     })
             })
             .collect_vec()
+    }
+
+    pub async fn list_object_dependencies(&self) -> Vec<PbObjectDependencies> {
+        let core = &self.core.lock().await.database;
+        let mut dependencies = vec![];
+        for table in core.tables.values() {
+            let table_type = table.get_table_type().unwrap();
+            let job_status = table.get_stream_job_status().unwrap();
+            if table_type != TableType::Internal && job_status != StreamJobStatus::Creating {
+                for referenced in &table.dependent_relations {
+                    dependencies.push(PbObjectDependencies {
+                        object_id: table.id,
+                        referenced_object_id: *referenced,
+                    });
+                }
+                for incoming_sinks in &table.incoming_sinks {
+                    dependencies.push(PbObjectDependencies {
+                        object_id: table.id,
+                        referenced_object_id: *incoming_sinks,
+                    });
+                }
+            }
+        }
+        for sink in core.sinks.values() {
+            for referenced in &sink.dependent_relations {
+                dependencies.push(PbObjectDependencies {
+                    object_id: sink.id,
+                    referenced_object_id: *referenced,
+                });
+            }
+        }
+
+        dependencies
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
@@ -3845,9 +3915,9 @@ impl CatalogManager {
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::AuthInfo => user.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => {
-                user.name = update_user.name.clone();
+                user.name.clone_from(&update_user.name);
             }
         });
 

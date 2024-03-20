@@ -352,14 +352,16 @@ impl WorkerNodeSelector {
                         // 1. Stable mapping for most cases.
                         return Ok(o);
                     }
-                    let max_parallelism = o.iter_unique().count();
+                    // If it's a singleton, set max_parallelism=1 for place_vnode.
+                    let max_parallelism = o.to_single().map(|_| 1);
                     (Some(o), max_parallelism)
                 }
                 Err(e) => {
                     if !matches!(e, SchedulerError::ServingVnodeMappingNotFound(_)) {
                         return Err(e);
                     }
-                    let max_parallelism = 100;
+                    // We cannot tell whether it's a singleton, set max_parallelism=1 for place_vnode as if it's a singleton.
+                    let max_parallelism = 1;
                     tracing::warn!(
                         fragment_id,
                         max_parallelism,
@@ -367,7 +369,7 @@ impl WorkerNodeSelector {
                     );
                     // Workaround the case that new mapping is not available yet due to asynchronous
                     // notification.
-                    (None, max_parallelism)
+                    (None, Some(max_parallelism))
                 }
             };
             // 2. Temporary mapping that filters out unavailable workers.

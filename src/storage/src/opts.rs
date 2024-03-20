@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::config::{
-    extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+    extract_storage_memory_config, EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
@@ -47,10 +47,16 @@ pub struct StorageOpts {
     pub write_conflict_detection_enabled: bool,
     /// Capacity of sstable block cache.
     pub block_cache_capacity_mb: usize,
+    /// the number of block-cache shard. Less shard means that more concurrent-conflict.
+    pub block_cache_shard_num: usize,
+    /// Eviction config for block cache.
+    pub block_cache_eviction_config: EvictionConfig,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
-    /// Percent of the ratio of high priority data in block-cache
-    pub high_priority_ratio: usize,
+    /// the number of meta-cache shard. Less shard means that more concurrent-conflict.
+    pub meta_cache_shard_num: usize,
+    /// Eviction config for meta cache.
+    pub meta_cache_eviction_config: EvictionConfig,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
@@ -128,7 +134,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
-    /// enable FastCompactorRunner.
+    /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
     pub check_compaction_result: bool,
     pub max_preload_io_retry_times: usize,
@@ -165,11 +171,14 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
-            high_priority_ratio: s.high_priority_ratio_in_percent,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
+            block_cache_shard_num: s.block_cache_shard_num,
+            block_cache_eviction_config: s.block_cache_eviction_config.clone(),
+            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
+            meta_cache_shard_num: s.meta_cache_shard_num,
+            meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
-            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,

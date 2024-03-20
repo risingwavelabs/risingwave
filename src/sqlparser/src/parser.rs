@@ -25,6 +25,7 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
+use self::ddl::AlterSubscriptionOperation;
 use crate::ast::ddl::{
     AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
     AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
@@ -2087,6 +2088,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_create_subscription(or_replace)
         } else if self.parse_keyword(Keyword::CONNECTION) {
             self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
@@ -2186,6 +2189,22 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // SUBSCRIPTION
+    // [IF NOT EXISTS]?
+    // <subscription_name: Ident>
+    // FROM
+    // <materialized_view: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_subscription(
+        &mut self,
+        _or_replace: bool,
+    ) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSubscription {
+            stmt: CreateSubscriptionStatement::parse_to(self)?,
         })
     }
 
@@ -2905,9 +2924,11 @@ impl Parser {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_alter_subscription()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
@@ -3236,6 +3257,59 @@ impl Parser {
         })
     }
 
+    pub fn parse_alter_subscription(&mut self) -> Result<Statement, ParserError> {
+        let subscription_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let subscription_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::RenameSubscription { subscription_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSubscriptionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected(
+                        "TO or = after ALTER TABLE SET PARALLELISM",
+                        self.peek_token(),
+                    );
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
+            } else {
+                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                "RENAME or OWNER TO or SET after ALTER SUBSCRIPTION",
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterSubscription {
+            name: subscription_name,
+            operation,
+        })
+    }
+
     pub fn parse_alter_source(&mut self) -> Result<Statement, ParserError> {
         let source_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
@@ -3267,6 +3341,8 @@ impl Parser {
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let connector_schema = self.parse_schema()?.unwrap();
             AlterSourceOperation::FormatEncode { connector_schema }
+        } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
+            AlterSourceOperation::RefreshSchema
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",
@@ -4298,6 +4374,14 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::SUBSCRIPTIONS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Subscription {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects {
                         object: ShowObject::Database,
@@ -4451,13 +4535,12 @@ impl Parser {
                 Keyword::INDEX => ShowCreateType::Index,
                 Keyword::SOURCE => ShowCreateType::Source,
                 Keyword::SINK => ShowCreateType::Sink,
+                Keyword::SUBSCRIPTION => ShowCreateType::Subscription,
                 Keyword::FUNCTION => ShowCreateType::Function,
-                _ => {
-                    return self.expected(
-                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
-                        self.peek_token(),
-                    )
-                }
+                _ => return self.expected(
+                    "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
+                    self.peek_token(),
+                ),
             };
             return Ok(Statement::ShowCreateObject {
                 create_type: show_type,
@@ -4465,7 +4548,7 @@ impl Parser {
             });
         }
         self.expected(
-            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
+            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
             self.peek_token(),
         )
     }

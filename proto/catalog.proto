@@ -177,6 +177,8 @@ message Subscription {
 
   optional string initialized_at_cluster_version = 15;
   optional string created_at_cluster_version = 16;
+
+  string subscription_from_name = 17;
 }
 
 message Connection {

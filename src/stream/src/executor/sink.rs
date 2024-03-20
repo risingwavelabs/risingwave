@@ -172,9 +172,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             sink,
                             log_reader,
                             self.input_columns,
+                            self.sink_param,
                             self.sink_writer_param,
                             self.actor_context,
-                            self.info,
                         );
                         // TODO: may try to remove the boxed
                         select(consume_log_stream.into_stream(), write_log_stream).boxed()
@@ -350,9 +350,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
+        sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
-        info: ExecutorInfo,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
 
@@ -381,21 +381,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
             .await
         {
-            let mut err_str = e.to_report_string();
-            if actor_context
-                .error_suppressor
-                .lock()
-                .suppress_error(&err_str)
-            {
-                err_str = format!(
-                    "error msg suppressed (due to per-actor error limit: {})",
-                    actor_context.error_suppressor.lock().max()
-                );
-            }
             GLOBAL_ERROR_METRICS.user_sink_error.report([
-                S::SINK_NAME.to_owned(),
-                info.identity.clone(),
-                err_str,
+                "sink_executor_error".to_owned(),
+                sink_param.sink_id.to_string(),
+                sink_param.sink_name.clone(),
+                actor_context.fragment_id.to_string(),
             ]);
 
             match log_reader.rewind().await {
@@ -431,6 +421,7 @@ impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
 #[cfg(test)]
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -474,12 +465,12 @@ mod test {
         let pk_indices = vec![0];
 
         let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
                     + 3 2 1",
             ))),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 "  I I I
                     U- 3 2 1
@@ -495,6 +486,7 @@ mod test {
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -594,12 +586,12 @@ mod test {
             .collect();
 
         let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
                     + 1 1 10",
             ))),
-            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                 " I I I
                     + 1 3 30",
@@ -613,12 +605,13 @@ mod test {
                 " I I I
                     - 1 1 10",
             ))),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .into_executor(schema.clone(), vec![0, 1]);
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -732,14 +725,15 @@ mod test {
         let pk_indices = vec![0];
 
         let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(1)),
-            Message::Barrier(Barrier::new_test_barrier(2)),
-            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .into_executor(schema.clone(), pk_indices.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
+            sink_name: "test".into(),
             properties,
             columns: columns
                 .iter()
@@ -776,19 +770,19 @@ mod test {
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(1))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1)))
         );
 
         // Barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(2))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2)))
         );
 
         // The last barrier message.
         assert_eq!(
             executor.next().await.unwrap().unwrap(),
-            Message::Barrier(Barrier::new_test_barrier(3))
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
         );
     }
 }

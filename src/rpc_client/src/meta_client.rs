@@ -44,8 +44,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, Table,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -71,6 +71,7 @@ use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
@@ -380,6 +381,20 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSubscriptionRequest {
+            subscription: Some(subscription),
+            fragment_graph: Some(graph),
+        };
+
+        let resp = self.inner.create_subscription(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn create_function(&self, function: PbFunction) -> Result<CatalogVersion> {
         let request = CreateFunctionRequest {
             function: Some(function),
@@ -565,6 +580,19 @@ impl MetaClient {
             affected_table_change,
         };
         let resp = self.inner.drop_sink(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_subscription(
+        &self,
+        subscription_id: u32,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
+        let request = DropSubscriptionRequest {
+            subscription_id,
+            cascade,
+        };
+        let resp = self.inner.drop_subscription(request).await?;
         Ok(resp.version)
     }
 
@@ -809,6 +837,14 @@ impl MetaClient {
             .list_actor_states(ListActorStatesRequest {})
             .await?;
         Ok(resp.states)
+    }
+
+    pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
+        let resp = self
+            .inner
+            .list_object_dependencies(ListObjectDependenciesRequest {})
+            .await?;
+        Ok(resp.dependencies)
     }
 
     pub async fn pause(&self) -> Result<PauseResponse> {
@@ -1847,6 +1883,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
             ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
+            ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -1856,6 +1893,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
+            ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
@@ -1865,6 +1903,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
+            ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }

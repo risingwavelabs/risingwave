@@ -794,6 +794,7 @@ impl BlockBuilder {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
 
     use super::*;
@@ -803,10 +804,10 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -815,22 +816,22 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
@@ -849,10 +850,10 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct_for_test(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -861,34 +862,34 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
+        assert_eq!(construct_full_key_struct_for_test(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
         assert!(!bi.is_valid());
     }
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct_for_test(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
     ) -> FullKey<&[u8]> {
-        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(epoch))
     }
 
     #[test]
@@ -899,9 +900,9 @@ mod tests {
         let large_key = vec![b'b'; MAX_KEY_LEN];
         let xlarge_key = vec![b'c'; MAX_KEY_LEN + 500];
 
-        builder.add_for_test(construct_full_key_struct(0, &medium_key, 1), b"v1");
-        builder.add_for_test(construct_full_key_struct(0, &large_key, 2), b"v2");
-        builder.add_for_test(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+        builder.add_for_test(construct_full_key_struct_for_test(0, &medium_key, 1), b"v1");
+        builder.add_for_test(construct_full_key_struct_for_test(0, &large_key, 2), b"v2");
+        builder.add_for_test(construct_full_key_struct_for_test(0, &xlarge_key, 3), b"v3");
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
@@ -910,17 +911,26 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
+        assert_eq!(
+            construct_full_key_struct_for_test(0, &medium_key, 1),
+            bi.key()
+        );
         assert_eq!(b"v1", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
+        assert_eq!(
+            construct_full_key_struct_for_test(0, &large_key, 2),
+            bi.key()
+        );
         assert_eq!(b"v2", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
+        assert_eq!(
+            construct_full_key_struct_for_test(0, &xlarge_key, 3),
+            bi.key()
+        );
         assert_eq!(b"v3", bi.value());
 
         bi.next();
@@ -940,15 +950,18 @@ mod tests {
                 if index < 50 {
                     let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                     medium_key.push(index);
-                    builder.add_for_test(construct_full_key_struct(0, &medium_key, 1), b"v1");
+                    builder
+                        .add_for_test(construct_full_key_struct_for_test(0, &medium_key, 1), b"v1");
                 } else if index < 80 {
                     let mut large_key = vec![b'B'; MAX_KEY_LEN];
                     large_key.push(index);
-                    builder.add_for_test(construct_full_key_struct(0, &large_key, 2), b"v2");
+                    builder
+                        .add_for_test(construct_full_key_struct_for_test(0, &large_key, 2), b"v2");
                 } else {
                     let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                     xlarge_key.push(index);
-                    builder.add_for_test(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+                    builder
+                        .add_for_test(construct_full_key_struct_for_test(0, &xlarge_key, 3), b"v3");
                 }
             }
 
@@ -964,15 +977,24 @@ mod tests {
                 if index < 50 {
                     let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                     medium_key.push(index);
-                    assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
+                    assert_eq!(
+                        construct_full_key_struct_for_test(0, &medium_key, 1),
+                        bi.key()
+                    );
                 } else if index < 80 {
                     let mut large_key = vec![b'B'; MAX_KEY_LEN];
                     large_key.push(index);
-                    assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
+                    assert_eq!(
+                        construct_full_key_struct_for_test(0, &large_key, 2),
+                        bi.key()
+                    );
                 } else {
                     let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                     xlarge_key.push(index);
-                    assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
+                    assert_eq!(
+                        construct_full_key_struct_for_test(0, &xlarge_key, 3),
+                        bi.key()
+                    );
                 }
                 bi.next();
             }

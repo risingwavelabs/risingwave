@@ -36,7 +36,7 @@ pub struct IndexCatalog {
 
     /// Only `InputRef` and `FuncCall` type index is supported Now.
     /// The index of `InputRef` is the column index of the primary table.
-    /// The index_item size is equal to the index table columns size
+    /// The `index_item` size is equal to the index table columns size
     /// The input args of `FuncCall` is also the column index of the primary table.
     pub index_item: Vec<ExprImpl>,
 

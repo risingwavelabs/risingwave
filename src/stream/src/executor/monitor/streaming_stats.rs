@@ -65,6 +65,7 @@ pub struct StreamingMetrics {
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
+    pub source_backfill_row_count: LabelGuardedIntCounterVec<4>,
 
     // Sink & materialized view
     pub sink_input_row_count: LabelGuardedIntCounterVec<3>,
@@ -118,12 +119,8 @@ pub struct StreamingMetrics {
     pub temporal_join_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
     // Backfill
-    pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
-    pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
-
-    // Arrangement Backfill
-    pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
-    pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+    pub backfill_snapshot_read_row_count: LabelGuardedIntCounterVec<2>,
+    pub backfill_upstream_output_row_count: LabelGuardedIntCounterVec<2>,
 
     // CDC Backfill
     pub cdc_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
@@ -220,6 +217,14 @@ impl StreamingMetrics {
         let source_split_change_count = register_int_counter_vec_with_registry!(
             "stream_source_split_change_event_count",
             "Total number of split change events that have been operated by source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let source_backfill_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_source_backfill_rows_counts",
+            "Total number of rows that have been backfilled for source",
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
@@ -661,7 +666,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+        let backfill_snapshot_read_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_snapshot_read_row_count",
             "Total number of rows that have been read from the backfill snapshot",
             &["table_id", "actor_id"],
@@ -669,30 +674,13 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+        let backfill_upstream_output_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_backfill_upstream_output_row_count",
             "Total number of rows that have been output from the backfill upstream",
             &["table_id", "actor_id"],
             registry
         )
         .unwrap();
-
-        let arrangement_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
-            "stream_arrangement_backfill_snapshot_read_row_count",
-            "Total number of rows that have been read from the arrangement_backfill snapshot",
-            &["table_id", "actor_id"],
-            registry
-        )
-        .unwrap();
-
-        let arrangement_backfill_upstream_output_row_count =
-            register_int_counter_vec_with_registry!(
-                "stream_arrangement_backfill_upstream_output_row_count",
-                "Total number of rows that have been output from the arrangement_backfill upstream",
-                &["table_id", "actor_id"],
-                registry
-            )
-            .unwrap();
 
         let cdc_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
             "stream_cdc_backfill_snapshot_read_row_count",
@@ -776,7 +764,7 @@ impl StreamingMetrics {
         let opts = histogram_opts!(
             "stream_barrier_sync_storage_duration_seconds",
             "barrier_sync_latency",
-            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -1069,6 +1057,7 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             source_output_row_count,
             source_split_change_count,
+            source_backfill_row_count,
             sink_input_row_count,
             mview_input_row_count,
             exchange_frag_recv_size,
@@ -1106,8 +1095,6 @@ impl StreamingMetrics {
             temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
-            arrangement_backfill_snapshot_read_row_count,
-            arrangement_backfill_upstream_output_row_count,
             cdc_backfill_snapshot_read_row_count,
             cdc_backfill_upstream_output_row_count,
             over_window_cached_entry_count,

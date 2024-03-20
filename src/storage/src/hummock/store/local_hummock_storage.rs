@@ -23,11 +23,11 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
-use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
 use crate::error::StorageResult;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
 use crate::hummock::iterator::{
     ConcatIteratorInner, Forward, HummockIteratorUnion, MergeIterator, UserIterator,
@@ -44,6 +44,7 @@ use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
+use crate::panic_store::PanicStateStoreIter;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -74,11 +75,11 @@ pub struct LocalHummockStorage {
     /// This also handles a corner case where an executor doing replication
     /// is scheduled to the same CN as its Upstream executor.
     /// In that case, we use this flag to avoid reading the same data twice,
-    /// by ignoring the replicated ReadVersion.
+    /// by ignoring the replicated `ReadVersion`.
     is_replicated: bool,
 
     /// Event sender.
-    event_sender: mpsc::UnboundedSender<HummockEvent>,
+    event_sender: HummockEventSender,
 
     memory_limiter: Arc<MemoryLimiter>,
 
@@ -135,7 +136,7 @@ impl LocalHummockStorage {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
@@ -163,7 +164,7 @@ impl LocalHummockStorage {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
+    ) -> StorageResult<LocalHummockStorageIterator<'_>> {
         let (table_key_range, read_snapshot) = read_filter_for_version(
             epoch,
             read_options.table_id,
@@ -205,7 +206,8 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+    type Iter = HummockStorageIterator;
 
     fn get(
         &self,
@@ -222,15 +224,24 @@ impl StateStoreRead for LocalHummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         assert!(epoch <= self.epoch());
         self.iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
     }
+
+    async fn iter_log(
+        &self,
+        _epoch_range: (u64, u64),
+        _key_range: TableKeyRange,
+        _options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        unimplemented!()
+    }
 }
 
 impl LocalStateStore for LocalHummockStorage {
-    type IterStream<'a> = StreamTypeOfIter<LocalHummockStorageIterator<'a>>;
+    type Iter<'a> = LocalHummockStorageIterator<'a>;
 
     fn may_exist(
         &self,
@@ -258,7 +269,7 @@ impl LocalStateStore for LocalHummockStorage {
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> StorageResult<Self::IterStream<'_>> {
+    ) -> StorageResult<Self::Iter<'_>> {
         let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
         assert_eq!(
             r_vnode_exclusive - l_vnode_inclusive,
@@ -533,7 +544,7 @@ impl LocalHummockStorage {
         instance_guard: LocalInstanceGuard,
         read_version: HummockReadVersionRef,
         hummock_version_reader: HummockVersionReader,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
+        event_sender: HummockEventSender,
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
@@ -593,19 +604,21 @@ pub type LocalHummockStorageIterator<'a> = HummockStorageIteratorInner<'a>;
 
 pub struct HummockStorageIteratorInner<'a> {
     inner: UserIterator<HummockStorageIteratorPayloadInner<'a>>,
+    initial_read: bool,
     stats_guard: IterLocalMetricsGuard,
 }
 
 impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
-    type Item = StateStoreIterItem;
-
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
         let iter = &mut self.inner;
+        if !self.initial_read {
+            self.initial_read = true;
+        } else {
+            iter.next().await?;
+        }
 
         if iter.is_valid() {
-            let kv = (iter.key().clone(), iter.value().clone());
-            iter.next().await?;
-            Ok(Some(kv))
+            Ok(Some((iter.key(), iter.value())))
         } else {
             Ok(None)
         }
@@ -621,6 +634,7 @@ impl<'a> HummockStorageIteratorInner<'a> {
     ) -> Self {
         Self {
             inner,
+            initial_read: false,
             stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
     }

@@ -52,8 +52,12 @@ impl ServingVnodeMapping {
         for (fragment_id, streaming_parallelism) in streaming_parallelisms {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(&fragment_id);
-                // Set max serving parallelism to `streaming_parallelism`. It's not a must.
-                place_vnode(old_mapping, workers, streaming_parallelism)
+                let max_parallelism = if streaming_parallelism == 1 {
+                    Some(1)
+                } else {
+                    None
+                };
+                place_vnode(old_mapping, workers, max_parallelism)
             };
             match new_mapping {
                 None => {

@@ -23,9 +23,7 @@ use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::JVM;
-use risingwave_pb::connector_service::{
-    SourceCommonParam, SourceType, ValidateSourceRequest, ValidateSourceResponse,
-};
+use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::{
@@ -37,7 +35,7 @@ pub const DATABASE_SERVERS_KEY: &str = "database.servers";
 
 #[derive(Debug)]
 pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
-    /// The source_id in the catalog
+    /// The `source_id` in the catalog
     source_id: u32,
     worker_node_addrs: Vec<HostAddr>,
     _phantom: PhantomData<T>,
@@ -80,9 +78,8 @@ where
                 source_type: props.get_source_type_pb() as _,
                 properties: props.properties,
                 table_schema: Some(props.table_schema),
-                common_param: Some(SourceCommonParam {
-                    is_multi_table_shared: props.is_multi_table_shared,
-                }),
+                is_source_job: props.is_cdc_source_job,
+                is_backfill_table: props.is_backfill_table,
             };
 
             let validate_source_request_bytes =
