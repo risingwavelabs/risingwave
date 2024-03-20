@@ -462,9 +462,7 @@ impl PredicatePushdown for LogicalScan {
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));
-        println!("before: {}", predicate);
         let predicate = ConditionRewriter::rewrite(predicate);
-        println!("after: {}", predicate);
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()
