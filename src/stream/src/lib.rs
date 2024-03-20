@@ -87,7 +87,7 @@ mod consistency {
             match crate::consistency::strict_consistency() {
                 risingwave_common::config::StrictConsistencyOption::On => {
                     tracing::error!($($arg)*);
-                    panic!("inconsisteny happened, see error log for details");
+                    panic!("inconsistency happened, see error log for details");
                 }
                 risingwave_common::config::StrictConsistencyOption::Off => tracing::error!($($arg)*),
                 risingwave_common::config::StrictConsistencyOption::OffSilent => {}
