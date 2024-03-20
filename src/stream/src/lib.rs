@@ -56,6 +56,8 @@ pub mod task;
 risingwave_expr_impl::enable!();
 
 mod consistency {
+    //! This module contains global variables and methods to access the stream consistency settings.
+
     use std::sync::LazyLock;
 
     use risingwave_common::util::env_var::env_var_is_true;
