@@ -1006,7 +1006,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 NATS_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Bytes],
                 ),
                 MQTT_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Bytes],
