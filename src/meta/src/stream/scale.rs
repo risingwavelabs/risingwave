@@ -1837,7 +1837,7 @@ impl ScaleController {
                     for actor in &fragment.actors {
                         let prev =
                             actor_fragment_id_map_for_check.insert(actor.actor_id, *fragment_id);
-                        
+
                         debug_assert!(prev.is_none());
                     }
                 }
