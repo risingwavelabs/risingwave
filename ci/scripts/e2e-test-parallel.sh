@@ -54,4 +54,5 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- Cleaning logs"
-cat .risingwave/log/compactor.log | sed -i -E 's/Compaction task table_ids: \[[0-9, ]+\]/Compaction task table_ids: [hidden]/g'
+cat /risingwave/.risingwave/log/compactor-6660.log | sed -i -E 's/Compaction task table_ids: \[[0-9, ]+\]/Compaction task table_ids: [hidden]/g'
+
