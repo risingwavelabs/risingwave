@@ -133,21 +133,23 @@ impl SourceStreamChunkBuilder {
         builder.finish()
     }
 
-    fn take_heartbeat(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.descs);
-        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
-
-        // heartbeat rows are empty, we set them invisible
-        let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
+    fn finish_heartbeat(self) -> StreamChunk {
+        // heartbeat chunk should be invisible
+        let visibility = BitmapBuilder::zeroed(self.op_builder.len());
         StreamChunk::with_visibility(
-            builder.op_builder,
-            builder
-                .builders
+            self.op_builder,
+            self.builders
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
             visibility.finish(),
         )
+    }
+
+    fn take_heartbeat(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish_heartbeat()
     }
 
     pub fn op_num(&self) -> usize {
@@ -782,6 +784,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         }
 
         // emit heartbeat for each message batch
+        // we must emit heartbeat chunk before the data chunk,
+        // otherwise the source offset could be backward due to the heartbeat
         if !heartbeat_builder.is_empty() {
             yield heartbeat_builder.take_heartbeat(0);
         }

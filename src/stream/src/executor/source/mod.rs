@@ -60,24 +60,21 @@ pub fn get_split_offset_mapping_from_chunk(
     offset_idx: usize,
 ) -> Option<HashMap<SplitId, String>> {
     let mut split_offset_mapping = HashMap::new();
-    // iterate all rows including the invisible ones,
-    // which contain offset from upstream heartbeat message
-    for i in 0..chunk.capacity() {
-        let (_, row, vis) = chunk.row_at(i);
-        let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
-        let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-        if vis {
-            split_offset_mapping.insert(split_id, offset.to_string());
-        } else {
-            assert!(
-                row.iter().all(|d| d.is_none()),
-                "heartbeat row should be all nulls"
-            );
-            // invisible rows are assume to be heartbeat messages from upstream,
-            // which should not overwrite the offset of data messages
+    if chunk.cardinality() == 0 {
+        // assumes the chunk is a heartbeat chunk
+        for i in 0..chunk.capacity() {
+            let (_, row, _) = chunk.row_at(i);
+            let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
+            let offset = row.datum_at(offset_idx).unwrap().into_utf8();
             split_offset_mapping
                 .entry(split_id)
                 .or_insert(offset.to_string());
+        }
+    } else {
+        for (_, row) in chunk.rows() {
+            let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
+            let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+            split_offset_mapping.insert(split_id, offset.to_string());
         }
     }
     Some(split_offset_mapping)
