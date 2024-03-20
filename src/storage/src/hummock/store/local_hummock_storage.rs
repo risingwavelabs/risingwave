@@ -44,6 +44,7 @@ use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
+use crate::panic_store::PanicStateStoreIter;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -74,7 +75,7 @@ pub struct LocalHummockStorage {
     /// This also handles a corner case where an executor doing replication
     /// is scheduled to the same CN as its Upstream executor.
     /// In that case, we use this flag to avoid reading the same data twice,
-    /// by ignoring the replicated ReadVersion.
+    /// by ignoring the replicated `ReadVersion`.
     is_replicated: bool,
 
     /// Event sender.
@@ -205,6 +206,7 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = HummockStorageIterator;
 
     fn get(
@@ -226,6 +228,15 @@ impl StateStoreRead for LocalHummockStorage {
         assert!(epoch <= self.epoch());
         self.iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
+    }
+
+    async fn iter_log(
+        &self,
+        _epoch_range: (u64, u64),
+        _key_range: TableKeyRange,
+        _options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        unimplemented!()
     }
 }
 

@@ -38,13 +38,13 @@ pub struct HopWindow<PlanRef> {
     pub window_slide: Interval,
     pub window_size: Interval,
     pub window_offset: Interval,
-    /// Provides mapping from input schema, window_start, window_end to output schema.
+    /// Provides mapping from input schema, `window_start`, `window_end` to output schema.
     /// For example, if we had:
-    /// input schema: | 0: trip_time | 1: trip_name |
-    /// window_start: 2
-    /// window_end: 3
-    /// output schema: | trip_name | window_start |
-    /// Then, output_indices: [1, 2]
+    /// input schema: | 0: `trip_time` | 1: `trip_name` |
+    /// `window_start`: 2
+    /// `window_end`: 3
+    /// output schema: | `trip_name` | `window_start` |
+    /// Then, `output_indices`: [1, 2]
     pub output_indices: Vec<usize>,
 }
 

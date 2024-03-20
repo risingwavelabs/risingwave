@@ -45,6 +45,7 @@ enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.5", features = ["std"] }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
 hex = "0.4.3"
@@ -107,6 +108,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-retry = "0.3"
 toml = "0.8"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }

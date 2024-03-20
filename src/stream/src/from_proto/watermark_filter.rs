@@ -38,8 +38,10 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let watermark_descs = node.get_watermark_descs().clone();
         let [watermark_desc]: [_; 1] = watermark_descs.try_into().unwrap();
-        let watermark_expr =
-            build_non_strict_from_prost(&watermark_desc.expr.unwrap(), params.eval_error_report)?;
+        let watermark_expr = build_non_strict_from_prost(
+            &watermark_desc.expr.unwrap(),
+            params.eval_error_report.clone(),
+        )?;
         let event_time_col_idx = watermark_desc.watermark_idx as usize;
         let vnodes = Arc::new(
             params
@@ -65,12 +67,12 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
 
         let exec = WatermarkFilterExecutor::new(
             params.actor_context,
-            &params.info,
             input,
             watermark_expr,
             event_time_col_idx,
             table,
             global_watermark_table,
+            params.eval_error_report,
         );
         Ok((params.info, exec).into())
     }

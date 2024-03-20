@@ -189,6 +189,7 @@ pub enum AlterSourceOperation {
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
     FormatEncode { connector_schema: ConnectorSchema },
+    RefreshSchema,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -423,6 +424,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::FormatEncode { connector_schema } => {
                 write!(f, "{connector_schema}")
+            }
+            AlterSourceOperation::RefreshSchema => {
+                write!(f, "REFRESH SCHEMA")
             }
         }
     }
