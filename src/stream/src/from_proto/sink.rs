@@ -109,6 +109,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id = sink_desc.get_id().into();
+        let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
@@ -154,6 +155,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_param = SinkParam {
             sink_id,
+            sink_name,
             properties,
             columns: columns
                 .iter()

@@ -32,6 +32,7 @@ use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 pub use risingwave_common::config::ObjectStoreConfig;
+use risingwave_common::util::env_var::env_var_is_false_or;
 pub use s3::*;
 
 pub mod error;
@@ -46,6 +47,8 @@ use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
+
+const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
 
 type BoxedStreamingUploader = Box<dyn StreamingUploader>;
 
@@ -792,15 +795,8 @@ pub async fn build_remote_object_store(
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => {
-            if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
-                let bucket = s3.strip_prefix("s3://").unwrap();
-
-                ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
-                )
-            } else {
+            // only switch to s3 sdk when `RW_USE_OPENDAL_FOR_S3` is set to false.
+            if env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
                         s3.strip_prefix("s3://").unwrap().to_string(),
@@ -810,6 +806,14 @@ pub async fn build_remote_object_store(
                     .await
                     .monitored(metrics, config),
                 )
+            } else {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
+                )
             }
         }
         #[cfg(feature = "hdfs-backend")]
@@ -817,9 +821,13 @@ pub async fn build_remote_object_store(
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
             let (namenode, root) = hdfs.split_once('@').unwrap_or((hdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics),
+                OpendalObjectStore::new_hdfs_engine(
+                    namenode.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         gcs if gcs.starts_with("gcs://") => {
@@ -871,7 +879,7 @@ pub async fn build_remote_object_store(
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string())
+                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone())
                     .unwrap()
                     .monitored(metrics, config),
             )

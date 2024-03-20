@@ -300,9 +300,11 @@ impl TestCase {
 
         let mut result = result.unwrap_or_default();
         result.input = self.input.clone();
-        result.create_source = self.create_source().clone();
-        result.create_table_with_connector = self.create_table_with_connector().clone();
-        result.with_config_map = self.with_config_map().clone();
+        result.create_source.clone_from(self.create_source());
+        result
+            .create_table_with_connector
+            .clone_from(self.create_table_with_connector());
+        result.with_config_map.clone_from(self.with_config_map());
 
         Ok(result)
     }
@@ -914,17 +916,17 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
 
     let mut failed_num = 0;
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
-        if let Some(loc) = e.location() {
-            anyhow!(
-                "failed to parse yaml: {}, at {}:{}:{}",
-                e.as_report(),
+        let context = if let Some(loc) = e.location() {
+            format!(
+                "failed to parse yaml at {}:{}:{}",
                 file_path.display(),
                 loc.line(),
                 loc.column()
             )
         } else {
-            anyhow!("failed to parse yaml: {}", e.as_report())
-        }
+            "failed to parse yaml".to_owned()
+        };
+        anyhow::anyhow!(e).context(context)
     })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
     let mut outputs = vec![];

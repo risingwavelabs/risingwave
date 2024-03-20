@@ -18,6 +18,7 @@ MAIN_CRON_TEST_MAP = {
     "run-micro-benchmarks": ["noelkwan"],
     "upload-micro-benchmarks": ["noelkwan"],
     "e2e-standalone-binary-tests": ["noelkwan"],
+    "e2e-single-node-binary-tests": ["pin", "peng", "noelkwan"],
     "unit-test": ["zhi"],
     "unit-test-deterministic": ["zhi"],
     "e2e-test-release": ["zhi"],
@@ -87,6 +88,8 @@ INTEGRATION_TEST_MAP = {
     "deltalake-sink-json": ["xinhao"],
     "pinot-sink-json": ["yiming"],
     "client-library-none": ["tao"],
+    "nats-json": ["tao"],
+    "nats-protobuf": ["tao"],
 }
 
 def get_failed_tests(get_test_status, test_map):

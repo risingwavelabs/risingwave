@@ -44,9 +44,9 @@ impl Strong {
         Self { null_columns }
     }
 
-    /// Returns whether the analyzed expression will definitely return null if
+    /// Returns whether the analyzed expression will *definitely* return null if
     /// all of a given set of input columns are null.
-    #[allow(dead_code)]
+    /// Note: we could not assume any null-related property for the input expression if `is_null` returns false
     pub fn is_null(expr: &ExprImpl, null_columns: FixedBitSet) -> bool {
         let strong = Strong::new(null_columns);
         strong.is_null_visit(expr)
@@ -148,7 +148,10 @@ impl Strong {
             | ExprType::Round
             | ExprType::Ascii
             | ExprType::Translate
+            | ExprType::Concat
+            | ExprType::ConcatVariadic
             | ExprType::ConcatWs
+            | ExprType::ConcatWsVariadic
             | ExprType::Abs
             | ExprType::SplitPart
             | ExprType::ToChar
@@ -218,6 +221,7 @@ impl Strong {
             | ExprType::Left
             | ExprType::Right
             | ExprType::Format
+            | ExprType::FormatVariadic
             | ExprType::PgwireSend
             | ExprType::PgwireRecv
             | ExprType::ConvertFrom
@@ -256,7 +260,9 @@ impl Strong {
             | ExprType::JsonbAccess
             | ExprType::JsonbAccessStr
             | ExprType::JsonbExtractPath
+            | ExprType::JsonbExtractPathVariadic
             | ExprType::JsonbExtractPathText
+            | ExprType::JsonbExtractPathTextVariadic
             | ExprType::JsonbTypeof
             | ExprType::JsonbArrayLength
             | ExprType::IsJson
@@ -272,7 +278,9 @@ impl Strong {
             | ExprType::JsonbStripNulls
             | ExprType::ToJsonb
             | ExprType::JsonbBuildArray
+            | ExprType::JsonbBuildArrayVariadic
             | ExprType::JsonbBuildObject
+            | ExprType::JsonbBuildObjectVariadic
             | ExprType::JsonbPathExists
             | ExprType::JsonbPathMatch
             | ExprType::JsonbPathQueryArray

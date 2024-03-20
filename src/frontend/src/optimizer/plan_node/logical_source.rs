@@ -19,7 +19,6 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
@@ -60,7 +59,7 @@ pub struct LogicalSource {
     /// Expressions to output. This field presents and will be turned to a `Project` when
     /// converting to a physical plan, only if there are generated columns.
     output_exprs: Option<Vec<ExprImpl>>,
-    /// When there are generated columns, the `StreamRowIdGen`'s row_id_index is different from
+    /// When there are generated columns, the `StreamRowIdGen`'s `row_id_index` is different from
     /// the one in `core`. So we store the one in `output_exprs` here.
     output_row_id_index: Option<usize>,
 }
@@ -490,9 +489,6 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self.core.is_new_fs_connector() {
-            bail_not_implemented!("New fs connector for batch");
-        }
         let mut plan: PlanRef = BatchSource::new(self.core.clone()).into();
 
         if let Some(exprs) = &self.output_exprs {

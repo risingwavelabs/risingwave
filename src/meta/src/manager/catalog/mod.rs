@@ -121,6 +121,7 @@ macro_rules! commit_meta {
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
@@ -130,6 +131,7 @@ use crate::manager::catalog::utils::{
     refcnt_inc_connection, ReplaceTableExprRewriter,
 };
 use crate::rpc::ddl_controller::DropMode;
+use crate::telemetry::MetaTelemetryJobDesc;
 
 pub type CatalogManagerRef = Arc<CatalogManager>;
 
@@ -3531,6 +3533,41 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn list_stream_job_for_telemetry(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        let tables = self.list_tables().await;
+        let mut res = Vec::with_capacity(tables.len());
+        let source_read_lock = self.core.lock().await;
+        for table_def in tables {
+            // filter out internal tables, only allow Table and MaterializedView
+            if !(table_def.table_type == TableType::Table as i32
+                || table_def.table_type == TableType::MaterializedView as i32)
+            {
+                continue;
+            }
+            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+                table_def.optional_associated_source_id
+                && let Some(source) = source_read_lock.database.sources.get(&source_id)
+            {
+                res.push(MetaTelemetryJobDesc {
+                    table_id: table_def.id as i32,
+                    connector: source
+                        .with_properties
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .map(|v| v.to_lowercase()),
+                    optimization: vec![],
+                })
+            } else {
+                res.push(MetaTelemetryJobDesc {
+                    table_id: table_def.id as i32,
+                    connector: None,
+                    optimization: vec![],
+                })
+            }
+        }
+
+        Ok(res)
+    }
+
     pub async fn list_tables_by_type(&self, table_type: TableType) -> Vec<Table> {
         self.core
             .lock()
@@ -3641,6 +3678,39 @@ impl CatalogManager {
             .collect_vec()
     }
 
+    pub async fn list_object_dependencies(&self) -> Vec<PbObjectDependencies> {
+        let core = &self.core.lock().await.database;
+        let mut dependencies = vec![];
+        for table in core.tables.values() {
+            let table_type = table.get_table_type().unwrap();
+            let job_status = table.get_stream_job_status().unwrap();
+            if table_type != TableType::Internal && job_status != StreamJobStatus::Creating {
+                for referenced in &table.dependent_relations {
+                    dependencies.push(PbObjectDependencies {
+                        object_id: table.id,
+                        referenced_object_id: *referenced,
+                    });
+                }
+                for incoming_sinks in &table.incoming_sinks {
+                    dependencies.push(PbObjectDependencies {
+                        object_id: table.id,
+                        referenced_object_id: *incoming_sinks,
+                    });
+                }
+            }
+        }
+        for sink in core.sinks.values() {
+            for referenced in &sink.dependent_relations {
+                dependencies.push(PbObjectDependencies {
+                    object_id: sink.id,
+                    referenced_object_id: *referenced,
+                });
+            }
+        }
+
+        dependencies
+    }
+
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.env
             .notification_manager()
@@ -3689,6 +3759,33 @@ impl CatalogManager {
             .values()
             .filter(|table| table.get_stream_job_status() != Ok(StreamJobStatus::Creating))
             .map(|table| table.id)
+            .collect()
+    }
+
+    /// Returns column ids of `table_ids` that is versioned.
+    /// Being versioned implies using `ColumnAwareSerde`.
+    pub async fn get_versioned_table_schemas(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<TableId, Vec<i32>> {
+        let guard = self.core.lock().await;
+        table_ids
+            .iter()
+            .filter_map(|table_id| {
+                if let Some(t) = guard.database.tables.get(table_id)
+                    && t.version.is_some()
+                {
+                    let ret = (
+                        t.id,
+                        t.columns
+                            .iter()
+                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                            .collect_vec(),
+                    );
+                    return Some(ret);
+                }
+                None
+            })
             .collect()
     }
 
@@ -3818,9 +3915,9 @@ impl CatalogManager {
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::AuthInfo => user.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => {
-                user.name = update_user.name.clone();
+                user.name.clone_from(&update_user.name);
             }
         });
 
@@ -3944,14 +4041,28 @@ impl CatalogManager {
         true
     }
 
+    /// Check whether the user is the owner of the object.
+    #[inline(always)]
+    fn check_owner(
+        database_manager: &DatabaseManager,
+        object: &Object,
+        user_id: UserId,
+    ) -> MetaResult<bool> {
+        database_manager
+            .get_object_owner(object)
+            .map(|owner_id| owner_id == user_id)
+    }
+
     pub async fn grant_privilege(
         &self,
         user_ids: &[UserId],
         new_grant_privileges: &[GrantPrivilege],
         grantor: UserId,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.user;
-        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let core = &mut *self.core.lock().await;
+        let user_core = &mut core.user;
+        let catalog_core = &core.database;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut user_updated = Vec::with_capacity(user_ids.len());
         let grantor_info = users
             .get(&grantor)
@@ -3970,6 +4081,13 @@ impl CatalogManager {
             }
             if !grantor_info.is_super {
                 for new_grant_privilege in new_grant_privileges {
+                    if Self::check_owner(
+                        catalog_core,
+                        new_grant_privilege.object.as_ref().unwrap(),
+                        grantor,
+                    )? {
+                        continue;
+                    }
                     if let Some(privilege) = grantor_info
                         .grant_privileges
                         .iter()
@@ -4005,7 +4123,7 @@ impl CatalogManager {
 
         commit_meta!(self, users)?;
 
-        let grant_user = core
+        let grant_user = user_core
             .user_grant_relation
             .entry(grantor)
             .or_insert_with(HashSet::new);
@@ -4066,8 +4184,10 @@ impl CatalogManager {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.user;
-        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let core = &mut *self.core.lock().await;
+        let user_core = &mut core.user;
+        let catalog_core = &core.database;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         let mut user_updated = HashMap::new();
         let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
@@ -4078,6 +4198,13 @@ impl CatalogManager {
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_super {
             for privilege in revoke_grant_privileges {
+                if Self::check_owner(
+                    catalog_core,
+                    privilege.object.as_ref().unwrap(),
+                    revoke_by.id,
+                )? {
+                    continue;
+                }
                 if let Some(user_privilege) = revoke_by
                     .grant_privileges
                     .iter()
@@ -4113,7 +4240,7 @@ impl CatalogManager {
         }
         while !users_info.is_empty() {
             let mut cur_user = users_info.pop_front().unwrap();
-            let cur_relations = core
+            let cur_relations = user_core
                 .user_grant_relation
                 .get(&cur_user.id)
                 .cloned()
@@ -4168,7 +4295,7 @@ impl CatalogManager {
 
         // Since we might revoke privileges recursively, just simply re-build the grant relation
         // map here.
-        core.build_grant_relation_map();
+        user_core.build_grant_relation_map();
 
         let mut version = 0;
         // FIXME: user might not be updated.

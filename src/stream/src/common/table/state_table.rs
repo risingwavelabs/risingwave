@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use foyer::memory::CacheContext;
+use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, TableId, TableOption,
 };
@@ -55,10 +55,10 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel, PrefetchOptions,
-    ReadOptions, SealCurrentEpochOptions, StateStoreIterItemStream,
+    ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreIterExt,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{KeyedRow, TableDistribution};
+use risingwave_storage::table::{deserialize_log_stream, KeyedRow, TableDistribution};
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tracing::{trace, Instrument};
@@ -98,6 +98,9 @@ pub struct StateTableInner<
     /// State store backend.
     local_store: S::Local,
 
+    /// State store for accessing snapshot data
+    store: S,
+
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -118,7 +121,7 @@ pub struct StateTableInner<
 
     prefix_hint_len: usize,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
@@ -138,7 +141,7 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
-    /// "i" here refers to the base state_table's actual schema.
+    /// "i" here refers to the base `state_table`'s actual schema.
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
@@ -147,7 +150,7 @@ pub struct StateTableInner<
 
     /// Output indices
     /// Used for:
-    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
@@ -177,9 +180,7 @@ where
     /// async interface only used for replicated state table,
     /// as it needs to wait for prev epoch to be committed.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
-        self.local_store
-            .init(InitOptions::new(epoch, self.vnodes().clone()))
-            .await
+        self.local_store.init(InitOptions::new(epoch)).await
     }
 }
 
@@ -195,7 +196,7 @@ where
     /// No need to `wait_for_epoch`, so it should complete immediately.
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         self.local_store
-            .init(InitOptions::new(epoch, self.vnodes().clone()))
+            .init(InitOptions::new(epoch))
             .now_or_never()
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
@@ -359,9 +360,19 @@ where
 
         let table_option = TableOption::new(table_catalog.retention_seconds);
         let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new_replicated(table_id, op_consistency_level, table_option)
+            NewLocalOptions::new_replicated(
+                table_id,
+                op_consistency_level,
+                table_option,
+                distribution.vnodes().clone(),
+            )
         } else {
-            NewLocalOptions::new(table_id, op_consistency_level, table_option)
+            NewLocalOptions::new(
+                table_id,
+                op_consistency_level,
+                table_option,
+                distribution.vnodes().clone(),
+            )
         };
         let local_state_store = store.new_local(new_local_options).await;
 
@@ -398,15 +409,16 @@ where
             .collect_vec();
 
         // Compute i2o mapping
+        // Note that this can be a partial mapping, since we use the i2o mapping to get
+        // any 1 of the output columns, and use that to fill the input column.
         let mut i2o_mapping = vec![None; columns.len()];
-        let mut output_column_indices = vec![];
         for (i, column) in columns.iter().enumerate() {
             if let Some(pos) = output_column_ids_to_input_idx.get(&column.column_id) {
                 i2o_mapping[i] = Some(*pos);
-                output_column_indices.push(i);
             }
         }
-        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+        // We can prune any duplicate column indices
+        let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_ids.len());
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
@@ -414,6 +426,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            store,
             pk_serde,
             row_serde,
             pk_indices,
@@ -573,6 +586,7 @@ where
                 table_id,
                 op_consistency_level,
                 TableOption::default(),
+                distribution.vnodes().clone(),
             ))
             .await;
         let row_serde = make_row_serde();
@@ -594,6 +608,7 @@ where
         Self {
             table_id,
             local_store: local_state_store,
+            store,
             pk_serde,
             row_serde,
             pk_indices,
@@ -744,7 +759,7 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1300,13 +1315,13 @@ where
         table_key_range: TableKeyRange,
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1385,7 +1400,7 @@ where
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
+    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::Iter<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
         let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
 
@@ -1430,7 +1445,7 @@ where
         let read_options = ReadOptions {
             prefix_hint,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
 
@@ -1446,23 +1461,56 @@ where
     }
 }
 
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub async fn iter_log_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        epoch_range: (u64, u64),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_> {
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let memcomparable_range_with_vnode = prefixed_range_with_vnode(memcomparable_range, vnode);
+        Ok(deserialize_log_stream(
+            self.store
+                .iter_log(
+                    epoch_range,
+                    memcomparable_range_with_vnode,
+                    ReadLogOptions {
+                        table_id: self.table_id,
+                    },
+                )
+                .await?,
+            &self.row_serde,
+        )
+        .map_err(Into::into))
+    }
+}
+
 pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
 fn deserialize_keyed_row_stream<'a>(
-    stream: impl StateStoreIterItemStream + 'a,
+    iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
-    stream.map(move |result| {
-        result
-            .map_err(StreamExecutorError::from)
-            .and_then(|(key, value)| {
-                Ok(KeyedRow::new(
-                    key.user_key.table_key,
-                    deserializer.deserialize(&value).map(OwnedRow::new)?,
-                ))
-            })
+    iter.into_stream(move |(key, value)| {
+        Ok(KeyedRow::new(
+            // TODO: may avoid clone the key when key is not needed
+            key.user_key.table_key.copy_into(),
+            deserializer.deserialize(value).map(OwnedRow::new)?,
+        ))
     })
+    .map_err(Into::into)
 }
 
 pub fn prefix_range_to_memcomparable(

@@ -258,6 +258,7 @@ pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     Function {
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
+        variadic: false,
         over: None,
         distinct: false,
         order_by: vec![],

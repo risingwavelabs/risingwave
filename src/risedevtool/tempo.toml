@@ -3,7 +3,7 @@ extend = "common.toml"
 [env]
 TEMPO_SYSTEM = "${SYSTEM_UNDERSCORE}"
 TEMPO_DOWNLOAD_PATH = "${PREFIX_TMP}/tempo.tar.gz"
-TEMPO_VERSION = "2.1.1"
+TEMPO_VERSION = "2.3.1"
 TEMPO_RELEASE = "tempo_${TEMPO_VERSION}_${TEMPO_SYSTEM}"
 TEMPO_DOWNLOAD_TAR_GZ = "https://github.com/grafana/tempo/releases/download/v${TEMPO_VERSION}/${TEMPO_RELEASE}.tar.gz"
 

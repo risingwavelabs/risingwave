@@ -35,7 +35,7 @@ use with_options::WithOptions;
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_SUCCESS_STATUS, STARROCKS_DELETE_SIGN,
 };
-use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, RowEncoder};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::sink::writer::SinkWriterExt;
@@ -48,25 +48,25 @@ const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct StarrocksCommon {
-    /// The StarRocks host address.
+    /// The `StarRocks` host address.
     #[serde(rename = "starrocks.host")]
     pub host: String,
-    /// The port to the MySQL server of StarRocks FE.
+    /// The port to the MySQL server of `StarRocks` FE.
     #[serde(rename = "starrocks.mysqlport", alias = "starrocks.query_port")]
     pub mysql_port: String,
-    /// The port to the HTTP server of StarRocks FE.
+    /// The port to the HTTP server of `StarRocks` FE.
     #[serde(rename = "starrocks.httpport", alias = "starrocks.http_port")]
     pub http_port: String,
-    /// The user name used to access the StarRocks database.
+    /// The user name used to access the `StarRocks` database.
     #[serde(rename = "starrocks.user")]
     pub user: String,
     /// The password associated with the user.
     #[serde(rename = "starrocks.password")]
     pub password: String,
-    /// The StarRocks database where the target table is located
+    /// The `StarRocks` database where the target table is located
     #[serde(rename = "starrocks.database")]
     pub database: String,
-    /// The StarRocks table you want to sink data to.
+    /// The `StarRocks` table you want to sink data to.
     #[serde(rename = "starrocks.table")]
     pub table: String,
     #[serde(rename = "starrocks.partial_update")]
@@ -139,7 +139,7 @@ impl StarrocksSink {
                     i.name
                 ))
             })?;
-            if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
+            if !Self::check_and_correct_column_type(&i.data_type, value)? {
                 return Err(SinkError::Starrocks(format!(
                     "Column type don't match, column name is {:?}. starrocks type is {:?} risingwave type is {:?} ",i.name,value,i.data_type
                 )));
@@ -150,7 +150,7 @@ impl StarrocksSink {
 
     fn check_and_correct_column_type(
         rw_data_type: &DataType,
-        starrocks_data_type: String,
+        starrocks_data_type: &String,
     ) -> Result<bool> {
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => {
@@ -186,12 +186,16 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
                 "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
             )),
-            // todo! Validate the type struct and list
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
                 "STRUCT is not supported for Starrocks sink.".to_string(),
             )),
-            risingwave_common::types::DataType::List(_) => {
-                Ok(starrocks_data_type.contains("unknown"))
+            risingwave_common::types::DataType::List(list) => {
+                // For compatibility with older versions starrocks
+                if starrocks_data_type.contains("unknown") {
+                    return Ok(true);
+                }
+                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
                 "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
@@ -363,12 +367,7 @@ impl StarrocksSinkWriter {
             inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_starrocks(
-                schema,
-                None,
-                TimestampHandlingMode::String,
-                decimal_map,
-            ),
+            row_encoder: JsonEncoder::new_with_starrocks(schema, None, decimal_map),
         })
     }
 

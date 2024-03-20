@@ -109,7 +109,7 @@ def test_check(demo: str, upstream: str, need_data_check=True, need_sink_check=F
 
 demo = sys.argv[1]
 upstream = sys.argv[2]  # mysql, postgres, etc. see scripts/integration_tests.sh
-if demo in ['docker', 'iceberg-cdc', 'iceberg-sink']:
+if demo in ['docker', 'iceberg-cdc', 'iceberg-sink', 'iceberg-source']:
     print('Skip for running test for `%s`' % demo)
     sys.exit(0)
 

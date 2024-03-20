@@ -25,7 +25,7 @@ arg_parser.add_argument('--case',
 args = arg_parser.parse_args()
 demo = args.case
 
-if demo in ['iceberg-sink']:
+if demo in ['iceberg-sink', 'iceberg-source']:
     print('Skip for running test for `%s`' % demo)
     sys.exit(0)
 

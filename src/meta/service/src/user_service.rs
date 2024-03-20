@@ -274,7 +274,7 @@ impl UserService for UserServiceImpl {
                     .revoke_privilege(
                         user_ids,
                         &privileges,
-                        Some(req.granted_by as _),
+                        req.granted_by as _,
                         req.revoke_by as _,
                         req.revoke_grant_option,
                         req.cascade,

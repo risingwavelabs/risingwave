@@ -318,14 +318,9 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
 
             // Dispatch types once to accelerate the inner call.
             dispatch_array_variants!(array, array, {
-                for ((scalar, visible), serializer) in array
-                    .iter()
-                    .zip_eq_fast(data_chunk.visibility().iter())
-                    .zip_eq_fast(&mut serializers)
-                {
-                    if visible {
-                        serializer.serialize(scalar);
-                    }
+                for i in data_chunk.visibility().iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe { serializers[i].serialize(array.value_at_unchecked(i)) }
                 }
             });
         }
@@ -382,22 +377,16 @@ impl DataChunk {
                 }
             })
         }
-
-        let mut sizes = self
-            .visibility()
-            .iter()
-            .map(|visible| if visible { exact_size } else { 0 })
-            .collect_vec();
+        let mut sizes = vec![exact_size; self.capacity()];
 
         for i in estimated_column_indices {
             dispatch_array_variants!(&*self.columns()[i], col, {
-                for ((datum, visible), size) in col
-                    .iter()
-                    .zip_eq_fast(self.visibility().iter())
-                    .zip_eq_fast(&mut sizes)
-                {
-                    if visible && let Some(scalar) = datum {
-                        *size += HashKeySer::estimated_size(scalar);
+                for i in self.visibility().iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        if let Some(scalar) = col.value_at_unchecked(i) {
+                            sizes[i] += HashKeySer::estimated_size(scalar);
+                        }
                     }
                 }
             })

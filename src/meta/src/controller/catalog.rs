@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model_v2::fragment::StreamNode;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
@@ -29,8 +30,8 @@ use risingwave_meta_model_v2::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, SchemaId, SinkId,
-    SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
+    SinkId, SourceId, StreamSourceInfo, StreamingParallelism, TableId, UserId,
 };
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -38,6 +39,7 @@ use risingwave_pb::catalog::{
     PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
+use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
@@ -68,6 +70,7 @@ use crate::controller::ObjectModel;
 use crate::manager::{Catalog, MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::rpc::ddl_controller::DropMode;
 use crate::stream::SourceManagerRef;
+use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
 pub type CatalogControllerRef = Arc<CatalogController>;
@@ -415,6 +418,57 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(tables)
+    }
+
+    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        let inner = self.inner.read().await;
+
+        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
+            .select_only()
+            .columns([
+                object_dependency::Column::Oid,
+                object_dependency::Column::UsedBy,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        let mut obj_dependencies = dependencies
+            .into_iter()
+            .map(|(oid, used_by)| PbObjectDependencies {
+                object_id: used_by as _,
+                referenced_object_id: oid as _,
+            })
+            .collect_vec();
+
+        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
+            .select_only()
+            .columns([sink::Column::SinkId, sink::Column::TargetTable])
+            .join(JoinType::InnerJoin, sink::Relation::Object.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .and(sink::Column::TargetTable.is_not_null()),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
+            PbObjectDependencies {
+                object_id: table_id as _,
+                referenced_object_id: sink_id as _,
+            }
+        }));
+
+        Ok(obj_dependencies)
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {
@@ -2341,6 +2395,44 @@ impl CatalogController {
             .await;
 
         Ok(version)
+    }
+
+    pub async fn list_stream_job_desc_for_telemetry(
+        &self,
+    ) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
+        let inner = self.inner.read().await;
+        let info: Vec<(TableId, Option<Property>)> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .column(source::Column::WithProperties)
+            .join(JoinType::LeftJoin, table::Relation::Source.def())
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Table)
+                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(info
+            .into_iter()
+            .map(|(table_id, properties)| {
+                let connector_info = if let Some(inner_props) = properties {
+                    inner_props
+                        .inner_ref()
+                        .get(UPSTREAM_SOURCE_KEY)
+                        .map(|v| v.to_lowercase())
+                } else {
+                    None
+                };
+                MetaTelemetryJobDesc {
+                    table_id,
+                    connector: connector_info,
+                    optimization: vec![],
+                }
+            })
+            .collect())
     }
 
     pub async fn alter_source_column(

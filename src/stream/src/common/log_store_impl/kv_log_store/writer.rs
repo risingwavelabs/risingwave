@@ -83,9 +83,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         epoch: EpochPair,
         pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
-        self.state_store
-            .init(InitOptions::new(epoch, self.serde.vnodes().clone()))
-            .await?;
+        self.state_store.init(InitOptions::new(epoch)).await?;
         if pause_read_on_bootstrap {
             self.pause()?;
             info!("KvLogStore of {} paused on bootstrap", self.identity);

@@ -41,7 +41,9 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
+use risingwave_common::config::{
+    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -128,8 +130,8 @@ pub struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
-    /// Each session is identified by (process_id,
-    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// Each session is identified by (`process_id`,
+    /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
 
@@ -139,6 +141,7 @@ pub struct FrontendEnv {
 
     batch_config: BatchConfig,
     meta_config: MetaConfig,
+    streaming_config: StreamingConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -173,6 +176,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::for_test()),
             None,
+            None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
@@ -205,6 +209,7 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
+            streaming_config: StreamingConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
@@ -223,6 +228,7 @@ impl FrontendEnv {
 
         let batch_config = config.batch;
         let meta_config = config.meta;
+        let streaming_config = config.streaming;
 
         let frontend_address: HostAddr = opts
             .advertise_addr
@@ -277,6 +283,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
+            batch_config.max_batch_queries_per_frontend_node,
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -398,6 +405,7 @@ impl FrontendEnv {
                 sessions_map,
                 batch_config,
                 meta_config,
+                streaming_config,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -477,6 +485,10 @@ impl FrontendEnv {
         &self.meta_config
     }
 
+    pub fn streaming_config(&self) -> &StreamingConfig {
+        &self.streaming_config
+    }
+
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
     }
@@ -546,7 +558,7 @@ pub struct SessionImpl {
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
-    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
 
     /// Client address

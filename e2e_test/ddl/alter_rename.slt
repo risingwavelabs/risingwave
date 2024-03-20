@@ -16,6 +16,11 @@ CREATE SINK sink AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv AS mv3 WITH (
 );
 
 statement ok
+CREATE SUBSCRIPTION subscription FROM mv WITH (
+    retention = '1D'
+);
+
+statement ok
 CREATE SOURCE src (v INT) WITH (
     connector = 'datagen',
     fields.v.kind = 'sequence',
@@ -112,6 +117,14 @@ query TT
 SHOW CREATE SINK sink1;
 ----
 public.sink1 CREATE SINK sink1 AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv2 AS mv3 WITH (connector = 'blackhole')
+
+statement ok
+ALTER SUBSCRIPTION subscription RENAME TO subscription1;
+
+query TT
+SHOW CREATE SUBSCRIPTION subscription1;
+----
+public.subscription1 CREATE SUBSCRIPTION subscription1 FROM mv WITH (retention = '1D')
 
 # alter mview rename with alias conflict, used by sink1
 statement ok
@@ -228,6 +241,9 @@ DROP SCHEMA schema1;
 
 statement ok
 DROP SINK sink1;
+
+statement ok
+DROP SUBSCRIPTION subscription1;
 
 statement error Permission denied
 DROP VIEW v5;

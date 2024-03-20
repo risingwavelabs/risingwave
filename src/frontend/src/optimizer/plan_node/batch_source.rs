@@ -32,7 +32,7 @@ use crate::optimizer::property::{Distribution, Order};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase<Batch>,
-    core: generic::Source,
+    pub core: generic::Source,
 }
 
 impl BatchSource {
