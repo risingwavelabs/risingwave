@@ -28,4 +28,5 @@ curl -S -X PUT -H "Content-Type: application/json" http://localhost:8083/connect
     "table.include.list": "dbo.orders,dbo.sqlserver_all_data_types"
 }'
 
+sleep 10
 echo 'Done'
