@@ -163,6 +163,9 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
+        // set the global `CONFIG` variable
+        _ = crate::CONFIG.set(env.config().clone());
+
         let await_tree_reg = await_tree_config
             .clone()
             .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
@@ -607,7 +610,6 @@ impl StreamActorManager {
                 subtasks,
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
-                self.env.config().clone(),
                 expr_context,
                 shared_context.local_barrier_manager.clone(),
             );
@@ -627,7 +629,6 @@ impl LocalBarrierWorker {
             let monitor = tokio_metrics::TaskMonitor::new();
             let actor_context = actor.actor_context.clone();
             let actor_id = actor_context.id;
-            let config = actor.config.clone();
 
             let handle = {
                 let trace_span = format!("Actor {actor_id}: `{}`", actor_context.mview_definition);
@@ -649,7 +650,6 @@ impl LocalBarrierWorker {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                let with_config = crate::CONFIG.scope(config.clone(), instrumented);
 
                 // TODO: are the following lines still useful?
                 #[cfg(enable_task_local_alloc)]
@@ -658,7 +658,7 @@ impl LocalBarrierWorker {
                     let actor_id_str = actor_id.to_string();
                     let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
-                        with_config,
+                        instrumented,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
@@ -673,7 +673,7 @@ impl LocalBarrierWorker {
                 }
                 #[cfg(not(enable_task_local_alloc))]
                 {
-                    self.actor_manager.runtime.spawn(with_config)
+                    self.actor_manager.runtime.spawn(instrumented)
                 }
             };
             self.actor_manager_state.handles.insert(actor_id, handle);

@@ -19,7 +19,6 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
-use risingwave_common::config::StreamingConfig;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
@@ -129,7 +128,6 @@ pub struct Actor<C> {
 
     _metrics: Arc<StreamingMetrics>,
     pub actor_context: ActorContextRef,
-    pub config: Arc<StreamingConfig>,
     expr_context: ExprContext,
     barrier_manager: LocalBarrierManager,
 }
@@ -143,7 +141,6 @@ where
         subtasks: Vec<SubtaskHandle>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
-        config: Arc<StreamingConfig>,
         expr_context: ExprContext,
         barrier_manager: LocalBarrierManager,
     ) -> Self {
@@ -152,7 +149,6 @@ where
             subtasks,
             _metrics: metrics,
             actor_context,
-            config,
             expr_context,
             barrier_manager,
         }

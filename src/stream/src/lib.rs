@@ -42,7 +42,7 @@
 #![feature(assert_matches)]
 #![feature(try_blocks)]
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use risingwave_common::config::StreamingConfig;
 
@@ -59,8 +59,12 @@ pub mod task;
 #[cfg(test)]
 risingwave_expr_impl::enable!();
 
-tokio::task_local! {
-    pub static CONFIG: Arc<StreamingConfig>;
+pub(crate) static CONFIG: OnceLock<Arc<StreamingConfig>> = OnceLock::new();
+
+fn streaming_config() -> &'static StreamingConfig {
+    CONFIG
+        .get()
+        .expect("should be set when compute node initializing")
 }
 
 mod consistency {
@@ -79,7 +83,7 @@ mod consistency {
     }
 
     pub(crate) fn strict_consistency() -> StrictConsistencyOption {
-        crate::CONFIG.with(|config| config.strict_consistency)
+        crate::streaming_config().strict_consistency
     }
 
     macro_rules! inconsistency_panic {
