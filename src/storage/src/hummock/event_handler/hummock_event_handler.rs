@@ -392,9 +392,10 @@ impl HummockEventHandler {
                 // older data first
                 .rev()
                 .for_each(|staging_sstable_info| {
+                    let staging_sstable_info_ref = Arc::new(staging_sstable_info);
                     self.for_each_read_version(|read_version| {
                         read_version.update(VersionUpdate::Staging(StagingData::Sst(
-                            staging_sstable_info.clone(),
+                            staging_sstable_info_ref.clone(),
                         )))
                     });
                 });
@@ -438,6 +439,7 @@ impl HummockEventHandler {
 
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
         // todo: do some prune for version update
+        let staging_sstable_info = Arc::new(staging_sstable_info);
         self.for_each_read_version(|read_version| {
             trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
             read_version.update(VersionUpdate::Staging(StagingData::Sst(

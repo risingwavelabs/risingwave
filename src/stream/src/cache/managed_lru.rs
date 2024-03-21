@@ -21,9 +21,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use lru::{DefaultHasher, LruCache};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::common::metrics::MetricsInfo;
 

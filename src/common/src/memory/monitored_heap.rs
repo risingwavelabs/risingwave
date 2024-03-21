@@ -15,7 +15,8 @@
 use std::collections::BinaryHeap;
 use std::mem::size_of;
 
-use crate::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
+
 use crate::memory::{MemoryContext, MonitoredGlobalAlloc};
 
 pub struct MemMonitoredHeap<T> {
@@ -105,7 +106,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::estimate_size::collections::MemMonitoredHeap;
+    use super::MemMonitoredHeap;
     use crate::memory::MemoryContext;
     use crate::metrics::LabelGuardedIntGauge;
 

@@ -20,13 +20,13 @@ use std::sync::Arc;
 use bytes::{Buf, BufMut};
 use either::Either;
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
-use crate::estimate_size::EstimateSize;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
     ToText,

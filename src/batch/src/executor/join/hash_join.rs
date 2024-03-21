@@ -28,6 +28,7 @@ use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -36,7 +37,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::task::{BatchTaskContext, ShutdownToken};
 
