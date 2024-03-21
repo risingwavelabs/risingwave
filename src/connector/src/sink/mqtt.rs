@@ -17,7 +17,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context as _};
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -180,24 +180,8 @@ impl Sink for MqttSink {
         }
 
         if let Some(field) = &self.config.topic_field {
-            let mut iter = field.split('.');
-            let dt = iter
-                .next()
-                .and_then(|field| {
-                    self.schema
-                        .fields()
-                        .iter()
-                        .find(|f| f.name == field)
-                        .map(|f| &f.data_type)
-                })
-                .and_then(|dt| {
-                    iter.try_fold(dt, |dt, field| match dt {
-                        DataType::Struct(st) => {
-                            st.iter().find(|(s, _)| *s == field).map(|(_, dt)| dt)
-                        }
-                        _ => None,
-                    })
-                });
+            let (_, dt) = get_topic_field_index_path(&self.schema, field.as_str());
+
             match dt {
                 Some(DataType::Varchar) => (),
                 Some(dt) => {
@@ -248,41 +232,16 @@ impl MqttSinkWriter {
         name: &str,
         id: u64,
     ) -> Result<Self> {
-        let mut path = vec![];
+        let mut topic_index_path = vec![];
         if let Some(field) = &config.topic_field {
-            let mut iter = field.split('.');
-            let dt = iter
-                .next()
-                .and_then(|field| {
-                    schema
-                        .fields()
-                        .iter()
-                        .enumerate()
-                        .find(|(_, f)| f.name == field)
-                        .map(|(pos, f)| {
-                            path.push(pos);
-                            &f.data_type
-                        })
-                })
-                .and_then(|dt| {
-                    iter.try_fold(dt, |dt, field| match dt {
-                        DataType::Struct(st) => {
-                            st.iter().enumerate().find(|(_, (s, _))| *s == field).map(
-                                |(pos, (_, dt))| {
-                                    path.push(pos);
-                                    dt
-                                },
-                            )
-                        }
-                        _ => None,
-                    })
-                });
+            let (path, dt) = get_topic_field_index_path(&schema, field.as_str());
             if !matches!(dt, Some(DataType::Varchar)) {
                 return Err(SinkError::Config(anyhow!(
                     "topic field must be of type string but got {:?}",
                     dt
                 )));
             }
+            topic_index_path = path;
         }
 
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
@@ -365,7 +324,7 @@ impl MqttSinkWriter {
             client,
             qos,
             retain: config.retain,
-            path,
+            topic_index_path,
         };
 
         Ok::<_, SinkError>(Self {
@@ -401,7 +360,7 @@ struct MqttSinkPayloadWriter {
     topic: Option<String>,
     qos: QoS,
     retain: bool,
-    path: Vec<usize>,
+    topic_index_path: Vec<usize>,
 }
 
 impl MqttSinkPayloadWriter {}
@@ -413,34 +372,15 @@ impl MqttSinkPayloadWriter {
                 continue;
             }
 
-            let topic = if let Some(topic) = &self.topic
-                && self.path.is_empty()
-            {
-                topic.as_str()
-            } else {
-                let mut iter = self.path.iter();
-
-                let scalar = iter
-                    .next()
-                    .and_then(|pos| row.datum_at(*pos))
-                    .and_then(|d| {
-                        iter.try_fold(d, |d, pos| match d {
-                            ScalarRefImpl::Struct(struct_ref) => {
-                                struct_ref.iter_fields_ref().nth(*pos).flatten()
-                            }
-                            _ => None,
-                        })
-                    });
-                match scalar {
-                    Some(ScalarRefImpl::Utf8(s)) => s,
-                    _ => {
-                        if let Some(topic) = &self.topic {
-                            topic.as_str()
-                        } else {
-                            tracing::error!("topic field not found in row, skipping: {:?}", row);
-                            return Ok(());
-                        }
-                    }
+            let topic = match get_topic_from_index_path(
+                &self.topic_index_path,
+                self.topic.as_deref(),
+                &row,
+            ) {
+                Some(s) => s,
+                None => {
+                    tracing::error!("topic field not found in row, skipping: {:?}", row);
+                    return Ok(());
                 }
             };
 
@@ -454,5 +394,219 @@ impl MqttSinkPayloadWriter {
         }
 
         Ok(())
+    }
+}
+
+fn get_topic_from_index_path<'s>(
+    path: &[usize],
+    default_topic: Option<&'s str>,
+    row: &'s RowRef<'s>,
+) -> Option<&'s str> {
+    if let Some(topic) = default_topic
+        && path.is_empty()
+    {
+        Some(topic)
+    } else {
+        let mut iter = path.iter();
+        let scalar = iter
+            .next()
+            .and_then(|pos| row.datum_at(*pos))
+            .and_then(|d| {
+                iter.try_fold(d, |d, pos| match d {
+                    ScalarRefImpl::Struct(struct_ref) => {
+                        struct_ref.iter_fields_ref().nth(*pos).flatten()
+                    }
+                    _ => None,
+                })
+            });
+        match scalar {
+            Some(ScalarRefImpl::Utf8(s)) => Some(s),
+            _ => {
+                if let Some(topic) = default_topic {
+                    Some(topic)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn get_topic_field_index_path<'s>(
+    schema: &'s Schema,
+    topic_field: &str,
+) -> (Vec<usize>, Option<&'s DataType>) {
+    let mut iter = topic_field.split('.');
+    let mut path = vec![];
+    let dt =
+        iter.next()
+            .and_then(|field| {
+                schema
+                    .fields()
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| f.name == field)
+                    .map(|(pos, f)| {
+                        path.push(pos);
+                        &f.data_type
+                    })
+            })
+            .and_then(|dt| {
+                iter.try_fold(dt, |dt, field| match dt {
+                    DataType::Struct(st) => {
+                        st.iter().enumerate().find(|(_, (s, _))| *s == field).map(
+                            |(pos, (_, dt))| {
+                                path.push(pos);
+                                dt
+                            },
+                        )
+                    }
+                    _ => None,
+                })
+            });
+
+    (path, dt)
+}
+
+#[cfg(test)]
+mod test {
+    use risingwave_common::array::{DataChunk, DataChunkTestExt, RowRef};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataType, StructType};
+
+    use super::{get_topic_field_index_path, get_topic_from_index_path};
+
+    #[test]
+    fn test_single_field_extraction() {
+        let schema = Schema::new(vec![Field::with_name(DataType::Varchar, "topic")]);
+        let (path, dt) = get_topic_field_index_path(&schema, "topic");
+        assert_eq!(path, vec![0]);
+        assert_eq!(dt, Some(&DataType::Varchar));
+
+        let chunk = DataChunk::from_pretty(
+            "T
+            test",
+        );
+
+        let row = RowRef::new(&chunk, 0);
+
+        assert_eq!(get_topic_from_index_path(&path, None, &row), Some("test"));
+
+        let (path, dt) = get_topic_field_index_path(&schema, "other_field");
+        assert!(path.is_empty());
+        assert_eq!(dt, None);
+    }
+
+    #[test]
+    fn test_nested_field_extraction() {
+        let schema = Schema::new(vec![Field::with_name(
+            DataType::Struct(StructType::new(vec![
+                ("field", DataType::Int32),
+                ("subtopic", DataType::Varchar),
+            ])),
+            "topic",
+        )]);
+        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic");
+        assert_eq!(path, vec![0, 1]);
+        assert_eq!(dt, Some(&DataType::Varchar));
+
+        let chunk = DataChunk::from_pretty(
+            "<i,T>
+            (1,test)",
+        );
+
+        let row = RowRef::new(&chunk, 0);
+
+        assert_eq!(get_topic_from_index_path(&path, None, &row), Some("test"));
+
+        let (_, dt) = get_topic_field_index_path(&schema, "topic.other_field");
+        assert_eq!(dt, None);
+    }
+
+    #[test]
+    fn test_null_values_extraction() {
+        let path = vec![0];
+        let chunk = DataChunk::from_pretty(
+            "T
+            .",
+        );
+        let row = RowRef::new(&chunk, 0);
+        assert_eq!(
+            get_topic_from_index_path(&path, Some("default"), &row),
+            Some("default")
+        );
+        assert_eq!(get_topic_from_index_path(&path, None, &row), None);
+
+        let path = vec![0, 1];
+        let chunk = DataChunk::from_pretty(
+            "<i,T>
+            (1,)",
+        );
+        let row = RowRef::new(&chunk, 0);
+        assert_eq!(
+            get_topic_from_index_path(&path, Some("default"), &row),
+            Some("default")
+        );
+        assert_eq!(get_topic_from_index_path(&path, None, &row), None);
+    }
+
+    #[test]
+    fn test_multiple_levels() {
+        let schema = Schema::new(vec![
+            Field::with_name(
+                DataType::Struct(StructType::new(vec![
+                    ("field", DataType::Int32),
+                    (
+                        "subtopic",
+                        DataType::Struct(StructType::new(vec![
+                            ("int_field", DataType::Int32),
+                            ("boolean_field", DataType::Boolean),
+                            ("string_field", DataType::Varchar),
+                        ])),
+                    ),
+                ])),
+                "topic",
+            ),
+            Field::with_name(DataType::Varchar, "other_field"),
+        ]);
+
+        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic.string_field");
+        assert_eq!(path, vec![0, 1, 2]);
+        assert_eq!(dt, Some(&DataType::Varchar));
+
+        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic.boolean_field");
+        assert_eq!(path, vec![0, 1, 1]);
+        assert_eq!(dt, Some(&DataType::Boolean));
+
+        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic.int_field");
+        assert_eq!(path, vec![0, 1, 0]);
+        assert_eq!(dt, Some(&DataType::Int32));
+
+        let (path, dt) = get_topic_field_index_path(&schema, "topic.field");
+        assert_eq!(path, vec![0, 0]);
+        assert_eq!(dt, Some(&DataType::Int32));
+
+        let (path, dt) = get_topic_field_index_path(&schema, "other_field");
+        assert_eq!(path, vec![1]);
+        assert_eq!(dt, Some(&DataType::Varchar));
+
+        let chunk = DataChunk::from_pretty(
+            "<i,<T>> T
+            (1,(test)) other",
+        );
+
+        let row = RowRef::new(&chunk, 0);
+
+        // topic.subtopic.string_field
+        assert_eq!(
+            get_topic_from_index_path(&[0, 1, 0], None, &row),
+            Some("test")
+        );
+
+        // topic.field
+        assert_eq!(get_topic_from_index_path(&[0, 0], None, &row), None);
+
+        // other_field
+        assert_eq!(get_topic_from_index_path(&[1], None, &row), Some("other"));
     }
 }
