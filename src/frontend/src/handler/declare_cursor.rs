@@ -57,9 +57,17 @@ pub async fn handle_declare_cursor(
             subscription_from_table_name,
         )?));
         let res = handle_query(handle_args, query_stmt, formats).await?;
-        let start_rw_timestamp = res.query_with_snapshot().ok_or_else(|| {
-            ErrorCode::InternalError("Fetch can't find snapshot epoch".to_string())
-        })?;
+        let start_rw_timestamp = session
+            .get_epoch_from_exn_ctx()
+            .ok_or_else(|| {
+                ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
+            })?
+            .epoch_with_frontend_pinned()
+            .ok_or_else(|| {
+                ErrorCode::InternalError("Fetch Cursor don't support setting an epoch".to_string())
+            })?
+            .0;
+
         (convert_epoch_to_logstore_i64(start_rw_timestamp), res)
     } else {
         let start_rw_timestamp = convert_epoch_to_logstore_i64(start_rw_timestamp);

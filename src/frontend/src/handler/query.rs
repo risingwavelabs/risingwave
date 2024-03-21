@@ -340,34 +340,28 @@ async fn execute(
     // Used in counting row count.
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
-    let (mut row_stream, query_with_snapshot) = match query_mode {
+    let mut row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => {
-            let (chunk_stream, query_with_snapshot) =
-                local_execute(session.clone(), query, can_timeout_cancel).await?;
-            (
-                PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                    chunk_stream,
-                    column_types,
-                    formats,
-                    session.clone(),
-                )),
-                query_with_snapshot,
-            )
+            let chunk_stream = local_execute(session.clone(), query, can_timeout_cancel).await?;
+
+            PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+                chunk_stream,
+                column_types,
+                formats,
+                session.clone(),
+            ))
         }
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
-            let (chunk_stream, query_with_snapshot) =
+            let chunk_stream =
                 distribute_execute(session.clone(), query, can_timeout_cancel).await?;
-            (
-                PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    chunk_stream,
-                    column_types,
-                    formats,
-                    session.clone(),
-                )),
-                query_with_snapshot,
-            )
+            PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
+                chunk_stream,
+                column_types,
+                formats,
+                session.clone(),
+            ))
         }
     };
 
@@ -459,7 +453,6 @@ async fn execute(
         .row_cnt_opt(row_cnt)
         .values(row_stream, pg_descs)
         .callback(callback)
-        .query_with_snapshot(query_with_snapshot)
         .into())
 }
 
@@ -467,7 +460,7 @@ async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
-) -> Result<(DistributedQueryStream, u64)> {
+) -> Result<DistributedQueryStream> {
     let timeout = if cfg!(madsim) {
         None
     } else if can_timeout_cancel {
@@ -490,7 +483,7 @@ async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
-) -> Result<(LocalQueryStream, u64)> {
+) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
     } else if can_timeout_cancel {
@@ -504,14 +497,8 @@ async fn local_execute(
     let snapshot = session.pinned_snapshot();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(
-        query,
-        front_env.clone(),
-        "",
-        snapshot.clone(),
-        session,
-        timeout,
-    );
+    let execution =
+        LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session, timeout);
 
-    Ok((execution.stream_rows(), snapshot.epoch().0))
+    Ok(execution.stream_rows())
 }

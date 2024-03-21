@@ -187,7 +187,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-    ) -> SchedulerResult<(DistributedQueryStream, u64)> {
+    ) -> SchedulerResult<DistributedQueryStream> {
         if let Some(query_limit) = self.disrtibuted_query_limit
             && self.query_metrics.running_query_num.get() as u64 == query_limit
         {
@@ -220,7 +220,7 @@ impl QueryManager {
             .start(
                 context.clone(),
                 worker_node_manager_reader,
-                pinned_snapshot.clone(),
+                pinned_snapshot,
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),
@@ -236,10 +236,7 @@ impl QueryManager {
                     .delete_query(&query_id);
                 err
             })?;
-        Ok((
-            query_result_fetcher.stream_from_channel(),
-            pinned_snapshot.epoch().0,
-        ))
+        Ok(query_result_fetcher.stream_from_channel())
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
