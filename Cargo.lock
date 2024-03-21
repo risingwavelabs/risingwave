@@ -5881,15 +5881,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "718e8fae447df0c7e1ba7f5189829e63fd536945c8988d61444c19039f16b670"
-dependencies = [
- "hashbrown 0.13.2",
-]
-
-[[package]]
-name = "lru"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efa59af2ddfad1854ae27d75009d538d0998b4b2fd47083e743ac1a10e46c60"
@@ -10075,7 +10066,7 @@ dependencies = [
  "http 0.2.9",
  "hyper",
  "itertools 0.12.0",
- "lru 0.10.1",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
