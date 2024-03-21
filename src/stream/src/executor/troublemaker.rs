@@ -126,7 +126,10 @@ impl TroublemakerExecutor {
         record: Record<impl Row>,
     ) -> SmallVec<[(Op, OwnedRow); 2]> {
         let record = if vars.met_delete_before && rand::thread_rng().gen_bool(0.5) {
-            // Change the `Op`
+            // Change the `Op`.
+            // Because we don't know the `append_only` property of the stream, we can't
+            // generate `Delete` arbitrarily. So we just generate `Delete` after we saw
+            // `Delete` or `Update` before.
             match record {
                 Record::Insert { new_row } => Record::Delete {
                     old_row: new_row.into_owned_row(),
@@ -140,7 +143,7 @@ impl TroublemakerExecutor {
                 },
             }
         } else {
-            // Just convert the rows to owned rows, without changing the `Op`
+            // Just convert the rows to owned rows, without changing the `Op`.
             match record {
                 Record::Insert { new_row } => Record::Insert {
                     new_row: new_row.into_owned_row(),
