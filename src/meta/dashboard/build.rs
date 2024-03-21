@@ -42,7 +42,6 @@ fn build() -> anyhow::Result<()> {
     rerun_if_changed!(format!("{DASHBOARD_DIR}/components"));
 
     let exit_status = NpmEnv::default()
-        .with_node_env(&NodeEnv::Production)
         .set_path(DASHBOARD_DIR)
         .init_env()
         .install(None)
