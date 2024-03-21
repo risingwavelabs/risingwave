@@ -254,7 +254,7 @@ impl NewTableFragmentInfo {
     pub fn state_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.mv_table_id
             .iter()
-            .chain(self.mv_table_id.iter())
+            .chain(self.internal_table_ids.iter())
             .cloned()
     }
 }
@@ -2029,10 +2029,10 @@ impl HummockManager {
             table.insert(self.env.meta_store_checked()).await?;
         }
         for group in &compaction_groups {
-            assert_ne!(group.id, StaticCompactionGroupId::NewCompactionGroup as u64);
             assert!(
-                    group.id >= StaticCompactionGroupId::StateDefault as u64
-                    && group.id <= StaticCompactionGroupId::MaterializedView as u64,
+                group.id == StaticCompactionGroupId::NewCompactionGroup as u64
+                    || (group.id >= StaticCompactionGroupId::StateDefault as u64
+                    && group.id <= StaticCompactionGroupId::MaterializedView as u64),
                 "compaction group id should be either NewCompactionGroup to create new one, or predefined static ones."
             );
         }
