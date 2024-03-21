@@ -454,7 +454,9 @@ impl PlanRef {
 
                 if merge_predicate.conjunctions.len() == 1 {
                     let mut expr_rewriter = ExpressionSimplifyRewriter {};
-                    merge_predicate = Condition::with_expr(expr_rewriter.rewrite_cond(merge_predicate.conjunctions[0].clone()));
+                    merge_predicate = Condition::with_expr(
+                        expr_rewriter.rewrite_cond(merge_predicate.conjunctions[0].clone()),
+                    );
                 }
 
                 let input: PlanRef = logical_share.input();
