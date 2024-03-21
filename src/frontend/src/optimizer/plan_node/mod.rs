@@ -50,6 +50,7 @@ use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 use crate::error::{ErrorCode, Result};
+use crate::optimizer::ExpressionSimplifyRewriter;
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -430,7 +431,7 @@ impl PlanRef {
             // predicate before we merge the predicates and pushdown.
             let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
             if parent_has_pushed == ctx.get_parent_num(logical_share) {
-                let merge_predicate = ctx
+                let mut merge_predicate = ctx
                     .take_predicate(self.id())
                     .expect("must have predicate")
                     .into_iter()
@@ -450,6 +451,12 @@ impl PlanRef {
                     })
                     .reduce(|a, b| a.or(b))
                     .unwrap();
+
+                if merge_predicate.conjunctions.len() == 1 {
+                    let mut expr_rewriter = ExpressionSimplifyRewriter {};
+                    merge_predicate = Condition::with_expr(expr_rewriter.rewrite_cond(merge_predicate.conjunctions[0].clone()));
+                }
+
                 let input: PlanRef = logical_share.input();
                 let input = input.predicate_pushdown(merge_predicate, ctx);
                 logical_share.replace_input(input);
@@ -495,6 +502,7 @@ impl PredicatePushdown for PlanRef {
             &LogicalFilter::new(self.clone(), predicate_clone).into(),
             &res,
         );
+
         res
     }
 }

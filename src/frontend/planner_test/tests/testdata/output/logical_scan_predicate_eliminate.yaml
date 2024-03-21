@@ -12,7 +12,6 @@
     └─LogicalFilter { predicate: Not((t1.c1 > 1:Int32)) AND (t1.c1 > 1:Int32) }
       └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
   batch_plan: 'BatchValues { rows: [] }'
-
 - id: non_trivial_optimizable_case
   before:
   - create_table
@@ -32,7 +31,6 @@
     └─LogicalFilter { predicate: (t1.c1 > 1:Int32) AND (t1.c2 > 2:Int32) AND (t1.c3 > 3:Int32) AND Not((t1.c1 < 1:Int32)) AND Not((t1.c2 < 2:Int32)) AND Not((t1.c3 < 3:Int32)) AND Not((t1.c1 > 1:Int32)) AND Not((t1.c2 > 2:Int32)) AND Not((t1.c3 > 3:Int32)) }
       └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
   batch_plan: 'BatchValues { rows: [] }'
-
 - id: corner_case
   before:
   - create_table

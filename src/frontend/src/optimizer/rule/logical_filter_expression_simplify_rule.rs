@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_expr_visitor::strong::Strong;
-use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, LogicalShare, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
+use crate::utils::Condition;
 
-/// Specially for the predicate under `LogicalFilter -> LogicalShare -> LogicalFilter`
+/// Specially for the predicate and sub-nodes under `LogicalFilter`
+/// note that we will rewrite everything for the `LogicalFilter`
+/// include `input` and `predicate`
 pub struct LogicalFilterExpressionSimplifyRule {}
 impl Rule for LogicalFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
@@ -32,15 +37,16 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        let mut rewriter = ExpressionSimplifyRewriter {};
-        let logical_share_plan = filter.input();
-        let share: &LogicalShare = logical_share_plan.as_logical_share()?;
-        let input = share.input().rewrite_exprs(&mut rewriter);
-        share.replace_input(input);
-        Some(LogicalFilter::create(
-            share.clone().into(),
-            filter.predicate().clone(),
-        ))
+
+        // rewrite the entire condition first
+        // i.e., the specific optimization that will apply to the entire condition
+        // e.g., `e and not(e)`
+        let predicate = ConditionRewriter::rewrite(filter.predicate().clone());
+        let filter = LogicalFilter::create(filter.input(), predicate);
+
+        // then rewrite single expression via `rewrite_exprs`
+        let mut expr_rewriter = ExpressionSimplifyRewriter {};
+        Some(filter.rewrite_exprs(&mut expr_rewriter))
     }
 }
 
@@ -188,6 +194,14 @@ fn check_special_pattern(e1: ExprImpl, e2: ExprImpl, op: ExprType) -> Option<boo
 }
 
 pub struct ExpressionSimplifyRewriter {}
+
+impl ExpressionSimplifyRewriter {
+    /// Should only be used in `predicate_pushdown_inner`
+    pub fn rewrite_cond(&mut self, expr: ExprImpl) -> ExprImpl {
+        self.rewrite_expr(expr)
+    }
+}
+
 impl ExprRewriter for ExpressionSimplifyRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         // Check if the input expression is *definitely* null
@@ -254,5 +268,50 @@ impl ExprRewriter for ExpressionSimplifyRewriter {
         } else {
             expr
         }
+    }
+}
+
+/// The condition rewriter *only* used by `LogicalScan` under `LogicalFilter`
+/// we do not directly rewrite in `condition.rs` (i.e., the `simplify`) since
+/// this should only apply to the predicate, otherwise it may be *semantically*
+/// wrong especially when `null` is involved.
+///
+/// consider the following example, e.g.,
+/// ```sql
+///     create table t1 (c1 INT nullable);
+///     select c1 from t1 where not(c1 > 1) and (c1 > 1);
+/// ```
+///
+/// we can easily replace this predicate with `Condition::false_cond`,
+/// since both `null` and `false` will be *filtered* out
+/// from a `where clause / filter`'s perspective.
+struct ConditionRewriter {}
+impl ConditionRewriter {
+    pub fn rewrite(condition: Condition) -> Condition {
+        let conjunctions = condition.conjunctions.clone();
+        let mut set = HashSet::new();
+        let mut not_set = HashSet::new();
+        for expr in conjunctions {
+            let e;
+            let mut not_flag = false;
+            if let ExprImpl::FunctionCall(func_call) = expr.clone() {
+                // Not(e)
+                if func_call.func_type() == ExprType::Not && func_call.inputs().len() == 1 {
+                    e = func_call.inputs()[0].clone();
+                    not_set.insert(e.clone());
+                    not_flag = true;
+                } else {
+                    e = expr;
+                }
+            } else {
+                e = expr;
+            }
+            if (!not_flag && not_set.contains(&e)) || (not_flag && set.contains(&e)) {
+                return Condition::false_cond();
+            } else if !not_flag {
+                set.insert(e);
+            }
+        }
+        condition
     }
 }
