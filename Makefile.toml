@@ -607,7 +607,7 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
 fi
 
 set -x
-target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave --in-memory --max-idle-secs=1800 $@
 '''
 
 [tasks.standalone]
