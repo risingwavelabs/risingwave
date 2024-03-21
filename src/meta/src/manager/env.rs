@@ -19,7 +19,7 @@ use risingwave_common::config::{CompactionConfig, DefaultParallelism};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
+use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
 
 use super::{SystemParamsManager, SystemParamsManagerRef};

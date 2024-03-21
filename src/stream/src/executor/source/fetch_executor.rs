@@ -63,9 +63,6 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
 
-    // config for the connector node
-    connector_params: ConnectorParams,
-
     _marker: PhantomData<Src>,
 }
 
@@ -83,7 +80,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             source_ctrl_opts,
-            connector_params,
             _marker: PhantomData,
         }
     }
