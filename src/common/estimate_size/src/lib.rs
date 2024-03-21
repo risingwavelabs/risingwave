@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
+pub use risingwave_common_proc_macro::EstimateSize;
 use rust_decimal::Decimal as RustDecimal;
 
 /// The trait for estimating the actual memory usage of a struct.

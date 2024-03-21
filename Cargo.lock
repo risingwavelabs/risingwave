@@ -9096,6 +9096,7 @@ dependencies = [
  "educe 0.5.7",
  "fixedbitset 0.5.0",
  "lru 0.7.6",
+ "risingwave_common_proc_macro",
  "rust_decimal",
  "serde_json",
 ]

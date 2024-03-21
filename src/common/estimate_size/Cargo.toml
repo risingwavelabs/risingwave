@@ -21,6 +21,7 @@ fixedbitset = "0.5"
 lru = { workspace = true }
 rust_decimal = "1"
 serde_json = "1"
+risingwave_common_proc_macro = { workspace = true }
 
 [lints]
 workspace = true

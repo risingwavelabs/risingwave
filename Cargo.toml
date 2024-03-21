@@ -178,6 +178,7 @@ risingwave_common_service = { path = "./src/common/common_service" }
 risingwave_common_estimate_size = { path = "./src/common/estimate_size" }
 risingwave_common_heap_profiling = { path = "./src/common/heap_profiling" }
 risingwave_common_metrics = { path = "./src/common/metrics" }
+risingwave_common_proc_macro = { path = "./src/common/proc_macro" }
 risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
