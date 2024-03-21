@@ -113,7 +113,7 @@ harness = false
 # debug = true
 
 [[bench]]
-name = "bench_lru_cache"
+name = "bench_block_cache"
 harness = false
 
 [[bench]]
