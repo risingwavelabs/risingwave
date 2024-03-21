@@ -226,7 +226,7 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(
     rw_timestamp: i64,
 ) -> crate::error::Result<Statement> {
     let sql_str = format!(
-        "SELECT * FROM {} WHERE kv_log_store_epoch >= {} AND kv_log_store_row_op != 6 AND kv_log_store_row_op != 5 ORDER BY kv_log_store_epoch",
+        "SELECT * FROM {} WHERE kv_log_store_epoch >= {} ORDER BY kv_log_store_epoch",
         logstore_name, rw_timestamp
     );
     let query_stmt = Parser::parse_sql(&sql_str)
