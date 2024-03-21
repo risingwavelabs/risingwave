@@ -48,7 +48,7 @@ mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
 
 echo "--- Install nodejs"
-curl -o- curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 export NVM_DIR="$HOME/.nvm"
 . "$NVM_DIR/nvm.sh"
 cd dashboard && nvm install && nvm use
