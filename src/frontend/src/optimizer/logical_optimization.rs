@@ -244,7 +244,6 @@ static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
         vec![
             SplitNowAndRule::create(),
             SplitNowOrRule::create(),
-            LogicalFilterExpressionSimplifyRule::create(),
             FilterWithNowToJoinRule::create(),
         ],
         ApplyOrder::TopDown,
