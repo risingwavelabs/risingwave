@@ -149,7 +149,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     // Set state store for meta (if not set). It could be set by environment variables before this.
     if meta_opts.state_store.is_none() {
         if opts.in_memory {
-            meta_opts.state_store = Some("hummock+memory://".to_string());
+            meta_opts.state_store = Some("hummock+memory".to_string());
         } else {
             let state_store_dir = format!("{}/state_store", &store_directory);
             std::fs::create_dir_all(&state_store_dir).unwrap();

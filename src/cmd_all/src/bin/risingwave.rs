@@ -192,7 +192,7 @@ fn main() -> Result<()> {
 
     let matches = match command.try_get_matches() {
         Ok(m) => m,
-        Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
+        Err(e) if e.kind() == ErrorKind::MissingSubcommand || e.kind() == ErrorKind::UnknownArgument => {
             // `$ ./risingwave`
             // NOTE(kwannoel): This is a hack to make `risingwave`
             // work as an alias of `risingwave single-process`.
