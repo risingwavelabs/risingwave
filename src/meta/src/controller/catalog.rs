@@ -1688,6 +1688,10 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
                 check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn)
                     .await?;
+
+                let mut obj = obj.into_active_model();
+                obj.schema_id = Set(Some(new_schema));
+                let obj = obj.update(&txn).await?;
                 relations.push(PbRelationInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
