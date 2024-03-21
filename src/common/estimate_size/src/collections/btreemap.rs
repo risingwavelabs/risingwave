@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeInclusive};
 
-use crate::estimate_size::{EstimateSize, KvSize};
+use crate::{EstimateSize, KvSize};
 
 pub struct EstimatedBTreeMap<K, V> {
     inner: BTreeMap<K, V>,

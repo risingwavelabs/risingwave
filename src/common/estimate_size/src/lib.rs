@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(allocator_api)]
+#![feature(btree_cursors)]
+
 pub mod collections;
 
 use std::marker::PhantomData;
@@ -19,10 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
-pub use risingwave_common_proc_macro::EstimateSize;
 use rust_decimal::Decimal as RustDecimal;
-
-use crate::types::DataType;
 
 /// The trait for estimating the actual memory usage of a struct.
 ///
@@ -135,57 +135,6 @@ impl<T: ZeroHeapSize, const LEN: usize> EstimateSize for [T; LEN] {
 impl ZeroHeapSize for RustDecimal {}
 
 impl<T> ZeroHeapSize for PhantomData<T> {}
-
-impl ZeroHeapSize for DataType {}
-
-#[derive(Clone)]
-pub struct VecWithKvSize<T: EstimateSize> {
-    inner: Vec<T>,
-    kv_heap_size: usize,
-}
-
-impl<T: EstimateSize> Default for VecWithKvSize<T> {
-    fn default() -> Self {
-        Self {
-            inner: vec![],
-            kv_heap_size: 0,
-        }
-    }
-}
-
-impl<T: EstimateSize> VecWithKvSize<T> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn get_kv_size(&self) -> usize {
-        self.kv_heap_size
-    }
-
-    pub fn push(&mut self, value: T) {
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(value.estimated_heap_size());
-        self.inner.push(value);
-    }
-
-    pub fn into_inner(self) -> Vec<T> {
-        self.inner
-    }
-
-    pub fn inner(&self) -> &Vec<T> {
-        &self.inner
-    }
-}
-
-impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-    type Item = T;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.inner.into_iter()
-    }
-}
 
 /// The size of the collection.
 ///

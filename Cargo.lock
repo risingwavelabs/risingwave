@@ -9049,6 +9049,7 @@ dependencies = [
  "regex",
  "reqwest",
  "risingwave-fields-derive",
+ "risingwave_common_estimate_size",
  "risingwave_common_metrics",
  "risingwave_common_proc_macro",
  "risingwave_error",
@@ -9085,6 +9086,18 @@ dependencies = [
  "url",
  "uuid",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_common_estimate_size"
+version = "1.7.0-alpha"
+dependencies = [
+ "bytes",
+ "educe 0.5.7",
+ "fixedbitset 0.5.0",
+ "lru 0.7.6",
+ "rust_decimal",
+ "serde_json",
 ]
 
 [[package]]

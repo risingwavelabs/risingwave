@@ -23,6 +23,8 @@ pub mod hashmap;
 pub use hashmap::EstimatedHashMap;
 pub mod btreemap;
 pub use btreemap::EstimatedBTreeMap;
+pub mod vec;
+pub use vec::VecWithKvSize;
 
 mod private {
     use super::*;

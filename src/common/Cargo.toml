@@ -44,7 +44,7 @@ either = "1"
 enum-as-inner = "0.6"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
-fixedbitset = { version = "0.5", features = ["std"] }
+fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 governor = { version = "0.6", default-features = false, features = ["std"] }
@@ -78,6 +78,7 @@ rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { path = "./proc_macro" }
 risingwave_error = { workspace = true }
