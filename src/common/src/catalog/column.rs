@@ -103,7 +103,7 @@ pub struct ColumnDesc {
     pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,
-    pub additional_columns: AdditionalColumn,
+    pub additional_column: AdditionalColumn,
     pub version: ColumnDescVersion,
 }
 
@@ -117,7 +117,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_columns: AdditionalColumn { column_type: None },
+            additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -131,7 +131,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_columns: AdditionalColumn { column_type: None },
+            additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -150,7 +150,7 @@ impl ColumnDesc {
             type_name: String::new(),
             generated_or_default_column: None,
             description: None,
-            additional_columns: additional_column_type,
+            additional_column: additional_column_type,
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -170,7 +170,8 @@ impl ColumnDesc {
             type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
-            additional_columns: Some(self.additional_columns.clone()),
+            additional_column_type: 0, // deprecated
+            additional_column: Some(self.additional_column.clone()),
             version: self.version as i32,
         }
     }
@@ -198,7 +199,7 @@ impl ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_columns: AdditionalColumn { column_type: None },
+            additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -221,7 +222,7 @@ impl ColumnDesc {
             type_name: type_name.to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_columns: AdditionalColumn { column_type: None },
+            additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -239,7 +240,7 @@ impl ColumnDesc {
             type_name: field.type_name.clone(),
             description: None,
             generated_or_default_column: None,
-            additional_columns: AdditionalColumn { column_type: None },
+            additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
         }
     }
@@ -265,8 +266,8 @@ impl ColumnDesc {
 
 impl From<PbColumnDesc> for ColumnDesc {
     fn from(prost: PbColumnDesc) -> Self {
-        let additional_columns = prost
-            .get_additional_columns()
+        let additional_column = prost
+            .get_additional_column()
             .unwrap_or(&AdditionalColumn { column_type: None })
             .clone();
         let version = prost.version();
@@ -283,7 +284,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             field_descs,
             generated_or_default_column: prost.generated_or_default_column,
             description: prost.description.clone(),
-            additional_columns,
+            additional_column,
             version,
         }
     }
@@ -305,7 +306,8 @@ impl From<&ColumnDesc> for PbColumnDesc {
             type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
-            additional_columns: c.additional_columns.clone().into(),
+            additional_column_type: 0, // deprecated
+            additional_column: c.additional_column.clone().into(),
             version: c.version as i32,
         }
     }

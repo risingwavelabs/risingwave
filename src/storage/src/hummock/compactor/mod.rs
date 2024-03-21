@@ -45,7 +45,7 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TtlCompactionFilter,
 };
-pub use context::CompactorContext;
+pub use context::{new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext};
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
@@ -83,9 +83,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BlockedXor16FilterBuilder, CompactionDeleteRangeIterator, FilterBuilder,
-    HummockError, SharedComapctorObjectIdManager, SstableWriterFactory,
-    UnifiedSstableWriterFactory,
+    validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, HummockError,
+    SharedComapctorObjectIdManager, SstableWriterFactory, UnifiedSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -126,7 +125,6 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_iter: CompactionDeleteRangeIterator,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         task_id: Option<HummockCompactionTaskId>,
@@ -152,7 +150,6 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    del_iter,
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
@@ -164,7 +161,6 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    del_iter,
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
@@ -247,7 +243,6 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_iter: CompactionDeleteRangeIterator,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
@@ -271,7 +266,6 @@ impl Compactor {
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
-            del_iter,
             &self.task_config,
             self.context.compactor_metrics.clone(),
             iter,
@@ -464,7 +458,7 @@ pub fn start_compactor(
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
                                         shutdown.lock().unwrap().insert(task_id, tx);
-                                        let (compact_task, table_stats) = match sstable_object_id_manager.add_watermark_object_id(None).await
+                                        let ((compact_task, table_stats), _memory_tracker) = match sstable_object_id_manager.add_watermark_object_id(None).await
                                         {
                                             Ok(tracker_id) => {
                                                 let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
@@ -480,7 +474,7 @@ pub fn start_compactor(
                                                 tracing::warn!(error = %err.as_report(), "Failed to track pending SST object id");
                                                 let mut compact_task = compact_task;
                                                 compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
-                                                (compact_task, HashMap::default())
+                                                ((compact_task, HashMap::default()),None)
                                             }
                                         };
                                         shutdown.lock().unwrap().remove(&task_id);
@@ -669,7 +663,7 @@ pub fn start_shared_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let (compact_task, table_stats) = compactor_runner::compact(
+                                    let ((compact_task, table_stats), _memory_tracker)= compactor_runner::compact(
                                         context.clone(),
                                         compact_task,
                                         rx,

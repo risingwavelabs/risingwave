@@ -17,12 +17,13 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::{ErrorCode, Result as RwResult};
-use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar};
+use risingwave_common::types::{DataType, Datum, JsonbVal, Scalar, ScalarImpl};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
+
+use crate::error::{ErrorCode, Result as RwResult};
 
 mod agg_call;
 mod correlated_input_ref;
@@ -264,6 +265,26 @@ impl ExprImpl {
         FunctionCall::cast_mut(self, target, CastContext::Explicit)
     }
 
+    /// Casting to Regclass type means getting the oid of expr.
+    /// See <https://www.postgresql.org/docs/current/datatype-oid.html>
+    pub fn cast_to_regclass(self) -> Result<ExprImpl, CastError> {
+        match self.return_type() {
+            DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                FunctionCall::new_unchecked(ExprType::CastRegclass, vec![self], DataType::Int32),
+            ))),
+            DataType::Int32 => Ok(self),
+            dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
+            _ => Err(CastError("Unsupported input type".to_string())),
+        }
+    }
+
+    /// Shorthand to inplace cast expr to `regclass` type.
+    pub fn cast_to_regclass_mut(&mut self) -> Result<(), CastError> {
+        let owned = std::mem::replace(self, ExprImpl::literal_bool(false));
+        *self = owned.cast_to_regclass()?;
+        Ok(())
+    }
+
     /// Ensure the return type of this expression is an array of some type.
     pub fn ensure_array_type(&self) -> Result<(), ErrorCode> {
         if self.is_untyped() {
@@ -382,7 +403,7 @@ pub struct InequalityInputPair {
     pub(crate) key_required_larger: usize,
     /// Input index of less side of inequality.
     pub(crate) key_required_smaller: usize,
-    /// greater >= less + delta_expression
+    /// greater >= less + `delta_expression`
     pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
 }
 
@@ -593,6 +614,7 @@ impl ExprImpl {
             struct HasOthers {
                 has_others: bool,
             }
+
             impl ExprVisitor for HasOthers {
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {
@@ -606,10 +628,35 @@ impl ExprImpl {
                         | ExprImpl::Parameter(_)
                         | ExprImpl::Now(_) => self.has_others = true,
                         ExprImpl::Literal(_inner) => {}
-                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                        ExprImpl::FunctionCall(inner) => {
+                            if !self.is_short_circuit(inner) {
+                                // only if the current `func_call` is *not* a short-circuit
+                                // expression, e.g., true or (...) | false and (...),
+                                // shall we proceed to visit it.
+                                self.visit_function_call(inner)
+                            }
+                        }
                         ExprImpl::FunctionCallWithLambda(inner) => {
                             self.visit_function_call_with_lambda(inner)
                         }
+                    }
+                }
+            }
+
+            impl HasOthers {
+                fn is_short_circuit(&self, func_call: &FunctionCall) -> bool {
+                    /// evaluate the first parameter of `Or` or `And` function call
+                    fn eval_first(e: &ExprImpl, expect: bool) -> bool {
+                        let Some(Ok(Some(scalar))) = e.try_fold_const() else {
+                            return false;
+                        };
+                        scalar == ScalarImpl::Bool(expect)
+                    }
+
+                    match func_call.func_type {
+                        ExprType::Or => eval_first(&func_call.inputs()[0], true),
+                        ExprType::And => eval_first(&func_call.inputs()[0], false),
+                        _ => false,
                     }
                 }
             }

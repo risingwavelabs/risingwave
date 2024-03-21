@@ -81,7 +81,7 @@ pub struct Configuration {
 
     /// The number of CPU cores for each compute node.
     ///
-    /// This determines worker_node_parallelism.
+    /// This determines `worker_node_parallelism`.
     pub compute_node_cores: usize,
 
     /// The probability of etcd request timeout.
@@ -169,7 +169,7 @@ impl Configuration {
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = false;".into()]
+            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()]
                 .into(),
             ..Default::default()
         }
@@ -189,6 +189,9 @@ impl Configuration {
                 r#"[meta]
 max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
 disable_automatic_parallelism_control = {disable_automatic_parallelism_control}
+parallelism_control_trigger_first_delay_sec = 0
+parallelism_control_batch_size = 0
+parallelism_control_trigger_period_sec = 10
 
 [system]
 barrier_interval_ms = 250
@@ -261,7 +264,7 @@ metrics_level = "Disabled"
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            per_session_queries: vec!["SET STREAMING_ENABLE_ARRANGEMENT_BACKFILL = true;".into()]
+            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
             ..Default::default()
         }
@@ -290,6 +293,26 @@ metrics_level = "Disabled"
             meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
+            ..Default::default()
+        }
+    }
+
+    pub fn enable_arrangement_backfill() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("disable_arrangement_backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 1,
+            per_session_queries: vec![].into(),
             ..Default::default()
         }
     }
@@ -866,9 +889,7 @@ impl Session {
     }
 
     pub async fn is_arrangement_backfill_enabled(&mut self) -> Result<bool> {
-        let result = self
-            .run("show streaming_enable_arrangement_backfill")
-            .await?;
+        let result = self.run("show streaming_use_arrangement_backfill").await?;
         Ok(result == "true")
     }
 }

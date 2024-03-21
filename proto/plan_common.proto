@@ -54,14 +54,12 @@ message ColumnDesc {
   // This field is used to represent the connector-spec additional column type.
   // UNSPECIFIED or unset for normal column.
 
-  // deprecated, use AdditionalColumn instead
-  // AdditionalColumnType additional_column_type = 9;
-  reserved "additional_column_type";
-  reserved 9;
+  // deprecated, use AdditionalColumn instead, keep for compatibility with v1.6.x
+  AdditionalColumnType additional_column_type = 9;
 
   ColumnDescVersion version = 10;
 
-  AdditionalColumn additional_columns = 11;
+  AdditionalColumn additional_column = 11;
 }
 
 message ColumnCatalog {
@@ -88,7 +86,7 @@ message StorageTableDesc {
   // TODO: may refactor primary key representations
   repeated common.ColumnOrder pk = 3;
   repeated uint32 dist_key_in_pk_indices = 4;
-  uint32 retention_seconds = 5;
+  reserved 5;
   repeated uint32 value_indices = 6;
   uint32 read_prefix_len_hint = 7;
   // Whether the table is versioned. If `true`, column-aware row encoding will
@@ -96,6 +94,7 @@ message StorageTableDesc {
   bool versioned = 8;
   repeated uint32 stream_key = 9;
   optional uint32 vnode_col_idx_in_pk = 10;
+  optional uint32 retention_seconds = 11;
 }
 
 // Represents a table in external database for CDC scenario
@@ -135,6 +134,7 @@ enum FormatType {
   FORMAT_TYPE_CANAL = 5;
   FORMAT_TYPE_UPSERT = 6;
   FORMAT_TYPE_PLAIN = 7;
+  FORMAT_TYPE_NONE = 8;
 }
 
 enum EncodeType {
@@ -146,6 +146,7 @@ enum EncodeType {
   ENCODE_TYPE_JSON = 5;
   ENCODE_TYPE_BYTES = 6;
   ENCODE_TYPE_TEMPLATE = 7;
+  ENCODE_TYPE_NONE = 8;
 }
 
 enum RowFormatType {
@@ -214,4 +215,15 @@ message AdditionalColumn {
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
   }
+}
+
+enum AdditionalColumnType {
+  ADDITIONAL_COLUMN_TYPE_UNSPECIFIED = 0;
+  ADDITIONAL_COLUMN_TYPE_KEY = 1;
+  ADDITIONAL_COLUMN_TYPE_TIMESTAMP = 2;
+  ADDITIONAL_COLUMN_TYPE_PARTITION = 3;
+  ADDITIONAL_COLUMN_TYPE_OFFSET = 4;
+  ADDITIONAL_COLUMN_TYPE_HEADER = 5;
+  ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
+  ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
 }

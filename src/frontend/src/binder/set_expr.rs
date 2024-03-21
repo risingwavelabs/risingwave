@@ -14,12 +14,12 @@
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
 use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, CorrelatedId, Depth};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
@@ -138,7 +138,9 @@ impl Binder {
                         let mut left = self.bind_set_expr(*left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
-                        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+                        self.context
+                            .cte_to_relation
+                            .clone_from(&new_context.cte_to_relation);
                         let mut right = self.bind_set_expr(*right)?;
 
                         if left.schema().fields.len() != right.schema().fields.len() {

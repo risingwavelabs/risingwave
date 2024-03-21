@@ -28,7 +28,7 @@ mod test {
         gen_merge_iterator_interleave_test_sstable_iters, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator};
+    use crate::hummock::iterator::{Forward, HummockIterator, MergeIterator, ValueMeta};
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
@@ -196,6 +196,10 @@ mod test {
         }
 
         fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+        fn value_meta(&self) -> ValueMeta {
+            ValueMeta::default()
+        }
     }
 
     #[tokio::test]

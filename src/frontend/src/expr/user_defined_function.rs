@@ -35,7 +35,7 @@ impl UserDefinedFunction {
     pub(super) fn from_expr_proto(
         udf: &risingwave_pb::expr::UserDefinedFunction,
         return_type: DataType,
-    ) -> risingwave_common::error::Result<Self> {
+    ) -> crate::error::Result<Self> {
         let args: Vec<_> = udf
             .get_children()
             .iter()
@@ -58,6 +58,8 @@ impl UserDefinedFunction {
             identifier: udf.identifier.clone(),
             body: udf.body.clone(),
             link: udf.link.clone(),
+            compressed_binary: udf.compressed_binary.clone(),
+            always_retry_on_network_error: udf.always_retry_on_network_error,
         };
 
         Ok(Self {
@@ -92,6 +94,8 @@ impl Expr for UserDefinedFunction {
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
+                compressed_binary: self.catalog.compressed_binary.clone(),
+                always_retry_on_network_error: self.catalog.always_retry_on_network_error,
             })),
         }
     }

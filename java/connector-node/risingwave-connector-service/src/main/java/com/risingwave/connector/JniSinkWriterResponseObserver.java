@@ -41,11 +41,12 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onError(Throwable throwable) {
-        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage())) {
+        LOG.error("JniSinkWriterHandler onError: ", throwable);
+        var errMsg = throwable.getMessage() == null ? "unknown error" : throwable.getMessage();
+        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, errMsg)) {
             LOG.warn("unable to send error: {}", throwable.getMessage());
         }
         this.success = false;
-        LOG.error("JniSinkWriterHandler onError: ", throwable);
     }
 
     @Override

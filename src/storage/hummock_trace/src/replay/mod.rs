@@ -120,7 +120,7 @@ pub trait ReplayStateStore {
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64>;
     async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
     async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
-    async fn clear_shared_buffer(&self) -> Result<()>;
+    async fn clear_shared_buffer(&self, prev_epoch: u64);
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
 }
 
@@ -152,7 +152,7 @@ mock! {
         ) -> Result<u64>;
         async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
         async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
-        async fn clear_shared_buffer(&self) -> Result<()>;
+        async fn clear_shared_buffer(&self, prev_epoch: u64);
         fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
     }
     impl GlobalReplay for GlobalReplayInterface{}

@@ -105,7 +105,7 @@ where
     }
 
     fn access_field(&self, desc: &SourceColumnDesc) -> super::AccessResult {
-        match desc.additional_column_type.column_type {
+        match desc.additional_column.column_type {
             Some(AdditionalColumnType::Key(_)) => {
                 if let Some(key_as_column_name) = &self.key_column_name
                     && &desc.name == key_as_column_name

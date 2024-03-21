@@ -143,6 +143,11 @@ impl DataChunkBuilder {
         }
     }
 
+    /// Build a data chunk from the current buffer.
+    pub fn finish(mut self) -> DataChunk {
+        self.build_data_chunk()
+    }
+
     fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) {
         self.do_append_one_row_from_datums(data_chunk.row_at(row_idx).0.iter());
     }

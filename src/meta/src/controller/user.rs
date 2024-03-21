@@ -34,10 +34,10 @@ use sea_orm::{
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     check_user_name_duplicate, ensure_privileges_not_referred, ensure_user_id,
-    extract_grant_obj_id, get_referring_privileges_cascade, get_user_privilege,
+    extract_grant_obj_id, get_object_owner, get_referring_privileges_cascade, get_user_privilege,
     list_user_info_by_ids, PartialUserPrivilege,
 };
-use crate::manager::NotificationVersion;
+use crate::manager::{NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -248,6 +248,9 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("user", grantor))?;
         if !user.is_super {
             for privilege in &mut privileges {
+                if grantor == get_object_owner(*privilege.oid.as_ref(), &txn).await? {
+                    continue;
+                }
                 let filter = user_privilege::Column::UserId
                     .eq(grantor)
                     .and(user_privilege::Column::Oid.eq(*privilege.oid.as_ref()))
@@ -293,8 +296,10 @@ impl CatalogController {
             } else {
                 on_conflict.do_nothing();
             }
+
             UserPrivilege::insert(privilege)
                 .on_conflict(on_conflict)
+                .do_nothing()
                 .exec(&txn)
                 .await?;
         }
@@ -311,7 +316,7 @@ impl CatalogController {
         &self,
         user_ids: Vec<UserId>,
         revoke_grant_privileges: &[PbGrantPrivilege],
-        granted_by: Option<UserId>,
+        granted_by: UserId,
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
@@ -327,7 +332,6 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", revoke_by))?;
 
-        let granted_by = granted_by.unwrap_or(revoke_by);
         // check whether user can revoke the privilege.
         if !revoke_user.is_super && granted_by != revoke_by {
             let granted_user_name: String = User::find_by_id(granted_by)
@@ -355,8 +359,11 @@ impl CatalogController {
         }
 
         let filter = if !revoke_user.is_super {
-            // ensure user have grant options.
+            // ensure user have grant options or is owner of the object.
             for (obj, actions) in &revoke_items {
+                if revoke_by == get_object_owner(*obj, &txn).await? {
+                    continue;
+                }
                 let owned_actions: HashSet<Action> = UserPrivilege::find()
                     .select_only()
                     .column(user_privilege::Column::Action)
@@ -386,11 +393,11 @@ impl CatalogController {
             user_privilege::Column::UserId.is_in(user_ids.clone())
         };
         let mut root_user_privileges: Vec<PartialUserPrivilege> = vec![];
-        for (obj, actions) in &revoke_items {
+        for (obj, actions) in revoke_items {
             let filter = filter
                 .clone()
-                .and(user_privilege::Column::Oid.eq(*obj))
-                .and(user_privilege::Column::Action.is_in(actions.clone()));
+                .and(user_privilege::Column::Oid.eq(obj))
+                .and(user_privilege::Column::Action.is_in(actions));
             root_user_privileges.extend(
                 UserPrivilege::find()
                     .select_only()
@@ -402,9 +409,8 @@ impl CatalogController {
             );
         }
         if root_user_privileges.is_empty() {
-            return Err(MetaError::invalid_parameter(
-                "no privilege to revoke".to_string(),
-            ));
+            tracing::warn!("no privilege to revoke, ignore it");
+            return Ok(IGNORED_NOTIFICATION_VERSION);
         }
 
         // check if the user granted any privileges to other users.
@@ -589,7 +595,7 @@ mod tests {
             mgr.revoke_privilege(
                 vec![user_1.user_id],
                 &[conn_with_option.clone()],
-                Some(TEST_ROOT_USER_ID),
+                TEST_ROOT_USER_ID,
                 user_2.user_id,
                 false,
                 false
@@ -604,7 +610,7 @@ mod tests {
             mgr.revoke_privilege(
                 vec![user_2.user_id],
                 &[create_without_option.clone()],
-                None,
+                user_1.user_id,
                 user_1.user_id,
                 false,
                 false
@@ -619,7 +625,7 @@ mod tests {
             mgr.revoke_privilege(
                 vec![user_1.user_id],
                 &[conn_with_option.clone()],
-                None,
+                TEST_ROOT_USER_ID,
                 TEST_ROOT_USER_ID,
                 false,
                 false
@@ -633,7 +639,7 @@ mod tests {
         mgr.revoke_privilege(
             vec![user_1.user_id],
             &[create_without_option.clone()],
-            None,
+            TEST_ROOT_USER_ID,
             TEST_ROOT_USER_ID,
             false,
             false,
@@ -650,7 +656,7 @@ mod tests {
         mgr.revoke_privilege(
             vec![user_1.user_id],
             &[conn_with_option.clone()],
-            None,
+            TEST_ROOT_USER_ID,
             TEST_ROOT_USER_ID,
             true,
             true,
@@ -673,7 +679,7 @@ mod tests {
         mgr.revoke_privilege(
             vec![user_1.user_id],
             &[conn_with_option.clone()],
-            None,
+            TEST_ROOT_USER_ID,
             TEST_ROOT_USER_ID,
             false,
             true,

@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbComment;
 use risingwave_sqlparser::ast::{CommentObject, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
+use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
 pub async fn handle_comment(

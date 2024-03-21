@@ -32,9 +32,9 @@ import Head from "next/head"
 import Link from "next/link"
 import { Fragment } from "react"
 import Title from "../components/Title"
+import useFetch from "../lib/api/fetch"
+import { Relation, StreamingJob } from "../lib/api/streaming"
 import extractColumnInfo from "../lib/extractInfo"
-import useFetch from "../pages/api/fetch"
-import { Relation, StreamingJob } from "../pages/api/streaming"
 import {
   Sink as RwSink,
   Source as RwSource,

@@ -21,7 +21,7 @@ use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::SystemParams;
@@ -123,6 +123,7 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             .await?
             .ok_or_else(|| anyhow!("cluster id not found in meta store"))?
             .into();
+        let subscription = Subscription::list_at_snapshot::<S>(&meta_store_snapshot).await?;
 
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
@@ -142,6 +143,7 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
             connection,
             system_param,
             cluster_id,
+            subscription,
         };
         Ok(())
     }

@@ -14,7 +14,6 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::table_parallelism::{
     AdaptiveParallelism, FixedParallelism, PbParallelism,
 };
@@ -27,6 +26,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
+use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
 pub async fn handle_alter_parallelism(
@@ -84,6 +84,13 @@ pub async fn handle_alter_parallelism(
 
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                 sink.id.sink_id()
+            }
+            StatementType::ALTER_SUBSCRIPTION => {
+                let (subscription, schema_name) =
+                    reader.get_subscription_by_name(db_name, schema_path, &real_table_name)?;
+
+                session.check_privilege_for_drop_alter(schema_name, &**subscription)?;
+                subscription.id.subscription_id()
             }
             _ => bail!(
                 "invalid statement type for alter parallelism: {:?}",

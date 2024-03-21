@@ -37,7 +37,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         state_store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
         let progress = params
@@ -50,13 +50,13 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        let executor = match node.stream_scan_type() {
+        let exec = match node.stream_scan_type() {
             StreamScanType::Chain | StreamScanType::UpstreamOnly => {
                 let upstream_only = matches!(node.stream_scan_type(), StreamScanType::UpstreamOnly);
-                ChainExecutor::new(params.info, snapshot, upstream, progress, upstream_only).boxed()
+                ChainExecutor::new(snapshot, upstream, progress, upstream_only).boxed()
             }
             StreamScanType::Rearrange => {
-                RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
+                RearrangedChainExecutor::new(snapshot, upstream, progress).boxed()
             }
 
             StreamScanType::Backfill => {
@@ -83,7 +83,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
 
                 BackfillExecutor::new(
-                    params.info,
                     upstream_table,
                     upstream,
                     state_table,
@@ -126,7 +125,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             )
                             .await;
                         ArrangementBackfillExecutor::<_, $SD>::new(
-                            params.info,
                             upstream_table,
                             upstream,
                             state_table,
@@ -147,11 +145,14 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::Unspecified => unreachable!(),
         };
-        Ok(FlowControlExecutor::new(
-            executor,
+        let mut info = params.info.clone();
+        info.identity = format!("{} (flow controlled)", info.identity);
+
+        let exec = FlowControlExecutor::new(
+            (info, exec).into(),
             params.actor_context,
             node.rate_limit.map(|x| x as _),
-        )
-        .boxed())
+        );
+        Ok((params.info, exec).into())
     }
 }

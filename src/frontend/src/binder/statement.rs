@@ -14,12 +14,12 @@
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
-use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
 use super::update::BoundUpdate;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
+use crate::error::Result;
 use crate::expr::ExprRewriter;
 
 #[derive(Debug, Clone)]

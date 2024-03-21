@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
@@ -20,14 +20,14 @@ use educe::Educe;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::WithPropertiesExt;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::{TableCatalog, WithOptions};
+use crate::TableCatalog;
 
 /// In which scnario the source node is created
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -99,9 +99,9 @@ impl GenericPlanNode for Source {
 
 impl Source {
     pub fn is_new_fs_connector(&self) -> bool {
-        self.catalog.as_ref().is_some_and(|catalog| {
-            ConnectorProperties::is_new_fs_connector_b_tree_map(&catalog.with_properties)
-        })
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_new_fs_connector())
     }
 
     /// The columns in stream/batch source node indicate the actual columns it will produce,
@@ -145,7 +145,7 @@ impl Source {
         // state in source.
         // Source state doesn't maintain retention_seconds, internal_table_subset function only
         // returns retention_seconds so default is used here
-        let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
+        let mut builder = TableCatalogBuilder::default();
 
         let key = Field {
             data_type: DataType::Varchar,

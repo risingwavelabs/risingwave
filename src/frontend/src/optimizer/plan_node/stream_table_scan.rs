@@ -155,8 +155,7 @@ impl StreamTableScan {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
-        let properties = self.ctx().with_options().internal_table_subset();
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // We use vnode as primary key in state table.
@@ -205,6 +204,7 @@ impl Distill for StreamTableScan {
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if verbose {
+            vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
             let pk = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
                 schema: self.base.schema(),

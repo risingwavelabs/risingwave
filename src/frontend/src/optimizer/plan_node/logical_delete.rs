@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::error::Result;
 
 use super::utils::impl_distill_by_unit;
 use super::{
@@ -21,6 +20,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,

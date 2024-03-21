@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine;
@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
@@ -38,7 +39,7 @@ use super::doris_starrocks_connector::{
     POOL_IDLE_TIMEOUT,
 };
 use super::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
 
@@ -170,7 +171,7 @@ impl DorisSink {
                 Ok(doris_data_type.contains("DATETIME"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Doris(
-                "doris can not support Timestamptz".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Doris sink as Doris doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Doris(
                 "doris can not support Interval".to_string(),
@@ -293,12 +294,7 @@ impl DorisSinkWriter {
             inserter_inner_builder: doris_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(
-                schema,
-                None,
-                TimestampHandlingMode::String,
-                decimal_map,
-            ),
+            row_encoder: JsonEncoder::new_with_doris(schema, None, decimal_map),
         })
     }
 
@@ -326,8 +322,9 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
@@ -342,8 +339,9 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
@@ -359,8 +357,9 @@ impl DorisSinkWriter {
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Doris(format!("Json derialize error: {}", e.as_report()))
+                    })?;
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
@@ -471,12 +470,9 @@ impl DorisSchemaClient {
         } else {
             raw_bytes
         };
-        let schema: DorisSchema = serde_json::from_str(&json_data).map_err(|err| {
-            SinkError::DorisStarrocksConnect(anyhow::anyhow!(
-                "Can't get schema from json {:?}",
-                err
-            ))
-        })?;
+        let schema: DorisSchema = serde_json::from_str(&json_data)
+            .context("Can't get schema from json")
+            .map_err(SinkError::DorisStarrocksConnect)?;
         Ok(schema)
     }
 }

@@ -31,20 +31,20 @@ pub struct BarrierInfo {
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
 pub(crate) struct Notifier {
-    /// Get notified when scheduled barrier is injected to compute nodes.
-    pub injected: Option<oneshot::Sender<BarrierInfo>>,
+    /// Get notified when scheduled barrier has started to be handled.
+    pub started: Option<oneshot::Sender<BarrierInfo>>,
 
     /// Get notified when scheduled barrier is collected or failed.
     pub collected: Option<oneshot::Sender<MetaResult<()>>>,
 
     /// Get notified when scheduled barrier is finished.
-    pub finished: Option<oneshot::Sender<()>>,
+    pub finished: Option<oneshot::Sender<MetaResult<()>>>,
 }
 
 impl Notifier {
     /// Notify when we have injected a barrier to compute nodes.
-    pub fn notify_injected(&mut self, info: BarrierInfo) {
-        if let Some(tx) = self.injected.take() {
+    pub fn notify_started(&mut self, info: BarrierInfo) {
+        if let Some(tx) = self.started.take() {
             tx.send(info).ok();
         }
     }
@@ -70,7 +70,24 @@ impl Notifier {
     /// However for creating MV, this is only called when all `BackfillExecutor` report it finished.
     pub fn notify_finished(self) {
         if let Some(tx) = self.finished {
-            tx.send(()).ok();
+            tx.send(Ok(())).ok();
+        }
+    }
+
+    /// Notify when we failed to finish a barrier. This function consumes `self`.
+    pub fn notify_finish_failed(self, err: MetaError) {
+        if let Some(tx) = self.finished {
+            tx.send(Err(err)).ok();
+        }
+    }
+
+    /// Notify when we failed to collect or finish a barrier. This function consumes `self`.
+    pub fn notify_failed(self, err: MetaError) {
+        if let Some(tx) = self.collected {
+            tx.send(Err(err.clone())).ok();
+        }
+        if let Some(tx) = self.finished {
+            tx.send(Err(err)).ok();
         }
     }
 }

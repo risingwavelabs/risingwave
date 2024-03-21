@@ -20,11 +20,11 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, Property,
-    SourceId, TableId, TableVersion,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
+    TableId, TableVersion,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, PartialEq, Hash, Copy, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum TableType {
     #[sea_orm(string_value = "TABLE")]
@@ -108,7 +108,6 @@ pub struct Model {
     pub distribution_key: I32Array,
     pub stream_key: I32Array,
     pub append_only: bool,
-    pub properties: Property,
     pub fragment_id: Option<FragmentId>,
     pub vnode_col_index: Option<i32>,
     pub row_id_index: Option<i32>,
@@ -123,6 +122,8 @@ pub struct Model {
     pub cleaned_by_watermark: bool,
     pub description: Option<String>,
     pub version: Option<TableVersion>,
+    pub retention_seconds: Option<i32>,
+    pub incoming_sinks: I32Array,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -217,7 +218,6 @@ impl From<PbTable> for ActiveModel {
             distribution_key: Set(pb_table.distribution_key.into()),
             stream_key: Set(pb_table.stream_key.into()),
             append_only: Set(pb_table.append_only),
-            properties: Set(pb_table.properties.into()),
             fragment_id,
             vnode_col_index: Set(pb_table.vnode_col_index.map(|x| x as i32)),
             row_id_index: Set(pb_table.row_id_index.map(|x| x as i32)),
@@ -232,6 +232,8 @@ impl From<PbTable> for ActiveModel {
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
             version: Set(pb_table.version.map(|v| v.into())),
+            retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
+            incoming_sinks: Set(pb_table.incoming_sinks.into()),
         }
     }
 }

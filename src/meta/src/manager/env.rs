@@ -93,6 +93,12 @@ pub struct MetaOpts {
     pub enable_recovery: bool,
     /// Whether to disable the auto-scaling feature.
     pub disable_automatic_parallelism_control: bool,
+    /// The number of streaming jobs per scaling operation.
+    pub parallelism_control_batch_size: usize,
+    /// The period of parallelism control trigger.
+    pub parallelism_control_trigger_period_sec: u64,
+    /// The first delay of parallelism control.
+    pub parallelism_control_trigger_first_delay_sec: u64,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -152,18 +158,18 @@ pub struct MetaOpts {
     /// connection`.
     pub privatelink_endpoint_default_tags: Option<Vec<(String, String)>>,
 
-    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `space_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
     /// telemetry enabled in config file or not
     pub telemetry_enabled: bool,
-    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `ttl_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule tombstone_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule split_compaction_group for all compaction groups with this interval.
+    /// Schedule `split_compaction_group` for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
 
     /// The size limit to split a large compaction group.
@@ -190,17 +196,16 @@ pub struct MetaOpts {
 
     /// hybird compaction group config
     ///
-    /// hybird_partition_vnode_count determines the granularity of vnodes in the hybrid compaction group for SST alignment.
-    /// When hybird_partition_vnode_count > 0, in hybrid compaction group
+    /// `hybird_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When `hybird_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When hybird_partition_vnode_count = 0,no longer be special alignment operations for the hybird compaction group
+    /// When `hybird_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
     pub hybird_partition_vnode_count: u32,
 
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
-
     /// The number of traces to be cached in-memory by the tracing collector
     /// embedded in the meta node.
     pub cached_traces_num: u32,
@@ -213,6 +218,7 @@ pub struct MetaOpts {
 
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
+    pub enable_dropped_column_reclaim: bool,
 }
 
 impl MetaOpts {
@@ -221,6 +227,9 @@ impl MetaOpts {
         Self {
             enable_recovery,
             disable_automatic_parallelism_control: false,
+            parallelism_control_batch_size: 1,
+            parallelism_control_trigger_period_sec: 10,
+            parallelism_control_trigger_first_delay_sec: 30,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
@@ -265,6 +274,7 @@ impl MetaOpts {
             cached_traces_memory_limit_bytes: usize::MAX,
             enable_trivial_move: true,
             enable_check_task_level_overlap: true,
+            enable_dropped_column_reclaim: false,
         }
     }
 }

@@ -39,7 +39,6 @@ use itertools::Itertools;
 use paste::paste;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
@@ -50,6 +49,7 @@ use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
+use crate::error::{ErrorCode, Result};
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -854,6 +854,7 @@ mod stream_sink;
 mod stream_sort;
 mod stream_source;
 mod stream_stateless_simple_agg;
+mod stream_subscription;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -947,6 +948,7 @@ pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
+pub use stream_subscription::StreamSubscription;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1039,6 +1041,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
+            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, HashJoin }
             , { Stream, Exchange }
@@ -1155,6 +1158,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
             , { Stream, Sink }
+            , { Stream, Subscription }
             , { Stream, Source }
             , { Stream, HashAgg }
             , { Stream, SimpleAgg }

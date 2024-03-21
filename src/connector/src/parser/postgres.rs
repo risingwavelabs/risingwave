@@ -23,6 +23,8 @@ use risingwave_common::types::{
     Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
+use thiserror_ext::AsReport;
+use tokio_postgres::types::Type;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
@@ -37,12 +39,12 @@ macro_rules! handle_list_data_type {
                 }
             }
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::error!(
-                        "parse column \"{}\" fail: {} ({} suppressed)",
-                        $name,
-                        err,
-                        sc
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
                     );
                 }
             }
@@ -59,12 +61,12 @@ macro_rules! handle_list_data_type {
                 }
             }
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::error!(
-                        "parse column \"{}\" fail: {} ({} suppressed)",
-                        $name,
-                        err,
-                        sc
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
                     );
                 }
             }
@@ -78,12 +80,12 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::error!(
-                        "parse column \"{}\" fail: {} ({} suppressed)",
-                        $name,
-                        err,
-                        sc
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
                     );
                 }
                 None
@@ -95,12 +97,12 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                     tracing::error!(
-                        "parse column \"{}\" fail: {} ({} suppressed)",
-                        $name,
-                        err,
-                        sc
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
                     );
                 }
                 None
@@ -138,7 +140,29 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     handle_data_type!(row, i, name, RustDecimal, Decimal)
                 }
                 DataType::Varchar => {
-                    handle_data_type!(row, i, name, String)
+                    match row.columns()[i].type_() {
+                        // Since we don't support UUID natively, adapt it to a VARCHAR column
+                        &Type::UUID => {
+                            let res = row.try_get::<_, Option<uuid::Uuid>>(i);
+                            match res {
+                                Ok(val) => val.map(|v| ScalarImpl::from(v.to_string())),
+                                Err(err) => {
+                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                        tracing::error!(
+                                            suppressed_count,
+                                            column = name,
+                                            error = %err.as_report(),
+                                            "parse uuid column failed",
+                                        );
+                                    }
+                                    None
+                                }
+                            }
+                        }
+                        _ => {
+                            handle_data_type!(row, i, name, String)
+                        }
+                    }
                 }
                 DataType::Date => {
                     handle_data_type!(row, i, name, NaiveDate, Date)
@@ -157,12 +181,12 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            if let Ok(sc) = LOG_SUPPERSSER.check() {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
-                                    "parse column \"{}\" fail: {} ({} suppressed)",
-                                    name,
-                                    err,
-                                    sc
+                                    suppressed_count,
+                                    column = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
                                 );
                             }
                             None
@@ -254,12 +278,12 @@ pub fn postgres_row_to_owned_row(row: tokio_postgres::Row, schema: &Schema) -> O
                                     }
                                 }
                                 Err(err) => {
-                                    if let Ok(sc) = LOG_SUPPERSSER.check() {
+                                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                         tracing::error!(
-                                            "parse column \"{}\" fail: {} ({} suppressed)",
-                                            name,
-                                            err,
-                                            sc
+                                            suppressed_count,
+                                            column = name,
+                                            error = %err.as_report(),
+                                            "parse column failed",
                                         );
                                     }
                                 }

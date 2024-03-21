@@ -54,6 +54,21 @@ impl<T> Sentinelled<T> {
             (Normal(a), Normal(b)) => cmp_fn(a, b),
         }
     }
+
+    pub fn map<U>(self, map_fn: impl FnOnce(T) -> U) -> Sentinelled<U> {
+        use Sentinelled::*;
+        match self {
+            Smallest => Smallest,
+            Normal(inner) => Normal(map_fn(inner)),
+            Largest => Largest,
+        }
+    }
+}
+
+impl<T> From<T> for Sentinelled<T> {
+    fn from(inner: T) -> Self {
+        Self::Normal(inner)
+    }
 }
 
 impl<T> PartialOrd for Sentinelled<T>

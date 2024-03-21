@@ -22,7 +22,6 @@ use std::rc::Rc;
 
 use educe::Educe;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
@@ -30,6 +29,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::error::Result;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 use crate::scheduler::SchedulerResult;
@@ -280,6 +280,10 @@ fn build_fragment(
         }
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
+
+        NodeBody::Subscription(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Subscription as u32
+        }
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 

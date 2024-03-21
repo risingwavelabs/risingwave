@@ -240,6 +240,16 @@ message ListActorStatesResponse {
   repeated ActorState states = 1;
 }
 
+message ListObjectDependenciesRequest {}
+
+message ListObjectDependenciesResponse {
+  message ObjectDependencies {
+    uint32 object_id = 1;
+    uint32 referenced_object_id = 2;
+  }
+  repeated ObjectDependencies dependencies = 1;
+}
+
 enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
@@ -265,6 +275,7 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
 }
 
@@ -373,6 +384,7 @@ message MetaSnapshot {
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
   repeated catalog.Connection connections = 17;
+  repeated catalog.Subscription subscriptions = 19;
   repeated user.UserInfo users = 8;
   // for streaming
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
@@ -394,6 +406,7 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
+    catalog.Subscription subscription = 6;
   }
 }
 
@@ -555,7 +568,7 @@ message SystemParams {
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;
-  optional string wasm_storage_url = 14;
+  optional string wasm_storage_url = 14 [deprecated = true];
   optional bool enable_tracing = 15;
 }
 

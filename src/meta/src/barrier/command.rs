@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, MetadataManager, WorkerId};
+use crate::manager::{DdlType, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -175,6 +175,8 @@ pub enum Command {
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
         table_parallelism: HashMap<TableId, TableParallelism>,
+        // should contain the actor ids in upstream and downstream fragment of `reschedules`
+        fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
     },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -190,7 +192,7 @@ pub enum Command {
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of FlowControl Executor after StreamScan or Source.
+    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
 }
 
@@ -351,7 +353,7 @@ impl CommandContext {
 
 impl CommandContext {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
+    pub fn to_mutation(&self) -> Option<Mutation> {
         let mutation =
             match &self.command {
                 Command::Plain(mutation) => mutation.clone(),
@@ -479,21 +481,23 @@ impl CommandContext {
                     init_split_assignment,
                 ),
 
-                Command::RescheduleFragment { reschedules, .. } => {
-                    let metadata_manager = &self.barrier_manager_context.metadata_manager;
-
+                Command::RescheduleFragment {
+                    reschedules,
+                    fragment_actors,
+                    ..
+                } => {
                     let mut dispatcher_update = HashMap::new();
                     for reschedule in reschedules.values() {
                         for &(upstream_fragment_id, dispatcher_id) in
                             &reschedule.upstream_fragment_dispatcher_ids
                         {
                             // Find the actors of the upstream fragment.
-                            let upstream_actor_ids = metadata_manager
-                                .get_running_actors_of_fragment(upstream_fragment_id)
-                                .await?;
+                            let upstream_actor_ids = fragment_actors
+                                .get(&upstream_fragment_id)
+                                .expect("should contain");
 
                             // Record updates for all actors.
-                            for actor_id in upstream_actor_ids {
+                            for &actor_id in upstream_actor_ids {
                                 // Index with the dispatcher id to check duplicates.
                                 dispatcher_update
                                     .try_insert(
@@ -526,9 +530,9 @@ impl CommandContext {
                     for (&fragment_id, reschedule) in reschedules {
                         for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                             // Find the actors of the downstream fragment.
-                            let downstream_actor_ids = metadata_manager
-                                .get_running_actors_of_fragment(downstream_fragment_id)
-                                .await?;
+                            let downstream_actor_ids = fragment_actors
+                                .get(&downstream_fragment_id)
+                                .expect("should contain");
 
                             // Downstream removed actors should be skipped
                             // Newly created actors of the current fragment will not dispatch Update
@@ -545,7 +549,7 @@ impl CommandContext {
                                 .unwrap_or_default();
 
                             // Record updates for all actors.
-                            for actor_id in downstream_actor_ids {
+                            for &actor_id in downstream_actor_ids {
                                 if downstream_removed_actors.contains(&actor_id) {
                                     continue;
                                 }
@@ -615,12 +619,12 @@ impl CommandContext {
                         actor_splits,
                         actor_new_dispatchers,
                     });
-                    tracing::debug!("update mutation: {mutation:#?}");
+                    tracing::debug!("update mutation: {mutation:?}");
                     Some(mutation)
                 }
             };
 
-        Ok(mutation)
+        mutation
     }
 
     fn generate_update_mutation_for_replace_table(
@@ -705,15 +709,6 @@ impl CommandContext {
                         .collect()
                 }
             }
-            _ => Default::default(),
-        }
-    }
-
-    /// For `CancelStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
-    /// returns an empty set.
-    pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
-        match &self.command {
-            Command::CancelStreamingJob(table_fragments) => table_fragments.backfill_actor_ids(),
             _ => Default::default(),
         }
     }
@@ -820,8 +815,11 @@ impl CommandContext {
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
                 self.barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids_fail_fast(&table_ids)
+                    .env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
+                        table_ids,
+                    ))
                     .await;
 
                 match &self.barrier_manager_context.metadata_manager {
@@ -928,6 +926,27 @@ impl CommandContext {
                                 init_split_assignment,
                             )
                             .await?;
+
+                        if let Some(ReplaceTablePlan {
+                            new_table_fragments,
+                            dispatchers,
+                            init_split_assignment,
+                            old_table_fragments,
+                            ..
+                        }) = replace_table
+                        {
+                            // Tell compute nodes to drop actors.
+                            self.clean_up(old_table_fragments.actor_ids()).await?;
+
+                            mgr.catalog_controller
+                                .post_collect_table_fragments(
+                                    new_table_fragments.table_id().table_id as _,
+                                    new_table_fragments.actor_ids(),
+                                    dispatchers.clone(),
+                                    init_split_assignment,
+                                )
+                                .await?;
+                        }
                     }
                 }
 
@@ -947,6 +966,7 @@ impl CommandContext {
             Command::RescheduleFragment {
                 reschedules,
                 table_parallelism,
+                ..
             } => {
                 let removed_actors = reschedules
                     .values()

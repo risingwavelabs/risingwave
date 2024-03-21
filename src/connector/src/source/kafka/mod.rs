@@ -17,6 +17,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
+use crate::common::KafkaPrivateLinkCommon;
+
 pub mod enumerator;
 pub mod private_link;
 pub mod source;
@@ -115,7 +117,7 @@ pub struct KafkaProperties {
     )]
     pub time_offset: Option<String>,
 
-    /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
+    /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
     /// TODO: Currently, `Option<bool>` can not be parsed here.
     #[serde(rename = "upsert")]
@@ -129,6 +131,9 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub rdkafka_properties_consumer: RdKafkaPropertiesConsumer,
+
+    #[serde(flatten)]
+    pub privatelink_common: KafkaPrivateLinkCommon,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
@@ -208,6 +213,8 @@ mod test {
             "properties.fetch.max.bytes".to_string() => "114514".to_string(),
             "properties.enable.auto.commit".to_string() => "true".to_string(),
             "properties.fetch.queue.backoff.ms".to_string() => "114514".to_string(),
+            // PrivateLink
+            "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
         };
 
         let props: KafkaProperties =
@@ -246,5 +253,9 @@ mod test {
             props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
             Some(114514)
         );
+        let hashmap: HashMap<String, String> = hashmap! {
+            "broker1".to_string() => "10.0.0.1:8001".to_string()
+        };
+        assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));
     }
 }

@@ -15,7 +15,6 @@
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
@@ -25,6 +24,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
@@ -32,7 +32,7 @@ use crate::optimizer::property::{Distribution, Order};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase<Batch>,
-    core: generic::Source,
+    pub core: generic::Source,
 }
 
 impl BatchSource {

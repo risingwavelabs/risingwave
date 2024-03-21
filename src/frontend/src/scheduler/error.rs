@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use risingwave_batch::error::BatchError;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::session_config::QueryMode;
+use risingwave_connector::error::ConnectorError;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
 
 use crate::catalog::FragmentId;
+use crate::error::{ErrorCode, RwError};
 use crate::scheduler::plan_fragmenter::QueryId;
 
 #[derive(Error, Debug)]
@@ -61,6 +62,13 @@ pub enum SchedulerError {
         #[from]
         #[backtrace]
         BatchError,
+    ),
+
+    #[error(transparent)]
+    Connector(
+        #[from]
+        #[backtrace]
+        ConnectorError,
     ),
 
     #[error(transparent)]

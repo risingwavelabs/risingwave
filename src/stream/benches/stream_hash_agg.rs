@@ -20,13 +20,14 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
-use risingwave_stream::executor::{BoxedExecutor, PkIndices};
+use risingwave_stream::executor::{Executor, PkIndices};
 use tokio::runtime::Runtime;
 
 risingwave_expr_impl::enable!();
@@ -47,7 +48,7 @@ fn bench_hash_agg(c: &mut Criterion) {
 
 /// This aims to mirror `q17`'s aggregator.
 /// We can include more executor patterns as needed.
-fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
+fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
     // ---- Define hash agg executor parameters ----
     let input_data_types = vec![
         // to_char(date_time)
@@ -119,12 +120,13 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     );
 
     // ---- Create MockSourceExecutor ----
-    let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-    tx.push_barrier(1, false);
+    let (mut tx, source) = MockSource::channel();
+    let source = source.into_executor(schema, PkIndices::new());
+    tx.push_barrier(test_epoch(1), false);
     for chunk in chunks {
         tx.push_chunk(chunk);
     }
-    tx.push_barrier_with_prev_epoch_for_test(1002, 1, false);
+    tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
 
     // ---- Create HashAggExecutor to be benchmarked ----
     let row_count_index = 0;
@@ -134,7 +136,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
 
     block_on(new_boxed_hash_agg_executor(
         store,
-        Box::new(source),
+        source,
         false,
         agg_calls,
         row_count_index,
@@ -146,7 +148,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     ))
 }
 
-pub async fn execute_executor(executor: BoxedExecutor) {
+pub async fn execute_executor(executor: Executor) {
     let mut stream = executor.execute();
     while let Some(ret) = stream.next().await {
         _ = black_box(ret.unwrap());

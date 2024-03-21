@@ -65,9 +65,16 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     .unwrap()[0]
         .to_string();
 
-    let result = session
+    let _result = session
         .run(format!(
             "select * from {} limit 10",
+            sink_internal_table_name
+        ))
+        .await?;
+
+    let _result = session
+        .run(format!(
+            "select * from {} where kv_log_store_vnode = 0 limit 10",
             sink_internal_table_name
         ))
         .await?;
@@ -76,6 +83,16 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
         .store
         .wait_for_count(test_source.id_list.len())
         .await?;
+
+    let result: String = session.run("select * from rw_sink_decouple").await?;
+    let [_, is_sink_decouple_str, vnode_count_str] =
+        TryInto::<[&str; 3]>::try_into(result.split(" ").collect_vec()).unwrap();
+    if is_decouple {
+        assert_eq!(is_sink_decouple_str, "t");
+        assert_eq!(vnode_count_str, "256");
+    } else {
+        assert_eq!(is_sink_decouple_str, "f");
+    }
 
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;

@@ -15,27 +15,25 @@
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::RwError;
 
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
 use crate::source::{SourceContextRef, SourceMessage, SplitReader};
 
 pub(crate) trait CommonSplitReader: SplitReader + 'static {
-    fn into_data_stream(
-        self,
-    ) -> impl Stream<Item = Result<Vec<SourceMessage>, anyhow::Error>> + Send;
+    fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> + Send;
 }
 
-#[try_stream(boxed, ok = StreamChunk, error = RwError)]
+#[try_stream(boxed, ok = StreamChunk, error = ConnectorError)]
 pub(crate) async fn into_chunk_stream(
     reader: impl CommonSplitReader,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 ) {
-    let actor_id = source_ctx.source_info.actor_id.to_string();
-    let fragment_id = source_ctx.source_info.fragment_id.to_string();
-    let source_id = source_ctx.source_info.source_id.to_string();
-    let source_name = source_ctx.source_info.source_name.to_string();
+    let actor_id = source_ctx.actor_id.to_string();
+    let fragment_id = source_ctx.fragment_id.to_string();
+    let source_id = source_ctx.source_id.to_string();
+    let source_name = source_ctx.source_name.to_string();
     let metrics = source_ctx.metrics.clone();
 
     let data_stream = reader.into_data_stream();

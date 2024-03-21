@@ -17,7 +17,6 @@ use std::rc::Rc;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
@@ -26,6 +25,7 @@ use thiserror_ext::AsReport;
 use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
 use crate::binder::{Binder, BoundSetExpr};
+use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.

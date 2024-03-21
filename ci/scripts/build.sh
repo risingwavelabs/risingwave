@@ -28,7 +28,7 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
 fi
 
 echo "--- Rust cargo-sort check"
-cargo sort --check --workspace
+cargo sort --check --workspace --grouped
 
 echo "--- Rust cargo-hakari check"
 cargo hakari generate --diff
@@ -53,6 +53,7 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_e2e_extended_mode_test \
     $RISINGWAVE_FEATURE_FLAGS \
+    --features embedded-python-udf \
     --profile "$profile"
 
 

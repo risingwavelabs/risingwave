@@ -1,0 +1,18 @@
+- sql: |
+    CREATE TABLE t1 (pk int, a int, b int, c bigint, d int);
+    CREATE MATERIALIZED VIEW t1_mv AS SELECT SUM(a) as sa, SUM(b) as sb, SUM(c) as sc, SUM(d) as sd FROM t1;
+    SELECT sa, count(*) as cnt2 FROM t1_mv GROUP BY sa ORDER BY cnt2 DESC LIMIT 50 OFFSET 50;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    CREATE TABLE t1 (pk int, a int, b int, c bigint, d int);
+    CREATE MATERIALIZED VIEW t1_mv AS SELECT * from t1;
+    SELECT * FROM t1_mv ORDER BY a DESC LIMIT 50 OFFSET 50;
+  expected_outputs:
+    - batch_plan
+- sql: |
+    CREATE TABLE t1 (pk int, a int, b int, c bigint, d int);
+    CREATE MATERIALIZED VIEW t1_mv AS SELECT * from t1 order by a desc;
+    SELECT * FROM t1_mv ORDER BY a DESC LIMIT 50 OFFSET 50;
+  expected_outputs:
+    - batch_plan

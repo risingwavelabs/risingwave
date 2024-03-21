@@ -34,12 +34,14 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> StreamResult<BoxedExecutor> {
+    ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let watermark_descs = node.get_watermark_descs().clone();
         let [watermark_desc]: [_; 1] = watermark_descs.try_into().unwrap();
-        let watermark_expr =
-            build_non_strict_from_prost(&watermark_desc.expr.unwrap(), params.eval_error_report)?;
+        let watermark_expr = build_non_strict_from_prost(
+            &watermark_desc.expr.unwrap(),
+            params.eval_error_report.clone(),
+        )?;
         let event_time_col_idx = watermark_desc.watermark_idx as usize;
         let vnodes = Arc::new(
             params
@@ -63,15 +65,15 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         let table =
             StateTable::from_table_catalog_inconsistent_op(&table, store, Some(vnodes)).await;
 
-        Ok(WatermarkFilterExecutor::new(
+        let exec = WatermarkFilterExecutor::new(
             params.actor_context,
-            params.info,
             input,
             watermark_expr,
             event_time_col_idx,
             table,
             global_watermark_table,
-        )
-        .boxed())
+            params.eval_error_report,
+        );
+        Ok((params.info, exec).into())
     }
 }

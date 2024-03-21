@@ -17,13 +17,13 @@
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
 
@@ -70,7 +70,7 @@ pub async fn handle_create_view(
         schema.fields().to_vec()
     } else {
         if columns.len() != schema.fields().len() {
-            return Err(risingwave_common::error::ErrorCode::InternalError(
+            return Err(crate::error::ErrorCode::InternalError(
                 "view has different number of columns than the query's columns".to_string(),
             )
             .into());

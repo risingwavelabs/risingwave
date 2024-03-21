@@ -18,6 +18,7 @@ use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta_model_v2::hummock_sequence;
+use risingwave_meta_model_v2::prelude::HummockSequence;
 use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 
@@ -71,7 +72,7 @@ impl SequenceGenerator {
                     name: ActiveValue::set(ident.into()),
                     seq: ActiveValue::set(init.checked_add(num as _).unwrap().try_into().unwrap()),
                 };
-                active_model.insert(&txn).await?;
+                HummockSequence::insert(active_model).exec(&txn).await?;
                 init
             }
             Some(model) => {

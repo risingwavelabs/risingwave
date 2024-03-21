@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::error::Result;
 
 use super::generic::DistillUnit;
 use super::utils::Distill;
@@ -21,6 +20,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchMaxOneRow, ColPrunable, ExprRewritable, Logical,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,

@@ -16,6 +16,7 @@ mod consistent_hash; // TODO: move this to a separate module
 mod dispatcher;
 mod key;
 mod key_v2;
+pub mod table_distribution;
 
 pub use consistent_hash::bitmap::*;
 pub use consistent_hash::mapping::*;

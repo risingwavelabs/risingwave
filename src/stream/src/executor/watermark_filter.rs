@@ -36,9 +36,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::filter::FilterExecutor;
-use super::{
-    ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
-};
+use super::{ActorContextRef, Execute, Executor, Message, StreamExecutorResult};
 use crate::common::table::state_table::StateTable;
 use crate::executor::{expect_first_barrier, Watermark};
 use crate::task::ActorEvalErrorReport;
@@ -48,58 +46,43 @@ use crate::task::ActorEvalErrorReport;
 /// filtered.
 pub struct WatermarkFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
-    info: ExecutorInfo,
 
-    input: BoxedExecutor,
+    input: Executor,
     /// The expression used to calculate the watermark value.
     watermark_expr: NonStrictExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     table: StateTable<S>,
     global_watermark_table: StorageTable<S>,
+
+    eval_error_report: ActorEvalErrorReport,
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
-        input: BoxedExecutor,
+        input: Executor,
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
         table: StateTable<S>,
         global_watermark_table: StorageTable<S>,
+        eval_error_report: ActorEvalErrorReport,
     ) -> Self {
         Self {
             ctx,
-            info,
             input,
             watermark_expr,
             event_time_col_idx,
             table,
             global_watermark_table,
+            eval_error_report,
         }
     }
 }
 
-impl<S: StateStore> Executor for WatermarkFilterExecutor<S> {
+impl<S: StateStore> Execute for WatermarkFilterExecutor<S> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
-    }
-
-    fn schema(&self) -> &risingwave_common::catalog::Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn info(&self) -> ExecutorInfo {
-        self.info.clone()
     }
 }
 
@@ -111,15 +94,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             event_time_col_idx,
             watermark_expr,
             ctx,
-            info,
             mut table,
             mut global_watermark_table,
+            eval_error_report,
         } = *self;
-
-        let eval_error_report = ActorEvalErrorReport {
-            actor_context: ctx.clone(),
-            identity: info.identity.into(),
-        };
 
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
@@ -259,7 +237,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     if barrier.kind.is_checkpoint()
                         && last_checkpoint_watermark != current_watermark
                     {
-                        last_checkpoint_watermark = current_watermark.clone();
+                        last_checkpoint_watermark.clone_from(&current_watermark);
                         // Persist the watermark when checkpoint arrives.
                         if let Some(watermark) = current_watermark.clone() {
                             for vnode in table.vnodes().clone().iter_vnodes() {
@@ -383,6 +361,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableDesc};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::Date;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::ColumnOrder;
@@ -393,7 +372,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::ActorContext;
+    use crate::executor::{ActorContext, ExecutorInfo};
 
     const WATERMARK_TYPE: DataType = DataType::Timestamp;
 
@@ -456,7 +435,7 @@ mod tests {
 
     async fn create_watermark_filter_executor(
         mem_state: MemoryStateStore,
-    ) -> (BoxedExecutor, MessageSender) {
+    ) -> (Box<dyn Execute>, MessageSender) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int16),        // pk
@@ -476,23 +455,29 @@ mod tests {
         )
         .await;
 
-        let (tx, source) = MockSource::channel(schema, vec![0]);
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![0]);
 
+        let ctx = ActorContext::for_test(123);
         let info = ExecutorInfo {
             schema: source.schema().clone(),
             pk_indices: source.pk_indices().to_vec(),
             identity: "WatermarkFilterExecutor".to_string(),
         };
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: info.identity.clone().into(),
+        };
 
         (
             WatermarkFilterExecutor::new(
-                ActorContext::for_test(123),
-                info,
-                source.boxed(),
+                ctx,
+                source,
                 watermark_expr,
                 1,
                 table,
                 storage_table,
+                eval_error_report,
             )
             .boxed(),
             tx,
@@ -526,7 +511,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the init barrier
-        tx.push_barrier(1, false);
+        tx.push_barrier(test_epoch(1), false);
         executor.next().await.unwrap().unwrap();
 
         macro_rules! watermark {
@@ -556,7 +541,7 @@ mod tests {
         );
 
         // push the 2nd barrier
-        tx.push_barrier(2, false);
+        tx.push_barrier(test_epoch(2), false);
         executor.next().await.unwrap().unwrap();
 
         // push the 2nd chunk
@@ -579,7 +564,7 @@ mod tests {
         );
 
         // push the 3nd barrier
-        tx.push_barrier(3, false);
+        tx.push_barrier(test_epoch(3), false);
         executor.next().await.unwrap().unwrap();
 
         // Drop executor
@@ -590,7 +575,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(4, false);
+        tx.push_barrier(test_epoch(4), false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover

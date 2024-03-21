@@ -14,6 +14,7 @@
 
 package com.risingwave.connector.source.common;
 
+import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import java.io.IOException;
@@ -29,10 +30,6 @@ import org.slf4j.LoggerFactory;
 
 public class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
-
-    /* Debezium private configs */
-    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
-            "debezium.embedded.shutdown.pause.before.interrupt.ms";
 
     public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
             "cdc.source.wait.streaming.before.exit.seconds";
@@ -61,11 +58,17 @@ public class DbzConnectorConfig {
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
+    private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
     private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
     private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+
+    public static class MongoDb {
+        public static final String MONGO_URL = "mongodb.url";
+        public static final String MONGO_COLLECTION_NAME = "collection.name";
+    }
 
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
@@ -108,7 +111,7 @@ public class DbzConnectorConfig {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone,
-            boolean isMultiTableShared) {
+            boolean isCdcSourceJob) {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
@@ -117,13 +120,13 @@ public class DbzConnectorConfig {
                         && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
 
         LOG.info(
-                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isMultiTableShared={}",
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}, isCdcSourceJob={}",
                 source,
                 sourceId,
                 startOffset,
                 snapshotDone,
                 isCdcBackfill,
-                isMultiTableShared);
+                isCdcSourceJob);
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
@@ -189,7 +192,7 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(postgresProps);
 
-            if (isMultiTableShared) {
+            if (isCdcSourceJob) {
                 // remove table filtering for the shared Postgres source, since we
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Postgres source");
@@ -217,6 +220,27 @@ public class DbzConnectorConfig {
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
             dbzProps.putAll(postgresProps);
+        } else if (source == SourceTypeE.MONGODB) {
+            var mongodbProps = initiateDbConfig(MONGODB_CONFIG_FILE, substitutor);
+
+            // if snapshot phase is finished and offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                mongodbProps.setProperty("snapshot.mode", "never");
+                mongodbProps.setProperty(
+                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            }
+
+            var mongodbUrl = userProps.get("mongodb.url");
+            var collection = userProps.get("collection.name");
+            var connectionStr = new ConnectionString(mongodbUrl);
+            var connectorName =
+                    String.format(
+                            "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);
+            mongodbProps.setProperty("name", connectorName);
+
+            dbzProps.putAll(mongodbProps);
+
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }

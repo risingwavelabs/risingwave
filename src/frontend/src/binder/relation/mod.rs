@@ -18,7 +18,6 @@ use std::ops::Deref;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
@@ -28,6 +27,7 @@ use thiserror_ext::AsReport;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
 mod join;
@@ -242,6 +242,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "sink name")
     }
 
+    /// return the `subscription_name`
+    pub fn resolve_subscription_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "subscription name")
+    }
+
     /// return the `table_name`
     pub fn resolve_table_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "table name")
@@ -284,7 +289,7 @@ impl Binder {
                     .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
-            field.name = name.clone();
+            field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
                 begin + index,

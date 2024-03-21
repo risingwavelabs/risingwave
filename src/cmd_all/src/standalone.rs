@@ -25,6 +25,11 @@ use tokio::signal;
 use crate::common::osstrs;
 
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
+#[command(
+    version,
+    about = "The Standalone mode allows users to start multiple services in one process, it exposes node-level options for each service",
+    hide = true
+)]
 pub struct StandaloneOpts {
     /// Compute node options
     /// If missing, compute node won't start
@@ -118,27 +123,33 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
 
     if let Some(config_path) = opts.config_path.as_ref() {
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.config_path = config_path.clone();
+            meta_opts.config_path.clone_from(config_path);
         }
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.config_path = config_path.clone();
+            compute_opts.config_path.clone_from(config_path);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.config_path = config_path.clone();
+            frontend_opts.config_path.clone_from(config_path);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.config_path = config_path.clone();
+            compactor_opts.config_path.clone_from(config_path);
         }
     }
     if let Some(prometheus_listener_addr) = opts.prometheus_listener_addr.as_ref() {
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compute_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            frontend_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compactor_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
             meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
@@ -161,6 +172,9 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
     }
 }
 
+/// For `standalone` mode, we can configure and start multiple services in one process.
+/// `standalone` mode is meant to be used by our cloud service and docker,
+/// where we can configure and start multiple services in one process.
 pub async fn standalone(
     ParsedStandaloneOpts {
         meta_opts,
@@ -253,8 +267,6 @@ mod test {
                 ParsedStandaloneOpts {
                     meta_opts: Some(
                         MetaNodeOpts {
-                            vpc_id: None,
-                            security_group_id: None,
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
@@ -266,11 +278,12 @@ mod test {
                             etcd_username: "",
                             etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: None,
-                            dashboard_ui_path: None,
                             prometheus_endpoint: None,
                             prometheus_selector: None,
                             connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
+                            vpc_id: None,
+                            security_group_id: None,
                             config_path: "src/config/test.toml",
                             backend: None,
                             barrier_interval_ms: None,

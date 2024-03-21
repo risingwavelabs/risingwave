@@ -26,6 +26,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use core::fmt::Display;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -52,7 +53,8 @@ pub use self::value::{
     Value,
 };
 pub use crate::ast::ddl::{
-    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
+    AlterViewOperation,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
@@ -814,10 +816,10 @@ impl fmt::Display for WindowFrameUnits {
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
-    /// `<N> PRECEDING` or `UNBOUNDED PRECEDING`
-    Preceding(Option<u64>),
-    /// `<N> FOLLOWING` or `UNBOUNDED FOLLOWING`.
-    Following(Option<u64>),
+    /// `<offset> PRECEDING` or `UNBOUNDED PRECEDING`
+    Preceding(Option<Box<Expr>>),
+    /// `<offset> FOLLOWING` or `UNBOUNDED FOLLOWING`.
+    Following(Option<Box<Expr>>),
 }
 
 impl fmt::Display for WindowFrameBound {
@@ -882,6 +884,7 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
+    Subscription { schema: Option<Ident> },
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
@@ -931,6 +934,7 @@ impl fmt::Display for ShowObject {
             }
             ShowObject::Jobs => write!(f, "JOBS"),
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
+            ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
         }
     }
 }
@@ -945,6 +949,7 @@ pub enum ShowCreateType {
     Source,
     Sink,
     Function,
+    Subscription,
 }
 
 impl fmt::Display for ShowCreateType {
@@ -957,6 +962,7 @@ impl fmt::Display for ShowCreateType {
             ShowCreateType::Source => f.write_str("SOURCE"),
             ShowCreateType::Sink => f.write_str("SINK"),
             ShowCreateType::Function => f.write_str("FUNCTION"),
+            ShowCreateType::Subscription => f.write_str("SUBSCRIPTION"),
         }
     }
 }
@@ -1153,6 +1159,10 @@ pub enum Statement {
     CreateSink {
         stmt: CreateSinkStatement,
     },
+    /// CREATE SUBSCRIPTION
+    CreateSubscription {
+        stmt: CreateSubscriptionStatement,
+    },
     /// CREATE CONNECTION
     CreateConnection {
         stmt: CreateConnectionStatement,
@@ -1168,6 +1178,7 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
+        with_options: CreateFunctionWithOptions,
     },
     /// CREATE AGGREGATE
     ///
@@ -1215,6 +1226,10 @@ pub enum Statement {
         /// Sink name
         name: ObjectName,
         operation: AlterSinkOperation,
+    },
+    AlterSubscription {
+        name: ObjectName,
+        operation: AlterSubscriptionOperation,
     },
     /// ALTER SOURCE
     AlterSource {
@@ -1536,6 +1551,7 @@ impl fmt::Display for Statement {
                 args,
                 returns,
                 params,
+                with_options,
             } => {
                 write!(
                     f,
@@ -1550,6 +1566,7 @@ impl fmt::Display for Statement {
                     write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
+                write!(f, "{with_options}")?;
                 Ok(())
             }
             Statement::CreateAggregate {
@@ -1714,6 +1731,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
@@ -1732,6 +1750,9 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSubscription { name, operation } => {
+                write!(f, "ALTER SUBSCRIPTION {} {}", name, operation)
             }
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
@@ -2268,6 +2289,8 @@ impl fmt::Display for FunctionArg {
 pub struct Function {
     pub name: ObjectName,
     pub args: Vec<FunctionArg>,
+    /// whether the last argument is variadic, e.g. `foo(a, b, variadic c)`
+    pub variadic: bool,
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
@@ -2282,6 +2305,7 @@ impl Function {
         Self {
             name,
             args: vec![],
+            variadic: false,
             over: None,
             distinct: false,
             order_by: vec![],
@@ -2295,17 +2319,22 @@ impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}({}{}{}{})",
+            "{}({}",
             self.name,
             if self.distinct { "DISTINCT " } else { "" },
-            display_comma_separated(&self.args),
-            if !self.order_by.is_empty() {
-                " ORDER BY "
-            } else {
-                ""
-            },
-            display_comma_separated(&self.order_by),
         )?;
+        if self.variadic {
+            for arg in &self.args[0..self.args.len() - 1] {
+                write!(f, "{}, ", arg)?;
+            }
+            write!(f, "VARIADIC {}", self.args.last().unwrap())?;
+        } else {
+            write!(f, "{}", display_comma_separated(&self.args))?;
+        }
+        if !self.order_by.is_empty() {
+            write!(f, " ORDER BY {}", display_comma_separated(&self.order_by))?;
+        }
+        write!(f, ")")?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
         }
@@ -2329,6 +2358,7 @@ pub enum ObjectType {
     Database,
     User,
     Connection,
+    Subscription,
 }
 
 impl fmt::Display for ObjectType {
@@ -2344,6 +2374,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
             ObjectType::Connection => "CONNECTION",
+            ObjectType::Subscription => "SUBSCRIPTION",
         })
     }
 }
@@ -2370,9 +2401,11 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
             ObjectType::Connection
+        } else if parser.parse_keyword(Keyword::SUBSCRIPTION) {
+            ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
@@ -2642,6 +2675,24 @@ impl fmt::Display for FunctionDefinition {
     }
 }
 
+impl FunctionDefinition {
+    /// Returns the function definition as a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+
+    /// Returns the function definition as a string.
+    pub fn into_string(self) -> String {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => s,
+            FunctionDefinition::DoubleDollarDef(s) => s,
+        }
+    }
+}
+
 /// Return types of a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2716,6 +2767,57 @@ impl fmt::Display for CreateFunctionBody {
             write!(f, " {using}")?;
         }
         Ok(())
+    }
+}
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionWithOptions {
+    /// Always retry on network errors.
+    pub always_retry_on_network_error: Option<bool>,
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl CreateFunctionWithOptions {
+    fn is_empty(&self) -> bool {
+        self.always_retry_on_network_error.is_none()
+    }
+}
+
+/// TODO(kwannoel): Generate from the struct definition instead.
+impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
+    type Error = ParserError;
+
+    fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
+        let mut always_retry_on_network_error = None;
+        for option in with_options {
+            if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
+                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+            } else {
+                return Err(ParserError::ParserError(format!(
+                    "Unsupported option: {}",
+                    option.name
+                )));
+            }
+        }
+        Ok(Self {
+            always_retry_on_network_error,
+        })
+    }
+}
+
+impl Display for CreateFunctionWithOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_empty() {
+            return Ok(());
+        }
+        let mut options = vec![];
+        if let Some(always_retry_on_network_error) = self.always_retry_on_network_error {
+            options.push(format!(
+                "ALWAYS_RETRY_NETWORK_ERRORS = {}",
+                always_retry_on_network_error
+            ));
+        }
+        write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
 }
 
@@ -2917,5 +3019,51 @@ mod tests {
             ))))),
         };
         assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
+    }
+
+    #[test]
+    fn test_create_function_display() {
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: None,
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1'",
+            format!("{}", create_function)
+        );
+        let create_function = Statement::CreateFunction {
+            temporary: false,
+            or_replace: false,
+            name: ObjectName(vec![Ident::new_unchecked("foo")]),
+            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
+            params: CreateFunctionBody {
+                language: Some(Ident::new_unchecked("python")),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
+                return_: None,
+                using: None,
+            },
+            with_options: CreateFunctionWithOptions {
+                always_retry_on_network_error: Some(true),
+            },
+        };
+        assert_eq!(
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
+            format!("{}", create_function)
+        );
     }
 }

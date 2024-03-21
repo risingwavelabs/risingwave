@@ -24,7 +24,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fail::fail_point;
 use function_name::named;
-use futures::future::Either;
+use futures::future::{Either, Shared};
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
@@ -54,7 +54,7 @@ use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
-    Event as RequestEvent, HeartBeat, PullTask, ReportTask,
+    self, Event as RequestEvent, HeartBeat, PullTask, ReportTask,
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
@@ -62,13 +62,13 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot::Sender;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot::{Receiver as OneShotReceiver, Sender};
 use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
@@ -82,9 +82,10 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_lsm_stat,
-    trigger_mv_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
-    trigger_split_stat, trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_local_table_stat,
+    trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
+    trigger_write_stop_stats,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -128,8 +129,8 @@ pub struct HummockManager {
     pub env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    /// Lock order: compaction, versioning, compaction_group_manager.
-    /// - Lock compaction first, then versioning, and finally compaction_group_manager.
+    /// Lock order: compaction, versioning, `compaction_group_manager`.
+    /// - Lock compaction first, then versioning, and finally `compaction_group_manager`.
     /// - This order should be strictly followed to prevent deadlock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
@@ -241,14 +242,6 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
-#[derive(Debug)]
-pub enum CompactionResumeTrigger {
-    /// The addition (re-subscription) of compactors
-    CompactorAddition { context_id: HummockContextId },
-    /// A compaction task is reported when all compactors are not idle.
-    TaskReport { original_task_num: usize },
-}
-
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
     pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
@@ -352,12 +345,16 @@ impl HummockManager {
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
+        let mut object_store_config = ObjectStoreConfig::default();
+        // For fs and hdfs object store, operations are not always atomic.
+        // We should manually enable atomicity guarantee by setting the atomic_write_dir config when building services.
+        object_store_config.set_atomic_write_dir();
         let object_store = Arc::new(
             build_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
-                ObjectStoreConfig::default(),
+                object_store_config,
             )
             .await,
         );
@@ -1040,7 +1037,9 @@ impl HummockManager {
         } else if is_trivial_move && can_trivial_move {
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            compact_task
+                .sorted_output_ssts
+                .clone_from(&compact_task.input_ssts[0].table_infos);
             self.report_compact_task_impl(
                 task_id,
                 Some(compact_task.clone()),
@@ -1064,10 +1063,9 @@ impl HummockManager {
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
             if group_config.compaction_config.split_weight_by_vnode > 0 {
+                table_to_vnode_partition.clear();
                 for table_id in &compact_task.existing_table_ids {
-                    table_to_vnode_partition
-                        .entry(*table_id)
-                        .or_insert(vnode_partition_count);
+                    table_to_vnode_partition.insert(*table_id, vnode_partition_count);
                 }
             }
 
@@ -1235,11 +1233,26 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        while let Some(task) = self
+        while let Some(mut task) = self
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
+                if self.env.opts.enable_dropped_column_reclaim {
+                    task.table_schemas = match self.metadata_manager() {
+                        MetadataManager::V1(mgr) => mgr
+                            .catalog_manager
+                            .get_versioned_table_schemas(&task.existing_table_ids)
+                            .await
+                            .into_iter()
+                            .map(|(table_id, column_ids)| (table_id, TableSchema { column_ids }))
+                            .collect(),
+                        MetadataManager::V2(_) => {
+                            // TODO #13952: support V2
+                            BTreeMap::default()
+                        }
+                    }
+                }
                 return Ok(Some(task));
             }
             assert!(
@@ -1438,13 +1451,23 @@ impl HummockManager {
                     VarTransactionWrapper,
                     VarTransaction::new(&mut versioning.version_stats,)
                 );
-                if let Some(table_stats_change) = &table_stats_change {
-                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
-                }
 
                 // apply version delta before we persist this change. If it causes panic we can
                 // recover to a correct state after restarting meta-node.
                 current_version.apply_version_delta(&version_delta);
+                if purge_prost_table_stats(&mut version_stats.table_stats, &current_version) {
+                    self.metrics.version_stats.reset();
+                    versioning.local_metrics.clear();
+                }
+                if let Some(table_stats_change) = &table_stats_change {
+                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
+                    trigger_local_table_stat(
+                        &self.metrics,
+                        &mut versioning.local_metrics,
+                        &version_stats,
+                        table_stats_change,
+                    );
+                }
                 commit_multi_var!(
                     self.env.meta_store(),
                     self.sql_meta_store(),
@@ -1455,7 +1478,7 @@ impl HummockManager {
                 )?;
                 branched_ssts.commit_memory();
 
-                trigger_version_stat(&self.metrics, &current_version, &versioning.version_stats);
+                trigger_version_stat(&self.metrics, &current_version);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
@@ -1716,16 +1739,17 @@ impl HummockManager {
             VarTransaction::new(&mut versioning.version_stats)
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
-        for (table_id, stats) in &table_stats_change {
-            let table_id_str = table_id.to_string();
-            let stats_value =
-                std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
-            self.metrics
-                .table_write_throughput
-                .with_label_values(&[table_id_str.as_str()])
-                .inc_by(stats_value as u64);
+        if purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version) {
+            self.metrics.version_stats.reset();
+            versioning.local_metrics.clear();
         }
+
+        trigger_local_table_stat(
+            &self.metrics,
+            &mut versioning.local_metrics,
+            &version_stats,
+            &table_stats_change,
+        );
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
@@ -1743,11 +1767,7 @@ impl HummockManager {
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        trigger_version_stat(
-            &self.metrics,
-            &versioning.current_version,
-            &versioning.version_stats,
-        );
+        trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
@@ -2694,18 +2714,37 @@ impl HummockManager {
         *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
-    #[named]
     pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> (JoinHandle<()>, Sender<()>) {
+    ) -> Vec<(JoinHandle<()>, Sender<()>)> {
         let mut compactor_request_streams = FuturesUnordered::new();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let (shutdown_tx_dedicated, shutdown_rx_dedicated) = tokio::sync::oneshot::channel();
         let shutdown_rx_shared = shutdown_rx.shared();
-        let mut compaction_selectors = init_selectors();
+        let shutdown_rx_dedicated_shared = shutdown_rx_dedicated.shared();
+
+        let (tx, rx) = unbounded_channel();
+
+        let mut join_handle_vec = Vec::default();
+
+        let hummock_manager_dedicated = hummock_manager.clone();
+        let compact_task_event_handler_join_handle = tokio::spawn(async move {
+            Self::compact_task_dedicated_event_handler(
+                hummock_manager_dedicated,
+                rx,
+                shutdown_rx_dedicated_shared,
+            )
+            .await;
+        });
+
+        join_handle_vec.push((
+            compact_task_event_handler_join_handle,
+            shutdown_tx_dedicated,
+        ));
 
         let join_handle = tokio::spawn(async move {
             let push_stream =
@@ -2720,10 +2759,10 @@ impl HummockManager {
                 };
 
             let mut event_loop_iteration_now = Instant::now();
+
             loop {
                 let shutdown_rx_shared = shutdown_rx_shared.clone();
-
-                // report
+                let hummock_manager = hummock_manager.clone();
                 hummock_manager
                     .metrics
                     .compaction_event_loop_iteration_latency
@@ -2731,9 +2770,7 @@ impl HummockManager {
                 event_loop_iteration_now = Instant::now();
 
                 tokio::select! {
-                    _ = shutdown_rx_shared => {
-                        return;
-                    },
+                    _ = shutdown_rx_shared => { return; },
 
                     compactor_stream = compactor_streams_change_rx.recv() => {
                         if let Some((context_id, stream)) = compactor_stream {
@@ -2744,23 +2781,20 @@ impl HummockManager {
 
                     result = pending_on_none(compactor_request_streams.next()) => {
                         let mut compactor_alive = true;
-                        let (context_id, compactor_stream_req) = result;
+
+                        let (context_id, compactor_stream_req): (_, (std::option::Option<std::result::Result<SubscribeCompactionEventRequest, _>>, _)) = result;
                         let (event, create_at, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
                                 (req.event.unwrap(), req.create_at, stream)
                             }
 
                             (Some(Err(err)), _stream) => {
-                                tracing::warn!(error = %err.as_report(), "compactor {} leaving the cluster with err", context_id);
-                                hummock_manager.compactor_manager
-                                    .remove_compactor(context_id);
+                                tracing::warn!(error = %err.as_report(), "compactor stream {} poll with err, recv stream may be destroyed", context_id);
                                 continue
                             }
 
                             _ => {
-                                tracing::warn!("compactor {} leaving the cluster", context_id);
-                                hummock_manager.compactor_manager
-                                    .remove_compactor(context_id);
+                                tracing::warn!("compactor stream {} poll err, recv stream may be destroyed", context_id);
                                 continue
                             },
                         };
@@ -2778,131 +2812,34 @@ impl HummockManager {
                         }
 
                         match event {
-                            RequestEvent::PullTask(PullTask {
-                                pull_task_count,
-                            }) => {
-                                assert_ne!(0, pull_task_count);
-                                if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
-                                    if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
-                                        let selector: &mut Box<dyn CompactionSelector> = {
-                                            let versioning_guard = read_lock!(hummock_manager, versioning).await;
-                                            let versioning = versioning_guard.deref();
-
-                                            if versioning.write_limit.contains_key(&group) {
-                                                let enable_emergency_picker = match hummock_manager
-                                                    .compaction_group_manager
-                                                    .read()
-                                                    .await
-                                                    .try_get_compaction_group_config(group)
-                                                {
-                                                    Some(config) =>{ config.compaction_config.enable_emergency_picker },
-                                                    None => { unreachable!("compaction-group {} not exist", group) }
-                                                };
-
-                                                if enable_emergency_picker {
-                                                    compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
-                                                } else {
-                                                    compaction_selectors.get_mut(&task_type).unwrap()
-                                                }
-                                            } else {
-                                                compaction_selectors.get_mut(&task_type).unwrap()
-                                            }
-                                        };
-                                        for _ in 0..pull_task_count {
-                                            let compact_task =
-                                                hummock_manager
-                                                .get_compact_task(group, selector)
-                                                .await;
-
-                                            match compact_task {
-                                                Ok(Some(compact_task)) => {
-                                                    let task_id = compact_task.task_id;
-                                                    if let Err(e) = compactor.send_event(
-                                                        ResponseEvent::CompactTask(compact_task)
-                                                    ) {
-                                                        tracing::warn!(
-                                                            error = %e.as_report(),
-                                                            "Failed to send task {} to {}",
-                                                            task_id,
-                                                            compactor.context_id(),
-                                                        );
-
-                                                        compactor_alive = false;
-                                                        break;
-                                                    }
-                                                },
-                                                Ok(None) => {
-                                                    // no compact_task to be picked
-                                                    hummock_manager.compaction_state.unschedule(group, task_type);
-                                                    break;
-                                                }
-                                                Err(err) => {
-                                                    tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
-                                                    break;
-                                                }
-                                            };
-                                        }
-                                    }
-
-                                    // ack to compactor
-                                    if compactor_alive {
-                                        if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})){
-                                            tracing::warn!(
-                                                error = %e.as_report(),
-                                                "Failed to send ask to {}",
-                                                context_id,
-                                            );
-
-                                            compactor_alive = false;
-                                        }
-                                    }
-                                } else {
-                                    compactor_alive = false;
-
-                                }
-                            },
-
-                            RequestEvent::ReportTask(ReportTask {
-                                task_id,
-                                task_status,
-                                sorted_output_ssts,
-                                table_stats_change
-                            }) => {
-                                if let Err(e) =  hummock_manager.report_compact_task(task_id, TaskStatus::try_from(task_status).unwrap(), sorted_output_ssts, Some(table_stats_change))
-                                       .await {
-                                        tracing::error!(error = %e.as_report(), "report compact_tack fail");
-                                }
-                            },
-
                             RequestEvent::HeartBeat(HeartBeat {
                                 progress,
                             }) => {
                                 let compactor_manager = hummock_manager.compactor_manager.clone();
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
-
-                                // TODO: task cancellation can be batched
-                                for task in cancel_tasks {
-                                    tracing::info!(
-                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
-                                        task.compaction_group_id,
-                                        task.task_id,
-                                        context_id,
-                                    );
-
-                                    if let Err(e) =
-                                        hummock_manager
-                                        .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
-                                        .await
-                                    {
-                                        tracing::error!(
-                                            task_id = task.task_id,
-                                            error = %e.as_report(),
-                                            "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                            until we can successfully report its status."
+                                if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                    // TODO: task cancellation can be batched
+                                    for task in cancel_tasks {
+                                        tracing::info!(
+                                            "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                            task.compaction_group_id,
+                                            task.task_id,
+                                            context_id,
                                         );
-                                    }
 
-                                    if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                                        if let Err(e) =
+                                            hummock_manager
+                                            .cancel_compact_task(task.task_id, TaskStatus::HeartbeatCanceled)
+                                            .await
+                                        {
+                                            tracing::error!(
+                                                task_id = task.task_id,
+                                                error = %e.as_report(),
+                                                "Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                                until we can successfully report its status."
+                                            );
+                                        }
+
                                         // Forcefully cancel the task so that it terminates
                                         // early on the compactor
                                         // node.
@@ -2912,31 +2849,36 @@ impl HummockManager {
                                             context_id,
                                             task.task_id
                                         );
-                                    } else {
-                                        compactor_alive = false;
                                     }
+                                } else {
+                                    // Determine the validity of the compactor streaming rpc. When the compactor no longer exists in the manager, the stream will be removed.
+                                    // Tip: Connectivity to the compactor will be determined through the `send_event` operation. When send fails, it will be removed from the manager
+                                    compactor_alive = false;
                                 }
                             },
 
                             RequestEvent::Register(_) => {
                                 unreachable!()
                             }
-                        }
 
+                            e @ (RequestEvent::PullTask(_) | RequestEvent::ReportTask(_)) => {
+                                let _ = tx.send((context_id, e));
+                            }
+                        }
 
                         if compactor_alive {
                             push_stream(context_id, stream, &mut compactor_request_streams);
                         } else {
-                            tracing::warn!("compactor {} leaving the cluster since it's not alive", context_id);
-                            hummock_manager.compactor_manager
-                                .remove_compactor(context_id);
+                            tracing::warn!("compactor stream {} error, send stream may be destroyed", context_id);
                         }
-                    }
+                    },
                 }
             }
         });
 
-        (join_handle, shutdown_tx)
+        join_handle_vec.push((join_handle, shutdown_tx));
+
+        join_handle_vec
     }
 
     pub fn add_compactor_stream(
@@ -3174,6 +3116,136 @@ impl HummockManager {
         }
 
         Ok(())
+    }
+
+    /// dedicated event runtime for CPU/IO bound event
+    #[named]
+    async fn compact_task_dedicated_event_handler(
+        hummock_manager: Arc<HummockManager>,
+        mut rx: UnboundedReceiver<(u32, subscribe_compaction_event_request::Event)>,
+        shutdown_rx_shared: Shared<OneShotReceiver<()>>,
+    ) {
+        let mut compaction_selectors = init_selectors();
+
+        tokio::select! {
+            _ = shutdown_rx_shared => {}
+
+            _ = async {
+                while let Some((context_id, event)) = rx.recv().await {
+                    match event {
+                        RequestEvent::PullTask(PullTask { pull_task_count }) => {
+                            assert_ne!(0, pull_task_count);
+                            if let Some(compactor) =
+                                hummock_manager.compactor_manager.get_compactor(context_id)
+                            {
+                                if let Some((group, task_type)) =
+                                    hummock_manager.auto_pick_compaction_group_and_type().await
+                                {
+                                    let selector: &mut Box<dyn CompactionSelector> = {
+                                        let versioning_guard =
+                                            read_lock!(hummock_manager, versioning).await;
+                                        let versioning = versioning_guard.deref();
+
+                                        if versioning.write_limit.contains_key(&group) {
+                                            let enable_emergency_picker = match hummock_manager
+                                                .compaction_group_manager
+                                                .read()
+                                                .await
+                                                .try_get_compaction_group_config(group)
+                                            {
+                                                Some(config) => {
+                                                    config.compaction_config.enable_emergency_picker
+                                                }
+                                                None => {
+                                                    unreachable!("compaction-group {} not exist", group)
+                                                }
+                                            };
+
+                                            if enable_emergency_picker {
+                                                compaction_selectors
+                                                    .get_mut(&TaskType::Emergency)
+                                                    .unwrap()
+                                            } else {
+                                                compaction_selectors.get_mut(&task_type).unwrap()
+                                            }
+                                        } else {
+                                            compaction_selectors.get_mut(&task_type).unwrap()
+                                        }
+                                    };
+                                    for _ in 0..pull_task_count {
+                                        let compact_task =
+                                            hummock_manager.get_compact_task(group, selector).await;
+
+                                        match compact_task {
+                                            Ok(Some(compact_task)) => {
+                                                let task_id = compact_task.task_id;
+                                                if let Err(e) = compactor.send_event(
+                                                    ResponseEvent::CompactTask(compact_task),
+                                                ) {
+                                                    tracing::warn!(
+                                                        error = %e.as_report(),
+                                                        "Failed to send task {} to {}",
+                                                        task_id,
+                                                        compactor.context_id(),
+                                                    );
+
+                                                    hummock_manager.compactor_manager.remove_compactor(context_id);
+                                                    break;
+                                                }
+                                            }
+                                            Ok(None) => {
+                                                // no compact_task to be picked
+                                                hummock_manager
+                                                    .compaction_state
+                                                    .unschedule(group, task_type);
+                                                break;
+                                            }
+                                            Err(err) => {
+                                                tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
+                                                break;
+                                            }
+                                        };
+                                    }
+                                }
+
+                                // ack to compactor
+                                if let Err(e) =
+                                    compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {}))
+                                {
+                                    tracing::warn!(
+                                        error = %e.as_report(),
+                                        "Failed to send ask to {}",
+                                        context_id,
+                                    );
+                                    hummock_manager.compactor_manager.remove_compactor(context_id);
+                                }
+                            }
+                        }
+
+                        RequestEvent::ReportTask(ReportTask {
+                            task_id,
+                            task_status,
+                            sorted_output_ssts,
+                            table_stats_change,
+                        }) => {
+                            if let Err(e) = hummock_manager
+                                .report_compact_task(
+                                    task_id,
+                                    TaskStatus::try_from(task_status).unwrap(),
+                                    sorted_output_ssts,
+                                    Some(table_stats_change),
+                                )
+                                .await
+                            {
+                                tracing::error!(error = %e.as_report(), "report compact_tack fail")
+                            }
+                        }
+
+                        _ => unreachable!(),
+                    }
+                }
+            } => {}
+        }
     }
 }
 

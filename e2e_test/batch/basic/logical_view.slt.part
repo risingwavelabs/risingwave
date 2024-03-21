@@ -40,7 +40,7 @@ SELECT * FROM v3;
 statement error
 DROP TABLE t;
 
-statement error other relation\(s\) depend on it
+statement error Permission denied
 DROP VIEW v2;
 
 statement ok

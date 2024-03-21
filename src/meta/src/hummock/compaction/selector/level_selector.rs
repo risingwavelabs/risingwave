@@ -50,14 +50,14 @@ pub enum PickerType {
     BottomLevel,
 }
 
-impl ToString for PickerType {
-    fn to_string(&self) -> String {
-        match self {
-            PickerType::Tier => String::from("Tier"),
-            PickerType::Intra => String::from("Intra"),
-            PickerType::ToBase => String::from("ToBase"),
-            PickerType::BottomLevel => String::from("BottomLevel"),
-        }
+impl std::fmt::Display for PickerType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PickerType::Tier => "Tier",
+            PickerType::Intra => "Intra",
+            PickerType::ToBase => "ToBase",
+            PickerType::BottomLevel => "BottomLevel",
+        })
     }
 }
 

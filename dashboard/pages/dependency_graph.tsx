@@ -24,9 +24,13 @@ import RelationDependencyGraph, {
   nodeRadius,
 } from "../components/RelationDependencyGraph"
 import Title from "../components/Title"
+import useFetch from "../lib/api/fetch"
+import {
+  Relation,
+  getRelations,
+  relationIsStreamingJob,
+} from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import useFetch from "./api/fetch"
-import { Relation, getRelations, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 

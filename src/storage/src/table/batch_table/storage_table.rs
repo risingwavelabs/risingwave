@@ -20,12 +20,12 @@ use std::sync::Arc;
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
@@ -45,7 +45,7 @@ use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
-use crate::store::{PrefetchOptions, ReadOptions};
+use crate::store::{PrefetchOptions, ReadOptions, StateStoreIter};
 use crate::table::merge_sort::merge_sort;
 use crate::table::{KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
@@ -61,7 +61,7 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     store: S,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
-    /// RowSeqScanExecutor.
+    /// `RowSeqScanExecutor`.
     schema: Schema,
 
     /// Used for serializing and deserializing the primary key.
@@ -69,10 +69,10 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
     output_indices: Vec<usize>,
 
-    /// the key part of output_indices.
+    /// the key part of `output_indices`.
     key_output_indices: Option<Vec<usize>>,
 
-    /// the value part of output_indices.
+    /// the value part of `output_indices`.
     value_output_indices: Vec<usize>,
 
     /// used for deserializing key part of output row from pk.
@@ -91,7 +91,7 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
     distribution: TableDistribution,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     read_prefix_len_hint: usize,
@@ -146,11 +146,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .collect_vec();
 
         let table_option = TableOption {
-            retention_seconds: if table_desc.retention_seconds > 0 {
-                Some(table_desc.retention_seconds)
-            } else {
-                None
-            },
+            retention_seconds: table_desc.retention_seconds,
         };
         let value_indices = table_desc
             .get_value_indices()
@@ -159,14 +155,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         let versioned = table_desc.versioned;
-        let dist_key_in_pk_indices = table_desc
-            .dist_key_in_pk_indices
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
-        let vnode_col_idx_in_pk = table_desc.vnode_col_idx_in_pk.map(|k| k as usize);
-        let distribution =
-            TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+        let distribution = TableDistribution::new_from_storage_table_desc(vnodes, table_desc);
 
         Self::new_inner(
             store,
@@ -370,7 +359,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
+            cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
@@ -457,8 +446,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ) {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CachePriority::Low),
-            _ => CachePolicy::Fill(CachePriority::High),
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheContext::LruPriorityLow),
+            _ => CachePolicy::Fill(CacheContext::Default),
         };
 
         let table_key_ranges = {
@@ -676,7 +665,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 /// [`StorageTableInnerIterInner`] iterates on the storage table.
 struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
-    iter: S::IterStream,
+    iter: S::Iter,
 
     mapping: Arc<ColumnMapping>,
 
@@ -687,10 +676,10 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 
     output_indices: Vec<usize>,
 
-    /// the key part of output_indices.
+    /// the key part of `output_indices`.
     key_output_indices: Option<Vec<usize>>,
 
-    /// the value part of output_indices.
+    /// the value part of `output_indices`.
     value_output_indices: Vec<usize>,
 
     /// used for deserializing key part of output row from pk.
@@ -736,18 +725,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 
     /// Yield a row with its primary key.
     #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
-    async fn into_stream(self) {
-        use futures::TryStreamExt;
-
-        // No need for table id and epoch.
-        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key, v));
-        futures::pin_mut!(iter);
-        while let Some((table_key, value)) = iter
+    async fn into_stream(mut self) {
+        while let Some((k, v)) = self
+            .iter
             .try_next()
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            let full_row = self.row_deserializer.deserialize(&value)?;
+            let (table_key, value) = (k.user_key.table_key, v);
+            let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self
                 .mapping
                 .project(OwnedRow::new(full_row))
@@ -785,14 +771,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                     }
                     let row = OwnedRow::new(result_row_vec);
 
+                    // TODO: may optimize the key clone
                     yield KeyedRow {
-                        vnode_prefixed_key: table_key,
+                        vnode_prefixed_key: table_key.copy_into(),
                         row,
                     }
                 }
                 None => {
                     yield KeyedRow {
-                        vnode_prefixed_key: table_key,
+                        vnode_prefixed_key: table_key.copy_into(),
                         row: result_row_in_value,
                     }
                 }

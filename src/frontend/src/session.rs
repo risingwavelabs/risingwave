@@ -41,10 +41,13 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::config::{
+    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+};
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::local_manager::{
+    LocalSystemParamsManager, LocalSystemParamsManagerRef,
+};
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
@@ -79,11 +82,15 @@ use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{
     check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
 };
+use crate::error::{ErrorCode, Result, RwError};
+use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
 use crate::handler::privilege::ObjectCheckItem;
+use crate::handler::show::{infer_show_create_object, infer_show_object};
 use crate::handler::util::to_pg_field;
+use crate::handler::variable::infer_show_variable;
 use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -100,7 +107,6 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod current;
@@ -119,11 +125,13 @@ pub struct FrontendEnv {
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
+
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
-    /// Each session is identified by (process_id,
-    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// Each session is identified by (`process_id`,
+    /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
 
@@ -133,6 +141,7 @@ pub struct FrontendEnv {
 
     batch_config: BatchConfig,
     meta_config: MetaConfig,
+    streaming_config: StreamingConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -159,12 +168,14 @@ impl FrontendEnv {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let meta_client = Arc::new(MockFrontendMetaClient {});
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
             Arc::new(DistributedQueryMetrics::for_test()),
+            None,
             None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
@@ -191,12 +202,14 @@ impl FrontendEnv {
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
+            system_params_manager,
             server_addr,
             client_pool,
             sessions_map: Arc::new(RwLock::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
+            streaming_config: StreamingConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
@@ -215,6 +228,7 @@ impl FrontendEnv {
 
         let batch_config = config.batch;
         let meta_config = config.meta;
+        let streaming_config = config.streaming;
 
         let frontend_address: HostAddr = opts
             .advertise_addr
@@ -269,6 +283,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
+            batch_config.max_batch_queries_per_frontend_node,
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -383,12 +398,14 @@ impl FrontendEnv {
                 meta_client: frontend_meta_client,
                 query_manager,
                 hummock_snapshot_manager,
+                system_params_manager,
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
                 sessions_map,
                 batch_config,
                 meta_config,
+                streaming_config,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -448,6 +465,10 @@ impl FrontendEnv {
         &self.hummock_snapshot_manager
     }
 
+    pub fn system_params_manager(&self) -> &LocalSystemParamsManagerRef {
+        &self.system_params_manager
+    }
+
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
@@ -462,6 +483,10 @@ impl FrontendEnv {
 
     pub fn meta_config(&self) -> &MetaConfig {
         &self.meta_config
+    }
+
+    pub fn streaming_config(&self) -> &StreamingConfig {
+        &self.streaming_config
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
@@ -533,7 +558,7 @@ pub struct SessionImpl {
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
-    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
 
     /// Client address
@@ -963,6 +988,8 @@ impl SessionManager for SessionManagerImpl {
                             ),
                             salt,
                         }
+                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
+                        UserAuthenticator::OAuth(auth_info.metadata.clone())
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,
@@ -1231,18 +1258,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             object: show_object,
             ..
         } => Ok(infer_show_object(&show_object)),
-        Statement::ShowCreateObject { .. } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::ShowCreateObject { .. } => Ok(infer_show_create_object()),
         Statement::ShowTransactionIsolationLevel => {
             let name = "transaction_isolation";
             Ok(infer_show_variable(name))
@@ -1251,28 +1267,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             let name = &variable[0].real_value().to_lowercase();
             Ok(infer_show_variable(name))
         }
-        Statement::Describe { name: _ } => Ok(vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Type".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Is Hidden".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Description".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ]),
+        Statement::Describe { name: _ } => Ok(infer_describe()),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             DataType::Varchar.to_oid(),

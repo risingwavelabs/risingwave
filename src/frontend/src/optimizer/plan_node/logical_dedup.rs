@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::generic::TopNLimit;
@@ -25,6 +24,7 @@ use super::{
     PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
 };
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;

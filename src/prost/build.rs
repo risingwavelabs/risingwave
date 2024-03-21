@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_plan",
         "stream_service",
         "task_service",
+        "telemetry",
         "user",
     ];
     let protos: Vec<String> = proto_files
@@ -156,6 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
         .type_attribute("hummock.TableOption", "#[derive(Eq)]")
         .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
+        .type_attribute("hummock.TableSchema", "#[derive(Eq)]")
         .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
         .type_attribute("hummock.TableWatermarks", "#[derive(Eq)]")
         .type_attribute("hummock.VnodeWatermark", "#[derive(Eq)]")

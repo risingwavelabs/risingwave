@@ -31,6 +31,9 @@ pub use state_table_handler::*;
 pub mod fetch_executor;
 pub use fetch_executor::*;
 
+pub mod source_backfill_executor;
+pub mod source_backfill_state_table;
+pub use source_backfill_state_table::BackfillStateTableHandler;
 pub mod source_executor;
 
 pub mod list_executor;
@@ -71,7 +74,7 @@ pub fn get_split_offset_col_idx(
     let mut split_idx = None;
     let mut offset_idx = None;
     for (idx, column) in column_descs.iter().enumerate() {
-        match column.additional_column_type {
+        match column.additional_column {
             AdditionalColumn {
                 column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
             } => {

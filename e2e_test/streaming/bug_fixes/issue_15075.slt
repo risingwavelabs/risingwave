@@ -1,0 +1,58 @@
+# https://github.com/risingwavelabs/risingwave/issues/15074
+# https://github.com/risingwavelabs/risingwave/issues/15075
+
+statement ok
+CREATE TABLE t1 (
+    c1 varchar,
+    c2 varchar,
+    c3 bigint,
+    c4 numeric,
+    c5 timestamptz
+) APPEND ONLY;
+
+statement ok
+CREATE TABLE t2 (
+    c6 timestamptz,
+    c7 integer,
+    c8 integer,
+    c9 integer,
+    c10 varchar,
+    c11 numeric,
+    c12 numeric,
+    c2 varchar
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS
+SELECT
+    o.*,
+    b.c13,
+    b.c14
+FROM
+    t2 o
+    LEFT JOIN LATERAL (
+        SELECT
+            sum(t.c3 * t.c4) filter (
+                WHERE
+                    (o.c11) * t.c4 <= (o.c11) * o.c12
+            ) AS c13,
+            sum(t.c3) filter (
+                WHERE
+                    (o.c11) * t.c4 <= (o.c11) * o.c12
+            ) AS c14
+        FROM
+            t1 t
+        WHERE
+            t.c2 = o.c2
+            AND t.c5 >= o.c6
+            AND t.c5 :: date = o.c6 :: date
+    ) AS b ON TRUE;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

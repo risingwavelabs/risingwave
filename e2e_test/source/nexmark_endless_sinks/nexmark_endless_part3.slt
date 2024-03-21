@@ -17,6 +17,9 @@ statement ok
 drop sink nexmark_q14;
 
 statement ok
+drop function count_char;
+
+statement ok
 drop sink nexmark_q15;
 
 include ../../nexmark/drop_sources.slt.part

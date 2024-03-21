@@ -15,7 +15,6 @@
 use std::fmt::{Debug, Display};
 
 use risingwave_common::array::{ArrayError, ArrayRef};
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
@@ -137,12 +136,6 @@ pub struct CryptographyError {
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
-
-impl From<ExprError> for RwError {
-    fn from(s: ExprError) -> Self {
-        ErrorCode::ExprError(Box::new(s)).into()
-    }
-}
 
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {

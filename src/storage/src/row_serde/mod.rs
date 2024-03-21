@@ -30,14 +30,18 @@ pub fn find_columns_by_ids(
     table_columns: &[ColumnDesc],
     column_ids: &[ColumnId],
 ) -> (Vec<ColumnDesc>, Vec<usize>) {
-    let mut table_columns = table_columns
+    if column_ids.is_empty() {
+        // shortcut
+        return (vec![], vec![]);
+    }
+    let id_to_columns = table_columns
         .iter()
         .enumerate()
         .map(|(index, c)| (c.column_id, (c.clone(), index)))
         .collect::<HashMap<_, _>>();
     column_ids
         .iter()
-        .map(|id| table_columns.remove(id).unwrap())
+        .map(|id| id_to_columns.get(id).expect("column id not found").clone())
         .unzip()
 }
 
@@ -95,7 +99,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_columns: AdditionalColumn {
+                            additional_column: AdditionalColumn {
                                 column_type: None,
                             },
                             version: Pr13707,
@@ -108,7 +112,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_columns: AdditionalColumn {
+                            additional_column: AdditionalColumn {
                                 column_type: None,
                             },
                             version: Pr13707,
@@ -141,7 +145,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_columns: AdditionalColumn {
+                            additional_column: AdditionalColumn {
                                 column_type: None,
                             },
                             version: Pr13707,
@@ -154,7 +158,7 @@ mod test {
                             type_name: "",
                             generated_or_default_column: None,
                             description: None,
-                            additional_columns: AdditionalColumn {
+                            additional_column: AdditionalColumn {
                                 column_type: None,
                             },
                             version: Pr13707,

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::Context;
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, NaiveDateTime, Timelike};
@@ -26,6 +27,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, Decimal, JsonbVal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
+use thiserror_ext::AsReport;
 
 use super::{
     CustomJsonType, DateHandlingMode, KafkaConnectParams, KafkaConnectParamsRef, Result,
@@ -81,7 +83,6 @@ impl JsonEncoder {
     pub fn new_with_doris(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        timestamp_handling_mode: TimestampHandlingMode,
         map: HashMap<String, (u8, u8)>,
     ) -> Self {
         Self {
@@ -89,9 +90,39 @@ impl JsonEncoder {
             col_indices,
             time_handling_mode: TimeHandlingMode::Milli,
             date_handling_mode: DateHandlingMode::String,
-            timestamp_handling_mode,
+            timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::Doris(map),
+            kafka_connect: None,
+        }
+    }
+
+    pub fn new_with_starrocks(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        map: HashMap<String, (u8, u8)>,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
+            custom_json_type: CustomJsonType::StarRocks(map),
+            kafka_connect: None,
+        }
+    }
+
+    pub fn new_with_bigquery(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+        Self {
+            schema,
+            col_indices,
+            time_handling_mode: TimeHandlingMode::Milli,
+            date_handling_mode: DateHandlingMode::String,
+            timestamp_handling_mode: TimestampHandlingMode::String,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::BigQuery,
             kafka_connect: None,
         }
     }
@@ -134,7 +165,7 @@ impl RowEncoder for JsonEncoder {
                 self.time_handling_mode,
                 &self.custom_json_type,
             )
-            .map_err(|e| SinkError::Encode(e.to_string()))?;
+            .map_err(|e| SinkError::Encode(e.to_report_string()))?;
             mappings.insert(key, value);
         }
 
@@ -172,7 +203,16 @@ fn datum_to_json_object(
     custom_json_type: &CustomJsonType,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
-        None => return Ok(Value::Null),
+        None => {
+            if let CustomJsonType::BigQuery = custom_json_type
+                && matches!(field.data_type(), DataType::List(_))
+            {
+                // Bigquery need to convert null of array to empty array https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types
+                return Ok(Value::Array(vec![]));
+            } else {
+                return Ok(Value::Null);
+            }
+        }
         Some(datum) => datum,
     };
 
@@ -203,7 +243,7 @@ fn datum_to_json_object(
             json!(v)
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
-            CustomJsonType::Doris(map) => {
+            CustomJsonType::Doris(map) | CustomJsonType::StarRocks(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
                         "doris/starrocks can't support decimal Inf, -Inf, Nan".to_string(),
@@ -219,7 +259,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::Es | CustomJsonType::None => {
+            CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
                 json!(v.to_text())
             }
         },
@@ -270,8 +310,10 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
-            CustomJsonType::Es => JsonbVal::from(jsonb_ref).take(),
-            CustomJsonType::Doris(_) | CustomJsonType::None => json!(jsonb_ref.to_string()),
+            CustomJsonType::Es | CustomJsonType::StarRocks(_) => JsonbVal::from(jsonb_ref).take(),
+            CustomJsonType::Doris(_) | CustomJsonType::None | CustomJsonType::BigQuery => {
+                json!(jsonb_ref.to_string())
+            }
         },
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
@@ -311,11 +353,16 @@ fn datum_to_json_object(
                         )?;
                         map.insert(sub_field.name.clone(), value);
                     }
-                    Value::String(serde_json::to_string(&map).map_err(|err| {
-                        ArrayError::internal(format!("Json to string err{:?}", err))
-                    })?)
+                    Value::String(
+                        serde_json::to_string(&map).context("failed to serialize into JSON")?,
+                    )
                 }
-                CustomJsonType::Es | CustomJsonType::None => {
+                CustomJsonType::StarRocks(_) => {
+                    return Err(ArrayError::internal(
+                        "starrocks can't support struct".to_string(),
+                    ));
+                }
+                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()

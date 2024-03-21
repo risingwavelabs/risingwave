@@ -27,6 +27,7 @@ message SinkParam {
   string db_name = 5;
   string sink_from_name = 6;
   catalog.SinkFormatDesc format_desc = 7;
+  string sink_name = 8;
 }
 
 enum SinkPayloadFormat {
@@ -156,12 +157,15 @@ message SinkCoordinatorStreamResponse {
 /* Source Service */
 
 message CdcMessage {
+  // The value of the Debezium message
   string payload = 1;
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
   bool is_transaction_meta = 6;
+  // The key of the Debezium message, which only used by `mongodb-cdc` connector.
+  string key = 7;
 }
 
 enum SourceType {
@@ -169,10 +173,7 @@ enum SourceType {
   MYSQL = 1;
   POSTGRES = 2;
   CITUS = 3;
-}
-
-message SourceCommonParam {
-  bool is_multi_table_shared = 1;
+  MONGODB = 4;
 }
 
 message GetEventStreamRequest {
@@ -181,7 +182,7 @@ message GetEventStreamRequest {
   string start_offset = 3;
   map<string, string> properties = 4;
   bool snapshot_done = 5;
-  SourceCommonParam common_param = 6;
+  bool is_source_job = 6;
 }
 
 message GetEventStreamResponse {
@@ -198,7 +199,8 @@ message ValidateSourceRequest {
   SourceType source_type = 2;
   map<string, string> properties = 3;
   TableSchema table_schema = 4;
-  SourceCommonParam common_param = 5;
+  bool is_source_job = 5;
+  bool is_backfill_table = 6;
 }
 
 message ValidateSourceResponse {

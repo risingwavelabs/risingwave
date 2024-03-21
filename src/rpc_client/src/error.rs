@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::meta_addr::MetaAddressStrategyParseError;
 use thiserror::Error;
 
@@ -52,14 +51,5 @@ impl From<tonic::transport::Error> for RpcError {
 impl From<tonic::Status> for RpcError {
     fn from(s: tonic::Status) -> Self {
         RpcError::GrpcStatus(Box::new(TonicStatusWrapper::new(s)))
-    }
-}
-
-impl From<RpcError> for RwError {
-    fn from(r: RpcError) -> Self {
-        match r {
-            RpcError::GrpcStatus(status) => TonicStatusWrapper::into(*status),
-            _ => ErrorCode::RpcError(r.into()).into(),
-        }
     }
 }

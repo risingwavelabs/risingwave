@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::error::Result;
 
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
+use crate::error::Result;
 use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
@@ -144,6 +144,7 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
             ApplyToJoinRule::create(),
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
+            PullUpCorrelatedPredicateAggRule::create(),
         ],
         ApplyOrder::BottomUp,
     )
@@ -415,6 +416,14 @@ static COMMON_SUB_EXPR_EXTRACT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Logical Filter Expression Simplify",
+        vec![LogicalFilterExpressionSimplifyRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: PlanRef,
@@ -623,6 +632,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -718,6 +729,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
+
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

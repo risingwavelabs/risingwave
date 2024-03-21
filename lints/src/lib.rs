@@ -14,6 +14,7 @@
 
 #![feature(rustc_private)]
 #![feature(let_chains)]
+#![feature(lazy_cell)]
 #![warn(unused_extern_crates)]
 
 extern crate rustc_ast;

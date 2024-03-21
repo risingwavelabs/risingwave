@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::error::Result;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::variable::set_var_to_param_str;
 use super::{HandlerArgs, RwPgResponse};
+use crate::error::Result;
 
 // Warn user if barrier_interval_ms is set above 5mins.
 const NOTICE_BARRIER_INTERVAL_MS: u32 = 300000;

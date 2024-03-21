@@ -41,11 +41,11 @@ impl NotificationVersionGenerator {
                 .await?;
             let current_version = model.as_ref().map(|m| m.version).unwrap_or(1) as u64;
             if model.is_none() {
-                catalog_version::ActiveModel {
+                CatalogVersion::insert(catalog_version::ActiveModel {
                     name: Set(VersionCategory::Notification),
                     version: Set(1),
-                }
-                .insert(&txn)
+                })
+                .exec(&txn)
                 .await?;
                 txn.commit().await?;
             }

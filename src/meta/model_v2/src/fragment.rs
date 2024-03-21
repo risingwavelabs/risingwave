@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
+
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+use risingwave_pb::stream_plan::PbStreamNode;
 use sea_orm::entity::prelude::*;
 
-use crate::{FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode};
+use crate::{FragmentId, FragmentVnodeMapping, I32Array, ObjectId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "fragment")]
@@ -29,6 +32,34 @@ pub struct Model {
     pub vnode_mapping: FragmentVnodeMapping,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
+}
+
+/// This is a workaround to avoid stack overflow when deserializing the `StreamNode` field from sql
+/// backend if we store it as Json. We'd better fix it before using it in production, because it's less
+/// readable and maintainable.
+#[derive(Clone, PartialEq, Eq, DeriveValueType)]
+pub struct StreamNode(#[sea_orm] Vec<u8>);
+
+impl StreamNode {
+    pub fn to_protobuf(&self) -> PbStreamNode {
+        prost::Message::decode(self.0.as_slice()).unwrap()
+    }
+
+    pub fn from_protobuf(val: &PbStreamNode) -> Self {
+        Self(prost::Message::encode_to_vec(val))
+    }
+}
+
+impl std::fmt::Debug for StreamNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.to_protobuf().fmt(f)
+    }
+}
+
+impl Default for StreamNode {
+    fn default() -> Self {
+        Self::from_protobuf(&PbStreamNode::default())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]

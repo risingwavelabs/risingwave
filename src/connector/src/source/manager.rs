@@ -37,10 +37,10 @@ pub struct SourceColumnDesc {
     /// `is_hidden_addition_col` is used to indicate whether the column is a hidden addition column.
     pub is_hidden_addition_col: bool,
 
-    /// `additional_column_type` and `column_type` are orthogonal
-    /// `additional_column_type` is used to indicate the column is from which part of the message
+    /// `additional_column` and `column_type` are orthogonal
+    /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario
-    pub additional_column_type: AdditionalColumn,
+    pub additional_column: AdditionalColumn,
 }
 
 /// `SourceColumnType` is used to indicate the type of a column emitted by the Source.
@@ -91,7 +91,7 @@ impl SourceColumnDesc {
             column_type: SourceColumnType::Normal,
             is_pk: false,
             is_hidden_addition_col: false,
-            additional_column_type: AdditionalColumn { column_type: None },
+            additional_column: AdditionalColumn { column_type: None },
         }
     }
 
@@ -131,7 +131,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             column_type,
             is_pk: false,
             is_hidden_addition_col: false,
-            additional_column_type: c.additional_columns.clone(),
+            additional_column: c.additional_column.clone(),
         }
     }
 }
@@ -146,7 +146,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
-            additional_columns: s.additional_column_type.clone(),
+            additional_column: s.additional_column.clone(),
             version: ColumnDescVersion::Pr13707,
         }
     }

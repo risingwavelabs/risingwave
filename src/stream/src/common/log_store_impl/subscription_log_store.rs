@@ -60,9 +60,7 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
         epoch: risingwave_common::util::epoch::EpochPair,
         _pause_read_on_bootstrap: bool,
     ) -> LogStoreResult<()> {
-        self.state_store
-            .init(InitOptions::new_with_epoch(epoch))
-            .await?;
+        self.state_store.init(InitOptions::new(epoch)).await?;
         self.seq_id = FIRST_SEQ_ID;
         Ok(())
     }
@@ -116,6 +114,7 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
 
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
+        self.state_store.update_vnode_bitmap(new_vnodes);
         Ok(())
     }
 }

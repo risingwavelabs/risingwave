@@ -21,10 +21,10 @@ use std::sync::LazyLock;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
-use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
+use crate::error::Result;
 use crate::expr::{
     collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,

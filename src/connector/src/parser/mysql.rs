@@ -23,6 +23,7 @@ use risingwave_common::types::{
     DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use rust_decimal::Decimal as RustDecimal;
+use thiserror_ext::AsReport;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
@@ -32,8 +33,13 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(v)),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
-                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
+                    );
                 }
                 None
             }
@@ -44,8 +50,13 @@ macro_rules! handle_data_type {
         match res {
             Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
             Err(err) => {
-                if let Ok(sc) = LOG_SUPPERSSER.check() {
-                    tracing::error!("parse column `{}` fail: {} ({} suppressed)", $name, err, sc);
+                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    tracing::error!(
+                        column = $name,
+                        error = %err.as_report(),
+                        suppressed_count,
+                        "parse column failed",
+                    );
                 }
                 None
             }
@@ -102,12 +113,12 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                             ScalarImpl::from(Timestamptz::from_micros(v.timestamp_micros()))
                         }),
                         Err(err) => {
-                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
-                                    "parse column `{}` fail: {} ({} suppressed)",
-                                    name,
-                                    err,
-                                    suppressed
+                                    suppressed_count,
+                                    column = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
                                 );
                             }
                             None
@@ -121,12 +132,12 @@ pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> Owne
                     match res {
                         Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
                         Err(err) => {
-                            if let Ok(suppressed) = LOG_SUPPERSSER.check() {
+                            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                                 tracing::error!(
-                                    "parse column `{}` fail: {} ({} suppressed)",
-                                    name,
-                                    err,
-                                    suppressed
+                                    suppressed_count,
+                                    column = name,
+                                    error = %err.as_report(),
+                                    "parse column failed",
                                 );
                             }
                             None

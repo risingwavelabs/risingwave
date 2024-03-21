@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ConnectorResult;
 use crate::source::pulsar::topic::Topic;
 use crate::source::pulsar::PulsarEnumeratorOffset;
 use crate::source::{SplitId, SplitMetaData};
@@ -32,15 +32,15 @@ impl SplitMetaData for PulsarSplit {
         self.topic.to_string().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         let start_offset = if start_offset.is_empty() {
             PulsarEnumeratorOffset::Earliest
         } else {

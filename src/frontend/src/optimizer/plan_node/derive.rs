@@ -17,10 +17,10 @@ use std::collections::HashSet;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema, USER_COLUMN_ID_OFFSET};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::PlanRef;
+use crate::error::{ErrorCode, Result};
 use crate::optimizer::property::Order;
 
 pub(crate) fn derive_columns(

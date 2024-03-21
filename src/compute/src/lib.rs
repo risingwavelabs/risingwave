@@ -60,7 +60,7 @@ pub struct ComputeNodeOpts {
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
@@ -106,29 +106,29 @@ pub struct ComputeNodeOpts {
     /// Used for control the metrics level, similar to log level.
     /// 0 = disable metrics
     /// >0 = enable metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
     /// Path to data file cache data directory.
     /// Left empty to disable file cache.
-    #[clap(long, env = "RW_DATA_FILE_CACHE_DIR")]
+    #[clap(long, hide = true, env = "RW_DATA_FILE_CACHE_DIR")]
     #[override_opts(path = storage.data_file_cache.dir)]
     pub data_file_cache_dir: Option<String>,
 
     /// Path to meta file cache data directory.
     /// Left empty to disable file cache.
-    #[clap(long, env = "RW_META_FILE_CACHE_DIR")]
+    #[clap(long, hide = true, env = "RW_META_FILE_CACHE_DIR")]
     #[override_opts(path = storage.meta_file_cache.dir)]
     pub meta_file_cache_dir: Option<String>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[clap(long, hide = true, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
 }
@@ -225,14 +225,14 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     })
 }
 
-fn default_total_memory_bytes() -> usize {
+pub fn default_total_memory_bytes() -> usize {
     (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
-fn default_parallelism() -> usize {
+pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn default_role() -> Role {
+pub fn default_role() -> Role {
     Role::Both
 }

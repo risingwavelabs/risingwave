@@ -35,7 +35,7 @@ use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBa
 #[derive(clap::Args, Debug, Clone)]
 pub struct RestoreOpts {
     /// Id of snapshot used to restore. Available snapshots can be found in
-    /// <storage_directory>/manifest.json.
+    /// <`storage_directory>/manifest.json`.
     #[clap(long)]
     pub meta_snapshot_id: u64,
     /// Type of meta store to restore.
@@ -176,13 +176,14 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
     if opts.dry_run {
         return Ok(());
     }
+    let hummock_version = target_snapshot.metadata.hummock_version_ref().clone();
+    writer.write(target_snapshot).await?;
     restore_hummock_version(
         &opts.hummock_storage_url,
         &opts.hummock_storage_directory,
-        target_snapshot.metadata.hummock_version_ref(),
+        &hummock_version,
     )
     .await?;
-    writer.write(target_snapshot).await?;
     Ok(())
 }
 
@@ -244,7 +245,6 @@ mod tests {
             data_directory: Some("data_directory".into()),
             backup_storage_url: Some("backup_storage_url".into()),
             backup_storage_directory: Some("backup_storage_directory".into()),
-            wasm_storage_url: Some("wasm_storage_url".into()),
             ..SystemConfig::default().into_init_system_params()
         }
     }

@@ -110,7 +110,7 @@ impl CoordinatorWorker {
             .wait_for_writers(first_writer_request.vnode_bitmap)
             .await
         {
-            error!("failed to wait for all writers: {:?}", e);
+            error!(error = %e.as_report(), "failed to wait for all writers");
             worker
                 .send_to_all_sink_writers(|| {
                     Err(Status::cancelled("failed to wait for all writers"))

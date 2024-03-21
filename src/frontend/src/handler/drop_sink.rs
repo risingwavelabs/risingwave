@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
 use risingwave_pb::ddl_service::ReplaceTablePlan;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::error::Result;
 use crate::handler::create_sink::{insert_merger_to_union, reparse_table_for_sink};
 use crate::handler::HandlerArgs;
 
@@ -72,7 +72,9 @@ pub async fn handle_drop_sink(
 
         assert!(!table_catalog.incoming_sinks.is_empty());
 
-        table.incoming_sinks = table_catalog.incoming_sinks.clone();
+        table
+            .incoming_sinks
+            .clone_from(&table_catalog.incoming_sinks);
 
         for _ in 0..(table_catalog.incoming_sinks.len() - 1) {
             for fragment in graph.fragments.values_mut() {

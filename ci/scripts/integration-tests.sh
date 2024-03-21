@@ -56,6 +56,11 @@ fi
 echo "--- install postgresql"
 sudo yum install -y postgresql15
 
+echo "--- install poetry"
+curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -
+
+
+
 echo "--- download rwctest-key"
 aws secretsmanager get-secret-value --secret-id "gcp-buildkite-rwctest-key" --region us-east-2 --query "SecretString" --output text >gcp-rwctest.json
 

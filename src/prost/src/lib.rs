@@ -89,6 +89,9 @@ pub mod java_binding;
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
+#[path = "sim/telemetry.rs"]
+pub mod telemetry;
+#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]
@@ -151,6 +154,9 @@ pub mod backup_service_serde;
 #[rustfmt::skip]
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
+#[rustfmt::skip]
+#[path = "telemetry.serde.rs"]
+pub mod telemetry_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]

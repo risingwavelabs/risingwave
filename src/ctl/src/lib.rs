@@ -22,6 +22,7 @@ use cmd_impl::hummock::SstDumpArgs;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -179,7 +180,7 @@ enum HummockCommands {
         data_dir: Option<String>,
     },
     SstDump(SstDumpArgs),
-    /// trigger a targeted compaction through compaction_group_id
+    /// trigger a targeted compaction through `compaction_group_id`
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
         compaction_group_id: u64,
@@ -194,7 +195,7 @@ enum HummockCommands {
         sst_ids: Vec<u64>,
     },
     /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
-    /// sst_retention_time_sec.
+    /// `sst_retention_time_sec`.
     TriggerFullGc {
         #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
         sst_retention_time_sec: u64,
@@ -262,7 +263,7 @@ enum HummockCommands {
         #[clap(long)]
         compaction_group_id: u64,
     },
-    /// Validate the current HummockVersion.
+    /// Validate the current `HummockVersion`.
     ValidateVersion,
     /// Rebuild table stats
     RebuildTableStats,
@@ -274,7 +275,7 @@ enum HummockCommands {
         /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
         #[clap(long, value_delimiter = ',')]
         archive_ids: Vec<u64>,
-        /// The data directory of Hummock storage, where SSTable objects can be found.
+        /// The data directory of Hummock storage, where `SSTable` objects can be found.
         #[clap(long)]
         data_dir: String,
         /// KVs that are matched with the user key are printed.
@@ -285,7 +286,7 @@ enum HummockCommands {
         /// The ident of the archive file in object store. It's also the first Hummock version id of this archive.
         #[clap(long, value_delimiter = ',')]
         archive_ids: Vec<u64>,
-        /// The data directory of Hummock storage, where SSTable objects can be found.
+        /// The data directory of Hummock storage, where `SSTable` objects can be found.
         #[clap(long)]
         data_dir: String,
         /// Version deltas that are related to the SST id are printed.
@@ -316,7 +317,7 @@ enum TableCommands {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ScaleHorizonCommands {
-    /// The worker that needs to be excluded during scheduling, worker_id and worker_host:worker_port are both
+    /// The worker that needs to be excluded during scheduling, `worker_id` and `worker_host:worker_port` are both
     /// supported
     #[clap(
         long,
@@ -325,7 +326,7 @@ pub struct ScaleHorizonCommands {
     )]
     exclude_workers: Option<Vec<String>>,
 
-    /// The worker that needs to be included during scheduling, worker_id and worker_host:worker_port are both
+    /// The worker that needs to be included during scheduling, `worker_id` and `worker_host:worker_port` are both
     /// supported
     #[clap(
         long,
@@ -336,7 +337,7 @@ pub struct ScaleHorizonCommands {
 
     /// The target parallelism, currently, it is used to limit the target parallelism and only
     /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
-    /// with exclude/include_workers.
+    /// with `exclude/include_workers`.
     #[clap(long)]
     target_parallelism: Option<u32>,
 
@@ -370,7 +371,7 @@ pub struct ScaleVerticalCommands {
     #[command(flatten)]
     common: ScaleCommon,
 
-    /// The worker that needs to be scheduled, worker_id and worker_host:worker_port are both
+    /// The worker that needs to be scheduled, `worker_id` and `worker_host:worker_port` are both
     /// supported
     #[clap(
         long,
@@ -466,7 +467,7 @@ enum MetaCommands {
         /// Show the plan only, no actual operation
         #[clap(long, default_value = "false")]
         dry_run: bool,
-        /// Resolve NO_SHUFFLE upstream
+        /// Resolve `NO_SHUFFLE` upstream
         #[clap(long, default_value = "false")]
         resolve_no_shuffle: bool,
     },
@@ -491,7 +492,7 @@ enum MetaCommands {
 
     /// Unregister workers from the cluster
     UnregisterWorkers {
-        /// The workers that needs to be unregistered, worker_id and worker_host:worker_port are both supported
+        /// The workers that needs to be unregistered, `worker_id` and `worker_host:worker_port` are both supported
         #[clap(
             long,
             required = true,
@@ -550,14 +551,28 @@ pub enum ProfileCommands {
     },
 }
 
-pub async fn start(opts: CliOpts) -> Result<()> {
+/// Start `risectl` with the given options.
+/// Log and abort the process if any error occurs.
+///
+/// Note: use [`start_fallible`] if you want to call functionalities of `risectl`
+/// in an embedded manner.
+pub async fn start(opts: CliOpts) {
+    if let Err(e) = start_fallible(opts).await {
+        eprintln!("Error: {:#?}", e.as_report()); // pretty with backtrace
+        std::process::exit(1);
+    }
+}
+
+/// Start `risectl` with the given options.
+/// Return `Err` if any error occurs.
+pub async fn start_fallible(opts: CliOpts) -> Result<()> {
     let context = CtlContext::default();
     let result = start_impl(opts, &context).await;
     context.try_close().await;
     result
 }
 
-pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
+async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
             cmd_impl::compute::show_config(&host).await?

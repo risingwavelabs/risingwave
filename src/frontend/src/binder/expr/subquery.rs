@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Query;
 
 use crate::binder::Binder;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, Subquery, SubqueryKind};
 
 impl Binder {

@@ -173,10 +173,7 @@ impl SystemParamsController {
         // delete all params first and then insert all params. It follows the same logic
         // as the old code, we'd better change it to another way later to keep consistency.
         SystemParameter::delete_many().exec(&txn).await?;
-
-        for model in models {
-            model.insert(&txn).await?;
-        }
+        SystemParameter::insert_many(models).exec(&txn).await?;
         txn.commit().await?;
         Ok(())
     }
@@ -189,7 +186,7 @@ impl SystemParamsController {
             .await?
         else {
             return Err(MetaError::system_params(format!(
-                "unrecognized system parameter {}",
+                "unrecognized system parameter {:?}",
                 name
             )));
         };

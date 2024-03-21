@@ -19,6 +19,7 @@
 use core::str::FromStr;
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use clap::Parser;
 use futures::prelude::future::Either;
 use futures::prelude::stream::{BoxStream, PollNext};
@@ -27,7 +28,6 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnId;
-use risingwave_common::error::anyhow_error;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::parser::{
     EncodingProperties, ParserConfig, ProtocolProperties, SpecificParserConfig,
@@ -82,7 +82,7 @@ impl LogReader for MockRangeLogReader {
                         .take()
                         .unwrap()
                         .send(self.throughput_metric.take().unwrap())
-                        .map_err(|_| anyhow_error!("Can't send throughput_metric"))?;
+                        .map_err(|_| anyhow!("Can't send throughput_metric"))?;
                     futures::future::pending().await
                 },
             item = self.upstreams.next() => {
@@ -108,7 +108,7 @@ impl LogReader for MockRangeLogReader {
                             },
                         ))
                     }
-                    _ => Err(anyhow_error!("Can't assert message type".to_string())),
+                    _ => Err(anyhow!("Can't assert message type".to_string())),
                 }
             }
         }
@@ -390,7 +390,7 @@ fn mock_from_legacy_type(
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
             SINK_TYPE_UPSERT => SinkFormat::Upsert,
             _ => {
-                return Err(SinkError::Config(risingwave_common::array::error::anyhow!(
+                return Err(SinkError::Config(anyhow!(
                     "sink type unsupported: {}",
                     r#type
                 )))
@@ -457,6 +457,7 @@ async fn main() {
         .unwrap();
         let sink_param = SinkParam {
             sink_id: SinkId::new(1),
+            sink_name: cfg.sink.clone(),
             properties,
             columns: table_schema.get_sink_schema(),
             downstream_pk: table_schema.pk_indices,

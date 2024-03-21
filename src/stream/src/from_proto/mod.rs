@@ -42,6 +42,7 @@ mod simple_agg;
 mod sink;
 mod sort;
 mod source;
+mod source_backfill;
 mod stateless_simple_agg;
 mod stream_cdc_scan;
 mod stream_scan;
@@ -85,6 +86,7 @@ use self::simple_agg::*;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
+use self::source_backfill::*;
 use self::stateless_simple_agg::*;
 use self::stream_cdc_scan::*;
 use self::stream_scan::*;
@@ -93,7 +95,7 @@ use self::top_n::*;
 use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
-use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::executor::{Execute, Executor, ExecutorInfo};
 use crate::from_proto::subscription::SubscriptionExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::ExecutorParams;
@@ -101,12 +103,12 @@ use crate::task::ExecutorParams;
 trait ExecutorBuilder {
     type Node;
 
-    /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    fn new_boxed_executor(
+    /// Create an [`Executor`] from [`StreamNode`].
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
-    ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
+    ) -> StreamResult<Executor>;
 }
 
 macro_rules! build_executor {
@@ -127,7 +129,7 @@ pub async fn create_executor(
     params: ExecutorParams,
     node: &StreamNode,
     store: impl StateStore,
-) -> StreamResult<BoxedExecutor> {
+) -> StreamResult<Executor> {
     build_executor! {
         params,
         node,
@@ -172,5 +174,6 @@ pub async fn create_executor(
         NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
         NodeBody::OverWindow => OverWindowExecutorBuilder,
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
+        NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
     }
 }

@@ -765,6 +765,7 @@ fn parse_create_function() {
                 )),
                 ..Default::default()
             },
+            with_options: Default::default(),
         }
     );
 
@@ -786,7 +787,8 @@ fn parse_create_function() {
                     "select $1 - $2;".into()
                 )),
                 ..Default::default()
-            }
+            },
+            with_options: Default::default(),
         },
     );
 
@@ -811,7 +813,8 @@ fn parse_create_function() {
                     right: Box::new(Expr::Parameter { index: 2 }),
                 }),
                 ..Default::default()
-            }
+            },
+            with_options: Default::default(),
         },
     );
 
@@ -842,6 +845,7 @@ fn parse_create_function() {
                 }),
                 ..Default::default()
             },
+            with_options: Default::default(),
         }
     );
 
@@ -865,6 +869,7 @@ fn parse_create_function() {
                 return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
+            with_options: Default::default(),
         }
     );
 }
@@ -1270,4 +1275,18 @@ fn parse_double_quoted_string_as_alias() {
 
     let sql = "SELECT x \"x1\" FROM t";
     assert!(parse_sql_statements(sql).is_ok());
+}
+
+#[test]
+fn parse_variadic_argument() {
+    let sql = "SELECT foo(a, b, VARIADIC c)";
+    _ = verified_stmt(sql);
+
+    let sql = "SELECT foo(VARIADIC a, b, VARIADIC c)";
+    assert_eq!(
+        parse_sql_statements(sql),
+        Err(ParserError::ParserError(
+            "VARIADIC argument must be last".to_string()
+        ))
+    );
 }

@@ -17,9 +17,9 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
-    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, Distinct, Expr, Function,
-    FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
-    TableAlias, TableFactor, TableWithJoins,
+    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
+    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem,
+    SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -48,6 +48,13 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
             stmt: CreateSourceStatement {
                 source_name: name, ..
             },
+        }
+        | Statement::CreateSubscription {
+            stmt:
+                CreateSubscriptionStatement {
+                    subscription_name: name,
+                    ..
+                },
         }
         | Statement::CreateSink {
             stmt: CreateSinkStatement {
@@ -79,6 +86,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
             stmt:
             CreateSinkStatement {
                 sink_from: CreateSink::AsQuery(query),
+                into_table_name: None,
                 ..
             },
         } => {
@@ -89,9 +97,33 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
             stmt:
             CreateSinkStatement {
                 sink_from: CreateSink::From(table_name),
+                into_table_name: None,
+                ..
+            },
+        }| Statement::CreateSubscription {
+            stmt:
+            CreateSubscriptionStatement {
+                subscription_from: table_name,
                 ..
             },
         } => replace_table_name(table_name, to),
+        Statement::CreateSink {
+            stmt: CreateSinkStatement {
+                sink_from,
+                into_table_name: Some(table_name),
+                ..
+            }
+        } => {
+            let idx = table_name.0.len() - 1;
+            if table_name.0[idx].real_value() == from {
+                table_name.0[idx] = Ident::new_unchecked(to);
+            } else {
+                match sink_from {
+                    CreateSink::From(table_name) => replace_table_name(table_name, to),
+                    CreateSink::AsQuery(query) => QueryRewriter::rewrite_query(query, from, to),
+                }
+            }
+        }
         _ => unreachable!(),
     };
     stmt.to_string()

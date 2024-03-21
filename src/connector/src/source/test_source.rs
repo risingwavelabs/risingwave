@@ -15,13 +15,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde_derive::{Deserialize, Serialize};
 use with_options::WithOptions;
 
+use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
@@ -32,7 +33,7 @@ pub type BoxListSplits = Box<
     dyn FnMut(
             TestSourceProperties,
             SourceEnumeratorContextRef,
-        ) -> anyhow::Result<Vec<TestSourceSplit>>
+        ) -> ConnectorResult<Vec<TestSourceSplit>>
         + Send
         + 'static,
 >;
@@ -59,7 +60,7 @@ impl BoxSource {
         list_splits: impl FnMut(
                 TestSourceProperties,
                 SourceEnumeratorContextRef,
-            ) -> anyhow::Result<Vec<TestSourceSplit>>
+            ) -> ConnectorResult<Vec<TestSourceSplit>>
             + Send
             + 'static,
         into_source_stream: impl FnMut(
@@ -124,11 +125,11 @@ impl TryFromHashmap for TestSourceProperties {
     fn try_from_hashmap(
         props: HashMap<String, String>,
         _deny_unknown_fields: bool,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         if cfg!(any(madsim, test)) {
             Ok(TestSourceProperties { properties: props })
         } else {
-            Err(anyhow!("test source only available at test"))
+            bail!("test source only available at test")
         }
     }
 }
@@ -149,11 +150,11 @@ impl SplitMetaData for TestSourceSplit {
         serde_json::to_value(self.clone()).unwrap().into()
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
+        serde_json::from_value(value.take()).map_err(Into::into)
     }
 
-    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+    fn update_with_offset(&mut self, start_offset: String) -> ConnectorResult<()> {
         self.offset = start_offset;
         Ok(())
     }
@@ -172,14 +173,14 @@ impl SplitEnumerator for TestSourceSplitEnumerator {
     async fn new(
         properties: Self::Properties,
         context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             properties,
             context,
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> ConnectorResult<Vec<Self::Split>> {
         (get_registry()
             .box_source
             .lock()
@@ -208,7 +209,7 @@ impl SplitReader for TestSourceSplitReader {
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
-    ) -> anyhow::Result<Self> {
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             properties,
             state,

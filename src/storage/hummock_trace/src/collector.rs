@@ -214,8 +214,11 @@ impl TraceSpan {
         Self::new_global_op(Operation::SealCurrentEpoch { epoch, opts }, storage_type)
     }
 
-    pub fn new_clear_shared_buffer_span() -> MayTraceSpan {
-        Self::new_global_op(Operation::ClearSharedBuffer, StorageType::Global)
+    pub fn new_clear_shared_buffer_span(prev_epoch: u64) -> MayTraceSpan {
+        Self::new_global_op(
+            Operation::ClearSharedBuffer(prev_epoch),
+            StorageType::Global,
+        )
     }
 
     pub fn new_validate_read_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {

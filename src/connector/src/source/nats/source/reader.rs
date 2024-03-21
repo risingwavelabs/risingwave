@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::Context as _;
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::bail;
 
 use super::message::NatsMessage;
 use super::{NatsOffset, NatsSplit};
+use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::nats::NatsProperties;
@@ -60,15 +62,15 @@ impl SplitReader for NatsSplitReader {
                     "earliest" => NatsOffset::Earliest,
                     "timestamp_millis" => {
                         if let Some(time) = &properties.start_time {
-                            NatsOffset::Timestamp(time.parse()?)
+                            NatsOffset::Timestamp(time.parse().context(
+                                "failed to parse the start time as nats offset timestamp",
+                            )?)
                         } else {
-                            return Err(anyhow!("scan_startup_timestamp_millis is required"));
+                            bail!("scan_startup_timestamp_millis is required");
                         }
                     }
                     _ => {
-                        return Err(anyhow!(
-                            "invalid scan_startup_mode, accept earliest/latest/timestamp_millis"
-                        ))
+                        bail!("invalid scan_startup_mode, accept earliest/latest/timestamp_millis")
                     }
                 },
             },
@@ -101,7 +103,7 @@ impl SplitReader for NatsSplitReader {
 }
 
 impl CommonSplitReader for NatsSplitReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
         let messages = self.consumer.messages().await?;

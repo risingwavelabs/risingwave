@@ -15,9 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -26,6 +25,7 @@ use risingwave_pb::plan_common::{AdditionalColumn, PbColumnCatalog};
 #[expect(deprecated)]
 use super::fs_reader::FsSourceReader;
 use super::reader::SourceReader;
+use crate::error::ConnectorResult;
 use crate::parser::additional_columns::{
     build_additional_column_catalog, COMMON_COMPATIBLE_ADDITIONAL_COLUMNS,
     COMPATIBLE_ADDITIONAL_COLUMNS,
@@ -139,7 +139,7 @@ impl SourceDescBuilder {
 
         // Check if partition/file/offset columns are included explicitly.
         for col in &self.columns {
-            match col.column_desc.as_ref().unwrap().get_additional_columns() {
+            match col.column_desc.as_ref().unwrap().get_additional_column() {
                 Ok(AdditionalColumn {
                     column_type: Some(ColumnType::Partition(_) | ColumnType::Filename(_)),
                 }) => {
@@ -177,7 +177,7 @@ impl SourceDescBuilder {
         columns
     }
 
-    pub fn build(self) -> Result<SourceDesc> {
+    pub fn build(self) -> ConnectorResult<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
         let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
@@ -202,7 +202,7 @@ impl SourceDescBuilder {
 
     #[deprecated = "will be replaced by new fs source (list + fetch)"]
     #[expect(deprecated)]
-    pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
+    pub fn build_fs_source_desc(&self) -> ConnectorResult<FsSourceDesc> {
         let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (
@@ -214,10 +214,11 @@ impl SourceDescBuilder {
                 EncodingProperties::Csv(_) | EncodingProperties::Json(_),
             ) => {}
             (format, encode) => {
-                return Err(RwError::from(ProtocolError(format!(
+                bail!(
                     "Unsupported combination of format {:?} and encode {:?}",
-                    format, encode
-                ))));
+                    format,
+                    encode,
+                );
             }
         }
 

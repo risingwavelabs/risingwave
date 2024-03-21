@@ -24,6 +24,7 @@ CREATE SINK s1 AS select * from products WITH (
     connector = 'iceberg',
     type = 'upsert',
     force_append_only = 'false',
+    catalog.name = 'demo',
     database.name = 'demo_db',
     table.name = 'demo_table',
     catalog.type = 'storage',

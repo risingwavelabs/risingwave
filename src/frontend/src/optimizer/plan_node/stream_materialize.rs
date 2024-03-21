@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::num::NonZeroU32;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId, OBJECT_ID_PLACEHOLDER};
-use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -29,6 +29,7 @@ use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
+use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -76,6 +77,7 @@ impl StreamMaterialize {
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -94,6 +96,7 @@ impl StreamMaterialize {
             table_type,
             None,
             cardinality,
+            retention_seconds,
         )?;
 
         Ok(Self::new(input, table))
@@ -116,6 +119,7 @@ impl StreamMaterialize {
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -131,6 +135,7 @@ impl StreamMaterialize {
             TableType::Table,
             version,
             Cardinality::unknown(), // unknown cardinality for tables
+            retention_seconds,
         )?;
 
         Ok(Self::new(input, table))
@@ -200,12 +205,12 @@ impl StreamMaterialize {
         table_type: TableType,
         version: Option<TableVersion>,
         cardinality: Cardinality,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
-        let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
@@ -226,6 +231,7 @@ impl StreamMaterialize {
             id: TableId::placeholder(),
             associated_source_id: None,
             name,
+            dependent_relations: vec![],
             columns,
             pk: table_pk,
             stream_key,
@@ -233,7 +239,6 @@ impl StreamMaterialize {
             table_type,
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            properties,
             fragment_id: OBJECT_ID_PLACEHOLDER,
             dml_fragment_id: None,
             vnode_col_index: None,
@@ -254,6 +259,7 @@ impl StreamMaterialize {
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
+            retention_seconds: retention_seconds.map(|i| i.into()),
         })
     }
 

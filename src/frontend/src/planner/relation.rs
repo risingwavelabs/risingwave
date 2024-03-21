@@ -17,13 +17,13 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
+use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
@@ -86,12 +86,19 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(
-            Rc::new(source.catalog),
-            SourceNodeKind::CreateMViewOrBatch,
-            self.ctx(),
-        )?
-        .into())
+        if source.is_backfillable_cdc_connector() {
+            Err(ErrorCode::InternalError(
+                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
+            )
+            .into())
+        } else {
+            Ok(LogicalSource::with_catalog(
+                Rc::new(source.catalog),
+                SourceNodeKind::CreateMViewOrBatch,
+                self.ctx(),
+            )?
+            .into())
+        }
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

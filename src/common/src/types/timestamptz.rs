@@ -17,7 +17,7 @@ use std::io::Write;
 use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 use serde::{Deserialize, Serialize};
@@ -199,6 +199,26 @@ impl std::fmt::Display for Timestamptz {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.write(f)
     }
+}
+
+pub fn write_date_time_tz(
+    instant_local: DateTime<Tz>,
+    writer: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
+    let date = instant_local.date_naive();
+    let (ce, year) = date.year_ce();
+    write!(
+        writer,
+        "{:04}-{:02}-{:02} {}",
+        year,
+        date.month(),
+        date.day(),
+        instant_local.format(if ce {
+            "%H:%M:%S%.f%:z"
+        } else {
+            "%H:%M:%S%.f%:z BC"
+        })
+    )
 }
 
 #[cfg(test)]

@@ -1,5 +1,3 @@
-use std::assert_matches::assert_matches;
-use std::collections::HashMap;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +11,7 @@ use std::collections::HashMap;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::num::NonZeroU32;
 use std::ops::DerefMut;
 
 pub mod plan_node;
@@ -39,6 +38,9 @@ pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
 
+use std::assert_matches::assert_matches;
+use std::collections::{HashMap, HashSet};
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use logical_optimization::*;
@@ -47,9 +49,8 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, UserId,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
@@ -61,7 +62,7 @@ use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
     PartitionComputeInfo, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    StreamSubscription, StreamWatermarkFilter, ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -69,6 +70,7 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecke
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
@@ -168,21 +170,22 @@ impl PlanRoot {
     pub fn into_array_agg(self) -> Result<PlanRef> {
         use generic::Agg;
         use plan_node::PlanAggCall;
-        use risingwave_common::types::DataType;
+        use risingwave_common::types::{DataType, ListValue};
         use risingwave_expr::aggregate::AggKind;
 
-        use crate::expr::InputRef;
+        use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
         let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
-        Ok(Agg::new(
+        let return_type = DataType::List(input_column_type.clone().into());
+        let agg = Agg::new(
             vec![PlanAggCall {
                 agg_kind: AggKind::ArrayAgg,
-                return_type: DataType::List(input_column_type.clone().into()),
-                inputs: vec![InputRef::new(select_idx, input_column_type)],
+                return_type: return_type.clone(),
+                inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
                 order_by: self.required_order.column_orders,
                 filter: Condition::true_cond(),
@@ -190,8 +193,19 @@ impl PlanRoot {
             }],
             IndexSet::empty(),
             self.plan,
-        )
-        .into())
+        );
+        Ok(LogicalProject::create(
+            agg.into(),
+            vec![FunctionCall::new(
+                ExprType::Coalesce,
+                vec![
+                    InputRef::new(0, return_type).into(),
+                    ExprImpl::literal_list(ListValue::empty(&input_column_type), input_column_type),
+                ],
+            )
+            .unwrap()
+            .into()],
+        ))
     }
 
     /// Apply logical optimization to the plan for stream.
@@ -348,13 +362,7 @@ impl PlanRoot {
 
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        let stream_scan_type = if self
-            .plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_arrangement_backfill()
-        {
+        let stream_scan_type = if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -524,6 +532,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -725,6 +734,7 @@ impl PlanRoot {
             pk_column_indices,
             row_id_index,
             version,
+            retention_seconds,
         )
     }
 
@@ -748,6 +758,7 @@ impl PlanRoot {
             definition,
             TableType::MaterializedView,
             cardinality,
+            None,
         )
     }
 
@@ -756,6 +767,7 @@ impl PlanRoot {
         &mut self,
         index_name: String,
         definition: String,
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
@@ -770,6 +782,7 @@ impl PlanRoot {
             definition,
             TableType::Index,
             cardinality,
+            retention_seconds,
         )
     }
 
@@ -790,13 +803,7 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
-        } else if self
-            .plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_arrangement_backfill()
-        {
+        } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -821,9 +828,55 @@ impl PlanRoot {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    /// Optimize and generate a create subscription plan.
+    pub fn gen_subscription_plan(
+        &mut self,
+        database_id: u32,
+        schema_id: u32,
+        dependent_relations: HashSet<TableId>,
+        subscription_name: String,
+        definition: String,
+        properties: WithOptions,
+        emit_on_window_close: bool,
+        subscription_from_table_name: String,
+        user_id: UserId,
+    ) -> Result<StreamSubscription> {
+        let stream_scan_type = StreamScanType::UpstreamOnly;
+        let stream_plan =
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
+
+        StreamSubscription::create(
+            database_id,
+            schema_id,
+            dependent_relations,
+            stream_plan,
+            subscription_name,
+            subscription_from_table_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            definition,
+            properties,
+            user_id,
+        )
+    }
+
     /// Set the plan root's required dist.
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
+    }
+
+    pub fn should_use_arrangement_backfill(&self) -> bool {
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let arrangement_backfill_enabled = session_ctx
+            .env()
+            .streaming_config()
+            .developer
+            .enable_arrangement_backfill;
+        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 }
 

@@ -75,7 +75,7 @@ impl SplitEnumerator for S3SplitEnumerator {
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<Self> {
+    ) -> crate::error::ConnectorResult<Self> {
         let config = AwsAuthProps::from(&properties);
         let sdk_config = config.build_config().await?;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
@@ -98,7 +98,7 @@ impl SplitEnumerator for S3SplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> crate::error::ConnectorResult<Vec<Self::Split>> {
         let mut objects = Vec::new();
         loop {
             let (files, has_finished) = self.get_next_page::<FsSplit>().await?;

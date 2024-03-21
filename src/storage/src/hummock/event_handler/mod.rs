@@ -16,10 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::{RwLock, RwLockReadGuard};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use thiserror_ext::AsReport;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::HummockResult;
@@ -34,6 +35,7 @@ pub use hummock_event_handler::HummockEventHandler;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 
 use super::store::version::HummockReadVersion;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -61,11 +63,9 @@ pub enum HummockEvent {
     },
 
     /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>),
+    Clear(oneshot::Sender<()>, u64),
 
     Shutdown,
-
-    VersionUpdate(HummockVersionUpdate),
 
     ImmToUploader(ImmutableMemtable),
 
@@ -90,6 +90,7 @@ pub enum HummockEvent {
         table_id: TableId,
         new_read_version_sender: oneshot::Sender<(HummockReadVersionRef, LocalInstanceGuard)>,
         is_replicated: bool,
+        vnodes: Arc<Bitmap>,
     },
 
     DestroyReadVersion {
@@ -108,13 +109,9 @@ impl HummockEvent {
                 sync_result_sender: _,
             } => format!("AwaitSyncEpoch epoch {} ", new_sync_epoch),
 
-            HummockEvent::Clear(_) => "Clear".to_string(),
+            HummockEvent::Clear(_, prev_epoch) => format!("Clear {:?}", prev_epoch),
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
-
-            HummockEvent::VersionUpdate(version_update_payload) => {
-                format!("VersionUpdate {:?}", version_update_payload)
-            }
 
             HummockEvent::ImmToUploader(imm) => {
                 format!("ImmToUploader {:?}", imm)
@@ -144,6 +141,7 @@ impl HummockEvent {
                 table_id,
                 new_read_version_sender: _,
                 is_replicated,
+                vnodes: _,
             } => format!(
                 "RegisterReadVersion table_id {:?}, is_replicated: {:?}",
                 table_id, is_replicated
@@ -197,25 +195,28 @@ impl<T> ReadOnlyRwLockRef<T> {
 pub struct LocalInstanceGuard {
     pub table_id: TableId,
     pub instance_id: LocalInstanceId,
-    event_sender: mpsc::UnboundedSender<HummockEvent>,
+    // Only send destroy event when event_sender when is_some
+    event_sender: Option<HummockEventSender>,
 }
 
 impl Drop for LocalInstanceGuard {
     fn drop(&mut self) {
-        // If sending fails, it means that event_handler and event_channel have been destroyed, no
-        // need to handle failure
-        self.event_sender
-            .send(HummockEvent::DestroyReadVersion {
-                table_id: self.table_id,
-                instance_id: self.instance_id,
-            })
-            .unwrap_or_else(|err| {
-                tracing::error!(
-                    error = %err.as_report(),
-                    table_id = %self.table_id,
-                    instance_id = self.instance_id,
-                    "LocalInstanceGuard Drop SendError",
-                )
-            })
+        if let Some(sender) = self.event_sender.take() {
+            // If sending fails, it means that event_handler and event_channel have been destroyed, no
+            // need to handle failure
+            sender
+                .send(HummockEvent::DestroyReadVersion {
+                    table_id: self.table_id,
+                    instance_id: self.instance_id,
+                })
+                .unwrap_or_else(|err| {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        table_id = %self.table_id,
+                        instance_id = self.instance_id,
+                        "LocalInstanceGuard Drop SendError",
+                    )
+                })
+        }
     }
 }
