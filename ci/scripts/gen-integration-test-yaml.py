@@ -12,6 +12,7 @@ CASES_MAP = {
     'schema-registry': ['json'],
     'mysql-cdc': ['json'],
     'postgres-cdc': ['json'],
+    'mongodb-cdc': ['json'],
     'mysql-sink': ['json'],
     'postgres-sink': ['json'],
     'iceberg-cdc': ['json'],
