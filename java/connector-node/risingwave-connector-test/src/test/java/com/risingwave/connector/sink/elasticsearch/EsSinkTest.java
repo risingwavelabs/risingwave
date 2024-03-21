@@ -54,15 +54,16 @@ public class EsSinkTest {
             throws IOException {
         EsSink sink =
                 new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress(), "test")
+                        new EsSinkConfig(container.getHttpHostAddress())
+                                .withIndex("test")
                                 .withDelimiter("$")
                                 .withUsername(username)
                                 .withPassword(password),
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
-                        new ArraySinkRow(Op.INSERT, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
+                        new ArraySinkRow(Op.INSERT, "", "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
+                        new ArraySinkRow(Op.INSERT, "", "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
         sink.sync();
         // container is slow here, but our default flush time is 5s,
         // so 3s is enough for sync test

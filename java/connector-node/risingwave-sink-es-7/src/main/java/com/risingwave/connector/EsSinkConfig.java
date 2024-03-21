@@ -44,7 +44,6 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonCreator
     public EsSinkConfig(@JsonProperty(value = "url") String url) {
         this.url = url;
-        this.index = index;
     }
 
     public String getUrl() {
@@ -53,6 +52,11 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public String getIndex() {
         return index;
+    }
+
+    public EsSinkConfig withIndex(String index) {
+        this.index = index;
+        return this;
     }
 
     public String getDelimiter() {
