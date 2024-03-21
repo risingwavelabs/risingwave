@@ -225,6 +225,17 @@ fi
 tail -f -n 5 ${PREFIX_LOG}/$1
 '''
 
+[tasks.ci-clean-logs]
+private = true
+category = "RiseDev - CI"
+description = "Clean logs before CI"
+script = '''
+#!/usr/bin/env bash
+set -e
+cat /risingwave/.risingwave/log/compactor-6660.log | sed -E 's/table_ids: \[[0-9, ]+\]/table_ids: [hidden]/g' > tmp.log
+mv tmp.log /risingwave/.risingwave/log/compactor-6660.log
+'''
+
 [tasks.check-logs]
 private = true
 category = "RiseDev - CI"
@@ -1257,6 +1268,11 @@ description = "Clean data and start a full RisingWave dev cluster using risedev-
 category = "RiseDev - CI"
 dependencies = ["k", "check-logs", "wait-processes-exit"]
 description = "Kill cluster and check logs, do not dump logs"
+
+[tasks.ci-kill-clean-logs]
+category = "RiseDev - CI"
+dependencies = ["k", "ci-clean-logs", "l", "check-logs", "wait-processes-exit"]
+description = "Kill cluster, dump logs and check logs"
 
 [tasks.ci-kill]
 category = "RiseDev - CI"

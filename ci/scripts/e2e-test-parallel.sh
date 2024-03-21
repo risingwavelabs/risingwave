@@ -28,16 +28,7 @@ download-and-decompress-artifact e2e_test_generated ./
 
 kill_cluster() {
   echo "--- Kill cluster"
-  cargo make kill
-
-  echo "--- Cleaning logs"
-  cat /risingwave/.risingwave/log/compactor-6660.log | sed -E 's/Compaction task table_ids: \[[0-9, ]+\]/Compaction task table_ids: [hidden]/g' > tmp.log
-  mv tmp.log /risingwave/.risingwave/log/compactor-6660.log
-
-  echo "--- Checking logs"
-  cargo make logs
-  cargo make check-logs
-  cargo make wait-processes-exit
+  cargo make ci-kill-clean-logs
 }
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
@@ -47,7 +38,6 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
-echo "--- Kill cluster"
 kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
@@ -56,7 +46,6 @@ cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
 sqllogictest ${host_args} -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
-echo "--- Kill cluster"
 kill_cluster
 
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
@@ -64,5 +53,4 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 
-echo "--- Kill cluster"
 kill_cluster
