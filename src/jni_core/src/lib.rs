@@ -1039,7 +1039,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
             Err(err) => {
                 if msg.is_null() {
                     tracing::warn!("source error message is null");
-                    return Ok(JNI_TRUE);
+                    Ok(JNI_TRUE)
                 } else {
                     tracing::error!(error = ?err.as_report(), "source error message should be a java string");
                     Ok(JNI_FALSE)
@@ -1154,7 +1154,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterEr
             Err(err) => {
                 if msg.is_null() {
                     tracing::warn!("sink error message is null");
-                    return Ok(JNI_TRUE);
+                    Ok(JNI_TRUE)
                 } else {
                     tracing::error!(error = ?err.as_report(), "sink error message should be a java string");
                     Ok(JNI_FALSE)
