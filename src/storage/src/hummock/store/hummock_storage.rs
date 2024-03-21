@@ -29,14 +29,13 @@ use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::error;
 
 use super::local_hummock_storage::LocalHummockStorage;
-use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
+use super::version::{read_filter_for_version, HummockVersionReader, ReadVersionTuple};
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
@@ -55,7 +54,6 @@ use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, MemoryLimiter,
     SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
-use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::opts::StorageOpts;
 use crate::store::*;
@@ -115,8 +113,6 @@ pub struct HummockStorage {
     compact_await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 }
 
-pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
-
 pub fn get_committed_read_version_tuple(
     version: PinnedVersion,
     table_id: TableId,
@@ -126,7 +122,7 @@ pub fn get_committed_read_version_tuple(
     if let Some(index) = version.table_watermark_index().get(&table_id) {
         index.rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
-    (key_range, (vec![], vec![], version))
+    (key_range, (vec![], version))
 }
 
 impl HummockStorage {

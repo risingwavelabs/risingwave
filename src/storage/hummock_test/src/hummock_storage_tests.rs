@@ -539,8 +539,7 @@ async fn test_state_store_sync() {
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
-        assert_eq!(1, read_version.read().staging().imm.len());
-        assert!(read_version.read().staging().sst.is_empty());
+        assert_eq!(1, read_version.read().staging().data.len());
     }
 
     {
@@ -581,8 +580,7 @@ async fn test_state_store_sync() {
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
-        assert!(read_version.read().staging().imm.is_empty());
-        assert!(read_version.read().staging().sst.is_empty());
+        assert!(read_version.read().staging().data.is_empty());
     }
 
     {
@@ -1461,7 +1459,7 @@ async fn test_hummock_version_reader() {
                         .read()
                         .committed()
                         .max_committed_epoch(),
-                    read_snapshot.2.max_committed_epoch()
+                    read_snapshot.1.max_committed_epoch()
                 );
 
                 let iter = hummock_version_reader
