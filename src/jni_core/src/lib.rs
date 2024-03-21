@@ -1024,19 +1024,26 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
     msg: JString<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
-        if msg.is_null() {
-            return Ok(JNI_TRUE);
-        }
-        let err_msg: String = env
-            .get_string(&msg)
-            .expect("source error message should be a java string")
-            .into();
-
-        match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
-            Ok(_) => Ok(JNI_TRUE),
-            Err(e) => {
-                tracing::error!(error = ?e.as_report(), "send error");
-                Ok(JNI_FALSE)
+        let ret = env.get_string(&msg);
+        match ret {
+            Ok(str) => {
+                let err_msg: String = str.into();
+                match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
+                    Ok(_) => Ok(JNI_TRUE),
+                    Err(e) => {
+                        tracing::info!(error = ?e.as_report(), "send error");
+                        Ok(JNI_FALSE)
+                    }
+                }
+            }
+            Err(err) => {
+                if msg.is_null() {
+                    tracing::warn!("source error message is null");
+                    return Ok(JNI_TRUE);
+                } else {
+                    tracing::error!(error = ?err.as_report(), "source error message should be a java string");
+                    Ok(JNI_FALSE)
+                }
             }
         }
     })
@@ -1132,19 +1139,26 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterEr
     msg: JString<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
-        if msg.is_null() {
-            return Ok(JNI_TRUE);
-        }
-        let err_msg: String = env
-            .get_string(&msg)
-            .expect("sink error message should be a java string")
-            .into();
-
-        match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
-            Ok(_) => Ok(JNI_TRUE),
-            Err(e) => {
-                tracing::info!(error = ?e.as_report(), "send error");
-                Ok(JNI_FALSE)
+        let ret = env.get_string(&msg);
+        match ret {
+            Ok(str) => {
+                let err_msg: String = str.into();
+                match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
+                    Ok(_) => Ok(JNI_TRUE),
+                    Err(e) => {
+                        tracing::info!(error = ?e.as_report(), "send error");
+                        Ok(JNI_FALSE)
+                    }
+                }
+            }
+            Err(err) => {
+                if msg.is_null() {
+                    tracing::warn!("sink error message is null");
+                    return Ok(JNI_TRUE);
+                } else {
+                    tracing::error!(error = ?err.as_report(), "sink error message should be a java string");
+                    Ok(JNI_FALSE)
+                }
             }
         }
     })
