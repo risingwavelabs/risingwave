@@ -17,21 +17,21 @@ use crate::EstimateSize;
 #[derive(Clone)]
 pub struct EstimatedVec<T: EstimateSize> {
     inner: Vec<T>,
-    kv_heap_size: usize,
+    heap_size: usize,
 }
 
 impl<T: EstimateSize> Default for EstimatedVec<T> {
     fn default() -> Self {
         Self {
             inner: vec![],
-            kv_heap_size: 0,
+            heap_size: 0,
         }
     }
 }
 
 impl<T: EstimateSize> EstimateSize for EstimatedVec<T> {
     fn estimated_heap_size(&self) -> usize {
-        self.kv_heap_size
+        self.heap_size
     }
 }
 
@@ -41,9 +41,7 @@ impl<T: EstimateSize> EstimatedVec<T> {
     }
 
     pub fn push(&mut self, value: T) {
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(value.estimated_heap_size());
+        self.heap_size = self.heap_size.saturating_add(value.estimated_heap_size());
         self.inner.push(value);
     }
 
