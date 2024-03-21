@@ -15,8 +15,9 @@
 use std::collections::HashSet;
 
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::estimate_size::{EstimateSize, KvSize, VecWithKvSize};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common_estimate_size::collections::VecWithKvSize;
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
