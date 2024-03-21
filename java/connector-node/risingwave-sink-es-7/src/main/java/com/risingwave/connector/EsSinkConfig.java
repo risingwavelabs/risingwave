@@ -42,8 +42,7 @@ public class EsSinkConfig extends CommonSinkConfig {
     private String indexColumn;
 
     @JsonCreator
-    public EsSinkConfig(
-            @JsonProperty(value = "url") String url) {
+    public EsSinkConfig(@JsonProperty(value = "url") String url) {
         this.url = url;
         this.index = index;
     }

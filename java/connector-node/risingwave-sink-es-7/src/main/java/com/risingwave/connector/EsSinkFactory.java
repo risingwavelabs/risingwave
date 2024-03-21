@@ -21,6 +21,7 @@ import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog;
+import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.Map;
@@ -61,10 +62,18 @@ public class EsSinkFactory implements SinkFactory {
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
-        if (config.getIndexColumn()!= null){
-            if (!tableSchema.getColumns().containsKey(config.getIndexColumn())) {
+        if (config.getIndexColumn() != null) {
+            Data.DataType.TypeName typeName = tableSchema.getColumnType(config.getIndexColumn());
+            if (typeName == null) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription("Index column " + config.getIndexColumn() + " not found in schema")
+                        .withDescription(
+                                "Index column " + config.getIndexColumn() + " not found in schema")
+                        .asRuntimeException();
+            }
+            if (!typeName.equals(Data.DataType.TypeName.VARCHAR)) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "Index column must be of type String, but found " + typeName)
                         .asRuntimeException();
             }
             if (config.getIndex() != null) {
@@ -72,7 +81,7 @@ public class EsSinkFactory implements SinkFactory {
                         .withDescription("index and index_column cannot be set at the same time")
                         .asRuntimeException();
             }
-        }else{
+        } else {
             if (config.getIndex() == null) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription("index or index_column must be set")
