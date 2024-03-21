@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use cargo_emit::{rerun_if_changed, rustc_cfg};
-use npm_rs::{NodeEnv, NpmEnv};
+use npm_rs::NpmEnv;
 
 fn env_var_is_true(key: &str) -> bool {
     cargo_emit::rerun_if_env_changed!(key);
