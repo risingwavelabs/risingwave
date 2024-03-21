@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common_estimate_size::collections::VecWithKvSize;
+use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 
 use crate::cache::{new_unbounded, ManagedLruCache};
@@ -35,7 +35,7 @@ impl LookupCache {
     }
 
     /// Update a key after lookup cache misses.
-    pub fn batch_update(&mut self, key: OwnedRow, value: VecWithKvSize<OwnedRow>) {
+    pub fn batch_update(&mut self, key: OwnedRow, value: EstimatedVec<OwnedRow>) {
         self.data.push(key, LookupEntryState::new(value));
     }
 
@@ -115,8 +115,8 @@ impl LookupEntryState {
         }
     }
 
-    fn new(value: VecWithKvSize<OwnedRow>) -> Self {
-        let kv_heap_size = value.get_kv_size();
+    fn new(value: EstimatedVec<OwnedRow>) -> Self {
+        let kv_heap_size = value.estimated_heap_size();
         Self {
             inner: HashSet::from_iter(value),
             kv_heap_size: KvSize::with_size(kv_heap_size),

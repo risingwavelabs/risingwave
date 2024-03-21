@@ -15,12 +15,12 @@
 use crate::EstimateSize;
 
 #[derive(Clone)]
-pub struct VecWithKvSize<T: EstimateSize> {
+pub struct EstimatedVec<T: EstimateSize> {
     inner: Vec<T>,
     kv_heap_size: usize,
 }
 
-impl<T: EstimateSize> Default for VecWithKvSize<T> {
+impl<T: EstimateSize> Default for EstimatedVec<T> {
     fn default() -> Self {
         Self {
             inner: vec![],
@@ -29,13 +29,15 @@ impl<T: EstimateSize> Default for VecWithKvSize<T> {
     }
 }
 
-impl<T: EstimateSize> VecWithKvSize<T> {
+impl<T: EstimateSize> EstimateSize for EstimatedVec<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.kv_heap_size
+    }
+}
+
+impl<T: EstimateSize> EstimatedVec<T> {
     pub fn new() -> Self {
         Default::default()
-    }
-
-    pub fn get_kv_size(&self) -> usize {
-        self.kv_heap_size
     }
 
     pub fn push(&mut self, value: T) {
@@ -54,7 +56,7 @@ impl<T: EstimateSize> VecWithKvSize<T> {
     }
 }
 
-impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
+impl<T: EstimateSize> IntoIterator for EstimatedVec<T> {
     type IntoIter = std::vec::IntoIter<Self::Item>;
     type Item = T;
 
