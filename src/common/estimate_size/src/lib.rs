@@ -17,13 +17,13 @@
 
 pub mod collections;
 
+use std::cmp::Reverse;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 pub use risingwave_common_proc_macro::EstimateSize;
-use rust_decimal::Decimal as RustDecimal;
 
 /// The trait for estimating the actual memory usage of a struct.
 ///
@@ -93,6 +93,18 @@ impl EstimateSize for serde_json::Value {
     }
 }
 
+impl EstimateSize for jsonbb::Value {
+    fn estimated_heap_size(&self) -> usize {
+        self.capacity()
+    }
+}
+
+impl EstimateSize for jsonbb::Builder {
+    fn estimated_heap_size(&self) -> usize {
+        self.capacity()
+    }
+}
+
 impl<T1: EstimateSize, T2: EstimateSize> EstimateSize for (T1, T2) {
     fn estimated_heap_size(&self) -> usize {
         self.0.estimated_heap_size() + self.1.estimated_heap_size()
@@ -127,13 +139,21 @@ impl<T: ZeroHeapSize> EstimateSize for Box<[T]> {
     }
 }
 
+impl<T: EstimateSize> EstimateSize for Reverse<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size()
+    }
+}
+
 impl<T: ZeroHeapSize, const LEN: usize> EstimateSize for [T; LEN] {
     fn estimated_heap_size(&self) -> usize {
         0
     }
 }
 
-impl ZeroHeapSize for RustDecimal {}
+impl ZeroHeapSize for rust_decimal::Decimal {}
+
+impl ZeroHeapSize for ethnum::I256 {}
 
 impl<T> ZeroHeapSize for PhantomData<T> {}
 
