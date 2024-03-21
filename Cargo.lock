@@ -4189,9 +4189,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65b0a4ca5d917e684c9267e8e2bcec4b3e0c27dd91c84945c20c09ddff906cac"
+checksum = "b5c17111344df2de260140472855e2d84e0e8e3bffd4faed840f12f6de6f23da"
 dependencies = [
  "ahash 0.8.6",
  "bitflags 2.4.2",
@@ -8243,7 +8243,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
