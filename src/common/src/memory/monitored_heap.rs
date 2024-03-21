@@ -105,7 +105,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::estimate_size::collections::MemMonitoredHeap;
+    use super::MemMonitoredHeap;
     use crate::memory::MemoryContext;
     use crate::metrics::LabelGuardedIntGauge;
 
