@@ -1413,6 +1413,10 @@ pub enum Statement {
     /// FETCH FROM CURSOR
     CursorFetch {
         cursor_name: ObjectName,
+        count: Option<i32>,
+    },
+    CloseCursor {
+        cursor_name: Option<ObjectName>,
     },
     /// FLUSH the current barrier.
     ///
@@ -1986,9 +1990,20 @@ impl fmt::Display for Statement {
             Statement::DeclareCursor { binary, cursor_name, query } => {
                 write!(f, "DECLARE {} {}CURSOR FOR {}", cursor_name, if *binary { "BINARY " } else { "" }, query)
             },
-            Statement::CursorFetch { cursor_name } => {
-                write!(f, "FETCH NEXT FROM {}", cursor_name)
+            Statement::CursorFetch { cursor_name , count} => {
+                if let Some(count) = count {
+                    write!(f, "FETCH {} FROM {}",count, cursor_name)
+                } else {
+                    write!(f, "FETCH NEXT FROM {}", cursor_name)
+                }
             },
+            Statement::CloseCursor { cursor_name } => {
+                if let Some(name) = cursor_name {
+                    write!(f, "CLOSE {}", name)
+                } else {
+                    write!(f, "CLOSE ALL")
+                }
+            }
         }
     }
 }

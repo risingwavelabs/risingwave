@@ -165,7 +165,7 @@ impl SessionImpl {
                 AccessMode::ReadWrite => unimplemented!(),
                 AccessMode::ReadOnly => {
                     *txn = State::Initial;
-                    self.drop_cursors();
+                    self.drop_all_cursors();
                 }
             },
         }
@@ -186,7 +186,7 @@ impl SessionImpl {
                 AccessMode::ReadWrite => unimplemented!(),
                 AccessMode::ReadOnly => {
                     *txn = State::Initial;
-                    self.drop_cursors();
+                    self.drop_all_cursors();
                 }
             },
         }

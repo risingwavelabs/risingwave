@@ -128,8 +128,29 @@ impl Cursor {
     //     Ok(Some(row))
     // }
 
-    pub fn next(&mut self) -> Result<Option<Row>> {
-        Ok(self.all_rows.pop_front())
+    pub fn next(&mut self, count: Option<i32>) -> Result<Vec<Row>> {
+        let fetch_count = count.unwrap_or(1);
+        let mut ans = vec![];
+        if fetch_count == 0 {
+            if let Some(row) = self.all_rows.front() {
+                ans.push(row.clone());
+            }
+            Ok(ans)
+        } else if fetch_count < 0 {
+            Err(crate::error::ErrorCode::InternalError(
+                "FETCH a negative count is not supported yet".to_string(),
+            )
+            .into())
+        } else {
+            let mut cur = 0;
+            while cur < fetch_count
+                && let Some(row) = self.all_rows.pop_front()
+            {
+                cur += 1;
+                ans.push(row);
+            }
+            Ok(ans)
+        }
     }
 
     pub fn pg_descs(&self) -> Result<Vec<PgFieldDescriptor>> {
@@ -145,8 +166,19 @@ impl SessionImpl {
         }
     }
 
-    pub fn drop_cursors(&self) {
+    pub fn drop_all_cursors(&self) {
         self.cursors.lock().clear();
+    }
+
+    pub fn drop_cursor(&self, cursor_name: ObjectName) -> Result<()> {
+        match self.cursors.lock().remove(&cursor_name) {
+            Some(_) => Ok(()),
+            None => Err(ErrorCode::InternalError(format!(
+                "cursor \"{}\" does not exist",
+                cursor_name
+            ))
+            .into()),
+        }
     }
 
     pub fn add_cursor(&self, cursor_name: ObjectName, cursor: Cursor) -> Result<()> {
@@ -176,9 +208,9 @@ impl SessionImpl {
     //     }
     // }
 
-    pub fn curosr_next(&self, cursor_name: &ObjectName) -> Result<Option<Row>> {
+    pub fn curosr_next(&self, cursor_name: &ObjectName, count: Option<i32>) -> Result<Vec<Row>> {
         if let Some(cursor) = self.cursors.lock().get_mut(cursor_name) {
-            cursor.next()
+            cursor.next(count)
         } else {
             Err(
                 ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))

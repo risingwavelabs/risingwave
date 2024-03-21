@@ -102,6 +102,7 @@ pub enum StatementType {
     CANCEL_COMMAND,
     DECLARE_CURSOR,
     CURSOR_FETCH,
+    CLOSE_CURSOR,
     WAIT,
     KILL,
 }

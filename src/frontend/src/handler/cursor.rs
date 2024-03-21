@@ -53,20 +53,27 @@ pub async fn handle_declare_cursor(
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-pub async fn handle_cursor_fetch(
+pub fn handle_cursor_fetch(
     handler_args: HandlerArgs,
     cursor_name: ObjectName,
+    count: Option<i32>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let row = session.curosr_next(&cursor_name)?;
-    let row_set = if let Some(row) = row {
-        vec![row]
-    } else {
-        vec![]
-    };
+    let rows = session.curosr_next(&cursor_name, count)?;
     let pg_descs = session.pg_descs(&cursor_name)?;
-    // .values(futures::stream::iter(vec![Ok(row_set)]).boxed(), pg_descs)
     Ok(PgResponse::builder(StatementType::CURSOR_FETCH)
-        .values(row_set.into(), pg_descs)
+        .values(rows.into(), pg_descs)
         .into())
+}
+
+pub fn handle_close_cursor(
+    handler_args: HandlerArgs,
+    cursor_name: Option<ObjectName>,
+) -> Result<RwPgResponse> {
+    if let Some(name) = cursor_name {
+        handler_args.session.drop_cursor(name)?;
+    } else {
+        handler_args.session.drop_all_cursors();
+    }
+    Ok(PgResponse::empty_result(StatementType::CLOSE_CURSOR))
 }
