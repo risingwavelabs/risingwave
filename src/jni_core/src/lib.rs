@@ -1024,6 +1024,9 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceErrorTo
     msg: JString<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
+        if msg.is_null() {
+            return Ok(JNI_TRUE);
+        }
         let err_msg: String = env
             .get_string(&msg)
             .expect("source error message should be a java string")
