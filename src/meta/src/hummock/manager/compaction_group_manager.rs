@@ -116,22 +116,14 @@ impl HummockManager {
             // materialized_view
             pairs.push((
                 mv_table,
-                if create_stream_job_option.new_independent_compaction_group {
-                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
-                } else {
-                    CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
-                },
+                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
             ));
         }
         // internal states
         for table_id in internal_tables {
             pairs.push((
                 table_id,
-                if create_stream_job_option.new_independent_compaction_group {
-                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
-                } else {
-                    CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
-                },
+                CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
             ));
         }
         self.register_table_ids(&pairs).await?;
