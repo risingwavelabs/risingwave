@@ -56,7 +56,6 @@ use crate::model::{
     BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, ValTransaction,
 };
 use crate::storage::MetaStore;
-use crate::stream::CreateStreamingJobOption;
 
 impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
@@ -102,12 +101,12 @@ impl HummockManager {
             .clone()
     }
 
+    #[cfg(test)]
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
-        create_stream_job_option: CreateStreamingJobOption,
     ) -> Result<Vec<StateTableId>> {
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
@@ -1103,9 +1102,6 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                CreateStreamingJobOption {
-                    new_independent_compaction_group: false,
-                },
             )
             .await
             .unwrap();
@@ -1114,9 +1110,6 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_2.table_id().table_id),
                 table_fragment_2.internal_table_ids(),
-                CreateStreamingJobOption {
-                    new_independent_compaction_group: false,
-                },
             )
             .await
             .unwrap();
@@ -1143,9 +1136,6 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                CreateStreamingJobOption {
-                    new_independent_compaction_group: true,
-                },
             )
             .await
             .unwrap();

@@ -60,9 +60,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, GroupMetaChange,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
+    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
+    TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -242,10 +243,27 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
+#[derive(Debug, Clone)]
+pub struct NewTableFragmentInfo {
+    pub table_id: TableId,
+    pub mv_table_id: Option<TableId>,
+    pub internal_table_ids: Vec<TableId>,
+}
+
+impl NewTableFragmentInfo {
+    pub fn state_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.mv_table_id
+            .iter()
+            .chain(self.mv_table_id.iter())
+            .cloned()
+    }
+}
+
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
     pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    pub new_table_fragment_info: Option<NewTableFragmentInfo>,
 }
 
 impl CommitEpochInfo {
@@ -253,11 +271,13 @@ impl CommitEpochInfo {
         sstables: Vec<ExtendedSstableInfo>,
         new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        new_table_fragment_info: Option<NewTableFragmentInfo>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
+            new_table_fragment_info,
         }
     }
 
@@ -270,6 +290,7 @@ impl CommitEpochInfo {
             sstables.into_iter().map(Into::into).collect(),
             HashMap::new(),
             sst_to_context,
+            None,
         )
     }
 }
@@ -1566,6 +1587,7 @@ impl HummockManager {
             mut sstables,
             new_table_watermarks,
             sst_to_context,
+            new_table_fragment_info,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1603,6 +1625,63 @@ impl HummockManager {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = new_version_delta.id;
+
+        if let Some(new_fragment_table_info) = new_table_fragment_info {
+            if !new_fragment_table_info.internal_table_ids.is_empty() {
+                if let Some(levels) = old_version
+                    .levels
+                    .get(&(StaticCompactionGroupId::StateDefault as u64))
+                {
+                    for table_id in &new_fragment_table_info.internal_table_ids {
+                        if levels.member_table_ids.contains(table_id) {
+                            return Err(Error::CompactionGroup(format!(
+                                "table {} already in group {}",
+                                table_id,
+                                StaticCompactionGroupId::StateDefault as u64
+                            )));
+                        }
+                    }
+                }
+
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(StaticCompactionGroupId::StateDefault as u64)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                        table_ids_add: new_fragment_table_info.internal_table_ids,
+                        ..Default::default()
+                    })),
+                });
+            }
+
+            if let Some(table_id) = new_fragment_table_info.mv_table_id {
+                if let Some(levels) = old_version
+                    .levels
+                    .get(&(StaticCompactionGroupId::MaterializedView as u64))
+                {
+                    if levels.member_table_ids.contains(&table_id) {
+                        return Err(Error::CompactionGroup(format!(
+                            "table {} already in group {}",
+                            table_id,
+                            StaticCompactionGroupId::MaterializedView as u64
+                        )));
+                    }
+                }
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(StaticCompactionGroupId::MaterializedView as u64)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                        table_ids_add: vec![table_id],
+                        ..Default::default()
+                    })),
+                });
+            }
+        }
         let mut incorrect_ssts = vec![];
         let mut new_sst_id_number = 0;
         for ExtendedSstableInfo {
@@ -1950,10 +2029,10 @@ impl HummockManager {
             table.insert(self.env.meta_store_checked()).await?;
         }
         for group in &compaction_groups {
+            assert_ne!(group.id, StaticCompactionGroupId::NewCompactionGroup as u64);
             assert!(
-                group.id == StaticCompactionGroupId::NewCompactionGroup as u64
-                    || (group.id >= StaticCompactionGroupId::StateDefault as u64
-                    && group.id <= StaticCompactionGroupId::MaterializedView as u64),
+                    group.id >= StaticCompactionGroupId::StateDefault as u64
+                    && group.id <= StaticCompactionGroupId::MaterializedView as u64,
                 "compaction group id should be either NewCompactionGroup to create new one, or predefined static ones."
             );
         }

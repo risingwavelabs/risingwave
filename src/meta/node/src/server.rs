@@ -562,7 +562,6 @@ pub async fn start_service_as_election_leader(
             metadata_manager.clone(),
             barrier_scheduler.clone(),
             source_manager.clone(),
-            hummock_manager.clone(),
             stream_rpc_manager,
             scale_controller.clone(),
         )

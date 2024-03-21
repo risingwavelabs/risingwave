@@ -812,7 +812,7 @@ impl GlobalBarrierManagerContext {
         assert!(state.node_to_collect.is_empty());
         let resps = state.resps;
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps);
+        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps, &command_ctx);
         if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
             for notifier in notifiers {
                 notifier.notify_collection_failed(e.clone());
@@ -1099,6 +1099,7 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
 fn collect_commit_epoch_info(
     resps: Vec<BarrierCompleteResponse>,
+    command_ctx: &CommandContext,
 ) -> (CommitEpochInfo, Vec<CreateMviewProgress>) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
@@ -1118,6 +1119,15 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
+    let new_table_fragment_info = if let Command::CreateStreamingJob {
+        new_table_fragment_info,
+        ..
+    } = &command_ctx.command
+    {
+        Some(new_table_fragment_info.clone())
+    } else {
+        None
+    };
     let info = CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1137,6 +1147,7 @@ fn collect_commit_epoch_info(
                 .collect_vec(),
         ),
         sst_to_worker,
+        new_table_fragment_info,
     );
     (info, progresses)
 }

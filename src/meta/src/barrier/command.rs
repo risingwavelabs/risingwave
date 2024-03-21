@@ -41,6 +41,7 @@ use thiserror_ext::AsReport;
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
+use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{DdlType, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
@@ -160,6 +161,7 @@ pub enum Command {
         definition: String,
         ddl_type: DdlType,
         replace_table: Option<ReplaceTablePlan>,
+        new_table_fragment_info: NewTableFragmentInfo,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
