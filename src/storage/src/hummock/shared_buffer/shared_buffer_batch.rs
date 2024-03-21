@@ -258,12 +258,15 @@ impl SharedBufferBatch {
         batch_items
             .iter()
             .map(|(k, v)| {
-                k.len() + {
-                    match v {
-                        HummockValue::Put(val) => val.len(),
-                        HummockValue::Delete => 0,
+                std::mem::size_of::<HummockValue<Bytes>>()
+                    + std::mem::size_of::<Bytes>()
+                    + k.len()
+                    + {
+                        match v {
+                            HummockValue::Put(val) => val.len(),
+                            HummockValue::Delete => 0,
+                        }
                     }
-                }
             })
             .sum()
     }
