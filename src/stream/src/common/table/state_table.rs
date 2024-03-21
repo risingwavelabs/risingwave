@@ -67,6 +67,7 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
+use crate::consistency::insane;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -78,6 +79,8 @@ const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
 
+/// This macro is used to mark a point where we want to randomly discard the operation and early
+/// return, only in insane mode.
 macro_rules! insane_mode_discard_point {
     () => {{
         use rand::Rng;
@@ -360,7 +363,14 @@ where
             )
         };
 
-        let op_consistency_level = if is_consistent_op && !crate::consistency::insane() {
+        let is_consistent_op = if insane() {
+            // In insane mode, we will have inconsistent operations applied on the table, even if
+            // our executor code do not expect that.
+            false
+        } else {
+            is_consistent_op
+        };
+        let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde)
         } else {
