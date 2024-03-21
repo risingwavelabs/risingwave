@@ -73,7 +73,7 @@
     Table 1 { columns: [ $expr1 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -140,7 +140,7 @@
     Table 3 { columns: [ $expr2, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4
-    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -193,7 +193,7 @@
     Table 1 { columns: [ $expr1 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -256,7 +256,7 @@
     Table 3 { columns: [ $expr1 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4
-    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]

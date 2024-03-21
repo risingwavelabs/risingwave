@@ -170,16 +170,10 @@ impl StreamTableScan {
         }
 
         // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Boolean,
-            format!("{}_backfill_finished", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
 
         // `row_count` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Int64,
-            format!("{}_row_count", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
