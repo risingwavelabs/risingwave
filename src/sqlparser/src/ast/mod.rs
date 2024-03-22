@@ -329,12 +329,26 @@ pub enum Expr {
         low: Box<Expr>,
         high: Box<Expr>,
     },
+    /// LIKE
+    Like {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<char>,
+    },
+    /// ILIKE (case-insensitive LIKE)
+    ILike {
+        negated: bool,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<char>,
+    },
     /// `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     SimilarTo {
-        expr: Box<Expr>,
         negated: bool,
-        pat: Box<Expr>,
-        esc_text: Option<Box<Expr>>,
+        expr: Box<Expr>,
+        pattern: Box<Expr>,
+        escape_char: Option<char>,
     },
     /// Binary operation e.g. `1 + 1` or `foo > bar`
     BinaryOp {
@@ -535,24 +549,72 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::SimilarTo {
-                expr,
+            Expr::Like {
                 negated,
-                pat,
-                esc_text,
-            } => {
-                write!(
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}LIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}LIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}ILIKE {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
+                    f,
+                    "{} {}ILIKE {}",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern
+                ),
+            },
+            Expr::SimilarTo {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => match escape_char {
+                Some(ch) => write!(
+                    f,
+                    "{} {}SIMILAR TO {} ESCAPE '{}'",
+                    expr,
+                    if *negated { "NOT " } else { "" },
+                    pattern,
+                    ch
+                ),
+                _ => write!(
                     f,
                     "{} {}SIMILAR TO {}",
                     expr,
                     if *negated { "NOT " } else { "" },
-                    pat,
-                )?;
-                if let Some(et) = esc_text {
-                    write!(f, "ESCAPE {}", et)?;
-                }
-                Ok(())
-            }
+                    pattern
+                ),
+            },
             Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),

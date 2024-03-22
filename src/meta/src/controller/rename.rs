@@ -314,8 +314,8 @@ impl QueryRewriter<'_> {
             }
             Expr::SimilarTo {
                 expr,
-                pat,
-                esc_text,
+                pattern: pat,
+                escape_char: esc_text,
                 ..
             } => {
                 self.visit_expr(expr);

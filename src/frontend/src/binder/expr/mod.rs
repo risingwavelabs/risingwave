@@ -150,8 +150,8 @@ impl Binder {
             Expr::SimilarTo {
                 expr,
                 negated,
-                pat,
-                esc_text,
+                pattern: pat,
+                escape_char: esc_text,
             } => self.bind_similar_to(*expr, negated, *pat, esc_text),
             Expr::InList {
                 expr,
