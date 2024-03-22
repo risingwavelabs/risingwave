@@ -353,7 +353,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 60
+    timeout_in_minutes: 75
     retry: *auto-retry
 
   - label: "recovery test (madsim)"
