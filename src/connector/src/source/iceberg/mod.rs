@@ -157,16 +157,70 @@ impl SplitEnumerator for IcebergSplitEnumerator {
     }
 }
 
+pub enum IcebergTimeTravelInfo {
+    Version(i64),
+    TimeStampMs(i64),
+}
+
 impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
+        time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table().await?;
-        let snapshot_id = table.current_table_metadata().current_snapshot_id.unwrap();
+        let snapshot_id = match time_traval_info {
+            Some(IcebergTimeTravelInfo::Version(version)) => {
+                match &table.current_table_metadata().snapshots {
+                    Some(snapshots) => {
+                        let snapshot = snapshots
+                            .iter()
+                            .find(|snapshot| snapshot.snapshot_id == version);
+                        match snapshot {
+                            Some(snapshot) => snapshot.snapshot_id,
+                            None => {
+                                bail!("Cannot find the snapshot id in the iceberg table.");
+                            }
+                        }
+                    }
+                    None => {
+                        bail!("Cannot find the snapshots in the iceberg table.");
+                    }
+                }
+            }
+            Some(IcebergTimeTravelInfo::TimeStampMs(timestamp)) => {
+                match &table.current_table_metadata().snapshots {
+                    Some(snapshots) => {
+                        let snapshot = snapshots
+                            .iter()
+                            .filter(|snapshot| snapshot.timestamp_ms <= timestamp)
+                            .max_by_key(|snapshot| snapshot.timestamp_ms);
+                        match snapshot {
+                            Some(snapshot) => snapshot.snapshot_id,
+                            None => {
+                                // convert unix time to human readable time
+                                let time = chrono::NaiveDateTime::from_timestamp_millis(timestamp);
+                                if time.is_some() {
+                                    bail!("Cannot find a snapshot older than {}", time.unwrap());
+                                } else {
+                                    bail!("Cannot find a snapshot");
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        bail!("Cannot find the snapshots in the iceberg table.");
+                    }
+                }
+            }
+            None => match table.current_table_metadata().current_snapshot_id {
+                Some(snapshot_id) => snapshot_id,
+                None => bail!("Cannot find the current snapshot id in the iceberg table."),
+            },
+        };
         let mut files = vec![];
         for file in table.current_data_files().await? {
             if file.content != DataContentType::Data {

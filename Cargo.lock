@@ -9657,6 +9657,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smallvec",
+ "speedate",
  "tempfile",
  "thiserror",
  "thiserror-ext",
