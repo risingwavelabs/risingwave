@@ -385,6 +385,7 @@ where
         }
 
         match msg {
+            FeMessage::Gss => self.process_gss_msg().await?,
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg).await?,
@@ -454,11 +455,17 @@ where
         ))
     }
 
+    async fn process_gss_msg(&mut self) -> PsqlResult<()> {
+        // We don't support GSSAPI, so we just say no gracefully.
+        self.stream.write(&BeMessage::EncryptionResponseNo).await?;
+        Ok(())
+    }
+
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
         if let Some(context) = self.tls_context.as_ref() {
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
-            self.stream.write(&BeMessage::EncryptionResponseYes).await?;
+            self.stream.write(&BeMessage::EncryptionResponseSsl).await?;
             let ssl_stream = self.stream.ssl(context).await?;
             self.stream = Conn::Ssl(ssl_stream);
         } else {

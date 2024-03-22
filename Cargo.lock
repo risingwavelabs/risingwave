@@ -5881,15 +5881,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "718e8fae447df0c7e1ba7f5189829e63fd536945c8988d61444c19039f16b670"
-dependencies = [
- "hashbrown 0.13.2",
-]
-
-[[package]]
-name = "lru"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efa59af2ddfad1854ae27d75009d538d0998b4b2fd47083e743ac1a10e46c60"
@@ -8867,6 +8858,7 @@ dependencies = [
  "prometheus",
  "rand",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_connector",
  "risingwave_dml",
  "risingwave_expr",
@@ -9058,6 +9050,7 @@ dependencies = [
  "regex",
  "reqwest",
  "risingwave-fields-derive",
+ "risingwave_common_estimate_size",
  "risingwave_common_metrics",
  "risingwave_common_proc_macro",
  "risingwave_error",
@@ -9094,6 +9087,21 @@ dependencies = [
  "url",
  "uuid",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_common_estimate_size"
+version = "1.7.0-alpha"
+dependencies = [
+ "bytes",
+ "educe 0.5.7",
+ "ethnum",
+ "fixedbitset 0.5.0",
+ "jsonbb",
+ "lru 0.7.6",
+ "risingwave_common_proc_macro",
+ "rust_decimal",
+ "serde_json",
 ]
 
 [[package]]
@@ -9348,6 +9356,7 @@ dependencies = [
  "regex",
  "reqwest",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_jni_core",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -9511,6 +9520,7 @@ dependencies = [
  "parse-display",
  "paste",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
@@ -9550,6 +9560,7 @@ dependencies = [
  "openssl",
  "regex",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_expr",
  "risingwave_pb",
  "rust_decimal",
@@ -9676,6 +9687,7 @@ dependencies = [
  "parse-display",
  "prost 0.12.1",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_pb",
  "tracing",
  "workspace-hack",
@@ -10075,7 +10087,7 @@ dependencies = [
  "http 0.2.9",
  "hyper",
  "itertools 0.12.0",
- "lru 0.10.1",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -10295,6 +10307,7 @@ dependencies = [
  "rand",
  "risingwave_backup",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_common_service",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -10358,6 +10371,7 @@ dependencies = [
  "prost 0.12.1",
  "rand",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_connector",
  "risingwave_dml",
  "risingwave_expr",

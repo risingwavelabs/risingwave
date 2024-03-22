@@ -633,6 +633,7 @@ impl PlanRoot {
                 row_id_index,
                 SourceNodeKind::CreateTable,
                 context.clone(),
+                None,
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 

@@ -3779,21 +3779,61 @@ impl Parser {
     }
 
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-    pub fn parse_for_system_time_as_of_proctime(&mut self) -> Result<bool, ParserError> {
+    pub fn parse_as_of(&mut self) -> Result<Option<AsOf>, ParserError> {
         let after_for = self.parse_keyword(Keyword::FOR);
         if after_for {
-            self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
-            let ident = self.parse_identifier()?;
-            // Backward compatibility for now.
-            if ident.real_value() != "proctime" && ident.real_value() != "now" {
-                return parser_err!(format!("Expected proctime, found: {}", ident.real_value()));
+            if self.peek_nth_any_of_keywords(0, &[Keyword::SYSTEM_TIME]) {
+                self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
+                let token = self.next_token();
+                match token.token {
+                    Token::Word(w) => {
+                        let ident = w.to_ident()?;
+                        // Backward compatibility for now.
+                        if ident.real_value() == "proctime" || ident.real_value() == "now" {
+                            self.expect_token(&Token::LParen)?;
+                            self.expect_token(&Token::RParen)?;
+                            Ok(Some(AsOf::ProcessTime))
+                        } else {
+                            parser_err!(format!("Expected proctime, found: {}", ident.real_value()))
+                        }
+                    }
+                    Token::Number(s) => {
+                        let num = s.parse::<i64>().map_err(|e| {
+                            ParserError::ParserError(format!(
+                                "Could not parse '{}' as i64: {}",
+                                s, e
+                            ))
+                        });
+                        Ok(Some(AsOf::TimestampNum(num?)))
+                    }
+                    Token::SingleQuotedString(s) => Ok(Some(AsOf::TimestampString(s))),
+                    unexpected => self.expected(
+                        "Proctime(), Number or SingleQuotedString",
+                        unexpected.with_location(token.location),
+                    ),
+                }
+            } else {
+                self.expect_keywords(&[Keyword::SYSTEM_VERSION, Keyword::AS, Keyword::OF])?;
+                let token = self.next_token();
+                match token.token {
+                    Token::Number(s) => {
+                        let num = s.parse::<i64>().map_err(|e| {
+                            ParserError::ParserError(format!(
+                                "Could not parse '{}' as i64: {}",
+                                s, e
+                            ))
+                        });
+                        Ok(Some(AsOf::VersionNum(num?)))
+                    }
+                    Token::SingleQuotedString(s) => Ok(Some(AsOf::VersionString(s))),
+                    unexpected => self.expected(
+                        "Number or SingleQuotedString",
+                        unexpected.with_location(token.location),
+                    ),
+                }
             }
-
-            self.expect_token(&Token::LParen)?;
-            self.expect_token(&Token::RParen)?;
-            Ok(true)
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 
@@ -4728,13 +4768,9 @@ impl Parser {
                     with_ordinality,
                 })
             } else {
-                let for_system_time_as_of_proctime = self.parse_for_system_time_as_of_proctime()?;
+                let as_of = self.parse_as_of()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::Table {
-                    name,
-                    alias,
-                    for_system_time_as_of_proctime,
-                })
+                Ok(TableFactor::Table { name, alias, as_of })
             }
         }
     }

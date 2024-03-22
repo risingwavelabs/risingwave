@@ -39,10 +39,9 @@
 use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
-
-use crate::estimate_size::EstimateSize;
 
 #[derive(Default, Debug, Clone, EstimateSize)]
 pub struct BitmapBuilder {

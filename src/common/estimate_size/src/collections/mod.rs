@@ -16,15 +16,17 @@ use std::ops::{Deref, DerefMut};
 
 use super::{EstimateSize, KvSize};
 
-mod heap;
 pub mod lru;
-pub use heap::*;
 pub mod vecdeque;
 pub use vecdeque::EstimatedVecDeque;
 pub mod hashmap;
 pub use hashmap::EstimatedHashMap;
 pub mod btreemap;
 pub use btreemap::EstimatedBTreeMap;
+pub mod vec;
+pub use vec::EstimatedVec;
+pub mod hashset;
+pub use hashset::EstimatedHashSet;
 
 mod private {
     use super::*;
