@@ -128,7 +128,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             self.kv_heap_size_dec(charge);
             // The popped epoch must be monotonically decreasing.
             if epoch != last_epoch {
-                report(self, epoch, evicted);
+                report(self, last_epoch, evicted);
                 last_epoch = epoch;
                 evicted = 0;
             }
