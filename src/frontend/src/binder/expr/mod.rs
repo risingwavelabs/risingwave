@@ -147,12 +147,24 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::Like {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => self.bind_like::<false>(*expr, negated, *pattern, escape_char),
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => self.bind_like::<true>(*expr, negated, *pattern, escape_char),
             Expr::SimilarTo {
                 expr,
                 negated,
-                pattern: pat,
-                escape_char: esc_text,
-            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
+                pattern,
+                escape_char,
+            } => self.bind_similar_to(*expr, negated, *pattern, escape_char),
             Expr::InList {
                 expr,
                 list,
@@ -443,22 +455,49 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    fn bind_like<const CASE_INSENSITIVE: bool>(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        pattern: Expr,
+        escape_char: Option<char>,
+    ) -> Result<ExprImpl> {
+        let expr = self.bind_expr_inner(expr)?;
+        let pattern = self.bind_expr_inner(pattern)?;
+        if let Some(_) = escape_char {
+            bail_not_implemented!(issue = 15701, "LIKE with escape character is not supported");
+        }
+        let expr_type = if CASE_INSENSITIVE {
+            ExprType::ILike
+        } else {
+            ExprType::Like
+        };
+        let func_call =
+            FunctionCall::new_unchecked(expr_type, vec![expr, pattern], DataType::Boolean);
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![func_call.into()], DataType::Boolean)
+        } else {
+            func_call
+        };
+        Ok(func_call.into())
+    }
+
     /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     pub(super) fn bind_similar_to(
         &mut self,
         expr: Expr,
         negated: bool,
-        pat: Expr,
-        esc_text: Option<Box<Expr>>,
+        pattern: Expr,
+        escape_char: Option<char>,
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
-        let pat = self.bind_expr_inner(pat)?;
+        let pattern = self.bind_expr_inner(pattern)?;
 
-        let esc_inputs = if let Some(et) = esc_text {
-            let esc_text = self.bind_expr_inner(*et)?;
-            vec![pat, esc_text]
+        let esc_inputs = if let Some(escape_char) = escape_char {
+            let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
+            vec![pattern, escape_char]
         } else {
-            vec![pat]
+            vec![pattern]
         };
 
         let esc_call =
