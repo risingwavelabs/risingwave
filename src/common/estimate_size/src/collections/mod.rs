@@ -25,6 +25,8 @@ pub mod btreemap;
 pub use btreemap::EstimatedBTreeMap;
 pub mod vec;
 pub use vec::EstimatedVec;
+pub mod hashset;
+pub use hashset::EstimatedHashSet;
 
 mod private {
     use super::*;
