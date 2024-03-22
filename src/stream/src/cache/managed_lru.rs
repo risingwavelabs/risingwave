@@ -110,9 +110,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     /// Evict epochs lower than the watermark
     fn evict_by_epoch(&mut self, epoch: u64) {
-        let mut last_epoch = 0; // real epoch must be greater than 0
-        let mut evicted = 0;
-
         let report = |lru: &Self, epoch: u64, evicted: usize| {
             lru.memory_evicted_metrics
                 .with_guarded_label_values(&[
@@ -123,19 +120,22 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 .set(evicted as _);
         };
 
-        while let Some((key, value, epoch)) = self.inner.pop_lru_by_epoch(epoch) {
+        let mut last_epoch = 0; // real epoch must be greater than 0
+        let mut evicted = 0;
+
+        while let Some((key, value, e)) = self.inner.pop_lru_by_epoch(epoch) {
             let charge = key.estimated_size() + value.estimated_size();
             self.kv_heap_size_dec(charge);
             // The popped epoch must be monotonically decreasing.
-            if epoch != last_epoch {
+            if e != last_epoch {
                 report(self, last_epoch, evicted);
-                last_epoch = epoch;
+                last_epoch = e;
                 evicted = 0;
             }
             evicted += charge;
         }
         if evicted > 0 {
-            report(self, epoch, evicted);
+            report(self, last_epoch, evicted);
         }
         self.report_evicted_watermark_time(epoch);
     }
