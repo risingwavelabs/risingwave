@@ -66,9 +66,7 @@ pub fn get_split_offset_mapping_from_chunk(
             let (_, row, _) = chunk.row_at(i);
             let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-            split_offset_mapping
-                .entry(split_id)
-                .or_insert(offset.to_string());
+            split_offset_mapping.insert(split_id, offset.to_string());
         }
     } else {
         for (_, row) in chunk.rows() {
