@@ -41,7 +41,7 @@
     "react-syntax-highlighter": "^15.5.0",
     "recharts": "^2.3.2",
     "styled-components": "5.3.0",
-    "ts-proto": "^1.156.2"
+    "ts-proto": "^1.169.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.2",
