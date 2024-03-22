@@ -126,13 +126,12 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         while let Some((key, value, epoch)) = self.inner.pop_lru_by_epoch(epoch) {
             let charge = key.estimated_size() + value.estimated_size();
             self.kv_heap_size_dec(charge);
-            if epoch == last_epoch {
-                evicted += charge;
-            } else {
+            if epoch != last_epoch {
                 report(self, epoch, evicted);
                 last_epoch = epoch;
                 evicted = 0;
             }
+            evicted += charge;
         }
         if evicted > 0 {
             report(self, epoch, evicted);
