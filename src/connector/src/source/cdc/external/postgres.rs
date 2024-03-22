@@ -81,10 +81,10 @@ enum MaybeTlsConnector {
 
 impl<S> TlsConnect<S> for MaybeTlsConnector
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     type Error = Box<dyn Error + Send + Sync>;
-    type Future = MaybeTlsFuture<MaybeTlsStream<S>, Self::Error>;
+    type Future = MaybeTlsFuture<Self::Stream, Self::Error>;
     type Stream = MaybeTlsStream<S>;
 
     fn connect(self, stream: S) -> Self::Future {
@@ -185,6 +185,7 @@ enum MaybeTlsFuture<S, E> {
 
 impl<S, E> Future for MaybeTlsFuture<MaybeTlsStream<S>, E>
 where
+    MaybeTlsStream<S>: Sync + Send,
     E: std::convert::From<tokio_postgres::tls::NoTlsError>,
 {
     type Output = Result<MaybeTlsStream<S>, E>;
