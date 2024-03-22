@@ -2085,7 +2085,7 @@ impl DdlController {
                 }
             }
 
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(1)).await;
         }
         Err(MetaError::cancelled(format!(
             "timeout after {timeout_secs}s"
