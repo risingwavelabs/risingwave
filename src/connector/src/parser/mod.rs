@@ -161,6 +161,63 @@ impl SourceStreamChunkBuilder {
     }
 }
 
+/// A builder for building a [`StreamChunk`] that contains only heartbeat rows.
+/// Some connectors may emit heartbeat messages to the downstream, and the cdc source
+/// rely on the heartbeat messages to keep the source offset up-to-date with upstream.
+pub struct HeartbeatChunkBuilder {
+    builder: SourceStreamChunkBuilder,
+}
+
+impl HeartbeatChunkBuilder {
+    pub fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
+        let builders = descs
+            .iter()
+            .map(|desc| desc.data_type.create_array_builder(cap))
+            .collect();
+
+        Self {
+            builder: SourceStreamChunkBuilder {
+                descs,
+                builders,
+                op_builder: Vec::with_capacity(cap),
+            },
+        }
+    }
+
+    pub fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
+        self.builder.row_writer()
+    }
+
+    /// Consumes the builder and returns a [`StreamChunk`] with all rows marked as invisible
+    fn finish(self) -> StreamChunk {
+        // heartbeat chunk should be invisible
+        let builder = self.builder;
+        let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
+        StreamChunk::with_visibility(
+            builder.op_builder,
+            builder
+                .builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect(),
+            visibility.finish(),
+        )
+    }
+
+    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
+    /// the builders of the next [`StreamChunk`].
+    #[must_use]
+    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.builder.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.builder.is_empty()
+    }
+}
+
 /// `SourceStreamChunkRowWriter` is responsible to write one or more records to the [`StreamChunk`],
 /// where each contains either one row (Insert/Delete) or two rows (Update) that can be written atomically.
 ///
@@ -640,7 +697,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
-    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
+    let mut heartbeat_builder = HeartbeatChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
@@ -787,7 +844,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         // we must emit heartbeat chunk before the data chunk,
         // otherwise the source offset could be backward due to the heartbeat
         if !heartbeat_builder.is_empty() {
-            yield heartbeat_builder.take_heartbeat(0);
+            yield heartbeat_builder.take(0);
         }
 
         // If we are not in a transaction, we should yield the chunk now.
