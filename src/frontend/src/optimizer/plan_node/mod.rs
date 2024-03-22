@@ -454,6 +454,13 @@ impl PlanRef {
 
                 // rewrite the *entire* predicate for `LogicalShare`
                 // before pushing down to whatever plan node(s)
+                // ps: the reason here contains a "special" optimization
+                // rather than directly apply explicit rule in stream or
+                // batch plan optimization, is because predicate push down
+                // will *instantly* push down all predicates, and rule(s)
+                // can not be applied in the middle.
+                // thus we need some on-the-fly (in the middle) rewrite
+                // technique to help with this kind of optimization.
                 let mut expr_rewriter = ExpressionSimplifyRewriter {};
                 let mut new_predicate = Condition::true_cond();
 
