@@ -572,6 +572,10 @@ impl LogicalOptimizer {
             bail!("Scalar subquery might produce more than one row.");
         }
 
+        // Same to batch plan optimization, this rule shall be applied before
+        // predicate push down
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
+
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
@@ -632,8 +636,6 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
 
-        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -668,6 +670,11 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
+
+        // Filter simplification must be applied before predicate push-down
+        // otherwise the filter for some nodes (e.g., `LogicalScan`)
+        // may not be properly applied.
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
 
         // Predicate Push-down
         let mut last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
@@ -729,8 +736,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
-
-        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

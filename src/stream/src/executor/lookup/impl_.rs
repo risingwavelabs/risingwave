@@ -21,7 +21,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_common_estimate_size::collections::VecWithKvSize;
+use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -370,7 +370,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
-        let mut all_rows = VecWithKvSize::new();
+        let mut all_rows = EstimatedVec::new();
         // Drop the stream.
         {
             let all_data_iter = match self.arrangement.use_current_epoch {
