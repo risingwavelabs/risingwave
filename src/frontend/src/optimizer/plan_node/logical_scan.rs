@@ -21,6 +21,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -69,7 +70,7 @@ impl LogicalScan {
         table_catalog: Arc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
         table_cardinality: Cardinality,
     ) -> Self {
         let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
@@ -80,7 +81,7 @@ impl LogicalScan {
             indexes,
             ctx,
             Condition::true_cond(),
-            for_system_time_as_of_proctime,
+            as_of,
             table_cardinality,
         )
         .into()
@@ -90,8 +91,8 @@ impl LogicalScan {
         &self.core.table_name
     }
 
-    pub fn for_system_time_as_of_proctime(&self) -> bool {
-        self.core.for_system_time_as_of_proctime
+    pub fn as_of(&self) -> Option<AsOf> {
+        self.core.as_of.clone()
     }
 
     /// The cardinality of the table **without** applying the predicate.
@@ -247,7 +248,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
-            self.for_system_time_as_of_proctime(),
+            self.as_of(),
             self.table_cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
@@ -266,7 +267,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
-            self.for_system_time_as_of_proctime(),
+            self.as_of(),
             self.table_cardinality(),
         )
         .into()
@@ -280,7 +281,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
-            self.for_system_time_as_of_proctime(),
+            self.as_of(),
             self.table_cardinality(),
         )
         .into()
