@@ -21,7 +21,6 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::State;
@@ -47,7 +46,7 @@ use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
@@ -91,18 +90,10 @@ impl GlobalBarrierManagerContext {
                     .collect();
                 debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
-                let unregister_table_ids = mgr
+                let _unregister_table_ids = mgr
                     .fragment_manager
                     .drop_table_fragments_vec(&to_drop_streaming_ids)
                     .await?;
-
-                // unregister compaction group for dirty table fragments.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        unregister_table_ids,
-                    ))
-                    .await;
 
                 // clean up source connector dirty changes.
                 self.source_manager
@@ -110,22 +101,8 @@ impl GlobalBarrierManagerContext {
                     .await;
             }
             MetadataManager::V2(mgr) => {
-                let ReleaseContext {
-                    state_table_ids,
-                    source_ids,
-                    ..
-                } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
-
-                // unregister compaction group for cleaned state tables.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        state_table_ids
-                            .into_iter()
-                            .map(|id| id as StateTableId)
-                            .collect_vec(),
-                    ))
-                    .await;
+                let ReleaseContext { source_ids, .. } =
+                    mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister cleaned sources.
                 self.source_manager
@@ -134,6 +111,28 @@ impl GlobalBarrierManagerContext {
             }
         }
 
+        Ok(())
+    }
+
+    async fn purge_state_table_from_hummock(&self) -> MetaResult<()> {
+        let all_state_table_ids = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_all_state_table_ids()
+                .await?
+                .into_iter()
+                .map(|id| id as u32)
+                .collect_vec(),
+        };
+        // TODO: may return with result
+        self.hummock_manager.purge(&all_state_table_ids).await;
         Ok(())
     }
 
@@ -323,12 +322,9 @@ impl GlobalBarrierManagerContext {
                         .fragment_manager
                         .drop_table_fragments_vec(&cancelled)
                         .await?;
-                    self.env
-                        .notification_manager()
-                        .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                            unregister_table_ids,
-                        ))
-                        .await;
+                    self.hummock_manager
+                        .unregister_table_ids(&unregister_table_ids)
+                        .await?;
                 }
                 MetadataManager::V2(mgr) => {
                     for job_id in cancelled {
@@ -336,6 +332,7 @@ impl GlobalBarrierManagerContext {
                             .try_abort_creating_streaming_job(job_id.table_id as _, true)
                             .await?;
                     }
+                    // TODO: may unregister hummock table id here?
                 }
             }
         }
@@ -368,6 +365,11 @@ impl GlobalBarrierManager {
             .clean_dirty_streaming_jobs()
             .await
             .expect("clean dirty streaming jobs");
+
+        self.context
+            .purge_state_table_from_hummock()
+            .await
+            .expect("purge state table from hummock");
 
         self.context.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();

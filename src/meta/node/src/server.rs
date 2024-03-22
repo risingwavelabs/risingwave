@@ -19,7 +19,6 @@ use anyhow::Context;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
-use itertools::Itertools;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::config::MetaBackend;
@@ -567,24 +566,6 @@ pub async fn start_service_as_election_leader(
         )
         .unwrap(),
     );
-
-    let all_state_table_ids = match &metadata_manager {
-        MetadataManager::V1(mgr) => mgr
-            .catalog_manager
-            .list_tables()
-            .await
-            .into_iter()
-            .map(|t| t.id)
-            .collect_vec(),
-        MetadataManager::V2(mgr) => mgr
-            .catalog_controller
-            .list_all_state_table_ids()
-            .await?
-            .into_iter()
-            .map(|id| id as u32)
-            .collect_vec(),
-    };
-    hummock_manager.purge(&all_state_table_ids).await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(

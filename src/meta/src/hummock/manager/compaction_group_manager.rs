@@ -262,7 +262,7 @@ impl HummockManager {
     }
 
     #[named]
-    async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         if table_ids.is_empty() {
             return Ok(());
         }

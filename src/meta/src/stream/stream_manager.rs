@@ -30,7 +30,7 @@ use tracing::Instrument;
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
 use crate::hummock::NewTableFragmentInfo;
-use crate::manager::{DdlType, LocalNotification, MetaSrvEnv, MetadataManager, StreamingJob};
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -537,18 +537,14 @@ impl GlobalStreamManager {
         if !removed_actors.is_empty() {
             let _ = self
                 .barrier_scheduler
-                .run_command(Command::DropStreamingJobs(removed_actors))
+                .run_command(Command::DropStreamingJobs {
+                    actors: removed_actors,
+                    unregister_state_table_ids: state_table_ids,
+                })
                 .await
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
-
-            self.env
-                .notification_manager()
-                .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                    state_table_ids,
-                ))
-                .await;
         }
     }
 
@@ -576,19 +572,14 @@ impl GlobalStreamManager {
             .collect_vec();
         let _ = self
             .barrier_scheduler
-            .run_command(Command::DropStreamingJobs(dropped_actors))
+            .run_command(Command::DropStreamingJobs {
+                actors: dropped_actors,
+                unregister_state_table_ids: unregister_table_ids,
+            })
             .await
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
-
-        // Unregister from compaction group afterwards.
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                unregister_table_ids,
-            ))
-            .await;
 
         Ok(())
     }

@@ -22,6 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
@@ -42,7 +43,7 @@ use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
 use crate::hummock::NewTableFragmentInfo;
-use crate::manager::{DdlType, LocalNotification, MetadataManager, WorkerId};
+use crate::manager::{DdlType, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -142,7 +143,10 @@ pub enum Command {
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropStreamingJobs(Vec<ActorId>),
+    DropStreamingJobs {
+        actors: Vec<ActorId>,
+        unregister_state_table_ids: Vec<StateTableId>,
+    },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
@@ -216,7 +220,7 @@ impl Command {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
-            Command::DropStreamingJobs(actors) => Some(CommandActorChanges {
+            Command::DropStreamingJobs { actors, .. } => Some(CommandActorChanges {
                 to_add: Default::default(),
                 to_remove: actors.iter().cloned().collect(),
             }),
@@ -403,7 +407,7 @@ impl CommandContext {
                     }))
                 }
 
-                Command::DropStreamingJobs(actors) => Some(Mutation::Stop(StopMutation {
+                Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                     actors: actors.clone(),
                 })),
 
@@ -795,9 +799,17 @@ impl CommandContext {
                     .await;
             }
 
-            Command::DropStreamingJobs(actors) => {
+            Command::DropStreamingJobs {
+                actors,
+                unregister_state_table_ids: unregister_table_ids,
+            } => {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
+
+                self.barrier_manager_context
+                    .hummock_manager
+                    .unregister_table_ids(unregister_table_ids)
+                    .await?;
             }
 
             Command::CancelStreamingJob(table_fragments) => {
@@ -817,12 +829,9 @@ impl CommandContext {
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
                 self.barrier_manager_context
-                    .env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        table_ids,
-                    ))
-                    .await;
+                    .hummock_manager
+                    .unregister_table_ids(&table_ids)
+                    .await?;
 
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {

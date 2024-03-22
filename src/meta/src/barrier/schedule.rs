@@ -90,7 +90,7 @@ impl ScheduledQueue {
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
                 scheduled.command,
-                Command::DropStreamingJobs(_) | Command::CancelStreamingJob(_)
+                Command::DropStreamingJobs { .. } | Command::CancelStreamingJob(_)
             )
         {
             return Err(MetaError::unavailable(reason));
@@ -428,8 +428,11 @@ impl ScheduledBarriers {
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs(actor_ids) => {
-                    drop_table_ids.extend(actor_ids);
+                Command::DropStreamingJobs {
+                    unregister_state_table_ids: unregister_table_ids,
+                    ..
+                } => {
+                    drop_table_ids.extend(unregister_table_ids);
                 }
                 Command::CancelStreamingJob(table_fragments) => {
                     let table_id = table_fragments.table_id();
