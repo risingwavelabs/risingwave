@@ -32,6 +32,7 @@ use crate::types::Row;
 #[derive(Debug)]
 pub enum FeMessage {
     Ssl,
+    Gss,
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
     Parse(FeParseMessage),
@@ -338,6 +339,7 @@ impl FeStartupMessage {
             196608 => Ok(FeMessage::Startup(FeStartupMessage::build_with_payload(
                 &payload,
             )?)),
+            80877104 => Ok(FeMessage::Gss),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
             80877102 => FeCancelMessage::parse(Bytes::from(payload)),
@@ -382,7 +384,8 @@ pub enum BeMessage<'a> {
     CommandComplete(BeCommandCompleteMessage),
     NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
-    EncryptionResponseYes,
+    EncryptionResponseSsl,
+    EncryptionResponseGss,
     EncryptionResponseNo,
     EmptyQueryResponse,
     ParseComplete,
@@ -637,8 +640,12 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(())).unwrap();
             }
 
-            BeMessage::EncryptionResponseYes => {
+            BeMessage::EncryptionResponseSsl => {
                 buf.put_u8(b'S');
+            }
+
+            BeMessage::EncryptionResponseGss => {
+                buf.put_u8(b'G');
             }
 
             BeMessage::EncryptionResponseNo => {
