@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use cargo_emit::{rerun_if_changed, rustc_cfg};
-use npm_rs::{NodeEnv, NpmEnv};
+use npm_rs::NpmEnv;
 
 fn env_var_is_true(key: &str) -> bool {
     cargo_emit::rerun_if_env_changed!(key);
@@ -42,7 +42,6 @@ fn build() -> anyhow::Result<()> {
     rerun_if_changed!(format!("{DASHBOARD_DIR}/components"));
 
     let exit_status = NpmEnv::default()
-        .with_node_env(&NodeEnv::Production)
         .set_path(DASHBOARD_DIR)
         .init_env()
         .install(None)
