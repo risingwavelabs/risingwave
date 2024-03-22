@@ -43,6 +43,7 @@ prost = { workspace = true }
 rand = "0.8"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -113,7 +114,7 @@ harness = false
 # debug = true
 
 [[bench]]
-name = "bench_lru_cache"
+name = "bench_block_cache"
 harness = false
 
 [[bench]]

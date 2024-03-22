@@ -22,7 +22,6 @@ use futures::StreamExt;
 use futures_async_stream::for_await;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -30,6 +29,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -627,7 +627,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
-use risingwave_common::estimate_size::KvSize;
+use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;

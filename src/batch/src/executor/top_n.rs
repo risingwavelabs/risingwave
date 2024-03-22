@@ -19,13 +19,12 @@ use std::vec::Vec;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::collections::MemMonitoredHeap;
-use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::memory::MemoryContext;
+use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::{encode_chunk, MemcmpEncoded};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
