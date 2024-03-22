@@ -431,7 +431,7 @@ impl PlanRef {
             // predicate before we merge the predicates and pushdown.
             let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
             if parent_has_pushed == ctx.get_parent_num(logical_share) {
-                let mut merge_predicate = ctx
+                let merge_predicate = ctx
                     .take_predicate(self.id())
                     .expect("must have predicate")
                     .into_iter()
@@ -452,15 +452,21 @@ impl PlanRef {
                     .reduce(|a, b| a.or(b))
                     .unwrap();
 
-                if merge_predicate.conjunctions.len() == 1 {
-                    let mut expr_rewriter = ExpressionSimplifyRewriter {};
-                    merge_predicate = Condition::with_expr(
-                        expr_rewriter.rewrite_cond(merge_predicate.conjunctions[0].clone()),
+                // rewrite the *entire* predicate for `LogicalShare`
+                // before pushing down to whatever plan node(s)
+                let mut expr_rewriter = ExpressionSimplifyRewriter {};
+                let mut new_predicate = Condition::true_cond();
+
+                for c in merge_predicate.conjunctions {
+                    let c = Condition::with_expr(
+                        expr_rewriter.rewrite_cond(c),
                     );
+
+                    new_predicate = new_predicate.and(c);
                 }
 
                 let input: PlanRef = logical_share.input();
-                let input = input.predicate_pushdown(merge_predicate, ctx);
+                let input = input.predicate_pushdown(new_predicate, ctx);
                 logical_share.replace_input(input);
             }
             LogicalFilter::create(self.clone(), predicate)
