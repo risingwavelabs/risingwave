@@ -992,7 +992,6 @@ mod tests {
     use crate::hummock::test_utils::setup_compute_env;
     use crate::hummock::HummockManager;
     use crate::model::TableFragments;
-    use crate::stream::CreateStreamingJobOption;
 
     #[tokio::test]
     async fn test_inner() {
