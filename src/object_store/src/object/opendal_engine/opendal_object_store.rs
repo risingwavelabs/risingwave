@@ -38,6 +38,7 @@ pub enum EngineType {
     Memory,
     Hdfs,
     Gcs,
+    Minio,
     S3,
     Obs,
     Oss,
@@ -191,6 +192,7 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::Minio => "Minio",
             EngineType::S3 => "S3",
             EngineType::Gcs => "Gcs",
             EngineType::Obs => "Obs",

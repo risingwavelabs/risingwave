@@ -62,13 +62,13 @@ type PartId = i32;
 
 /// MinIO and S3 share the same minimum part ID and part size.
 const MIN_PART_ID: PartId = 1;
+// TODO: we should do some benchmark to determine the proper part size for MinIO
+const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 /// The minimum number of bytes that is buffered before they are uploaded as a part.
 /// Its value must be greater than the minimum part size of 5MiB.
 ///
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html>
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
-// TODO: we should do some benchmark to determine the proper part size for MinIO
-const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 /// The number of S3/MinIO bucket prefixes
 const NUM_BUCKET_PREFIXES: u32 = 256;
 /// Stop multipart uploads that don't complete within a specified number of days after being
