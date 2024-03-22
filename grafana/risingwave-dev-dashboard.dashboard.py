@@ -1068,6 +1068,20 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
+                    "Executor Evicted Cache Memory",
+                    "The operator-level evicted memory statistics collected by each LRU cache",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_evicted')}) by (table_id, epoch)",
+                            "table {{table_id}} epoch: {{epoch}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('stream_memory_evicted')}",
+                            "table {{table_id}} actor {{actor_id}} epoch: {{epoch}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
                     "Executor Cache Memory Usage of Materialized Views",
                     "Memory usage aggregated by materialized views",
                     [

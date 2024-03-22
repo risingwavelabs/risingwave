@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use lru::{DefaultHasher, LruCache};
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::{LabelGuardedIntGauge, LabelGuardedIntGaugeVec};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common_estimate_size::EstimateSize;
 
@@ -40,10 +40,11 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     kv_heap_size: usize,
     /// The metrics of memory usage
     memory_usage_metrics: LabelGuardedIntGauge<3>,
+    /// The metrics of evicted memory by epoch.
+    memory_evicted_metrics: LabelGuardedIntGaugeVec<3>,
     // The metrics of evicted watermark time
     lru_evicted_watermark_time_ms: LabelGuardedIntGauge<3>,
     // Metrics info
-    #[expect(dead_code)]
     metrics_info: MetricsInfo,
     /// The size reported last time
     last_reported_size_bytes: usize,
@@ -73,6 +74,8 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             ]);
         memory_usage_metrics.set(0.into());
 
+        let memory_evicted_metrics = metrics_info.metrics.stream_memory_evicted.clone();
+
         let lru_evicted_watermark_time_ms = metrics_info
             .metrics
             .lru_evicted_watermark_time_ms
@@ -87,6 +90,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             watermark_epoch,
             kv_heap_size: 0,
             memory_usage_metrics,
+            memory_evicted_metrics,
             lru_evicted_watermark_time_ms,
             metrics_info,
             last_reported_size_bytes: 0,
@@ -106,8 +110,32 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     /// Evict epochs lower than the watermark
     fn evict_by_epoch(&mut self, epoch: u64) {
-        while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
-            self.kv_heap_size_dec(key.estimated_size() + value.estimated_size());
+        let mut last_epoch = 0; // real epoch must be greater than 0
+        let mut evicted = 0;
+
+        let report = |lru: &Self, epoch: u64, evicted: usize| {
+            lru.memory_evicted_metrics
+                .with_guarded_label_values(&[
+                    &lru.metrics_info.table_id,
+                    &lru.metrics_info.actor_id,
+                    &epoch.to_string(),
+                ])
+                .set(evicted as _);
+        };
+
+        while let Some((key, value, epoch)) = self.inner.pop_lru_by_epoch(epoch) {
+            let charge = key.estimated_size() + value.estimated_size();
+            self.kv_heap_size_dec(charge);
+            if epoch == last_epoch {
+                evicted += charge;
+            } else {
+                report(self, epoch, evicted);
+                last_epoch = epoch;
+                evicted = 0;
+            }
+        }
+        if evicted > 0 {
+            report(self, epoch, evicted);
         }
         self.report_evicted_watermark_time(epoch);
     }

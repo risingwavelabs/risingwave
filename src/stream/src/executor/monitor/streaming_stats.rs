@@ -186,6 +186,7 @@ pub struct StreamingMetrics {
 
     // Memory
     pub stream_memory_usage: LabelGuardedIntGaugeVec<3>,
+    pub stream_memory_evicted: LabelGuardedIntGaugeVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -998,6 +999,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let stream_memory_evicted = register_guarded_int_gauge_vec_with_registry!(
+            "stream_memory_evicted",
+            "Memory evicted for stream executors",
+            &["table_id", "actor_id", "epoch"],
+            registry
+        )
+        .unwrap();
+
         let iceberg_write_qps = register_guarded_int_counter_vec_with_registry!(
             "iceberg_write_qps",
             "The qps of iceberg writer",
@@ -1139,6 +1148,7 @@ impl StreamingMetrics {
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,
+            stream_memory_evicted,
         }
     }
 
