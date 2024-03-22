@@ -39,7 +39,7 @@ use super::{AddMutation, Executor, UpdateMutation, Watermark};
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Message, Mutation, StreamConsumer};
-use crate::task::{ActorId, DispatcherId, SharedContext};
+use crate::task::{ActorId, DispatcherId, FragmentId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -100,6 +100,7 @@ impl DispatcherMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: u32,
+    fragment_id: u32,
     context: Arc<SharedContext>,
     metrics: DispatcherMetrics,
 }
@@ -170,7 +171,7 @@ impl DispatchExecutorInner {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
             .map(|d| {
-                DispatcherImpl::new(&self.context, self.actor_id, d)
+                DispatcherImpl::new(&self.context, self.actor_id, self.fragment_id, d)
                     .map(|dispatcher| self.metrics.monitor_dispatcher(dispatcher))
             })
             .try_collect()?;
@@ -202,7 +203,13 @@ impl DispatchExecutorInner {
         let outputs: Vec<_> = update
             .added_downstream_actor_id
             .iter()
-            .map(|&id| new_output(&self.context, self.actor_id, id))
+            .map(|&id| {
+                new_output(
+                    &self.context,
+                    (self.actor_id, id),
+                    (self.fragment_id, update.dispatcher_id as u32),
+                )
+            })
             .try_collect()?;
 
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
@@ -368,6 +375,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
+                fragment_id,
                 context,
                 metrics,
             },
@@ -429,12 +437,19 @@ impl DispatcherImpl {
     pub fn new(
         context: &SharedContext,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         dispatcher: &PbDispatcher,
     ) -> StreamResult<Self> {
         let outputs = dispatcher
             .downstream_actor_id
             .iter()
-            .map(|&down_id| new_output(context, actor_id, down_id))
+            .map(|&down_id| {
+                new_output(
+                    context,
+                    (actor_id, down_id),
+                    (fragment_id, dispatcher.dispatcher_id as u32),
+                )
+            })
             .collect::<StreamResult<Vec<_>>>()?;
 
         let output_indices = dispatcher
@@ -1175,6 +1190,7 @@ mod tests {
         let broadcast_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
+            fragment_id,
             &PbDispatcher {
                 r#type: DispatcherType::Broadcast as _,
                 dispatcher_id: broadcast_dispatcher_id,
@@ -1188,6 +1204,7 @@ mod tests {
         let simple_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
+            fragment_id,
             &PbDispatcher {
                 r#type: DispatcherType::Simple as _,
                 dispatcher_id: simple_dispatcher_id,
@@ -1211,7 +1228,13 @@ mod tests {
         // 2. Take downstream receivers.
         let mut rxs = [untouched, old, new, old_simple, new_simple]
             .into_iter()
-            .map(|id| (id, ctx.take_receiver((actor_id, id)).unwrap()))
+            .map(|id| {
+                (
+                    id,
+                    ctx.take_receiver((actor_id, id), (fragment_id, simple_dispatcher_id as u32))
+                        .unwrap(),
+                )
+            })
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {

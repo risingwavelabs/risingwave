@@ -14,12 +14,16 @@
 
 //! Channel implementation for permit-based back-pressure.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
+use prometheus::{register_int_gauge_vec_with_registry, IntGauge, IntGaugeVec};
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 
 use crate::executor::Message;
+use crate::task::UpDownFragmentIds;
 
 /// Message with its required permits.
 ///
@@ -36,6 +40,7 @@ pub fn channel(
     initial_permits: usize,
     batched_permits: usize,
     concurrent_barriers: usize,
+    fragment_ids: UpDownFragmentIds,
 ) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
@@ -45,16 +50,47 @@ pub fn channel(
     let permits = Arc::new(Permits { records, barriers });
 
     let max_chunk_permits: usize = initial_permits - batched_permits;
+    let metric_memory_size =
+        MEMORY_SIZE.with_label_values(&[&fragment_ids.0.to_string(), &fragment_ids.1.to_string()]);
+    let metric_num_rows =
+        NUM_ROWS.with_label_values(&[&fragment_ids.0.to_string(), &fragment_ids.1.to_string()]);
 
     (
         Sender {
             tx,
             permits: permits.clone(),
             max_chunk_permits,
+            metric_memory_size: metric_memory_size.clone(),
+            metric_num_rows: metric_num_rows.clone(),
         },
-        Receiver { rx, permits },
+        Receiver {
+            rx,
+            permits,
+            metric_memory_size,
+            metric_num_rows,
+        },
     )
 }
+
+static MEMORY_SIZE: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    register_int_gauge_vec_with_registry!(
+        "stream_exchange_memory_size",
+        "Total size of memory in the exchange channel",
+        &["up_fragment_id", "down_fragment_id"],
+        GLOBAL_METRICS_REGISTRY,
+    )
+    .unwrap()
+});
+
+static NUM_ROWS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    register_int_gauge_vec_with_registry!(
+        "stream_exchange_num_rows",
+        "Total number of rows in the exchange channel",
+        &["up_fragment_id", "down_fragment_id"],
+        GLOBAL_METRICS_REGISTRY,
+    )
+    .unwrap()
+});
 
 /// The configuration for tests.
 pub mod for_test {
@@ -66,7 +102,12 @@ pub mod for_test {
 pub fn channel_for_test() -> (Sender, Receiver) {
     use for_test::*;
 
-    channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
+    channel(
+        INITIAL_PERMITS,
+        BATCHED_PERMITS,
+        CONCURRENT_BARRIERS,
+        (0, 0),
+    )
 }
 
 /// Semaphore-based permits to control the back-pressure.
@@ -116,6 +157,8 @@ pub struct Sender {
     /// acquire these permits. `BATCHED_PERMITS` is subtracted to avoid deadlock with
     /// batching.
     max_chunk_permits: usize,
+    metric_memory_size: IntGauge,
+    metric_num_rows: IntGauge,
 }
 
 impl Sender {
@@ -142,6 +185,11 @@ impl Sender {
             }
         }
 
+        if let Message::Chunk(chunk) = &message {
+            self.metric_memory_size.add(chunk.estimated_size() as i64);
+            self.metric_num_rows.add(chunk.cardinality() as i64);
+        }
+
         self.tx
             .send(MessageWithPermits { message, permits })
             .map_err(|e| mpsc::error::SendError(e.0.message))
@@ -152,6 +200,8 @@ impl Sender {
 pub struct Receiver {
     rx: mpsc::UnboundedReceiver<MessageWithPermits>,
     permits: Arc<Permits>,
+    metric_memory_size: IntGauge,
+    metric_num_rows: IntGauge,
 }
 
 impl Receiver {
@@ -164,6 +214,10 @@ impl Receiver {
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
+        }
+        if let Message::Chunk(chunk) = &message {
+            self.metric_memory_size.sub(chunk.estimated_size() as i64);
+            self.metric_num_rows.sub(chunk.cardinality() as i64);
         }
 
         Some(message)
@@ -178,6 +232,10 @@ impl Receiver {
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
+        }
+        if let Message::Chunk(chunk) = &message {
+            self.metric_memory_size.sub(chunk.estimated_size() as i64);
+            self.metric_num_rows.sub(chunk.cardinality() as i64);
         }
 
         Ok(message)
@@ -218,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_channel_close() {
-        let (tx, mut rx) = channel(0, 0, 1);
+        let (tx, mut rx) = channel(0, 0, 1, (0, 0));
 
         let send = || {
             tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(

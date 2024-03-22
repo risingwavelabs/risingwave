@@ -106,7 +106,10 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver((up_actor_id, down_actor_id))
+            .take_receiver(
+                (up_actor_id, down_actor_id),
+                (up_fragment_id, down_fragment_id),
+            )
             .await?;
 
         // Map the remaining stream to add-permits.
