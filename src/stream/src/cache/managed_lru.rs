@@ -111,6 +111,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     /// Evict epochs lower than the watermark
     fn evict_by_epoch(&mut self, epoch: u64) {
         let report = |lru: &Self, epoch: u64, evicted: usize| {
+            if evicted == 0 {
+                return;
+            }
             lru.memory_evicted_metrics
                 .with_guarded_label_values(&[
                     &lru.metrics_info.table_id,
@@ -134,9 +137,8 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             }
             evicted += charge;
         }
-        if evicted > 0 {
-            report(self, last_epoch, evicted);
-        }
+        report(self, last_epoch, evicted);
+
         self.report_evicted_watermark_time(epoch);
     }
 
