@@ -21,14 +21,14 @@ use crate::{EstimateSize, KvSize};
 #[derive(Default)]
 pub struct EstimatedHashSet<T: EstimateSize> {
     inner: HashSet<T>,
-    kv_heap_size: KvSize,
+    heap_size: KvSize,
 }
 
 impl<T: EstimateSize> EstimateSize for EstimatedHashSet<T> {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add hashset internal size.
         // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size.size()
+        self.heap_size.size()
     }
 }
 
@@ -38,10 +38,10 @@ where
 {
     /// Insert into the cache.
     pub fn insert(&mut self, value: T) -> bool {
-        let kv_heap_size = self.kv_heap_size.add_val(&value);
+        let heap_size = self.heap_size.add_val(&value);
         let inserted = self.inner.insert(value);
         if inserted {
-            self.kv_heap_size.set(kv_heap_size);
+            self.heap_size.set(heap_size);
         }
         inserted
     }
@@ -50,7 +50,7 @@ where
     pub fn remove(&mut self, value: &T) -> bool {
         let removed = self.inner.remove(value);
         if removed {
-            self.kv_heap_size.sub_val(value);
+            self.heap_size.sub_val(value);
         }
         removed
     }
@@ -58,10 +58,10 @@ where
     /// Convert an [`EstimatedVec`] to a [`EstimatedHashSet`]. Do not need to recalculate the
     /// heap size.
     pub fn from_vec(v: EstimatedVec<T>) -> Self {
-        let kv_heap_size = v.estimated_heap_size();
+        let heap_size = v.estimated_heap_size();
         Self {
             inner: HashSet::from_iter(v),
-            kv_heap_size: KvSize::with_size(kv_heap_size),
+            heap_size: KvSize::with_size(heap_size),
         }
     }
 }
