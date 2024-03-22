@@ -28,7 +28,7 @@ download-and-decompress-artifact e2e_test_generated ./
 
 kill_cluster() {
   echo "--- Kill cluster"
-  cargo make ci-kill-clean-logs
+  cargo make ci-kill
 }
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
