@@ -2060,8 +2060,8 @@ impl DdlController {
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
-        let timeout_secs = 30 * 60;
-        for _ in 0..timeout_secs {
+        let timeout_ms = 30 * 60 * 1000;
+        for _ in 0..timeout_ms {
             match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     if mgr
@@ -2088,7 +2088,7 @@ impl DdlController {
             sleep(Duration::from_millis(1)).await;
         }
         Err(MetaError::cancelled(format!(
-            "timeout after {timeout_secs}s"
+            "timeout after {timeout_ms}ms"
         )))
     }
 
