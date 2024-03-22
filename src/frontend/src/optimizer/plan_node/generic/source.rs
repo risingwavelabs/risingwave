@@ -21,6 +21,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
@@ -66,6 +67,8 @@ pub struct Source {
 
     /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
     pub(crate) kafka_timestamp_range: (Bound<i64>, Bound<i64>),
+
+    pub as_of: Option<AsOf>,
 }
 
 impl GenericPlanNode for Source {
