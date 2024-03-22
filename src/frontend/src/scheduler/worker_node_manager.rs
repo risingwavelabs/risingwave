@@ -220,10 +220,16 @@ impl WorkerNodeManager {
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
-        guard
+        if guard
             .streaming_fragment_vnode_mapping
             .remove(fragment_id)
-            .unwrap();
+            .is_none()
+        {
+            tracing::warn!(
+                "Streaming vnode mapping not found for fragment {}",
+                fragment_id
+            );
+        }
     }
 
     /// Returns fragment's vnode mapping for serving.
