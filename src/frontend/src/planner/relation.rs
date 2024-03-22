@@ -104,7 +104,10 @@ impl Planner {
         } else {
             let as_of = source.as_of.clone();
             match as_of {
-                None | Some(AsOf::VersionNum(_)) | Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {}
+                None
+                | Some(AsOf::VersionNum(_))
+                | Some(AsOf::TimestampString(_))
+                | Some(AsOf::TimestampNum(_)) => {}
                 Some(AsOf::ProcessTime) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }

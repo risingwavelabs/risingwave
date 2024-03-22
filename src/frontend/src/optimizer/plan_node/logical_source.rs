@@ -86,10 +86,8 @@ impl LogicalSource {
             as_of,
         };
 
-        if core.as_of.is_some() {
-            if !core.support_time_travel() {
-                bail!("Time travel is not supported for the source")
-            }
+        if core.as_of.is_some() && !core.support_time_travel() {
+            bail!("Time travel is not supported for the source")
         }
 
         let base = PlanBase::new_logical_with_core(&core);
