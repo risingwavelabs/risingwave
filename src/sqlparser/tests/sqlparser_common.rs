@@ -696,36 +696,36 @@ fn parse_like() {
 #[test]
 fn parse_ilike() {
     fn chk(negated: bool) {
-        // let sql = &format!(
-        //     "SELECT * FROM customers WHERE name {}ILIKE '%a'",
-        //     if negated { "NOT " } else { "" }
-        // );
-        // let select = verified_only_select(sql);
-        // assert_eq!(
-        //     Expr::ILike {
-        //         expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
-        //         negated,
-        //         pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-        //         escape_char: None,
-        //     },
-        //     select.selection.unwrap()
-        // );
+        let sql = &format!(
+            "SELECT * FROM customers WHERE name {}ILIKE '%a'",
+            if negated { "NOT " } else { "" }
+        );
+        let select = verified_only_select(sql);
+        assert_eq!(
+            Expr::ILike {
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
+                negated,
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                escape_char: None,
+            },
+            select.selection.unwrap()
+        );
 
         // Test with escape char
-        // let sql = &format!(
-        //     "SELECT * FROM customers WHERE name {}ILIKE '%a' ESCAPE '^'",
-        //     if negated { "NOT " } else { "" }
-        // );
-        // let select = verified_only_select(sql);
-        // assert_eq!(
-        //     Expr::ILike {
-        //         expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
-        //         negated,
-        //         pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-        //         escape_char: Some('^'),
-        //     },
-        //     select.selection.unwrap()
-        // );
+        let sql = &format!(
+            "SELECT * FROM customers WHERE name {}ILIKE '%a' ESCAPE '^'",
+            if negated { "NOT " } else { "" }
+        );
+        let select = verified_only_select(sql);
+        assert_eq!(
+            Expr::ILike {
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
+                negated,
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                escape_char: Some('^'),
+            },
+            select.selection.unwrap()
+        );
 
         // This statement tests that ILIKE and NOT ILIKE have the same precedence.
         // This was previously mishandled (#81).
