@@ -1072,12 +1072,12 @@ def section_streaming_actors(outer_panels):
                     "The operator-level evicted memory statistics collected by each LRU cache",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_evicted')}) by (table_id, epoch)",
-                            "table {{table_id}} epoch: {{epoch}}",
+                            f"sum({metric('stream_memory_evicted')}) by (table_id, sequence)",
+                            "table {{table_id}} sequence: {{sequence}}",
                         ),
                         panels.target_hidden(
                             f"{metric('stream_memory_evicted')}",
-                            "table {{table_id}} actor {{actor_id}} epoch: {{epoch}}",
+                            "table {{table_id}} actor {{actor_id}} sequence: {{sequence}} epoch: {{epoch}}",
                         ),
                     ],
                 ),

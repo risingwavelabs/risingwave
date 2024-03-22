@@ -41,7 +41,9 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     /// The metrics of memory usage
     memory_usage_metrics: LabelGuardedIntGauge<3>,
     /// The metrics of evicted memory by epoch.
-    memory_evicted_metrics: LabelGuardedIntGaugeVec<3>,
+    memory_evicted_metrics: LabelGuardedIntGaugeVec<4>,
+    /// The sequence of evict by epoch operation.
+    evict_sequence: usize,
     // The metrics of evicted watermark time
     lru_evicted_watermark_time_ms: LabelGuardedIntGauge<3>,
     // Metrics info
@@ -91,6 +93,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             kv_heap_size: 0,
             memory_usage_metrics,
             memory_evicted_metrics,
+            evict_sequence: 0,
             lru_evicted_watermark_time_ms,
             metrics_info,
             last_reported_size_bytes: 0,
@@ -118,6 +121,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 .with_guarded_label_values(&[
                     &lru.metrics_info.table_id,
                     &lru.metrics_info.actor_id,
+                    &lru.evict_sequence.to_string(),
                     &epoch.to_string(),
                 ])
                 .set(evicted as _);
@@ -125,6 +129,8 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
         let mut last_epoch = 0; // real epoch must be greater than 0
         let mut evicted = 0;
+
+        self.evict_sequence += 1;
 
         while let Some((key, value, e)) = self.inner.pop_lru_by_epoch(epoch) {
             let charge = key.estimated_size() + value.estimated_size();

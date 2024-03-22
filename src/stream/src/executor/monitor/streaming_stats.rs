@@ -186,7 +186,7 @@ pub struct StreamingMetrics {
 
     // Memory
     pub stream_memory_usage: LabelGuardedIntGaugeVec<3>,
-    pub stream_memory_evicted: LabelGuardedIntGaugeVec<3>,
+    pub stream_memory_evicted: LabelGuardedIntGaugeVec<4>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -1002,7 +1002,7 @@ impl StreamingMetrics {
         let stream_memory_evicted = register_guarded_int_gauge_vec_with_registry!(
             "stream_memory_evicted",
             "Memory evicted for stream executors",
-            &["table_id", "actor_id", "epoch"],
+            &["table_id", "actor_id", "sequence", "epoch"],
             registry
         )
         .unwrap();
