@@ -33,10 +33,10 @@ use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 use crate::TableCatalog;
 
-/// [`Scan`] returns contents of a table or other equivalent object
+/// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
-pub struct Scan {
+pub struct TableScan {
     pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
@@ -66,7 +66,7 @@ pub struct Scan {
     pub ctx: OptimizerContextRef,
 }
 
-impl Scan {
+impl TableScan {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
     }
@@ -334,7 +334,7 @@ impl Scan {
     }
 }
 
-impl GenericPlanNode for Scan {
+impl GenericPlanNode for TableScan {
     fn schema(&self) -> Schema {
         let fields = self
             .output_col_idx
@@ -377,7 +377,7 @@ impl GenericPlanNode for Scan {
     }
 }
 
-impl Scan {
+impl TableScan {
     pub fn get_table_columns(&self) -> &[ColumnDesc] {
         &self.table_desc.columns
     }

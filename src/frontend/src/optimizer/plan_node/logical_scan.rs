@@ -47,18 +47,18 @@ use crate::TableCatalog;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
     pub base: PlanBase<Logical>,
-    core: generic::Scan,
+    core: generic::TableScan,
 }
 
-impl From<generic::Scan> for LogicalScan {
-    fn from(core: generic::Scan) -> Self {
+impl From<generic::TableScan> for LogicalScan {
+    fn from(core: generic::TableScan) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
 
-impl From<generic::Scan> for PlanRef {
-    fn from(core: generic::Scan) -> Self {
+impl From<generic::TableScan> for PlanRef {
+    fn from(core: generic::TableScan) -> Self {
         LogicalScan::from(core).into()
     }
 }
@@ -74,7 +74,7 @@ impl LogicalScan {
         table_cardinality: Cardinality,
     ) -> Self {
         let output_col_idx: Vec<usize> = (0..table_catalog.columns().len()).collect();
-        generic::Scan::new(
+        generic::TableScan::new(
             table_name,
             output_col_idx,
             table_catalog,
@@ -220,7 +220,7 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    pub fn predicate_pull_up(&self) -> (generic::Scan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (generic::TableScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
             return (self.core.clone(), Condition::true_cond(), None);
@@ -241,7 +241,7 @@ impl LogicalScan {
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
-        let scan_without_predicate = generic::Scan::new(
+        let scan_without_predicate = generic::TableScan::new(
             self.table_name().to_string(),
             self.required_col_idx().to_vec(),
             self.core.table_catalog.clone(),
@@ -260,7 +260,7 @@ impl LogicalScan {
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::Scan::new_inner(
+        generic::TableScan::new_inner(
             self.table_name().to_string(),
             self.output_col_idx().to_vec(),
             self.table_catalog(),
@@ -274,7 +274,7 @@ impl LogicalScan {
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::Scan::new_inner(
+        generic::TableScan::new_inner(
             self.table_name().to_string(),
             output_col_idx,
             self.core.table_catalog.clone(),

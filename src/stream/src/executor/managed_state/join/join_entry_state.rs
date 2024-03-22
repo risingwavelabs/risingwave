@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::estimate_size::KvSize;
+use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;

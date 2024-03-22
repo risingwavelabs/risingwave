@@ -19,7 +19,7 @@ use std::hash::{BuildHasher, Hash};
 use lru::{DefaultHasher, LruCache};
 
 use super::{AtomicMutGuard, MutGuard};
-use crate::estimate_size::{EstimateSize, KvSize};
+use crate::{EstimateSize, KvSize};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `MemoryManager`.

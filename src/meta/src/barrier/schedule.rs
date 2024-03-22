@@ -241,7 +241,9 @@ impl BarrierScheduler {
             ..Default::default()
         };
         self.attach_notifiers(vec![notifier], checkpoint)?;
-        rx.await.unwrap()
+        rx.await
+            .ok()
+            .context("failed to wait for barrier collect")?
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that

@@ -560,7 +560,7 @@ impl IndexSelectionRule {
             }
         }
 
-        let primary_access = generic::Scan::new(
+        let primary_access = generic::TableScan::new(
             logical_scan.table_name().to_string(),
             primary_table_desc
                 .pk
@@ -602,7 +602,7 @@ impl IndexSelectionRule {
         }
 
         Some(
-            generic::Scan::new(
+            generic::TableScan::new(
                 index.index_table.name.to_string(),
                 index
                     .primary_table_pk_ref_to_index_table()
