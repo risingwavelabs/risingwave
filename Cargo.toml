@@ -306,6 +306,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+# patch to remove preserve_order from serde_json
+deno_core = { git = "https://github.com/bakjos/deno_core", rev = "70d1544" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
