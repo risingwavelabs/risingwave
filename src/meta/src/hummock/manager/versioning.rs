@@ -352,6 +352,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
         table_watermarks: HashMap::new(),
+        snapshot_groups: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,

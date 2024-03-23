@@ -1071,6 +1071,8 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
+        snapshot_group_delta: Default::default(),
+        removed_snapshot_group_ids: vec![],
     }
 }
 

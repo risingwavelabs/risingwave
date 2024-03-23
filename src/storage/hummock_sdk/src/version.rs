@@ -12,17 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
-use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
+use risingwave_pb::hummock::{
+    PbHummockVersion, PbHummockVersionDelta, PbSnapshotGroup, PbSnapshotGroupDelta,
+};
 
 use crate::table_watermark::TableWatermarks;
 use crate::{CompactionGroupId, HummockSstableObjectId};
+
+pub type SnapshotGroupId = TableId;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotGroup {
+    pub max_committed_epoch: u64,
+    pub safe_epoch: u64,
+    pub member_table_ids: HashSet<TableId>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersion {
@@ -31,6 +42,7 @@ pub struct HummockVersion {
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    pub snapshot_groups: HashMap<SnapshotGroupId, SnapshotGroup>,
 }
 
 impl Default for HummockVersion {
@@ -72,6 +84,24 @@ impl HummockVersion {
                     )
                 })
                 .collect(),
+            snapshot_groups: pb_version
+                .snapshot_groups
+                .iter()
+                .map(|(group_id, group)| {
+                    (
+                        SnapshotGroupId::new(*group_id),
+                        SnapshotGroup {
+                            max_committed_epoch: group.max_committed_epoch,
+                            safe_epoch: group.safe_epoch,
+                            member_table_ids: group
+                                .member_table_ids
+                                .iter()
+                                .map(|table_id| TableId::new(*table_id))
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -89,6 +119,25 @@ impl HummockVersion {
                 .table_watermarks
                 .iter()
                 .map(|(table_id, watermark)| (table_id.table_id, watermark.to_protobuf()))
+                .collect(),
+            snapshot_groups: self
+                .snapshot_groups
+                .iter()
+                .map(|(group_id, group)| {
+                    (
+                        (*group_id).into(),
+                        PbSnapshotGroup {
+                            group_id: group_id.table_id,
+                            max_committed_epoch: group.max_committed_epoch,
+                            safe_epoch: group.safe_epoch,
+                            member_table_ids: group
+                                .member_table_ids
+                                .iter()
+                                .map(|table_id| table_id.table_id)
+                                .collect(),
+                        },
+                    )
+                })
                 .collect(),
         }
     }
@@ -110,6 +159,12 @@ impl HummockVersion {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct SnapshotGroupDelta {
+    pub max_committed_epoch: u64,
+    pub safe_epoch: u64,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct HummockVersionDelta {
     pub id: u64,
     pub prev_id: u64,
@@ -120,6 +175,8 @@ pub struct HummockVersionDelta {
     pub gc_object_ids: Vec<HummockSstableObjectId>,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: Vec<TableId>,
+    pub snapshot_group_delta: HashMap<SnapshotGroupId, SnapshotGroupDelta>,
+    pub removed_snapshot_group_ids: Vec<SnapshotGroupId>,
 }
 
 impl Default for HummockVersionDelta {
@@ -165,6 +222,24 @@ impl HummockVersionDelta {
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
                 .collect(),
+            snapshot_group_delta: delta
+                .snapshot_group_delta
+                .iter()
+                .map(|(group_id, delta)| {
+                    (
+                        SnapshotGroupId::new(*group_id),
+                        SnapshotGroupDelta {
+                            max_committed_epoch: delta.max_committed_epoch,
+                            safe_epoch: delta.safe_epoch,
+                        },
+                    )
+                })
+                .collect(),
+            removed_snapshot_group_ids: delta
+                .removed_snapshot_group_ids
+                .iter()
+                .map(|group_id| SnapshotGroupId::new(*group_id))
+                .collect(),
         }
     }
 
@@ -186,6 +261,24 @@ impl HummockVersionDelta {
                 .removed_table_ids
                 .iter()
                 .map(|table_id| table_id.table_id)
+                .collect(),
+            snapshot_group_delta: self
+                .snapshot_group_delta
+                .iter()
+                .map(|(group_id, delta)| {
+                    (
+                        (*group_id).into(),
+                        PbSnapshotGroupDelta {
+                            max_committed_epoch: delta.max_committed_epoch,
+                            safe_epoch: delta.safe_epoch,
+                        },
+                    )
+                })
+                .collect(),
+            removed_snapshot_group_ids: self
+                .removed_snapshot_group_ids
+                .iter()
+                .map(|group_id| (*group_id).into())
                 .collect(),
         }
     }
