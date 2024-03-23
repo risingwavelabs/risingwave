@@ -71,6 +71,7 @@ download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" ta
 mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download risingwave-udf-example.jar ./
+buildkite-agent artifact download sse-server e2e_test/udf/sse/server/target/release/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
