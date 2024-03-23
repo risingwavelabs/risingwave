@@ -11,6 +11,11 @@ cd e2e_test/udf/wasm
 cargo build --release
 cd ../../..
 
+echo "--- Build sse-server"
+cd e2e_test/udf/sse/server
+cargo build --release
+cd ../../../..
+
 echo "--- Build Java packages"
 cd java
 mvn -B package -Dmaven.test.skip=true

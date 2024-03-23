@@ -131,11 +131,11 @@ impl UserDefinedFunction {
         };
         let language = match &self.imp {
             UdfImpl::Wasm(_) => "wasm",
-            UdfImpl::JavaScript(_) => "javascript",
+            UdfImpl::JavaScript(_) => "javascript(quickjs)",
             #[cfg(feature = "embedded-python-udf")]
             UdfImpl::Python(_) => "python",
             #[cfg(feature = "embedded-deno-udf")]
-            UdfImpl::Deno(_) => "deno",
+            UdfImpl::Deno(_) => "javascript(deno)",
             UdfImpl::External(_) => "external",
         };
         let labels: &[&str; 4] = &[addr, language, &self.identifier, fragment_id.as_str()];
@@ -250,6 +250,15 @@ impl Build for UserDefinedFunction {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
+        #[cfg(not(feature = "embedded-deno-udf"))]
+        let runtime = "quickjs";
+
+        #[cfg(feature = "embedded-deno-udf")]
+        let runtime = match udf.runtime.as_deref() {
+            Some("deno") => "deno",
+            _ => "quickjs",
+        };
+
         let identifier = udf.get_identifier()?;
         let imp = match udf.language.as_str() {
             #[cfg(not(madsim))]
@@ -260,7 +269,7 @@ impl Build for UserDefinedFunction {
                 let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
                 UdfImpl::Wasm(runtime)
             }
-            "javascript" => {
+            "javascript" if runtime != "deno" => {
                 let mut rt = JsRuntime::new()?;
                 let body = format!(
                     "export function {}({}) {{ {} }}",
@@ -276,20 +285,8 @@ impl Build for UserDefinedFunction {
                 )?;
                 UdfImpl::JavaScript(rt)
             }
-            #[cfg(feature = "embedded-python-udf")]
-            "python" if udf.body.is_some() => {
-                let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
-                let body = udf.get_body()?;
-                rt.add_function(
-                    identifier,
-                    arrow_schema::DataType::try_from(&return_type)?,
-                    PythonCallMode::CalledOnNullInput,
-                    body,
-                )?;
-                UdfImpl::Python(rt)
-            }
             #[cfg(feature = "embedded-deno-udf")]
-            "deno" if udf.body.is_some() => {
+            "javascript" if runtime == "deno" => {
                 let rt = DenoRuntime::new();
                 let body = match udf.get_body() {
                     Ok(body) => body.clone(),
@@ -305,16 +302,7 @@ impl Build for UserDefinedFunction {
                     },
                 };
 
-                let is_async = if let (Ok(name), Ok(ty)) = (
-                    udf.get_param_name().map(|s| s.as_str()),
-                    udf.get_param_value().map(|s| s.as_str()),
-                ) {
-                    "function_type" == name && "async" == ty
-                } else {
-                    false
-                };
-
-                let body = if is_async {
+                let body = if matches!(udf.function_type.as_deref(), Some("async")) {
                     format!(
                         "export async function {}({}) {{ {} }}",
                         identifier,
@@ -338,6 +326,18 @@ impl Build for UserDefinedFunction {
                 ))?;
 
                 UdfImpl::Deno(rt)
+            }
+            #[cfg(feature = "embedded-python-udf")]
+            "python" if udf.body.is_some() => {
+                let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+                let body = udf.get_body()?;
+                rt.add_function(
+                    identifier,
+                    arrow_schema::DataType::try_from(&return_type)?,
+                    PythonCallMode::CalledOnNullInput,
+                    body,
+                )?;
+                UdfImpl::Python(rt)
             }
             #[cfg(not(madsim))]
             _ => {
