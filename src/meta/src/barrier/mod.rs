@@ -812,7 +812,7 @@ impl GlobalBarrierManagerContext {
         assert!(state.node_to_collect.is_empty());
         let resps = state.resps;
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps);
+        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps, &command_ctx);
         if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
             for notifier in notifiers {
                 notifier.notify_collection_failed(e.clone());
@@ -1099,6 +1099,7 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
 fn collect_commit_epoch_info(
     resps: Vec<BarrierCompleteResponse>,
+    command_ctx: &CommandContext,
 ) -> (CommitEpochInfo, Vec<CreateMviewProgress>) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
@@ -1118,6 +1119,27 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
+    let (new_table_fragment_info, unregistered_state_table_ids) = match &command_ctx.command {
+        Command::CreateStreamingJob {
+            new_table_fragment_info,
+            ..
+        } => (Some(new_table_fragment_info.clone()), HashSet::new()),
+        Command::CancelStreamingJob(table_fragments) => {
+            let table_id = table_fragments.table_id().table_id;
+            let mut table_ids = HashSet::from_iter(table_fragments.internal_table_ids());
+            table_ids.insert(table_id);
+            (None, table_ids)
+        }
+        Command::DropStreamingJobs {
+            unregister_state_table_ids,
+            ..
+        } => (
+            None,
+            HashSet::from_iter(unregister_state_table_ids.iter().cloned()),
+        ),
+        _ => (None, HashSet::new()),
+    };
+
     let info = CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1137,6 +1159,8 @@ fn collect_commit_epoch_info(
                 .collect_vec(),
         ),
         sst_to_worker,
+        new_table_fragment_info,
+        unregistered_state_table_ids,
     );
     (info, progresses)
 }

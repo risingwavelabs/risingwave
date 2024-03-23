@@ -22,6 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
@@ -41,7 +42,8 @@ use thiserror_ext::AsReport;
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, LocalNotification, MetadataManager, WorkerId};
+use crate::hummock::NewTableFragmentInfo;
+use crate::manager::{DdlType, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -141,7 +143,10 @@ pub enum Command {
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropStreamingJobs(Vec<ActorId>),
+    DropStreamingJobs {
+        actors: Vec<ActorId>,
+        unregister_state_table_ids: Vec<StateTableId>,
+    },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
@@ -160,6 +165,7 @@ pub enum Command {
         definition: String,
         ddl_type: DdlType,
         replace_table: Option<ReplaceTablePlan>,
+        new_table_fragment_info: NewTableFragmentInfo,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -214,7 +220,7 @@ impl Command {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
-            Command::DropStreamingJobs(actors) => Some(CommandActorChanges {
+            Command::DropStreamingJobs { actors, .. } => Some(CommandActorChanges {
                 to_add: Default::default(),
                 to_remove: actors.iter().cloned().collect(),
             }),
@@ -401,7 +407,7 @@ impl CommandContext {
                     }))
                 }
 
-                Command::DropStreamingJobs(actors) => Some(Mutation::Stop(StopMutation {
+                Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                     actors: actors.clone(),
                 })),
 
@@ -793,7 +799,7 @@ impl CommandContext {
                     .await;
             }
 
-            Command::DropStreamingJobs(actors) => {
+            Command::DropStreamingJobs { actors, .. } => {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
             }
@@ -802,25 +808,7 @@ impl CommandContext {
                 tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
                 self.clean_up(table_fragments.actor_ids()).await?;
 
-                // NOTE(kwannoel): At this point, meta has already registered the table ids.
-                // We should unregister them.
-                // This is required for background ddl, for foreground ddl this is a no-op.
-                // Foreground ddl is handled entirely by stream manager, so it will unregister
-                // the table ids on failure.
-                // On the other hand background ddl could be handled by barrier manager.
-                // It won't clean the tables on failure,
-                // since the failure could be recoverable.
-                // As such it needs to be handled here.
                 let table_id = table_fragments.table_id().table_id;
-                let mut table_ids = table_fragments.internal_table_ids();
-                table_ids.push(table_id);
-                self.barrier_manager_context
-                    .env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        table_ids,
-                    ))
-                    .await;
 
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
@@ -835,7 +823,6 @@ impl CommandContext {
                             )
                             .await
                         {
-                            let table_id = table_fragments.table_id().table_id;
                             tracing::warn!(
                                 table_id,
                                 error = %e.as_report(),

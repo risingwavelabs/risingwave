@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::{join_all, BoxFuture};
+use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -29,8 +29,8 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
-use crate::hummock::HummockManagerRef;
-use crate::manager::{DdlType, LocalNotification, MetaSrvEnv, MetadataManager, StreamingJob};
+use crate::hummock::NewTableFragmentInfo;
+use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -39,7 +39,7 @@ pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
 
 #[derive(Default)]
 pub struct CreateStreamingJobOption {
-    pub new_independent_compaction_group: bool,
+    // leave empty as a place holder for future option if there is any
 }
 
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
@@ -190,8 +190,6 @@ pub struct GlobalStreamManager {
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
-    hummock_manager: HummockManagerRef,
-
     pub scale_controller: ScaleControllerRef,
 
     pub stream_rpc_manager: StreamRpcManager,
@@ -203,7 +201,6 @@ impl GlobalStreamManager {
         metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
         source_manager: SourceManagerRef,
-        hummock_manager: HummockManagerRef,
         stream_rpc_manager: StreamRpcManager,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
@@ -212,7 +209,6 @@ impl GlobalStreamManager {
             metadata_manager,
             barrier_scheduler,
             source_manager,
-            hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             scale_controller,
             stream_rpc_manager,
@@ -239,9 +235,8 @@ impl GlobalStreamManager {
 
         let stream_manager = self.clone();
         let fut = async move {
-            let mut revert_funcs = vec![];
             let res = stream_manager
-                .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
+                .create_streaming_job_impl( table_fragments, ctx)
                 .await;
             match res {
                 Ok(_) => {
@@ -251,9 +246,6 @@ impl GlobalStreamManager {
                         .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
                 }
                 Err(err) => {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
-                    }
                     let _ = sender
                         .send(CreatingState::Failed {
                             reason: err.clone(),
@@ -387,7 +379,6 @@ impl GlobalStreamManager {
 
     async fn create_streaming_job_impl(
         &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         table_fragments: TableFragments,
         CreateStreamingJobContext {
             dispatchers,
@@ -400,35 +391,11 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
             replace_table_job_info,
-            option,
+            ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut replace_table_command = None;
         let mut replace_table_id = None;
-
-        // Register to compaction group beforehand.
-        let hummock_manager_ref = self.hummock_manager.clone();
-        let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(
-                mv_table_id,
-                internal_tables.keys().copied().collect(),
-                option,
-            )
-            .await?;
-        debug_assert_eq!(
-            registered_table_ids.len(),
-            table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
-        );
-        let notification_manager_ref = self.env.notification_manager_ref();
-        revert_funcs.push(Box::pin(async move {
-            if create_type == CreateType::Foreground {
-                notification_manager_ref
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        registered_table_ids,
-                    ))
-                    .await;
-            }
-        }));
 
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
@@ -483,6 +450,11 @@ impl GlobalStreamManager {
             definition: definition.to_string(),
             ddl_type,
             replace_table: replace_table_command,
+            new_table_fragment_info: NewTableFragmentInfo {
+                table_id: table_id.table_id,
+                mv_table_id,
+                internal_table_ids: internal_tables.keys().cloned().collect(),
+            },
         };
 
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
@@ -565,18 +537,14 @@ impl GlobalStreamManager {
         if !removed_actors.is_empty() {
             let _ = self
                 .barrier_scheduler
-                .run_command(Command::DropStreamingJobs(removed_actors))
+                .run_command(Command::DropStreamingJobs {
+                    actors: removed_actors,
+                    unregister_state_table_ids: state_table_ids,
+                })
                 .await
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
                 });
-
-            self.env
-                .notification_manager()
-                .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                    state_table_ids,
-                ))
-                .await;
         }
     }
 
@@ -604,19 +572,14 @@ impl GlobalStreamManager {
             .collect_vec();
         let _ = self
             .barrier_scheduler
-            .run_command(Command::DropStreamingJobs(dropped_actors))
+            .run_command(Command::DropStreamingJobs {
+                actors: dropped_actors,
+                unregister_state_table_ids: unregister_table_ids,
+            })
             .await
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
-
-        // Unregister from compaction group afterwards.
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                unregister_table_ids,
-            ))
-            .await;
 
         Ok(())
     }
@@ -1025,7 +988,7 @@ mod tests {
                 scheduled_barriers,
                 env.clone(),
                 metadata_manager.clone(),
-                hummock_manager.clone(),
+                hummock_manager,
                 source_manager.clone(),
                 sink_manager,
                 meta_metrics.clone(),
@@ -1038,7 +1001,6 @@ mod tests {
                 metadata_manager,
                 barrier_scheduler.clone(),
                 source_manager.clone(),
-                hummock_manager,
                 stream_rpc_manager,
                 scale_controller.clone(),
             )?;
