@@ -140,15 +140,27 @@ message TableWatermarks {
 message SnapshotGroup {
   uint32 group_id = 1;
   repeated uint32 member_table_ids = 2;
-  uint64 max_committed_epoch = 3;
+  uint64 committed_epoch = 3;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 4;
 }
 
 message SnapshotGroupDelta {
-  uint64 max_committed_epoch = 3;
-  uint64 safe_epoch = 4;
+  message NewSnapshotGroup {
+    repeated uint32 member_table_ids = 1;
+    uint64 committed_epoch = 2;
+    uint64 safe_epoch = 3;
+  }
+
+  message DestroySnapshotGroup {}
+
+  oneof delta {
+    NewSnapshotGroup new_snapshot_group = 1;
+    uint64 new_committed_epoch = 2;
+    uint64 new_safe_epoch = 3;
+    DestroySnapshotGroup destroy = 4;
+  }
 }
 
 message HummockVersion {
@@ -187,7 +199,6 @@ message HummockVersionDelta {
   map<uint32, TableWatermarks> new_table_watermarks = 8;
   repeated uint32 removed_table_ids = 9;
   map<uint32, SnapshotGroupDelta> snapshot_group_delta = 10;
-  repeated uint32 removed_snapshot_group_ids = 11;
 }
 
 message HummockVersionDeltas {
