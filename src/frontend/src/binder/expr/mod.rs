@@ -464,7 +464,7 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
         let pattern = self.bind_expr_inner(pattern)?;
-        if let Some(_) = escape_char {
+        if escape_char.is_some() {
             bail_not_implemented!(issue = 15701, "LIKE with escape character is not supported");
         }
         let expr_type = if CASE_INSENSITIVE {
