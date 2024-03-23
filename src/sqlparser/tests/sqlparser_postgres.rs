@@ -873,7 +873,7 @@ fn parse_create_function() {
         }
     );
 
-    let sql = "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;' SET function_type = 'async'";
+    let sql = "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;' ASYNC";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
@@ -891,9 +891,7 @@ fn parse_create_function() {
                 as_: Some(FunctionDefinition::SingleQuotedDef(
                     "select $1 + $2;".into()
                 )),
-                param: Some(CreateFunctionParamType::FunctionType(
-                    CreateFunctionParamFunctionType::Async
-                )),
+                function_type: Some(CreateFunctionType::Async),
                 ..Default::default()
             },
             with_options: Default::default(),

@@ -697,7 +697,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-js-deno"
 version = "0.0.1"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=1381842#13818424f07d4494509ae82dfb4fab9ef105b90e"
+source = "git+https://github.com/bakjos/arrow-udf.git?rev=a810d2c#a810d2cc247e7bdd0ffdc6cecfe98c0192211e19"
 dependencies = [
  "anyhow",
  "arrow-array 50.0.0",
@@ -719,7 +719,7 @@ dependencies = [
 [[package]]
 name = "arrow-udf-js-deno-runtime"
 version = "0.0.1"
-source = "git+https://github.com/risingwavelabs/arrow-udf.git?rev=1381842#13818424f07d4494509ae82dfb4fab9ef105b90e"
+source = "git+https://github.com/bakjos/arrow-udf.git?rev=a810d2c#a810d2cc247e7bdd0ffdc6cecfe98c0192211e19"
 dependencies = [
  "anyhow",
  "deno_ast",

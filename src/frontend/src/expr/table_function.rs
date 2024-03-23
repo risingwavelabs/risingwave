@@ -80,8 +80,8 @@ impl TableFunction {
                     identifier: c.identifier.clone(),
                     body: c.body.clone(),
                     compressed_binary: c.compressed_binary.clone(),
-                    param_name: c.param_name.clone(),
-                    param_value: c.param_value.clone(),
+                    function_type: c.function_type.clone(),
+                    runtime: c.runtime.clone(),
                 }),
         }
     }

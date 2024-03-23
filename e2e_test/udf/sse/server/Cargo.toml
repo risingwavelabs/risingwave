@@ -1,0 +1,13 @@
+[package]
+name = "sse-server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = { version = "0.6.2", features = ["headers", "json", "original-uri"] }
+futures = "0.3.24"
+hyper = { version = "0.14", features = ["client"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }

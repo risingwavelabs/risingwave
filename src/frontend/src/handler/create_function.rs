@@ -50,7 +50,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" | "wasm" | "rust" | "javascript" | "deno" => lang,
+                "python" | "java" | "wasm" | "rust" | "javascript" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -64,6 +64,21 @@ pub async fn handle_create_function(
         // correct protocol.
         None => "".to_string(),
     };
+
+    let rt = match params.runtime {
+        Some(runtime) => {
+            if language.as_str() == "javascript" {
+                runtime.to_string()
+            } else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "runtime is only supported for javascript".to_string(),
+                )
+                .into());
+            }
+        }
+        None => "".to_string(),
+    };
+
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -122,8 +137,8 @@ pub async fn handle_create_function(
     let mut link = None;
     let mut body = None;
     let mut compressed_binary = None;
-    let mut param_name = None;
-    let mut param_value = None;
+    let mut function_type = None;
+    let mut runtime = None;
 
     match language.as_str() {
         "python" if params.using.is_none() => {
@@ -179,7 +194,7 @@ pub async fn handle_create_function(
             }
             link = Some(l);
         }
-        "javascript" => {
+        "javascript" if rt.as_str() != "deno" => {
             identifier = function_name.to_string();
             body = Some(
                 params
@@ -187,8 +202,9 @@ pub async fn handle_create_function(
                     .ok_or_else(|| ErrorCode::InvalidParameterValue("AS must be specified".into()))?
                     .into_string(),
             );
+            runtime = Some("quickjs".to_string());
         }
-        "deno" => {
+        "javascript" if rt.as_str() == "deno" => {
             identifier = function_name.to_string();
             match (params.using, params.as_) {
                 (None, None) => {
@@ -217,11 +233,15 @@ pub async fn handle_create_function(
                 }
             };
 
-            param_name = params.param.as_ref().map(|_| "function_type".to_string());
-            param_value = params.param.map(|p| {
-                let CreateFunctionParamType::FunctionType(f) = p;
-                f.to_string()
-            });
+            function_type = match params.function_type {
+                Some(CreateFunctionType::Sync) => Some("sync".to_string()),
+                Some(CreateFunctionType::Async) => Some("async".to_string()),
+                Some(CreateFunctionType::Generator) => Some("generator".to_string()),
+                Some(CreateFunctionType::AsyncGenerator) => Some("async_generator".to_string()),
+                None => None,
+            };
+
+            runtime = Some("deno".to_string());
         }
         "rust" => {
             if params.using.is_some() {
@@ -319,8 +339,8 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
-        param_name,
-        param_value,
+        runtime,
+        function_type,
     };
 
     let catalog_writer = session.catalog_writer()?;

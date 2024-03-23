@@ -197,6 +197,15 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
     let identifier = udtf.get_identifier()?;
     let return_type = DataType::from(prost.get_return_type()?);
 
+    #[cfg(not(feature = "embedded-deno-udf"))]
+    let runtime = "quickjs";
+
+    #[cfg(feature = "embedded-deno-udf")]
+    let runtime = match udtf.runtime.as_deref() {
+        Some("deno") => "deno",
+        _ => "quickjs",
+    };
+
     let client = match udtf.language.as_str() {
         "wasm" | "rust" => {
             let compressed_wasm_binary = udtf.get_compressed_binary()?;
@@ -205,7 +214,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             let runtime = crate::expr::expr_udf::get_or_create_wasm_runtime(&wasm_binary)?;
             UdfImpl::Wasm(runtime)
         }
-        "javascript" => {
+        "javascript" if runtime != "deno" => {
             let mut rt = JsRuntime::new()?;
             let body = format!(
                 "export function* {}({}) {{ {} }}",
@@ -221,20 +230,8 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
             )?;
             UdfImpl::JavaScript(rt)
         }
-        #[cfg(feature = "embedded-python-udf")]
-        "python" if udtf.body.is_some() => {
-            let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
-            let body = udtf.get_body()?;
-            rt.add_function(
-                identifier,
-                arrow_schema::DataType::try_from(&return_type)?,
-                PythonCallMode::CalledOnNullInput,
-                body,
-            )?;
-            UdfImpl::Python(rt)
-        }
         #[cfg(feature = "embedded-deno-udf")]
-        "deno" => {
+        "javascript" if runtime == "deno" => {
             let rt = DenoRuntime::new();
             let body = match udtf.get_body() {
                 Ok(body) => body.clone(),
@@ -250,21 +247,8 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 },
             };
 
-            let function_type = if let (Ok(f), Ok(function_type)) = (
-                udtf.get_param_name().map(|s| s.as_str()),
-                udtf.get_param_value().map(|s| s.as_str()),
-            ) {
-                if f == "function_type" {
-                    function_type
-                } else {
-                    "generator"
-                }
-            } else {
-                "generator"
-            };
-
-            let body = match function_type {
-                "async" => {
+            let body = match udtf.function_type.as_deref() {
+                Some("async") => {
                     format!(
                         "export async function {}({}) {{ {} }}",
                         identifier,
@@ -272,7 +256,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                         body
                     )
                 }
-                "async_generator" => {
+                Some("async_generator") => {
                     format!(
                         "export async function* {}({}) {{ {} }}",
                         identifier,
@@ -280,9 +264,9 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                         body
                     )
                 }
-                "generator" => {
+                Some("sync") => {
                     format!(
-                        "export function* {}({}) {{ {} }}",
+                        "export function {}({}) {{ {} }}",
                         identifier,
                         udtf.arg_names.join(","),
                         body
@@ -290,7 +274,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 }
                 _ => {
                     format!(
-                        "export function {}({}) {{ {} }}",
+                        "export function* {}({}) {{ {} }}",
                         identifier,
                         udtf.arg_names.join(","),
                         body
@@ -305,6 +289,18 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                 &body,
             ))?;
             UdfImpl::Deno(rt)
+        }
+        #[cfg(feature = "embedded-python-udf")]
+        "python" if udtf.body.is_some() => {
+            let mut rt = PythonRuntime::builder().sandboxed(true).build()?;
+            let body = udtf.get_body()?;
+            rt.add_function(
+                identifier,
+                arrow_schema::DataType::try_from(&return_type)?,
+                PythonCallMode::CalledOnNullInput,
+                body,
+            )?;
+            UdfImpl::Python(rt)
         }
         // connect to UDF service
         _ => {

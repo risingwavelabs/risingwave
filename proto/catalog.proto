@@ -246,8 +246,8 @@ message Function {
   // The zstd-compressed binary of the function.
   optional bytes compressed_binary = 17;
   bool always_retry_on_network_error = 16;
-  optional string param_name = 18;
-  optional string param_value = 19;
+  optional string runtime = 18;
+  optional string function_type = 19;
 
   oneof kind {
     ScalarFunction scalar = 11;
