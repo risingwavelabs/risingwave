@@ -251,7 +251,7 @@ impl FrontendObserverNode {
                                     // FIXME: the frontend node delete its fragment for the update
                                     // operation by itself.
                                     self.worker_node_manager
-                                        .remove_streaming_fragment_mapping(&old_fragment_id)
+                                        .remove_streaming_fragment_mapping(&old_fragment_id);
                                 }
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
