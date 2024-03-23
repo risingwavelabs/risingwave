@@ -50,8 +50,7 @@ async fn main() {
 
     let listener = std::net::TcpListener::bind("127.0.0.1:4200").unwrap();
 
-    let socket_addr = listener.local_addr().unwrap();
-
+    let _socket_addr = listener.local_addr().unwrap();
 
     let server = hyper::Server::from_tcp(listener)
         .unwrap()

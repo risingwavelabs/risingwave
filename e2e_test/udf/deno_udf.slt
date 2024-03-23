@@ -144,15 +144,13 @@ CREATE FUNCTION digest( t string ) RETURNS bytea LANGUAGE javascript RUNTIME den
         hash: 'SHA-256',
         length: 256,
         }, true, ['sign', 'verify']);
-
         const enc = new TextEncoder();
         const message = enc.encode(t);
-
         const result = await subtle.sign({
         name: 'HMAC',
         }, key, message);
-        console.log('result', result);
-        return result;
+    console.log('result', result);
+    return result;
 $$ ASYNC;
 
 query I
@@ -166,22 +164,21 @@ drop function digest;
 statement ok
 CREATE FUNCTION delay_response()
     RETURNS TABLE (x int) LANGUAGE javascript RUNTIME deno AS $$
-                 const delayedResponses = {
-                    delays: [50, 10, 15],
-                    wait(delay) {
-                      return new Promise((resolve) => {
-                        setTimeout(resolve, delay);
-                      });
-                    },
-
-                    async *[Symbol.asyncIterator]() {
-                      for (const delay of this.delays) {
-                        await this.wait(delay);
-                        yield delay;
-                      }
-                    },
-                  };
-                return delayedResponses;
+        const delayedResponses = {
+            delays: [50, 10, 15],
+            wait(delay) {
+                return new Promise((resolve) => {
+                setTimeout(resolve, delay);
+                });
+            },
+            async *[Symbol.asyncIterator]() {
+                for (const delay of this.delays) {
+                await this.wait(delay);
+                yield delay;
+                }
+            },
+        };
+        return delayedResponses;
 $$ SYNC;
 
 query I
