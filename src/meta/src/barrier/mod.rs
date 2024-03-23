@@ -1119,15 +1119,27 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
-    let new_table_fragment_info = if let Command::CreateStreamingJob {
-        new_table_fragment_info,
-        ..
-    } = &command_ctx.command
-    {
-        Some(new_table_fragment_info.clone())
-    } else {
-        None
+    let (new_table_fragment_info, unregistered_state_table_ids) = match &command_ctx.command {
+        Command::CreateStreamingJob {
+            new_table_fragment_info,
+            ..
+        } => (Some(new_table_fragment_info.clone()), HashSet::new()),
+        Command::CancelStreamingJob(table_fragments) => {
+            let table_id = table_fragments.table_id().table_id;
+            let mut table_ids = HashSet::from_iter(table_fragments.internal_table_ids());
+            table_ids.insert(table_id);
+            (None, table_ids)
+        }
+        Command::DropStreamingJobs {
+            unregister_state_table_ids,
+            ..
+        } => (
+            None,
+            HashSet::from_iter(unregister_state_table_ids.iter().cloned()),
+        ),
+        _ => (None, HashSet::new()),
     };
+
     let info = CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1148,6 +1160,7 @@ fn collect_commit_epoch_info(
         ),
         sst_to_worker,
         new_table_fragment_info,
+        unregistered_state_table_ids,
     );
     (info, progresses)
 }

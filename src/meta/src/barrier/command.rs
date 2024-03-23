@@ -799,39 +799,16 @@ impl CommandContext {
                     .await;
             }
 
-            Command::DropStreamingJobs {
-                actors,
-                unregister_state_table_ids: unregister_table_ids,
-            } => {
+            Command::DropStreamingJobs { actors, .. } => {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
-
-                self.barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(unregister_table_ids)
-                    .await?;
             }
 
             Command::CancelStreamingJob(table_fragments) => {
                 tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
                 self.clean_up(table_fragments.actor_ids()).await?;
 
-                // NOTE(kwannoel): At this point, meta has already registered the table ids.
-                // We should unregister them.
-                // This is required for background ddl, for foreground ddl this is a no-op.
-                // Foreground ddl is handled entirely by stream manager, so it will unregister
-                // the table ids on failure.
-                // On the other hand background ddl could be handled by barrier manager.
-                // It won't clean the tables on failure,
-                // since the failure could be recoverable.
-                // As such it needs to be handled here.
                 let table_id = table_fragments.table_id().table_id;
-                let mut table_ids = table_fragments.internal_table_ids();
-                table_ids.push(table_id);
-                self.barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(&table_ids)
-                    .await?;
 
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {
@@ -846,7 +823,6 @@ impl CommandContext {
                             )
                             .await
                         {
-                            let table_id = table_fragments.table_id().table_id;
                             tracing::warn!(
                                 table_id,
                                 error = %e.as_report(),

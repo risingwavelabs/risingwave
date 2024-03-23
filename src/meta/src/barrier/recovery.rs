@@ -131,8 +131,7 @@ impl GlobalBarrierManagerContext {
                 .map(|id| id as u32)
                 .collect_vec(),
         };
-        // TODO: may return with result
-        self.hummock_manager.purge(&all_state_table_ids).await;
+        self.hummock_manager.purge(&all_state_table_ids).await?;
         Ok(())
     }
 
@@ -316,25 +315,30 @@ impl GlobalBarrierManagerContext {
         let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
-            match &self.metadata_manager {
+            let unregister_table_ids = match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
-                    let unregister_table_ids = mgr
-                        .fragment_manager
+                    mgr.fragment_manager
                         .drop_table_fragments_vec(&cancelled)
-                        .await?;
-                    self.hummock_manager
-                        .unregister_table_ids(&unregister_table_ids)
-                        .await?;
+                        .await?
                 }
                 MetadataManager::V2(mgr) => {
+                    let mut unregister_table_ids = Vec::new();
                     for job_id in cancelled {
-                        mgr.catalog_controller
+                        let (_, table_ids_to_unregister) = mgr
+                            .catalog_controller
                             .try_abort_creating_streaming_job(job_id.table_id as _, true)
                             .await?;
+                        unregister_table_ids.extend(table_ids_to_unregister);
                     }
-                    // TODO: may unregister hummock table id here?
+                    unregister_table_ids
+                        .into_iter()
+                        .map(|table_id| table_id as u32)
+                        .collect()
                 }
-            }
+            };
+            self.hummock_manager
+                .unregister_table_ids(&unregister_table_ids)
+                .await?;
         }
         Ok(applied)
     }

@@ -149,7 +149,7 @@ impl HummockManager {
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, valid_ids: &[u32]) {
+    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -158,7 +158,7 @@ impl HummockManager {
             .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids_fail_fast(&to_unregister).await;
+        self.unregister_table_ids(&to_unregister).await
     }
 
     /// The implementation acquires `versioning` lock.
@@ -1115,12 +1115,12 @@ mod tests {
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge(&table_fragment_2.all_table_ids().collect_vec())
-            .await;
+            .await
+            .unwrap();
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await;
+        compaction_group_manager.purge(&[]).await.unwrap();
         assert_eq!(registered_number().await, 0);
 
-        // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
         assert_eq!(group_number().await, 2);
 
         compaction_group_manager
@@ -1131,9 +1131,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        assert_eq!(group_number().await, 3);
+        assert_eq!(group_number().await, 2);
 
-        // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1])
             .await;
