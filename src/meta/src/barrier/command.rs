@@ -696,7 +696,7 @@ impl CommandContext {
                 ..
             } => {
                 // cdc backfill table job doesn't need to be tracked
-                if table_fragments.fragments().iter().any(|fragment| {
+                if table_fragments.fragments().any(|fragment| {
                     fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
                 }) {
                     Default::default()

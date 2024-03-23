@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
@@ -34,6 +35,7 @@ use risingwave_pb::hummock::{
     SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tracing::warn;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
@@ -301,6 +303,43 @@ impl HummockManager {
         // version_stats.hummock_version_id is always 0 in meta store.
         version_stats.table_stats = new_stats.table_stats;
         commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
+        Ok(())
+    }
+
+    #[named]
+    pub async fn may_fill_backward_snapshot_group(
+        &self,
+        existing_table_fragment_state_tables: &[(TableId, HashSet<TableId>)],
+    ) -> Result<()> {
+        use crate::model::{
+            BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, ValTransaction,
+        };
+        let mut versioning = write_lock!(self, versioning).await;
+        if let Some(new_version_delta) = versioning
+            .current_version
+            .gen_fill_backward_compatibility_snapshot_group_delta(
+                existing_table_fragment_state_tables,
+            )
+        {
+            warn!(
+                ?new_version_delta,
+                "fill snapshot group for backward compatibility"
+            );
+            let new_version_delta = create_trx_wrapper!(
+                self.sql_meta_store(),
+                BTreeMapEntryTransactionWrapper,
+                BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    new_version_delta.id,
+                    new_version_delta,
+                )
+            );
+            commit_multi_var!(
+                self.env.meta_store(),
+                self.sql_meta_store(),
+                new_version_delta
+            )?;
+        }
         Ok(())
     }
 }

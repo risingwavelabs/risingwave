@@ -22,6 +22,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -586,6 +587,56 @@ pub async fn start_service_as_election_leader(
             .collect_vec(),
     };
     hummock_manager.purge(&all_state_table_ids).await;
+
+    let existing_table_fragment_state_tables: Vec<_> = match &metadata_manager {
+        MetadataManager::V1(mgr) => mgr
+            .fragment_manager
+            .list_table_fragments()
+            .await
+            .into_iter()
+            .map(|table_fragment| {
+                (
+                    table_fragment.table_id(),
+                    table_fragment
+                        .fragments()
+                        .flat_map(|fragment| {
+                            fragment
+                                .state_table_ids
+                                .iter()
+                                .map(|table_id| TableId::new(*table_id))
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+        MetadataManager::V2(mgr) => mgr
+            .catalog_controller
+            .table_fragments()
+            .await
+            .unwrap()
+            .into_values()
+            .map(|table_fragments| {
+                (
+                    TableId::new(table_fragments.table_id),
+                    table_fragments
+                        .fragments
+                        .values()
+                        .flat_map(|fragment| {
+                            fragment
+                                .state_table_ids
+                                .iter()
+                                .map(|table_id| TableId::new(*table_id))
+                        })
+                        .collect(),
+                )
+            })
+            .collect(),
+    };
+
+    hummock_manager
+        .may_fill_backward_snapshot_group(&existing_table_fragment_state_tables)
+        .await
+        .unwrap();
 
     // Initialize services.
     let backup_manager = BackupManager::new(

@@ -172,6 +172,51 @@ impl HummockVersion {
                 .map(|table_watermark| table_watermark.estimated_encode_len())
                 .sum::<usize>()
     }
+
+    fn may_fill_backward_compatibility_snapshot_group(&self) -> bool {
+        let has_prev_table = self
+            .levels
+            .values()
+            .any(|group| !group.member_table_ids.is_empty());
+        has_prev_table && self.snapshot_groups.is_empty()
+    }
+
+    pub fn gen_fill_backward_compatibility_snapshot_group_delta(
+        &self,
+        existing_table_fragment_state_tables: &[(TableId, HashSet<TableId>)],
+    ) -> Option<HummockVersionDelta> {
+        if existing_table_fragment_state_tables.is_empty()
+            || self.may_fill_backward_compatibility_snapshot_group()
+        {
+            return None;
+        }
+        let snapshot_group_delta = existing_table_fragment_state_tables
+            .iter()
+            .map(|(table_id, state_table_ids)| {
+                (
+                    SnapshotGroupId(table_id.table_id),
+                    SnapshotGroupDelta::NewSnapshotGroup {
+                        member_table_ids: state_table_ids.clone(),
+                        committed_epoch: self.max_committed_epoch,
+                        safe_epoch: self.safe_epoch,
+                    },
+                )
+            })
+            .collect();
+        let delta = HummockVersionDelta {
+            id: self.id + 1,
+            prev_id: self.id,
+            group_deltas: Default::default(),
+            max_committed_epoch: self.max_committed_epoch,
+            safe_epoch: self.safe_epoch,
+            trivial_move: false,
+            gc_object_ids: vec![],
+            new_table_watermarks: Default::default(),
+            removed_table_ids: vec![],
+            snapshot_group_delta,
+        };
+        Some(delta)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
