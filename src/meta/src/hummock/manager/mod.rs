@@ -19,7 +19,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fail::fail_point;
@@ -40,7 +40,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
     BranchedSstInfo, HummockLevelsExt,
 };
-use risingwave_hummock_sdk::version::{HummockVersionDelta, SnapshotGroupDelta};
+use risingwave_hummock_sdk::version::{HummockVersionDelta, SnapshotGroupDelta, SnapshotGroupId};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
     HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
@@ -1616,7 +1616,7 @@ impl HummockManager {
             add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
 
-        let old_version = &versioning.current_version;
+        let old_version: &HummockVersion = &versioning.current_version;
         let mut new_version_delta = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapEntryTransactionWrapper,
@@ -1628,14 +1628,33 @@ impl HummockManager {
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
-        let mut new_hummock_version = old_version.clone();
-        new_hummock_version.id = new_version_delta.id;
 
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
             assert!(
                 unregistered_state_table_ids.is_empty(),
                 "cannot unregister state table and register state table at the same epoch"
+            );
+            let snapshot_group_id = SnapshotGroupId::from(new_fragment_table_info.table_id);
+            if old_version.snapshot_groups.contains_key(&snapshot_group_id) {
+                return Err(anyhow!(
+                    "new fragment already exists: {}",
+                    new_fragment_table_info.table_id
+                )
+                .into());
+            }
+            new_version_delta.snapshot_group_delta.insert(
+                snapshot_group_id,
+                SnapshotGroupDelta::NewSnapshotGroup {
+                    member_table_ids: new_fragment_table_info
+                        .mv_table_id
+                        .iter()
+                        .chain(new_fragment_table_info.internal_table_ids.iter())
+                        .map(|table_id| risingwave_common::catalog::TableId::new(*table_id))
+                        .collect(),
+                    safe_epoch: old_version.safe_epoch,
+                    committed_epoch: epoch,
+                },
             );
             if !new_fragment_table_info.internal_table_ids.is_empty() {
                 if let Some(levels) = old_version
@@ -1869,6 +1888,7 @@ impl HummockManager {
             group_deltas.push(group_delta);
         }
 
+        let mut new_hummock_version = old_version.clone();
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_hummock_version.apply_version_delta(new_version_delta.deref());
 

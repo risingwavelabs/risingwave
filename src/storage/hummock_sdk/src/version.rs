@@ -37,6 +37,12 @@ impl From<SnapshotGroupId> for u32 {
     }
 }
 
+impl From<u32> for SnapshotGroupId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SnapshotGroup {
     pub group_id: SnapshotGroupId,
