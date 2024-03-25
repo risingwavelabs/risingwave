@@ -30,6 +30,7 @@ pub mod log_store;
 pub mod mock_coordination_client;
 pub mod mqtt;
 pub mod nats;
+pub mod opendal_sink;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -47,6 +48,8 @@ use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use opendal::Error as OpendalError;
+use risingwave_common::array::ArrayError;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
@@ -90,6 +93,8 @@ macro_rules! for_all_sinks {
                 { HttpJava, $crate::sink::remote::HttpJavaSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { S3, $crate::sink::opendal_sink::s3::S3Sink },
+                { Gcs, $crate::sink::opendal_sink::gcs::GcsSink },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink },
@@ -533,6 +538,8 @@ pub enum SinkError {
     ),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
+    #[error("Opendal error: {0}")]
+    Opendal(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
@@ -562,6 +569,24 @@ pub enum SinkError {
 impl From<icelake::Error> for SinkError {
     fn from(value: icelake::Error) -> Self {
         SinkError::Iceberg(anyhow!(value))
+    }
+}
+
+impl From<OpendalError> for SinkError {
+    fn from(error: OpendalError) -> Self {
+        SinkError::Opendal(error.to_string())
+    }
+}
+
+impl From<parquet::errors::ParquetError> for SinkError {
+    fn from(error: parquet::errors::ParquetError) -> Self {
+        SinkError::Opendal(error.to_string())
+    }
+}
+
+impl From<ArrayError> for SinkError {
+    fn from(error: ArrayError) -> Self {
+        SinkError::Opendal(error.to_string())
     }
 }
 
