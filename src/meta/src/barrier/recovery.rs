@@ -326,6 +326,7 @@ impl GlobalBarrierManagerContext {
                         .collect()
                 }
             };
+            // TODO: register the snapshot group
             self.hummock_manager
                 .unregister_table_ids(&unregister_table_ids)
                 .await?;

@@ -264,7 +264,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
-    pub unregistered_state_table_ids: HashSet<TableId>,
+    pub unregistered_table_fragment_ids: HashSet<TableId>,
 }
 
 impl CommitEpochInfo {
@@ -273,14 +273,14 @@ impl CommitEpochInfo {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
-        unregistered_state_table_ids: HashSet<TableId>,
+        unregistered_table_fragment_ids: HashSet<TableId>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
-            unregistered_state_table_ids,
+            unregistered_table_fragment_ids,
         }
     }
 
@@ -1592,7 +1592,7 @@ impl HummockManager {
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
-            unregistered_state_table_ids,
+            unregistered_table_fragment_ids,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1634,7 +1634,7 @@ impl HummockManager {
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
             assert!(
-                unregistered_state_table_ids.is_empty(),
+                unregistered_table_fragment_ids.is_empty(),
                 "cannot unregister state table and register state table at the same epoch"
             );
             let snapshot_group_id =
@@ -1722,7 +1722,19 @@ impl HummockManager {
         }
 
         // unregister table
-        if !unregistered_state_table_ids.is_empty() {
+        if !unregistered_table_fragment_ids.is_empty() {
+            let mut unregistered_state_table_ids = HashSet::new();
+            for (snapshot_group_id, group) in &old_version.snapshot_groups {
+                if unregistered_table_fragment_ids
+                    .contains(&TableId::new(u32::from(*snapshot_group_id)))
+                {
+                    unregistered_state_table_ids.extend(group.member_table_ids.iter().cloned());
+                    new_version_delta
+                        .snapshot_group_delta
+                        .insert(*snapshot_group_id, SnapshotGroupDelta::Destroy);
+                }
+            }
+
             let mut group_unregistered_table_ids: HashMap<_, Vec<_>> = HashMap::new();
             for (group_id, group) in &old_version.levels {
                 for table_id in &group.member_table_ids {
@@ -1772,6 +1784,17 @@ impl HummockManager {
             }
             for table_id in &unregistered_state_table_ids {
                 table_compaction_group_mapping.remove(table_id);
+            }
+        }
+
+        for snapshot_group_id in old_version.snapshot_groups.keys() {
+            if !unregistered_table_fragment_ids
+                .contains(&TableId::new(u32::from(*snapshot_group_id)))
+            {
+                new_version_delta.snapshot_group_delta.insert(
+                    *snapshot_group_id,
+                    SnapshotGroupDelta::NewCommittedEpoch(epoch),
+                );
             }
         }
 

@@ -204,3 +204,33 @@ async fn read_hummock_table_watermarks(
         })
         .collect())
 }
+
+#[derive(Fields)]
+struct RwHummockSnapshotGroups {
+    #[primary_key]
+    group_id: i32,
+    safe_epoch: i64,
+    committed_epoch: i64,
+    member_table_ids: Vec<i32>,
+}
+
+#[system_catalog(table, "rw_catalog.rw_hummock_snapshot_groups")]
+async fn read_hummock_snapshot_groups(
+    reader: &SysCatalogReaderImpl,
+) -> Result<Vec<RwHummockSnapshotGroups>> {
+    let version = reader.meta_client.get_hummock_current_version().await?;
+    Ok(version
+        .snapshot_groups
+        .iter()
+        .map(|(group_id, group)| RwHummockSnapshotGroups {
+            group_id: u32::from(*group_id) as _,
+            safe_epoch: group.safe_epoch as _,
+            committed_epoch: group.committed_epoch as _,
+            member_table_ids: group
+                .member_table_ids
+                .iter()
+                .map(|table_id| table_id.table_id as _)
+                .collect(),
+        })
+        .collect())
+}

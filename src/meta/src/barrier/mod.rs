@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
+use std::iter::once;
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -1126,25 +1127,18 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
-    let (new_table_fragment_info, unregistered_state_table_ids) = match &command_ctx.command {
+    let (new_table_fragment_info, unregistered_table_fragment_ids) = match &command_ctx.command {
         Command::CreateStreamingJob {
             new_table_fragment_info,
             ..
         } => (Some(new_table_fragment_info.clone()), HashSet::new()),
         Command::CancelStreamingJob(table_fragments) => {
-            let table_id = table_fragments.table_id();
-            let mut table_ids =
-                HashSet::from_iter(table_fragments.all_table_ids().map(TableId::new));
-            table_ids.insert(table_id);
-            (None, table_ids)
+            (None, HashSet::from_iter(once(table_fragments.table_id())))
         }
         Command::DropStreamingJobs {
-            unregistered_state_table_ids,
+            unregistered_table_fragment_ids,
             ..
-        } => (
-            None,
-            HashSet::from_iter(unregistered_state_table_ids.iter().cloned()),
-        ),
+        } => (None, unregistered_table_fragment_ids.clone()),
         _ => (None, HashSet::new()),
     };
 
@@ -1168,7 +1162,7 @@ fn collect_commit_epoch_info(
         ),
         sst_to_worker,
         new_table_fragment_info,
-        unregistered_state_table_ids,
+        unregistered_table_fragment_ids,
     );
     (info, progresses)
 }

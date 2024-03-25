@@ -654,6 +654,7 @@ impl HummockVersion {
                             new_committed_epoch,
                             group.committed_epoch,
                         );
+                        group.committed_epoch = *new_committed_epoch;
                     }
                 }
                 SnapshotGroupDelta::NewSafeEpoch(new_safe_epoch) => {
@@ -665,6 +666,7 @@ impl HummockVersion {
                             new_safe_epoch,
                             group.safe_epoch
                         );
+                        group.safe_epoch = *new_safe_epoch;
                     }
                 }
                 SnapshotGroupDelta::Destroy => {
@@ -1372,10 +1374,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
-            snapshot_groups: HashMap::new(),
+            ..Default::default()
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1436,10 +1435,7 @@ mod tests {
                     ),
                 ),
             ]),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
-            snapshot_groups: HashMap::new(),
+            ..Default::default()
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1520,10 +1516,7 @@ mod tests {
                     ),
                     (1, cg1,),
                 ]),
-                max_committed_epoch: 0,
-                safe_epoch: 0,
-                table_watermarks: HashMap::new(),
-                snapshot_groups: HashMap::new(),
+                ..Default::default()
             }
         );
     }

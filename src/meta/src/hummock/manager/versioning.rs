@@ -609,10 +609,7 @@ mod tests {
 
         let mut version = HummockVersion {
             id: 123,
-            levels: Default::default(),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
+            ..Default::default()
         };
         for cg in 1..3 {
             version.levels.insert(

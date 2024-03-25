@@ -1001,7 +1001,8 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
+    use std::iter::once;
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
@@ -1133,11 +1134,20 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(&table_fragment_2.all_table_ids().collect_vec())
+            .purge(
+                &once((
+                    table_fragment_2.table_id(),
+                    table_fragment_2.all_table_ids(),
+                ))
+                .collect(),
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await.unwrap();
+        compaction_group_manager
+            .purge(&HashMap::new())
+            .await
+            .unwrap();
         assert_eq!(registered_number().await, 0);
 
         assert_eq!(group_number().await, 2);
