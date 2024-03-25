@@ -72,7 +72,6 @@ mod consistency {
 
     use std::sync::LazyLock;
 
-    use risingwave_common::config::StrictConsistencyOption;
     use risingwave_common::util::env_var::env_var_is_true;
 
     static INSANE_MODE: LazyLock<bool> =
@@ -82,18 +81,15 @@ mod consistency {
         *INSANE_MODE
     }
 
-    pub(crate) fn strict_consistency() -> StrictConsistencyOption {
-        crate::streaming_config().strict_consistency
+    pub(crate) fn enable_strict_consistency() -> bool {
+        crate::streaming_config().unsafe_enable_strict_consistency
     }
 
     macro_rules! inconsistency_panic {
         ($($arg:tt)*) => {
-            match crate::consistency::strict_consistency() {
-                risingwave_common::config::StrictConsistencyOption::On => {
-                    tracing::error!($($arg)*);
-                    panic!("inconsistency happened, see error log for details");
-                }
-                risingwave_common::config::StrictConsistencyOption::Off => tracing::error!($($arg)*),
+            tracing::error!($($arg)*);
+            if crate::consistency::enable_strict_consistency() {
+                panic!("inconsistency happened, see error log for details");
             }
         };
     }

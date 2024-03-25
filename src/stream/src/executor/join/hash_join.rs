@@ -22,7 +22,6 @@ use futures::StreamExt;
 use futures_async_stream::for_await;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::config::StrictConsistencyOption;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -38,7 +37,7 @@ use super::row::{DegreeType, EncodedJoinRow};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::consistency::strict_consistency;
+use crate::consistency::enable_strict_consistency;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -670,7 +669,7 @@ impl JoinEntryState {
         value: StateValueType,
     ) -> Result<&mut StateValueType, JoinEntryError> {
         let mut removed = false;
-        if !strict_consistency().is_on() {
+        if !enable_strict_consistency() {
             // strict consistency is off, let's remove existing (if any) first
             if let Some(old_value) = self.cached.remove(&key) {
                 self.kv_heap_size.sub(&key, &old_value);
@@ -682,9 +681,9 @@ impl JoinEntryState {
 
         let ret = self.cached.try_insert(key.clone(), value);
 
-        if !strict_consistency().is_on() {
+        if !enable_strict_consistency() {
             assert!(ret.is_ok(), "we have removed existing entry, if any");
-            if removed && strict_consistency().is_off() {
+            if removed {
                 // if not silent, we should log the error
                 tracing::error!(?key, "double inserting a join state entry");
             }
@@ -698,17 +697,14 @@ impl JoinEntryState {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size.sub(&pk, &value);
             Ok(())
+        } else if enable_strict_consistency() {
+            Err(JoinEntryError::RemoveError)
         } else {
-            match strict_consistency() {
-                StrictConsistencyOption::On => Err(JoinEntryError::RemoveError),
-                StrictConsistencyOption::Off => {
-                    tracing::error!(
-                        ?pk,
-                        "removing a join state entry but it is not in the cache"
-                    );
-                    Ok(())
-                }
-            }
+            tracing::error!(
+                ?pk,
+                "removing a join state entry but it is not in the cache"
+            );
+            Ok(())
         }
     }
 

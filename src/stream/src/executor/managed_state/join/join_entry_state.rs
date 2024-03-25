@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::StrictConsistencyOption;
 use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 
 use super::*;
-use crate::consistency::strict_consistency;
+use crate::consistency::enable_strict_consistency;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
@@ -55,7 +54,7 @@ impl JoinEntryState {
         value: StateValueType,
     ) -> Result<&mut StateValueType, JoinEntryError> {
         let mut removed = false;
-        if !strict_consistency().is_on() {
+        if !enable_strict_consistency() {
             // strict consistency is off, let's remove existing (if any) first
             if let Some(old_value) = self.cached.remove(&key) {
                 self.kv_heap_size.sub(&key, &old_value);
@@ -67,11 +66,11 @@ impl JoinEntryState {
 
         let ret = self.cached.try_insert(key.clone(), value);
 
-        if !strict_consistency().is_on() {
+        if !enable_strict_consistency() {
             assert!(ret.is_ok(), "we have removed existing entry, if any");
-            if removed && strict_consistency().is_off() {
+            if removed {
                 // if not silent, we should log the error
-                tracing::error!(key=?key, "double inserting a join state entry");
+                tracing::error!(?key, "double inserting a join state entry");
             }
         }
 
@@ -83,14 +82,14 @@ impl JoinEntryState {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size.sub(&pk, &value);
             Ok(())
+        } else if enable_strict_consistency() {
+            Err(JoinEntryError::RemoveError)
         } else {
-            match strict_consistency() {
-                StrictConsistencyOption::On => Err(JoinEntryError::RemoveError),
-                StrictConsistencyOption::Off => {
-                    tracing::error!(key=?pk, "removing a join state entry but it is not in the cache");
-                    Ok(())
-                }
-            }
+            tracing::error!(
+                ?pk,
+                "removing a join state entry but it is not in the cache"
+            );
+            Ok(())
         }
     }
 

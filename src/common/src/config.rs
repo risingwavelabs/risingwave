@@ -24,7 +24,6 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
-use enum_as_inner::EnumAsInner;
 use foyer::memory::{LfuConfig, LruConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
@@ -528,8 +527,8 @@ pub struct StreamingConfig {
     pub unique_user_stream_errors: usize,
 
     /// Control the strictness of stream consistency.
-    #[serde(default = "default::streaming::strict_consistency")]
-    pub strict_consistency: StrictConsistencyOption,
+    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
+    pub unsafe_enable_strict_consistency: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -828,15 +827,6 @@ impl AsyncStackTraceOption {
             Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
         }
     }
-}
-
-#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize, EnumAsInner)]
-pub enum StrictConsistencyOption {
-    /// Enabled, panic on inconsistency.
-    #[default]
-    On,
-    /// Disabled, warn on inconsistency.
-    Off,
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum)]
@@ -1372,7 +1362,7 @@ pub mod default {
     }
 
     pub mod streaming {
-        use crate::config::{AsyncStackTraceOption, StrictConsistencyOption};
+        use crate::config::AsyncStackTraceOption;
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -1388,8 +1378,8 @@ pub mod default {
             10
         }
 
-        pub fn strict_consistency() -> StrictConsistencyOption {
-            StrictConsistencyOption::default()
+        pub fn unsafe_enable_strict_consistency() -> bool {
+            true
         }
     }
 
