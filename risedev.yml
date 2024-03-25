@@ -239,7 +239,7 @@ profile:
       # If you want to use azblob as storage backend, configure bucket(container) name:
       - use: opendal
         engine: azblob
-        bucket: test-bucket
+        bucket: wcy-test-container
       - use: compactor
       # - use: prometheus
       # - use: grafana
