@@ -174,22 +174,10 @@ impl IcebergSplitEnumerator {
         let table = self.config.load_table().await?;
         let snapshot_id = match time_traval_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
-                match &table.current_table_metadata().snapshots {
-                    Some(snapshots) => {
-                        let snapshot = snapshots
-                            .iter()
-                            .find(|snapshot| snapshot.snapshot_id == version);
-                        match snapshot {
-                            Some(snapshot) => snapshot.snapshot_id,
-                            None => {
-                                bail!("Cannot find the snapshot id in the iceberg table.");
-                            }
-                        }
-                    }
-                    None => {
-                        bail!("Cannot find the snapshots in the iceberg table.");
-                    }
-                }
+                let Some(snapshot) = table.current_table_metadata().snapshot(version) else {
+                    bail!("Cannot find the snapshot id in the iceberg table.");
+                };
+                snapshot.snapshot_id
             }
             Some(IcebergTimeTravelInfo::TimeStampMs(timestamp)) => {
                 match &table.current_table_metadata().snapshots {
