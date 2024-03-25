@@ -434,6 +434,10 @@ impl GlobalStreamManager {
 
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
+        tracing::debug!(
+            table_id = %table_fragments.table_id(),
+            "built actors finished"
+        );
 
         if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.build_actors(
@@ -495,6 +499,7 @@ impl GlobalStreamManager {
             ddl_type,
             replace_table: replace_table_command,
         };
+        tracing::debug!("sending Command::CreateStreamingJob");
         if let Err(err) = self.barrier_scheduler.run_command(command).await {
             if create_type == CreateType::Foreground || err.is_cancelled() {
                 let mut table_ids = HashSet::from_iter(std::iter::once(table_id));

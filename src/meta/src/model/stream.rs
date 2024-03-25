@@ -370,9 +370,12 @@ impl TableFragments {
     /// Returns actor ids that need to be tracked when creating MV.
     pub fn tracking_progress_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask
+            let is_value_or_scan = (fragment_type_mask
                 & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
-                != 0
+                != 0;
+            // Note: CDC table fragment is both StreamScan and CdcFilter fragment. We don't want to track CDC progress.
+            let is_cdc = (fragment_type_mask & FragmentTypeFlag::CdcFilter as u32) == 0;
+            is_value_or_scan && !is_cdc
         })
     }
 

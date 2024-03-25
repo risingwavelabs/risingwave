@@ -238,6 +238,25 @@ impl TrackingJob {
     }
 }
 
+impl std::fmt::Debug for TrackingJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrackingJob::New(command) => write!(
+                f,
+                "TrackingJob::New({:?})",
+                command.context.table_to_create()
+            ),
+            TrackingJob::Recovered(recovered) => {
+                write!(
+                    f,
+                    "TrackingJob::Recovered({:?})",
+                    recovered.fragments.table_id()
+                )
+            }
+        }
+    }
+}
+
 pub struct RecoveredTrackingJob {
     pub fragments: TableFragments,
     pub finished: Notifier,
@@ -367,6 +386,7 @@ impl CreateMviewProgressTracker {
     ///
     /// Returns whether there are still remaining stashed jobs to finish.
     pub(super) async fn finish_jobs(&mut self, checkpoint: bool) -> MetaResult<bool> {
+        tracing::trace!(finished_jobs=?self.finished_jobs, progress_map=?self.progress_map, "finishing jobs");
         for job in self
             .finished_jobs
             .extract_if(|job| checkpoint || !job.is_checkpoint_required())

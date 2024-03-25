@@ -876,6 +876,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_MVIEW = 2;
   FRAGMENT_TYPE_FLAG_SINK = 4;
   FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
+  // Include StreamScan and StreamCdcScan
   FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
