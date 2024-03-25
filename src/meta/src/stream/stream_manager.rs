@@ -29,7 +29,6 @@ use tracing::Instrument;
 
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan, StreamRpcManager};
-use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, StreamingJob};
 use crate::model::{ActorId, MetadataModel, TableFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
@@ -386,8 +385,6 @@ impl GlobalStreamManager {
             building_locations,
             existing_locations,
             definition,
-            mv_table_id,
-            internal_tables,
             create_type,
             ddl_type,
             replace_table_job_info,
@@ -450,11 +447,6 @@ impl GlobalStreamManager {
             definition: definition.to_string(),
             ddl_type,
             replace_table: replace_table_command,
-            new_table_fragment_info: NewTableFragmentInfo {
-                table_id,
-                mv_table_id: mv_table_id.map(TableId::new),
-                internal_table_ids: internal_tables.keys().cloned().map(TableId::new).collect(),
-            },
         };
 
         if let Err(err) = self.barrier_scheduler.run_command(command).await {

@@ -58,7 +58,7 @@ use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
-use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -1128,9 +1128,19 @@ fn collect_commit_epoch_info(
     }
     let (new_table_fragment_info, unregistered_state_table_ids) = match &command_ctx.command {
         Command::CreateStreamingJob {
-            new_table_fragment_info,
-            ..
-        } => (Some(new_table_fragment_info.clone()), HashSet::new()),
+            table_fragments, ..
+        } => (
+            Some(NewTableFragmentInfo {
+                table_id: table_fragments.table_id(),
+                mv_table_id: table_fragments.mv_table_id().map(TableId::new),
+                internal_table_ids: table_fragments
+                    .internal_table_ids()
+                    .into_iter()
+                    .map(TableId::new)
+                    .collect(),
+            }),
+            HashSet::new(),
+        ),
         Command::CancelStreamingJob(table_fragments) => {
             let table_id = table_fragments.table_id();
             let mut table_ids =
