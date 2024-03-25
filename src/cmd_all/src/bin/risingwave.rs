@@ -20,7 +20,7 @@ use anyhow::Result;
 use clap::error::ErrorKind;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
-use risingwave_cmd_all::{PlaygroundOpts, SingleNodeOpts, StandaloneOpts};
+use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -151,7 +151,7 @@ impl Component {
             Component::Frontend => FrontendOpts::augment_args(cmd),
             Component::Compactor => CompactorOpts::augment_args(cmd),
             Component::Ctl => CtlOpts::augment_args(cmd),
-            Component::Playground => PlaygroundOpts::augment_args(cmd),
+            Component::Playground => cmd,
             Component::Standalone => StandaloneOpts::augment_args(cmd),
             Component::SingleNode => SingleNodeOpts::augment_args(cmd),
         }
@@ -219,14 +219,6 @@ fn main() -> Result<()> {
     component.start(matches);
 
     Ok(())
-}
-
-fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
-        .with_target("risingwave_storage", Level::WARN)
-        .with_thread_name(true);
-    risingwave_rt::init_risingwave_logger(settings);
-    risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }
 
 fn standalone(opts: StandaloneOpts) {
