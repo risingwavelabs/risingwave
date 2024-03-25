@@ -163,9 +163,6 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        // set the global `CONFIG` variable
-        _ = crate::CONFIG.set(env.config().clone());
-
         let await_tree_reg = await_tree_config
             .clone()
             .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
@@ -373,10 +370,11 @@ impl LocalBarrierWorker {
             }
         };
         let actor_manager = self.actor_manager.clone();
-        let join_handle = self
-            .actor_manager
-            .runtime
-            .spawn(actor_manager.create_actors(actors, self.current_shared_context.clone()));
+        let create_actors_fut = crate::CONFIG.scope(
+            self.actor_manager.env.config().clone(),
+            actor_manager.create_actors(actors, self.current_shared_context.clone()),
+        );
+        let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
             .creating_actors
             .push(AttachedFuture::new(join_handle, result_sender));
@@ -650,6 +648,8 @@ impl LocalBarrierWorker {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
+                let with_config =
+                    crate::CONFIG.scope(self.actor_manager.env.config().clone(), instrumented);
 
                 // TODO: are the following lines still useful?
                 #[cfg(enable_task_local_alloc)]
@@ -658,7 +658,7 @@ impl LocalBarrierWorker {
                     let actor_id_str = actor_id.to_string();
                     let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
-                        instrumented,
+                        with_config,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
@@ -673,7 +673,7 @@ impl LocalBarrierWorker {
                 }
                 #[cfg(not(enable_task_local_alloc))]
                 {
-                    self.actor_manager.runtime.spawn(instrumented)
+                    self.actor_manager.runtime.spawn(with_config)
                 }
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
