@@ -58,13 +58,14 @@ impl Task for ConfigureTmuxTask {
         let mut cmd = new_tmux_command();
         cmd.arg("list-sessions");
         if ctx.run_command(cmd).is_ok() {
-            ctx.pb.set_message("killing previous tmux server...");
-            let mut cmd = new_tmux_command();
-            cmd.arg("kill-server");
+            ctx.pb.set_message("killing previous session...");
+
+            let mut cmd = Command::new("./risedev");
+            cmd.arg("kill-risedev");
             ctx.run_command(cmd)?;
         }
 
-        ctx.pb.set_message("creating new tmux session...");
+        ctx.pb.set_message("creating new session...");
 
         let mut cmd = new_tmux_command();
         cmd.arg("new-session") // this will automatically create the `risedev` tmux server
