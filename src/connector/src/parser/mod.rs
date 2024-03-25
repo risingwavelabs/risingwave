@@ -150,7 +150,7 @@ pub struct HeartbeatChunkBuilder {
 }
 
 impl HeartbeatChunkBuilder {
-    pub fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
+    fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
         let builders = descs
             .iter()
             .map(|desc| desc.data_type.create_array_builder(cap))
@@ -165,7 +165,7 @@ impl HeartbeatChunkBuilder {
         }
     }
 
-    pub fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
+    fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
         self.builder.row_writer()
     }
 
@@ -188,13 +188,13 @@ impl HeartbeatChunkBuilder {
     /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
     /// the builders of the next [`StreamChunk`].
     #[must_use]
-    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+    fn take(&mut self, next_cap: usize) -> StreamChunk {
         let descs = std::mem::take(&mut self.builder.descs);
         let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
         builder.finish()
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.builder.is_empty()
     }
 }
