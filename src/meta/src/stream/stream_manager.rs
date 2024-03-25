@@ -19,6 +19,7 @@ use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_meta_model_v2::ObjectId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -451,9 +452,9 @@ impl GlobalStreamManager {
             ddl_type,
             replace_table: replace_table_command,
             new_table_fragment_info: NewTableFragmentInfo {
-                table_id: table_id.table_id,
-                mv_table_id,
-                internal_table_ids: internal_tables.keys().cloned().collect(),
+                table_id,
+                mv_table_id: mv_table_id.map(TableId::new),
+                internal_table_ids: internal_tables.keys().cloned().map(TableId::new).collect(),
             },
         };
 
@@ -532,14 +533,25 @@ impl GlobalStreamManager {
     pub async fn drop_streaming_jobs_v2(
         &self,
         removed_actors: Vec<ActorId>,
-        state_table_ids: Vec<StateTableId>,
+        streaming_job_ids: Vec<ObjectId>,
+        state_table_ids: Vec<risingwave_meta_model_v2::TableId>,
     ) {
-        if !removed_actors.is_empty() {
+        if !removed_actors.is_empty()
+            || !streaming_job_ids.is_empty()
+            || !state_table_ids.is_empty()
+        {
             let _ = self
                 .barrier_scheduler
                 .run_command(Command::DropStreamingJobs {
                     actors: removed_actors,
-                    unregister_state_table_ids: state_table_ids,
+                    unregistered_table_fragment_ids: streaming_job_ids
+                        .into_iter()
+                        .map(|job_id| TableId::new(job_id as _))
+                        .collect(),
+                    unregistered_state_table_ids: state_table_ids
+                        .into_iter()
+                        .map(|table_id| TableId::new(table_id as _))
+                        .collect(),
                 })
                 .await
                 .inspect_err(|err| {
@@ -562,7 +574,7 @@ impl GlobalStreamManager {
         // Drop table fragments directly.
         let unregister_table_ids = mgr
             .fragment_manager
-            .drop_table_fragments_vec(&table_ids.into_iter().collect())
+            .drop_table_fragments_vec(&table_ids.iter().cloned().collect())
             .await?;
 
         // Issues a drop barrier command.
@@ -574,7 +586,11 @@ impl GlobalStreamManager {
             .barrier_scheduler
             .run_command(Command::DropStreamingJobs {
                 actors: dropped_actors,
-                unregister_state_table_ids: unregister_table_ids,
+                unregistered_table_fragment_ids: table_ids.into_iter().collect(),
+                unregistered_state_table_ids: unregister_table_ids
+                    .into_iter()
+                    .map(TableId::new)
+                    .collect(),
             })
             .await
             .inspect_err(|err| {

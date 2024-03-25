@@ -421,18 +421,15 @@ impl ScheduledBarriers {
     pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
         let mut queue = self.inner.queue.lock();
         assert_matches!(queue.status, QueueStatus::Blocked(_));
-        let (mut drop_table_ids, mut cancel_table_ids) = (vec![], HashSet::new());
+        let (mut dropped_actors, mut cancel_table_ids) = (vec![], HashSet::new());
 
         while let Some(Scheduled {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs {
-                    unregister_state_table_ids: unregister_table_ids,
-                    ..
-                } => {
-                    drop_table_ids.extend(unregister_table_ids);
+                Command::DropStreamingJobs { actors, .. } => {
+                    dropped_actors.extend(actors);
                 }
                 Command::CancelStreamingJob(table_fragments) => {
                     let table_id = table_fragments.table_id();
@@ -447,7 +444,7 @@ impl ScheduledBarriers {
                 notify.notify_finished();
             });
         }
-        (drop_table_ids, cancel_table_ids)
+        (dropped_actors, cancel_table_ids)
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.

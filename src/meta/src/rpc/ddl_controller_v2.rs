@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_meta_model_v2::object::ObjectType;
@@ -389,6 +390,7 @@ impl DdlController {
         }
 
         let ReleaseContext {
+            streaming_job_ids,
             state_table_ids,
             source_ids,
             connections,
@@ -431,7 +433,8 @@ impl DdlController {
         self.stream_manager
             .drop_streaming_jobs_v2(
                 removed_actors.into_iter().map(|id| id as _).collect(),
-                state_table_ids.into_iter().map(|id| id as _).collect(),
+                streaming_job_ids,
+                state_table_ids,
             )
             .await;
 

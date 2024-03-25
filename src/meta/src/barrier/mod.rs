@@ -1125,17 +1125,22 @@ fn collect_commit_epoch_info(
             ..
         } => (Some(new_table_fragment_info.clone()), HashSet::new()),
         Command::CancelStreamingJob(table_fragments) => {
-            let table_id = table_fragments.table_id().table_id;
-            let mut table_ids = HashSet::from_iter(table_fragments.internal_table_ids());
+            let table_id = table_fragments.table_id();
+            let mut table_ids = HashSet::from_iter(
+                table_fragments
+                    .internal_table_ids()
+                    .into_iter()
+                    .map(TableId::new),
+            );
             table_ids.insert(table_id);
             (None, table_ids)
         }
         Command::DropStreamingJobs {
-            unregister_state_table_ids,
+            unregistered_state_table_ids,
             ..
         } => (
             None,
-            HashSet::from_iter(unregister_state_table_ids.iter().cloned()),
+            HashSet::from_iter(unregistered_state_table_ids.iter().cloned()),
         ),
         _ => (None, HashSet::new()),
     };

@@ -29,6 +29,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
@@ -92,7 +93,7 @@ use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::manager::{MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
+use crate::manager::{MetaSrvEnv, MetadataManager, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
     BTreeMapTransactionWrapper, ClusterId, MetadataModel, MetadataModelError, ValTransaction,
@@ -170,7 +171,7 @@ pub struct HummockManager {
     // 2. When partition count <=1, compactor will still use table_id as the cutting boundary of sst
     // 3. Modify the special configuration item hybrid_vnode_count = 0 to remove the table_id in hybrid cg and no longer perform alignment cutting.
     group_to_table_vnode_partition:
-        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<TableId, u32>>>,
+        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<StateTableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -261,7 +262,7 @@ impl NewTableFragmentInfo {
 
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
+    pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
     pub unregistered_state_table_ids: HashSet<TableId>,
@@ -270,7 +271,7 @@ pub struct CommitEpochInfo {
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
+        new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
         unregistered_state_table_ids: HashSet<TableId>,
@@ -1643,7 +1644,7 @@ impl HummockManager {
                     .get(&(StaticCompactionGroupId::StateDefault as u64))
                 {
                     for table_id in &new_fragment_table_info.internal_table_ids {
-                        if levels.member_table_ids.contains(table_id) {
+                        if levels.member_table_ids.contains(&table_id.table_id) {
                             return Err(Error::CompactionGroup(format!(
                                 "table {} already in group {}",
                                 table_id,
@@ -1660,7 +1661,11 @@ impl HummockManager {
                     .group_deltas;
                 group_deltas.push(GroupDelta {
                     delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_add: new_fragment_table_info.internal_table_ids,
+                        table_ids_add: new_fragment_table_info
+                            .internal_table_ids
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect(),
                         ..Default::default()
                     })),
                 });
@@ -1671,7 +1676,7 @@ impl HummockManager {
                     .levels
                     .get(&(StaticCompactionGroupId::MaterializedView as u64))
                 {
-                    if levels.member_table_ids.contains(&table_id) {
+                    if levels.member_table_ids.contains(&table_id.table_id) {
                         return Err(Error::CompactionGroup(format!(
                             "table {} already in group {}",
                             table_id,
@@ -1686,7 +1691,7 @@ impl HummockManager {
                     .group_deltas;
                 group_deltas.push(GroupDelta {
                     delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_add: vec![table_id],
+                        table_ids_add: vec![table_id.table_id],
                         ..Default::default()
                     })),
                 });
@@ -1698,7 +1703,7 @@ impl HummockManager {
             let mut group_unregistered_table_ids: HashMap<_, Vec<_>> = HashMap::new();
             for (group_id, group) in &old_version.levels {
                 for table_id in &group.member_table_ids {
-                    if unregistered_state_table_ids.contains(table_id) {
+                    if unregistered_state_table_ids.contains(&TableId::new(*table_id)) {
                         group_unregistered_table_ids
                             .entry(*group_id)
                             .or_default()
@@ -1718,6 +1723,7 @@ impl HummockManager {
                     .expect("should exist")
                     .member_table_ids;
                 let delta = if unregistered_state_table_ids.len() == original_member_table_ids.len()
+                    && group_id > StaticCompactionGroupId::End as u64
                 {
                     info!(
                         group_id,
@@ -3395,11 +3401,11 @@ pub enum TableAlignRule {
     // The table_id is not optimized for alignment.
     NoOptimization,
     // Move the table_id to a separate compaction group. Currently, the system only supports separate compaction with one table.
-    SplitToDedicatedCg((CompactionGroupId, BTreeMap<TableId, u32>)),
+    SplitToDedicatedCg((CompactionGroupId, BTreeMap<StateTableId, u32>)),
     // In the current group, partition the table's data according to the granularity of the vnode.
-    SplitByVnode((TableId, u32)),
+    SplitByVnode((StateTableId, u32)),
     // In the current group, partition the table's data at the granularity of the table.
-    SplitByTable(TableId),
+    SplitByTable(StateTableId),
 }
 
 fn drop_sst(
