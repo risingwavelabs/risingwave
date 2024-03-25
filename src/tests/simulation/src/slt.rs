@@ -236,7 +236,7 @@ pub async fn run_slt_task(
                 | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
                 _ => SqlCmd::Others,
             };
-            tracing::debug!(?cmd, "Running");
+            tracing::debug!(?record, "Start Running");
 
             if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_rate > 0.0 {
                 panic!("We cannot run background_ddl statement with background_ddl_rate > 0.0, since it could be reset");
