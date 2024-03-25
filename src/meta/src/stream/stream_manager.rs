@@ -602,6 +602,7 @@ impl GlobalStreamManager {
             .iter()
             .flat_map(|tf| tf.actor_ids().into_iter())
             .collect_vec();
+        tracing::debug!("running drop command for actors");
         let _ = self
             .barrier_scheduler
             .run_command(Command::DropStreamingJobs(dropped_actors))
@@ -609,6 +610,7 @@ impl GlobalStreamManager {
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");
             });
+        tracing::debug!("ran drop command for actors");
 
         // Unregister from compaction group afterwards.
         self.env

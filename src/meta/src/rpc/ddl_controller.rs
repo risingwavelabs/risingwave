@@ -1167,7 +1167,9 @@ impl DdlController {
         target_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let mgr = self.metadata_manager.as_v1_ref();
+        tracing::debug!("acquire reschedule job lock for dropping streaming job");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        tracing::debug!("acquired reschedule job lock for dropping streaming job");
         let (mut version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 mgr.catalog_manager
@@ -1294,6 +1296,7 @@ impl DdlController {
             .drop_streaming_jobs(streaming_job_ids)
             .await;
 
+        tracing::debug!("release reschedule job lock for dropping streaming job");
         Ok(version)
     }
 
