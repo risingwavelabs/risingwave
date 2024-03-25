@@ -598,7 +598,7 @@ pub(crate) mod tests {
             table_catalog.into(),
             vec![],
             ctx,
-            false,
+            None,
             Cardinality::unknown(),
         )
         .to_batch()

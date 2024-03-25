@@ -455,7 +455,7 @@
       │     │     ├─StreamExchange { dist: HashShard(t._row_id, 0:Int32) }
       │     │     │ └─StreamProject { exprs: [t.t, t.a, t._row_id, 0:Int32], output_watermarks: [t.t] }
       │     │     │   └─StreamDynamicFilter { predicate: (t.t > $expr1), output_watermarks: [t.t], output: [t.t, t.a, t._row_id], cleaned_by_watermark: true }
-      │     │     │     ├─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
+      │     │     │     ├─StreamFilter { predicate: IsNotNull(t.a) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
       │     │     │     │ └─StreamShare { id: 2 }
       │     │     │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
       │     │     │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -464,7 +464,7 @@
       │     │     │         └─StreamNow { output: [now] }
       │     │     └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
       │     │       └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
-      │     │         └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
+      │     │         └─StreamFilter { predicate: IsNotNull(t.a) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
       │     │           └─StreamShare { id: 2 }
       │     │             └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
       │     │               └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -479,7 +479,7 @@
                 ├─StreamExchange { dist: HashShard(t._row_id, 0:Int32) }
                 │ └─StreamProject { exprs: [t.t, t.a, t._row_id, 0:Int32], output_watermarks: [t.t] }
                 │   └─StreamDynamicFilter { predicate: (t.t > $expr1), output_watermarks: [t.t], output: [t.t, t.a, t._row_id], cleaned_by_watermark: true }
-                │     ├─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
+                │     ├─StreamFilter { predicate: IsNotNull(t.a) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
                 │     │ └─StreamShare { id: 2 }
                 │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
                 │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -488,7 +488,7 @@
                 │         └─StreamNow { output: [now] }
                 └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
                   └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
-                    └─StreamFilter { predicate: (Not((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
+                    └─StreamFilter { predicate: IsNotNull(t.a) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
                       └─StreamShare { id: 2 }
                         └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
                           └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

@@ -116,6 +116,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         )
         .await;
 
-        Ok((params.info, exec.boxed()).into())
+        Ok((params.info, exec).into())
     }
 }

@@ -494,6 +494,7 @@ define_keywords!(
     SYSTEM,
     SYSTEM_TIME,
     SYSTEM_USER,
+    SYSTEM_VERSION,
     TABLE,
     TABLES,
     TABLESAMPLE,

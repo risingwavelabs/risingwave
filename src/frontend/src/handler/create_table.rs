@@ -697,6 +697,7 @@ fn gen_table_plan_inner(
         row_id_index,
         SourceNodeKind::CreateTable,
         context.clone(),
+        None,
     )?
     .into();
 

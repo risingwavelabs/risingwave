@@ -745,12 +745,19 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = self
+        let node_to_collect = match self
             .control_stream_manager
             .inject_barrier(command_ctx.clone())
-            .inspect_err(|_| {
+        {
+            Ok(node_to_collect) => node_to_collect,
+            Err(err) => {
+                for notifier in notifiers {
+                    notifier.notify_failed(err.clone());
+                }
                 fail_point!("inject_barrier_err_success");
-            })?;
+                return Err(err);
+            }
+        };
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
