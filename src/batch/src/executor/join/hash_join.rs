@@ -531,8 +531,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row,
                         build_data_types.len(),
                     ) {
-                        non_equi_state.first_output_row_id.clear();
-                        yield spilled
+                        yield Self::process_left_outer_join_non_equi_condition(
+                            spilled,
+                            cond.as_ref(),
+                            &mut non_equi_state,
+                        )
+                        .await?
                     }
                 }
             }
@@ -745,7 +749,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     &probe_chunk,
                     probe_row_id,
                 ) {
-                    yield spilled
+                    yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
+                        spilled,
+                        cond.as_ref(),
+                        &mut non_equi_state,
+                    )
+                    .await?
                 }
             }
         }
@@ -1178,7 +1187,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row,
                         build_data_types.len(),
                     ) {
-                        yield spilled
+                        yield Self::process_full_outer_join_non_equi_condition(
+                            spilled,
+                            cond.as_ref(),
+                            &mut left_non_equi_state,
+                            &mut right_non_equi_state,
+                        )
+                        .await?
                     }
                 }
             }
