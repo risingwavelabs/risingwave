@@ -374,7 +374,7 @@ impl TableFragments {
                 & (FragmentTypeFlag::Values as u32 | FragmentTypeFlag::StreamScan as u32))
                 != 0;
             // Note: CDC table fragment is both StreamScan and CdcFilter fragment. We don't want to track CDC progress.
-            let is_cdc = (fragment_type_mask & FragmentTypeFlag::CdcFilter as u32) == 0;
+            let is_cdc = (fragment_type_mask & FragmentTypeFlag::CdcFilter as u32) != 0;
             is_value_or_scan && !is_cdc
         })
     }
