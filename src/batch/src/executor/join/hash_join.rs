@@ -28,6 +28,7 @@ use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -36,7 +37,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::task::{BatchTaskContext, ShutdownToken};
 
@@ -56,7 +56,7 @@ pub struct HashJoinExecutor<K> {
     original_schema: Schema,
     /// Output schema after applying `output_indices`
     schema: Schema,
-    /// output_indices are the indices of the columns that we needed.
+    /// `output_indices` are the indices of the columns that we needed.
     output_indices: Vec<usize>,
     /// Left child executor
     probe_side_source: BoxedExecutor,
@@ -531,8 +531,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row,
                         build_data_types.len(),
                     ) {
-                        non_equi_state.first_output_row_id.clear();
-                        yield spilled
+                        yield Self::process_left_outer_join_non_equi_condition(
+                            spilled,
+                            cond.as_ref(),
+                            &mut non_equi_state,
+                        )
+                        .await?
                     }
                 }
             }
@@ -745,7 +749,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     &probe_chunk,
                     probe_row_id,
                 ) {
-                    yield spilled
+                    yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
+                        spilled,
+                        cond.as_ref(),
+                        &mut non_equi_state,
+                    )
+                    .await?
                 }
             }
         }
@@ -1178,7 +1187,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row,
                         build_data_types.len(),
                     ) {
-                        yield spilled
+                        yield Self::process_full_outer_join_non_equi_condition(
+                            spilled,
+                            cond.as_ref(),
+                            &mut left_non_equi_state,
+                            &mut right_non_equi_state,
+                        )
+                        .await?
                     }
                 }
             }

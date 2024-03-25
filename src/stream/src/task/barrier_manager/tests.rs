@@ -56,19 +56,25 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     let manager = &context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        manager.register_sender(actor_id, barrier_tx);
-        (actor_id, barrier_rx)
+        let actor_op_tx = &actor_op_tx;
+        async move {
+            let (barrier_tx, barrier_rx) = unbounded_channel();
+            actor_op_tx
+                .send_and_await(move |result_sender| LocalActorOperation::RegisterSenders {
+                    result_sender,
+                    actor_id,
+                    senders: vec![barrier_tx],
+                })
+                .await
+                .unwrap();
+            (actor_id, barrier_rx)
+        }
     };
 
     // Register actors
     let actor_ids = vec![233, 234, 235];
     let count = actor_ids.len();
-    let mut rxs = actor_ids
-        .clone()
-        .into_iter()
-        .map(register_sender)
-        .collect_vec();
+    let mut rxs = join_all(actor_ids.clone().into_iter().map(register_sender)).await;
 
     // Send a barrier to all actors
     let curr_epoch = test_epoch(2);
@@ -118,7 +124,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 }
 
 #[tokio::test]
-async fn test_managed_barrier_collection_before_send_request() -> StreamResult<()> {
+async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     let actor_op_tx = LocalBarrierManager::spawn_for_test();
 
     let (request_tx, request_rx) = unbounded_channel();
@@ -145,9 +151,19 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     let manager = &context.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        manager.register_sender(actor_id, barrier_tx);
-        (actor_id, barrier_rx)
+        let actor_op_tx = &actor_op_tx;
+        async move {
+            let (barrier_tx, barrier_rx) = unbounded_channel();
+            actor_op_tx
+                .send_and_await(move |result_sender| LocalActorOperation::RegisterSenders {
+                    result_sender,
+                    actor_id,
+                    senders: vec![barrier_tx],
+                })
+                .await
+                .unwrap();
+            (actor_id, barrier_rx)
+        }
     };
 
     let actor_ids_to_send = vec![233, 234, 235];
@@ -160,19 +176,16 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
 
     // Register actors
     let count = actor_ids_to_send.len();
-    let mut rxs = actor_ids_to_send
-        .clone()
-        .into_iter()
-        .map(register_sender)
-        .collect_vec();
+    let mut rxs = join_all(actor_ids_to_send.clone().into_iter().map(register_sender)).await;
 
     // Prepare the barrier
     let curr_epoch = test_epoch(2);
     let barrier = Barrier::new_test_barrier(curr_epoch);
     let epoch = barrier.epoch.prev;
 
-    // Collect a barrier before sending
-    manager.collect(extra_actor_id, &barrier);
+    // Read the mutation after receiving the barrier from remote input.
+    let mut mutation_reader = pin!(manager.read_barrier_mutation(&barrier));
+    assert!(poll_fn(|cx| Poll::Ready(mutation_reader.as_mut().poll(cx).is_pending())).await);
 
     request_tx
         .send(Ok(StreamingControlStreamRequest {
@@ -186,6 +199,12 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
             )),
         }))
         .unwrap();
+
+    let mutation = mutation_reader.await.unwrap();
+    assert_eq!(mutation, barrier.mutation);
+
+    // Collect a barrier before sending
+    manager.collect(extra_actor_id, &barrier);
 
     // Collect barriers from actors
     let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {

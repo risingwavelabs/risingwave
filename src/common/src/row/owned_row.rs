@@ -14,8 +14,9 @@
 
 use std::mem;
 
+use risingwave_common_estimate_size::EstimateSize;
+
 use super::Row;
-use crate::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Date, Datum, DatumRef, Decimal, Interval, ScalarImpl, Time, Timestamp, ToDatumRef,
 };

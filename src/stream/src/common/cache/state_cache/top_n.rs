@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
 use crate::common::cache::TopNCache;

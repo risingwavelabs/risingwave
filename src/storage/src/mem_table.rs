@@ -26,8 +26,8 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
 use thiserror::Error;
@@ -52,7 +52,7 @@ pub type ImmId = SharedBufferBatchId;
 pub enum KeyOp {
     Insert(Bytes),
     Delete(Bytes),
-    /// (old_value, new_value)
+    /// (`old_value`, `new_value`)
     Update((Bytes, Bytes)),
 }
 

@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -44,8 +43,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
-    PbView, Table,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
+    PbSubscription, PbTable, PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -381,6 +380,20 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn create_subscription(
+        &self,
+        subscription: PbSubscription,
+        graph: StreamFragmentGraph,
+    ) -> Result<CatalogVersion> {
+        let request = CreateSubscriptionRequest {
+            subscription: Some(subscription),
+            fragment_graph: Some(graph),
+        };
+
+        let resp = self.inner.create_subscription(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn create_function(&self, function: PbFunction) -> Result<CatalogVersion> {
         let request = CreateFunctionRequest {
             function: Some(function),
@@ -566,6 +579,19 @@ impl MetaClient {
             affected_table_change,
         };
         let resp = self.inner.drop_sink(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_subscription(
+        &self,
+        subscription_id: u32,
+        cascade: bool,
+    ) -> Result<CatalogVersion> {
+        let request = DropSubscriptionRequest {
+            subscription_id,
+            cascade,
+        };
+        let resp = self.inner.drop_subscription(request).await?;
         Ok(resp.version)
     }
 
@@ -1754,7 +1780,7 @@ impl GrpcMetaClient {
         let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
+                let mut members = LruCache::new(20);
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }
@@ -1868,6 +1894,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
+            ,{ ddl_client, create_subscription, CreateSubscriptionRequest, CreateSubscriptionResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
@@ -1877,6 +1904,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
+            ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
