@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::anyhow;
+use clickhouse::insert::Insert;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -25,7 +26,7 @@ use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -41,7 +42,7 @@ use crate::sink::{
 };
 
 const QUERY_ENGINE: &str =
-    "select distinct ?fields from system.tables where database = ? and table = ?";
+    "select distinct ?fields from system.tables where database = ? and name = ?";
 const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
@@ -61,6 +62,10 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
+fn default_max_batch_rows() -> usize {
+    1024
+}
+
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum ClickHouseEngine {
@@ -71,6 +76,13 @@ enum ClickHouseEngine {
     CollapsingMergeTree(String),
     VersionedCollapsingMergeTree(String),
     GraphiteMergeTree,
+    ReplicatedMergeTree,
+    ReplicatedReplacingMergeTree,
+    ReplicatedSummingMergeTree,
+    ReplicatedAggregatingMergeTree,
+    ReplicatedCollapsingMergeTree(String),
+    ReplicatedVersionedCollapsingMergeTree(String),
+    ReplicatedGraphiteMergeTree,
 }
 impl ClickHouseEngine {
     pub fn is_collapsing_engine(&self) -> bool {
@@ -78,6 +90,8 @@ impl ClickHouseEngine {
             self,
             ClickHouseEngine::CollapsingMergeTree(_)
                 | ClickHouseEngine::VersionedCollapsingMergeTree(_)
+                | ClickHouseEngine::ReplicatedCollapsingMergeTree(_)
+                | ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(_)
         )
     }
 
@@ -85,6 +99,12 @@ impl ClickHouseEngine {
         match self {
             ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
             ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => {
+                Some(sign_name.to_string())
+            }
+            ClickHouseEngine::ReplicatedCollapsingMergeTree(sign_name) => {
+                Some(sign_name.to_string())
+            }
+            ClickHouseEngine::ReplicatedVersionedCollapsingMergeTree(sign_name) => {
                 Some(sign_name.to_string())
             }
             _ => None,
@@ -97,6 +117,7 @@ impl ClickHouseEngine {
             "ReplacingMergeTree" => Ok(ClickHouseEngine::ReplacingMergeTree),
             "SummingMergeTree" => Ok(ClickHouseEngine::SummingMergeTree),
             "AggregatingMergeTree" => Ok(ClickHouseEngine::AggregatingMergeTree),
+            // VersionedCollapsingMergeTree(sign_name,"a")
             "VersionedCollapsingMergeTree" => {
                 let sign_name = engine_name
                     .create_table_query
@@ -109,6 +130,7 @@ impl ClickHouseEngine {
                     .to_string();
                 Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
             }
+            // CollapsingMergeTree(sign_name)
             "CollapsingMergeTree" => {
                 let sign_name = engine_name
                     .create_table_query
@@ -122,6 +144,43 @@ impl ClickHouseEngine {
                 Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
             }
             "GraphiteMergeTree" => Ok(ClickHouseEngine::GraphiteMergeTree),
+            "ReplicatedMergeTree" => Ok(ClickHouseEngine::ReplicatedMergeTree),
+            "ReplicatedReplacingMergeTree" => Ok(ClickHouseEngine::ReplicatedReplacingMergeTree),
+            "ReplicatedSummingMergeTree" => Ok(ClickHouseEngine::ReplicatedSummingMergeTree),
+            "ReplicatedAggregatingMergeTree" => {
+                Ok(ClickHouseEngine::ReplicatedAggregatingMergeTree)
+            }
+            // ReplicatedVersionedCollapsingMergeTree("a","b",sign_name,"c")
+            "ReplicatedVersionedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("ReplicatedVersionedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(',')
+                    .rev()
+                    .nth(1)
+                    .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
+                    .to_string();
+                Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
+            }
+            // ReplicatedCollapsingMergeTree("a","b",sign_name)
+            "ReplicatedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("ReplicatedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(')')
+                    .next()
+                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .split(',')
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .to_string();
+                Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
+            }
+            "ReplicatedGraphiteMergeTree" => Ok(ClickHouseEngine::ReplicatedGraphiteMergeTree),
             _ => Err(SinkError::ClickHouse(format!(
                 "Cannot find clickhouse engine {:?}",
                 engine_name.engine
@@ -376,6 +435,7 @@ pub struct ClickHouseSinkWriter {
     column_correct_vec: Vec<ClickHouseSchemaFeature>,
     rw_fields_name_after_calibration: Vec<String>,
     clickhouse_engine: ClickHouseEngine,
+    inserter: Option<Insert<ClickHouseColumn>>,
 }
 #[derive(Debug)]
 struct ClickHouseSchemaFeature {
@@ -419,6 +479,7 @@ impl ClickHouseSinkWriter {
             column_correct_vec: column_correct_vec?,
             rw_fields_name_after_calibration,
             clickhouse_engine,
+            inserter: None,
         })
     }
 
@@ -484,10 +545,12 @@ impl ClickHouseSinkWriter {
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut insert = self.client.insert_with_fields_name(
-            &self.config.common.table,
-            self.rw_fields_name_after_calibration.clone(),
-        )?;
+        if self.inserter.is_none() {
+            self.inserter = Some(self.client.insert_with_fields_name(
+                &self.config.common.table,
+                self.rw_fields_name_after_calibration.clone(),
+            )?);
+        }
         for (op, row) in chunk.rows() {
             let mut clickhouse_filed_vec = vec![];
             for (index, data) in row.iter().enumerate() {
@@ -519,9 +582,12 @@ impl ClickHouseSinkWriter {
             let clickhouse_column = ClickHouseColumn {
                 row: clickhouse_filed_vec,
             };
-            insert.write(&clickhouse_column).await?;
+            self.inserter
+                .as_mut()
+                .unwrap()
+                .write(&clickhouse_column)
+                .await?;
         }
-        insert.end().await?;
         Ok(())
     }
 }
@@ -533,6 +599,15 @@ impl AsyncTruncateSinkWriter for ClickHouseSinkWriter {
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         self.write(chunk).await
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if let Some(inserter) = self.inserter.take()
+            && is_checkpoint
+        {
+            inserter.end().await?;
+        }
+        Ok(())
     }
 }
 
