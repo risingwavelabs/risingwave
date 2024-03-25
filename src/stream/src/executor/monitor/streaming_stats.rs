@@ -1000,7 +1000,7 @@ impl StreamingMetrics {
         .unwrap();
 
         let stream_memory_evicted = register_guarded_int_gauge_vec_with_registry!(
-            "stream_memory_evicted",
+            "stream_memory_evicted_debug",
             "Memory evicted for stream executors",
             &["table_id", "actor_id", "sequence", "epoch"],
             registry
