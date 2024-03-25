@@ -42,6 +42,9 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
         // i.e., the specific optimization that will apply to the entire condition
         // e.g., `e and not(e)`
         let predicate = ConditionRewriter::rewrite(filter.predicate().clone());
+        let predicate = rewrite_condition_with_col_self_eq(predicate);
+
+        // construct the new filter after predicate rewriting
         let filter = LogicalFilter::create(filter.input(), predicate);
 
         // then rewrite single expression via `rewrite_exprs`
@@ -313,5 +316,55 @@ impl ConditionRewriter {
             }
         }
         condition
+    }
+}
+
+pub fn rewrite_condition_with_col_self_eq(cond: Condition) -> Condition {
+    let mut ret = Condition::true_cond();
+    for c in cond.conjunctions {
+        let c = Condition::with_expr(ColumnSelfEqualRewriter::rewrite(c));
+        ret = ret.and(c);
+    }
+    ret
+}
+
+/// for every `(col) == (col)`,
+/// transform to `IsNotNull(col)`
+/// since in the boolean context, `null = (...)` will always
+/// be treated as false.
+/// note: as always, only for *single column*.
+pub struct ColumnSelfEqualRewriter {}
+impl ColumnSelfEqualRewriter {
+    pub fn rewrite(expr: ExprImpl) -> ExprImpl {
+        let mut columns = vec![];
+        extract_column(expr.clone(), &mut columns);
+        if columns.len() > 1 {
+            // leave it intact
+            return expr;
+        }
+
+        // extract the equal inputs with sanity check
+        let ExprImpl::FunctionCall(func_call) = expr.clone() else {
+            return expr;
+        };
+        if func_call.func_type() != ExprType::Equal || func_call.inputs().len() != 2 {
+            return expr;
+        }
+        assert_eq!(func_call.return_type(), DataType::Boolean);
+        let inputs = func_call.inputs();
+        let e1 = inputs[0].clone();
+        let e2 = inputs[1].clone();
+
+        if e1 == e2 {
+            if columns.len() == 0 {
+                return ExprImpl::literal_bool(true);
+            }
+            let Ok(ret) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
+                return expr;
+            };
+            ret.into()
+        } else {
+            expr
+        }
     }
 }

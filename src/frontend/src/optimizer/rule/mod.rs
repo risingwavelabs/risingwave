@@ -29,7 +29,7 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
-mod logical_filter_expression_simplify_rule;
+pub mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
 mod over_window_merge_rule;
 pub use over_window_merge_rule::*;
