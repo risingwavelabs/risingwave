@@ -1056,6 +1056,7 @@ impl HummockManager {
         } else {
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+            // partition_count is based on compaction config. When compaction group is set to partition, the dynamically calculated value in memory will be invalid.
             if group_config.compaction_config.split_weight_by_vnode > 0 {
                 for table_id in &compact_task.existing_table_ids {
                     table_to_vnode_partition
