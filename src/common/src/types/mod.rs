@@ -417,6 +417,11 @@ impl DataType {
         Self::Struct(StructType::from_parts(field_names, fields))
     }
 
+    /// Returns the inner type of a struct type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the type is not a struct type.
     pub fn as_struct(&self) -> &StructType {
         match self {
             DataType::Struct(t) => t,
