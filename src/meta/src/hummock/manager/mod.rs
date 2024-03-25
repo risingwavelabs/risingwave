@@ -38,8 +38,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
-    get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt,
+    get_table_compaction_group_id_mapping, BranchedSstInfo, HummockLevelsExt,
 };
 use risingwave_hummock_sdk::version::{HummockVersionDelta, SnapshotGroupDelta, SnapshotGroupId};
 use risingwave_hummock_sdk::{
@@ -1630,13 +1629,16 @@ impl HummockManager {
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
 
+        let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
+
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
             assert!(
                 unregistered_state_table_ids.is_empty(),
                 "cannot unregister state table and register state table at the same epoch"
             );
-            let snapshot_group_id = SnapshotGroupId::from(new_fragment_table_info.table_id);
+            let snapshot_group_id =
+                SnapshotGroupId::from(new_fragment_table_info.table_id.table_id);
             if old_version.snapshot_groups.contains_key(&snapshot_group_id) {
                 return Err(anyhow!(
                     "new fragment already exists: {}",
@@ -1647,12 +1649,7 @@ impl HummockManager {
             new_version_delta.snapshot_group_delta.insert(
                 snapshot_group_id,
                 SnapshotGroupDelta::NewSnapshotGroup {
-                    member_table_ids: new_fragment_table_info
-                        .mv_table_id
-                        .iter()
-                        .chain(new_fragment_table_info.internal_table_ids.iter())
-                        .map(|table_id| risingwave_common::catalog::TableId::new(*table_id))
-                        .collect(),
+                    member_table_ids: new_fragment_table_info.state_table_ids().collect(),
                     safe_epoch: old_version.safe_epoch,
                     committed_epoch: epoch,
                 },
@@ -1688,6 +1685,11 @@ impl HummockManager {
                         ..Default::default()
                     })),
                 });
+
+                for table_id in &new_fragment_table_info.internal_table_ids {
+                    table_compaction_group_mapping
+                        .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
+                }
             }
 
             if let Some(table_id) = new_fragment_table_info.mv_table_id {
@@ -1714,6 +1716,8 @@ impl HummockManager {
                         ..Default::default()
                     })),
                 });
+                let _ = table_compaction_group_mapping
+                    .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
             }
         }
 
@@ -1766,6 +1770,9 @@ impl HummockManager {
                     delta_type: Some(delta),
                 });
             }
+            for table_id in &unregistered_state_table_ids {
+                table_compaction_group_mapping.remove(table_id);
+            }
         }
 
         let mut incorrect_ssts = vec![];
@@ -1787,13 +1794,10 @@ impl HummockManager {
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
-                    match try_get_compaction_group_id_by_table_id(
-                        &versioning.current_version,
-                        *table_id,
-                    ) {
+                    match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                         Some(compaction_group_id) => {
                             group_table_ids
-                                .entry(compaction_group_id)
+                                .entry(*compaction_group_id)
                                 .or_default()
                                 .push(*table_id);
                         }

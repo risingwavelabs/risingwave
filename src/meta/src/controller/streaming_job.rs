@@ -425,12 +425,19 @@ impl CatalogController {
             }
         }
 
-        let state_table_ids: Vec<TableId> = Table::find()
+        let internal_table_ids: Vec<TableId> = Table::find()
             .select_only()
             .column(table::Column::TableId)
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
             .all(&txn)
+            .await?;
+
+        let mv_table_id: Option<TableId> = Table::find_by_id(job_id)
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .one(&txn)
             .await?;
 
         let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
@@ -442,9 +449,9 @@ impl CatalogController {
             .await?;
 
         Object::delete_by_id(job_id).exec(&txn).await?;
-        if !state_table_ids.is_empty() {
+        if !internal_table_ids.is_empty() {
             Object::delete_many()
-                .filter(object::Column::Oid.is_in(state_table_ids.clone()))
+                .filter(object::Column::Oid.is_in(internal_table_ids.iter().cloned()))
                 .exec(&txn)
                 .await?;
         }
@@ -452,6 +459,10 @@ impl CatalogController {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
         txn.commit().await?;
+
+        let mut state_table_ids = internal_table_ids;
+
+        state_table_ids.extend(mv_table_id.into_iter());
 
         Ok((true, state_table_ids))
     }
