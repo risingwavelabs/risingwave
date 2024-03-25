@@ -135,7 +135,7 @@ impl ColumnSelfEqualRewriter {
         let e2 = inputs[1].clone();
 
         if e1 == e2 {
-            if columns.len() == 0 {
+            if columns.is_empty() {
                 return ExprImpl::literal_bool(true);
             }
             let Ok(ret) = FunctionCall::new(ExprType::IsNotNull, vec![columns[0].clone()]) else {
