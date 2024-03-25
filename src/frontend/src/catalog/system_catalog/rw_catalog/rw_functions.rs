@@ -38,6 +38,7 @@ pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
         (DataType::Varchar, "language"),
         (DataType::Varchar, "link"),
         (DataType::Varchar, "acl"),
+        (DataType::Boolean, "always_retry_on_network_error"),
     ]
 });
 
@@ -80,6 +81,7 @@ impl SysCatalogReaderImpl {
                             )
                             .into(),
                         )),
+                        Some(ScalarImpl::Bool(function.always_retry_on_network_error)),
                     ])
                 })
             })
