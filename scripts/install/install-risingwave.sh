@@ -102,4 +102,10 @@ echo "To view available options, run:"
 echo
 echo "  risingwave single-node --help"
 echo
+# Check if $JAVA_HOME is set, if not, prompt user to install Java, and set $JAVA_HOME.
+if [ -z "${JAVA_HOME}" ]; then
+  tput setaf 1
+  echo "WARNING: Java is required to use RisingWave's Java Connectors (e.g. MySQL)."
+  echo "Please install Java, and set the \$JAVA_HOME environment variable."
+fi
 # TODO(kwannoel): Include link to our docs.
