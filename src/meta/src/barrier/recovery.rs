@@ -391,12 +391,18 @@ impl GlobalBarrierManager {
                     let _ = self
                         .context
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
-                        .await?;
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "pre_apply_drop_cancel failed");
+                        })?;
 
                     let active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
                         self.context.metadata_manager.clone(),
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|err| {
+                        warn!(error = %err.as_report(), "get active streaming nodes failed");
+                    })?;
 
                     let all_nodes = active_streaming_nodes
                         .current()
@@ -408,7 +414,10 @@ impl GlobalBarrierManager {
                         .context
                         .metadata_manager
                         .list_background_creating_jobs()
-                        .await?;
+                        .await
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "list background creating jobs failed");
+                        })?;
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
