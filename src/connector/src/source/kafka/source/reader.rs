@@ -27,6 +27,7 @@ use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
+use super::KafkaMeta;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
@@ -34,8 +35,8 @@ use crate::source::kafka::{
     KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef, SplitId,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMeta, SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct KafkaSplitReader {
@@ -228,7 +229,13 @@ impl CommonSplitReader for KafkaSplitReader {
                 num_messages += 1;
                 let source_message =
                     SourceMessage::from_kafka_message(&msg, require_message_header);
-                let split_id = source_message.split_id.clone();
+                let split_id = {
+                    if let SourceMeta::Kafka(KafkaMeta { partition, .. }) = &source_message.meta {
+                        partition.clone()
+                    } else {
+                        unreachable!()
+                    }
+                };
                 res.push(source_message);
 
                 if let Entry::Occupied(o) = stop_offsets.entry(split_id) {

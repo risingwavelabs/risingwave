@@ -29,6 +29,8 @@ use crate::source::SourceProperties;
 
 pub const MQTT_CONNECTOR: &str = "mqtt";
 
+pub use crate::source::mqtt::source::MqttMeta;
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct MqttProperties {

@@ -19,7 +19,7 @@ use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
 
-use super::message::MqttMessage;
+use super::message::to_source_message;
 use super::MqttSplit;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
@@ -92,8 +92,8 @@ impl CommonSplitReader for MqttSplitReader {
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
-                    let msg = MqttMessage::new(p);
-                    yield vec![SourceMessage::from(msg)];
+                    // todo: do batching here, yielding only one message each time is not efficient
+                    yield vec![to_source_message(p)];
                 }
                 Ok(_) => (),
                 Err(e) => {

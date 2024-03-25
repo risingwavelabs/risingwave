@@ -44,7 +44,7 @@ pub(crate) async fn into_chunk_stream(
 
             for msg in data_batch {
                 by_split_id
-                    .entry(msg.split_id.as_ref())
+                    .entry(msg.get_split_id())
                     .or_insert_with(Vec::new)
                     .push(msg);
             }
@@ -55,7 +55,7 @@ pub(crate) async fn into_chunk_stream(
                     .with_label_values(&[
                         &actor_id,
                         &source_id,
-                        split_id,
+                        split_id.as_ref(),
                         &source_name,
                         &fragment_id,
                     ])
@@ -71,7 +71,7 @@ pub(crate) async fn into_chunk_stream(
                     .with_label_values(&[
                         &actor_id,
                         &source_id,
-                        split_id,
+                        split_id.as_ref(),
                         &source_name,
                         &fragment_id,
                     ])

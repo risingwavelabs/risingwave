@@ -14,17 +14,21 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexmark::event::Event;
+use risingwave_common::types::{Datum, ScalarImpl};
 
+use crate::impl_source_meta_extract_func;
 use crate::source::nexmark::source::combined_event::CombinedEvent;
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 #[derive(Clone, Debug)]
 pub struct NexmarkMeta {
+    pub split_id: SplitId,
     pub timestamp: Option<i64>,
+    pub offset: i64,
 }
 #[derive(Clone, Debug)]
 pub struct NexmarkMessage {
     pub split_id: SplitId,
-    pub sequence_number: String,
+    pub sequence_number: i64,
     pub payload: Vec<u8>,
 }
 
@@ -33,9 +37,9 @@ impl From<NexmarkMessage> for SourceMessage {
         SourceMessage {
             key: None,
             payload: Some(msg.payload),
-            offset: msg.sequence_number.clone(),
-            split_id: msg.split_id,
             meta: SourceMeta::Nexmark(NexmarkMeta {
+                split_id: msg.split_id,
+                offset: msg.sequence_number,
                 timestamp: Some(
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -47,11 +51,13 @@ impl From<NexmarkMessage> for SourceMessage {
     }
 }
 
+impl_source_meta_extract_func!(NexmarkMeta, Int64, offset, split_id);
+
 impl NexmarkMessage {
     pub fn new_single_event(split_id: SplitId, offset: u64, event: Event) -> Self {
         NexmarkMessage {
             split_id,
-            sequence_number: offset.to_string(),
+            sequence_number: offset as i64,
             payload: match &event {
                 Event::Person(p) => serde_json::to_vec(p),
                 Event::Auction(a) => serde_json::to_vec(a),
@@ -70,7 +76,7 @@ impl NexmarkMessage {
         let combined_event = serde_json::to_string(&combined_event).unwrap();
         NexmarkMessage {
             split_id,
-            sequence_number: offset.to_string(),
+            sequence_number: offset as i64,
             payload: combined_event.into(),
         }
     }

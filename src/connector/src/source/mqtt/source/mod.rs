@@ -15,6 +15,7 @@
 mod message;
 mod reader;
 
+pub use message::MqttMeta;
 pub use reader::*;
 
 pub use crate::source::mqtt::split::*;

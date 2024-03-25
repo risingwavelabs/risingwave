@@ -30,7 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_pb::catalog::{
@@ -47,7 +47,7 @@ pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
-use self::util::get_kafka_topic;
+use self::util::{extract_offset_from_meta, get_kafka_topic};
 use crate::common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
@@ -357,19 +357,31 @@ impl SourceStreamChunkRowWriter<'_> {
                     ))
                 }
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
-                    // the meta info does not involve spec connector
+                    // handle connector aware partition column
                     return Ok(A::output_for(
                         self.row_meta
                             .as_ref()
-                            .map(|ele| ScalarImpl::Utf8(ele.split_id.to_string().into())),
+                            .and_then(|ele| {
+                                extract_offset_from_meta(
+                                    ele.meta,
+                                    desc.data_type == DataType::Varchar,
+                                )
+                            })
+                            .unwrap_or(None),
                     ));
                 }
                 (_, &Some(AdditionalColumnType::Offset(_))) => {
-                    // the meta info does not involve spec connector
+                    // handle connector aware offset column
                     return Ok(A::output_for(
                         self.row_meta
                             .as_ref()
-                            .map(|ele| ScalarImpl::Utf8(ele.offset.to_string().into())),
+                            .and_then(|ele| {
+                                extract_offset_from_meta(
+                                    ele.meta,
+                                    desc.data_type == DataType::Varchar,
+                                )
+                            })
+                            .unwrap_or(None),
                     ));
                 }
                 (_, &Some(AdditionalColumnType::HeaderInner(ref header_inner))) => {
@@ -657,7 +669,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
-                tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
+                tracing::debug!(
+                    offset = msg.get_offset(),
+                    "skip parsing of heartbeat message"
+                );
                 continue;
             }
 
@@ -678,8 +693,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     msg.payload,
                     builder.row_writer().with_meta(MessageMeta {
                         meta: &msg.meta,
-                        split_id: &msg.split_id,
-                        offset: &msg.offset,
+                        split_id: msg.get_split_id().as_ref(),
+                        offset: msg.get_offset(),
                     }),
                 )
                 .await
@@ -703,8 +718,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
                             tracing::error!(
                                 error = %error.as_report(),
-                                split_id = &*msg.split_id,
-                                offset = msg.offset,
+                                split_id = msg.get_split_id().as_ref(),
+                                offset = msg.get_offset(),
                                 suppressed_count,
                                 "failed to parse message, skipping"
                             );

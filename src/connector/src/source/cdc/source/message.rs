@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_pb::connector_service::CdcMessage;
 
+use crate::impl_source_meta_extract_func;
 use crate::source::base::SourceMessage;
-use crate::source::SourceMeta;
+use crate::source::{SourceMeta, SplitId};
 
 #[derive(Debug, Clone)]
 pub struct DebeziumCdcMeta {
@@ -24,6 +28,9 @@ pub struct DebeziumCdcMeta {
     pub source_ts_ms: i64,
     // Whether the message is a transaction metadata
     pub is_transaction_meta: bool,
+
+    pub offset: String,
+    pub split_id: SplitId,
 }
 
 impl From<CdcMessage> for SourceMessage {
@@ -39,9 +46,9 @@ impl From<CdcMessage> for SourceMessage {
             } else {
                 Some(message.payload.as_bytes().to_vec())
             },
-            offset: message.offset,
-            split_id: message.partition.into(),
             meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
+                offset: message.offset,
+                split_id: Arc::from(message.partition.to_string()),
                 full_table_name: message.full_table_name,
                 source_ts_ms: message.source_ts_ms,
                 is_transaction_meta: message.is_transaction_meta,
@@ -49,3 +56,5 @@ impl From<CdcMessage> for SourceMessage {
         }
     }
 }
+
+impl_source_meta_extract_func!(DebeziumCdcMeta, offset, split_id);

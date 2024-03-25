@@ -137,3 +137,18 @@ pub fn extract_header_inner_from_meta(
         _ => None,
     }
 }
+
+pub fn extract_offset_from_meta(meta: &SourceMeta, expect_varchar: bool) -> Option<Datum> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_offset(expect_varchar),
+        _ => None,
+    }
+}
+
+pub fn extract_partition_from_meta(meta: &SourceMeta) -> Option<Datum> {
+    // all partition will be mapped to varchar
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_partition(),
+        _ => None,
+    }
+}

@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use pulsar::consumer::Message;
 
 use crate::source::{SourceMessage, SourceMeta};
+
+pub struct PulsarMeta {
+    split_id: Arc<str>,
+    offset: String,
+}
 
 impl From<Message<Vec<u8>>> for SourceMessage {
     fn from(msg: Message<Vec<u8>>) -> Self {
@@ -23,15 +29,16 @@ impl From<Message<Vec<u8>>> for SourceMessage {
         SourceMessage {
             key: msg.payload.metadata.partition_key.clone().map(|k| k.into()),
             payload: Some(msg.payload.data),
-            offset: format!(
-                "{}:{}:{}:{}",
-                message_id.ledger_id,
-                message_id.entry_id,
-                message_id.partition.unwrap_or(-1),
-                message_id.batch_index.unwrap_or(-1)
-            ),
-            split_id: msg.topic.into(),
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::Pulsar(PulsarMeta {
+                offset: format!(
+                    "{}:{}:{}:{}",
+                    message_id.ledger_id,
+                    message_id.entry_id,
+                    message_id.partition.unwrap_or(-1),
+                    message_id.batch_index.unwrap_or(-1)
+                ),
+                split_id: Arc::new(msg.topic),
+            }),
         }
     }
 }

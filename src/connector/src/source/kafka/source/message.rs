@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders};
 use rdkafka::Message;
@@ -19,15 +21,18 @@ use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::data::DataType as PbDataType;
 
+use crate::impl_source_meta_extract_func;
 use crate::parser::additional_columns::get_kafka_header_item_datatype;
 use crate::source::base::SourceMessage;
-use crate::source::SourceMeta;
+use crate::source::{SourceMeta, SplitId};
 
 #[derive(Debug, Clone)]
 pub struct KafkaMeta {
     // timestamp(milliseconds) of message append in mq
     pub timestamp: Option<i64>,
     pub headers: Option<OwnedHeaders>,
+    pub partition: Arc<str>,
+    pub offset: i64,
 }
 
 impl KafkaMeta {
@@ -85,14 +90,14 @@ impl KafkaMeta {
     }
 }
 
+impl_source_meta_extract_func!(KafkaMeta, Int64, offset, partition);
+
 impl SourceMessage {
     pub fn from_kafka_message(message: &BorrowedMessage<'_>, require_header: bool) -> Self {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             key: message.key().map(|p| p.to_vec()),
             payload: message.payload().map(|p| p.to_vec()),
-            offset: message.offset().to_string(),
-            split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
                 timestamp: message.timestamp().to_millis(),
                 headers: if require_header {
@@ -100,6 +105,8 @@ impl SourceMessage {
                 } else {
                     None
                 },
+                partition: Arc::from(message.partition().to_string()),
+                offset: message.offset(),
             }),
         }
     }

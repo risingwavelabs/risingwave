@@ -269,3 +269,88 @@ macro_rules! impl_cdc_source_type {
 
     }
 }
+
+#[macro_export]
+macro_rules! impl_source_meta_extract_func {
+    (
+        $struct_name:ident,
+        $offset_expect_type:ident,
+        $offset_member:ident,
+        $partition_member:ident
+    ) => {
+        impl $struct_name {
+            pub fn extract_offset(&self, expect_varchar: bool) -> Option<Datum> {
+                if expect_varchar {
+                    Some(Some(ScalarImpl::Utf8(
+                        self.$offset_member.to_string().into(),
+                    )))
+                } else {
+                    Some(Some(ScalarImpl::$offset_expect_type(self.$offset_member)))
+                }
+            }
+
+            pub fn extract_partition(&self) -> Option<Datum> {
+                Some(Some(ScalarImpl::Utf8(
+                    self.$partition_member.to_string().into(),
+                )))
+            }
+
+            pub fn get_split_id(&self) -> SplitId {
+                &self.$partition_member
+            }
+
+            pub fn get_offset(&self) -> &str {
+                self.$offset_member.to_string().as_ref()
+            }
+        }
+    };
+    ($struct_name:ident, $offset_member:ident, $partition_member:ident) => {
+        impl $struct_name {
+            pub fn extract_offset(&self, _expect_varchar: bool) -> Option<Datum> {
+                Some(Some(ScalarImpl::Utf8(
+                    self.$offset_member.to_string().into(),
+                )))
+            }
+
+            pub fn extract_partition(&self) -> Option<Datum> {
+                Some(Some(ScalarImpl::Utf8(
+                    self.$partition_member.to_string().into(),
+                )))
+            }
+
+            pub fn get_split_id(&self) -> SplitId {
+                self.$partition_member.clone()
+            }
+
+            pub fn get_offset(&self) -> &str {
+                self.$offset_member.to_string().as_ref()
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_source_message_get_offset_split {
+    ( $outer_struct: ident, $($get_from_struct: ident), +) => {
+        impl $outer_struct {
+            pub fn get_split_id(&self) -> SplitId {
+                match &self.meta {
+                    $(
+                        SourceMeta::$get_from_struct(meta) => meta.get_split_id().clone(),
+                    )+
+                    _ => unreachable!(),
+                }
+
+            }
+
+            pub fn get_offset(&self) -> &str {
+                match &self.meta {
+                    $(
+                        SourceMeta::$get_from_struct(meta) => meta.get_offset(),
+                    )+
+                    _ => unreachable!(),
+                }
+            }
+        }
+    };
+}

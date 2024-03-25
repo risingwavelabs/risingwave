@@ -14,7 +14,9 @@
 
 use aws_sdk_kinesis::types::Record;
 use aws_smithy_types_convert::date_time::DateTimeExt;
+use risingwave_common::types::{Datum, ScalarImpl};
 
+use crate::impl_source_meta_extract_func;
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
@@ -23,16 +25,20 @@ pub struct KinesisMessage {}
 #[derive(Clone, Debug)]
 pub struct KinesisMeta {
     // from `approximate_arrival_timestamp` of type `Option<aws_smithy_types::DateTime>`
-    timestamp: Option<i64>,
+    pub timestamp: Option<i64>,
+    pub offset: String,
+    pub split_id: SplitId,
 }
+
+impl_source_meta_extract_func!(KinesisMeta, offset, split_id);
 
 pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
     SourceMessage {
         key: Some(value.partition_key.clone().into_bytes()),
         payload: Some(value.data.clone().into_inner()),
-        offset: value.sequence_number.clone(),
-        split_id,
         meta: SourceMeta::Kinesis(KinesisMeta {
+            offset: value.sequence_number.clone(),
+            split_id,
             timestamp: value
                 .approximate_arrival_timestamp
                 .map(|dt| dt.to_chrono_utc().unwrap().timestamp_millis()),

@@ -14,13 +14,17 @@
 
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::subscriber::ReceivedMessage;
+use risingwave_common::types::{Datum, ScalarImpl};
 
+use crate::impl_source_meta_extract_func;
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Debug, Clone)]
 pub struct GooglePubsubMeta {
     // timestamp(milliseconds) of message append in mq
     pub timestamp: Option<i64>,
+    pub split_id: SplitId,
+    pub offset: i64,
 }
 
 /// Tag a `ReceivedMessage` from cloud pubsub so we can inject the virtual split-id into the
@@ -50,11 +54,13 @@ impl From<TaggedReceivedMessage> for SourceMessage {
                     _ => Some(payload),
                 }
             },
-            offset: timestamp.timestamp_nanos_opt().unwrap().to_string(),
-            split_id,
             meta: SourceMeta::GooglePubsub(GooglePubsubMeta {
                 timestamp: Some(timestamp.timestamp_millis()),
+                offset: timestamp.timestamp_nanos_opt().unwrap(),
+                split_id,
             }),
         }
     }
 }
+
+impl_source_meta_extract_func!(GooglePubsubMeta, Int64, offset, split_id);

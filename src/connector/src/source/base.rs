@@ -47,10 +47,11 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::mqtt::MqttMeta;
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str,
+    impl_source_message_get_offset_split, impl_split, match_source_name_str,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -518,10 +519,19 @@ pub type SplitId = Arc<str>;
 pub struct SourceMessage {
     pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
-    pub offset: String, // TODO: use `Arc<str>`
-    pub split_id: SplitId,
     pub meta: SourceMeta,
 }
+
+impl_source_message_get_offset_split!(
+    SourceMessage,
+    Kafka,
+    Kinesis,
+    Nexmark,
+    GooglePubsub,
+    Datagen,
+    DebeziumCdc,
+    Mqtt
+);
 
 #[derive(Debug, Clone)]
 pub enum SourceMeta {
@@ -531,6 +541,7 @@ pub enum SourceMeta {
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Mqtt(MqttMeta),
     // For the source that doesn't have meta data.
     Empty,
 }

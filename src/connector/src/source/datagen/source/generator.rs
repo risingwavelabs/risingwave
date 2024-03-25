@@ -18,10 +18,11 @@ use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::ConnectorResult;
+use crate::impl_source_meta_extract_func;
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
@@ -46,7 +47,11 @@ pub struct DatagenEventGenerator {
 pub struct DatagenMeta {
     // timestamp(milliseconds) of the data generated
     pub timestamp: Option<i64>,
+    pub split_id: SplitId,
+    pub offset: i64,
 }
+
+impl_source_meta_extract_func!(DatagenMeta, Int64, offset, split_id);
 
 impl DatagenEventGenerator {
     #[allow(clippy::too_many_arguments)]
@@ -132,9 +137,9 @@ impl DatagenEventGenerator {
                     msgs.push(SourceMessage {
                         key: None,
                         payload: Some(payload),
-                        offset: self.offset.to_string(),
-                        split_id: self.split_id.clone(),
                         meta: SourceMeta::Datagen(DatagenMeta {
+                            offset: self.offset as i64,
+                            split_id: self.split_id.clone(),
                             timestamp: Some(
                                 SystemTime::now()
                                     .duration_since(UNIX_EPOCH)

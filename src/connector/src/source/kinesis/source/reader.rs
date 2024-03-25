@@ -26,6 +26,7 @@ use risingwave_common::bail;
 use thiserror_ext::AsReport;
 use tokio_retry;
 
+use super::KinesisMeta;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::kinesis::source::message::from_kinesis_record;
@@ -33,7 +34,7 @@ use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::KinesisProperties;
 use crate::source::{
     into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    SourceMessage, SourceMeta, SplitId, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug, Clone)]
@@ -143,7 +144,13 @@ impl CommonSplitReader for KinesisSplitReader {
                         tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
                     }
-                    self.latest_offset = Some(chunk.last().unwrap().offset.clone());
+                    self.latest_offset = chunk.last().map(|x| {
+                        if let SourceMeta::Kinesis(KinesisMeta { offset, .. }) = &x.meta {
+                            offset.clone()
+                        } else {
+                            unreachable!()
+                        }
+                    });
                     tracing::debug!(
                         "shard {:?} latest offset: {:?}",
                         self.shard_id,

@@ -12,37 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use risingwave_common::types::{Datum, ScalarImpl};
 use rumqttc::v5::mqttbytes::v5::Publish;
 
+use crate::impl_source_meta_extract_func;
 use crate::source::base::SourceMessage;
-use crate::source::SourceMeta;
+use crate::source::{SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
-pub struct MqttMessage {
-    pub topic: String,
-    pub sequence_number: String,
-    pub payload: Vec<u8>,
+pub struct MqttMeta {
+    offset: i32,
+    topic: Arc<str>,
 }
 
-impl From<MqttMessage> for SourceMessage {
-    fn from(message: MqttMessage) -> Self {
-        SourceMessage {
-            key: None,
-            payload: Some(message.payload),
-            // For nats jetstream, use sequence id as offset
-            offset: message.sequence_number,
-            split_id: message.topic.into(),
-            meta: SourceMeta::Empty,
-        }
+pub fn to_source_message(message: Publish) -> SourceMessage {
+    SourceMessage {
+        key: None,
+        payload: Some(message.payload.to_vec()),
+        meta: SourceMeta::Mqtt(MqttMeta {
+            offset: message.pkid as i32,
+            topic: Arc::from(String::from_utf8_lossy(&message.topic).to_string()),
+        }),
     }
 }
 
-impl MqttMessage {
-    pub fn new(message: Publish) -> Self {
-        MqttMessage {
-            topic: String::from_utf8_lossy(&message.topic).to_string(),
-            sequence_number: message.pkid.to_string(),
-            payload: message.payload.to_vec(),
-        }
-    }
-}
+impl_source_meta_extract_func!(MqttMeta, Int32, offset, topic);
