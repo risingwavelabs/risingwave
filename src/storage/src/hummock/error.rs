@@ -21,47 +21,47 @@ use tokio::sync::oneshot::error::RecvError;
 #[derive(Error, Debug, thiserror_ext::Box)]
 #[thiserror_ext(newtype(name = HummockError, backtrace, report_debug))]
 pub enum HummockErrorInner {
-    #[error("Magic number mismatch: expected {expected}, found: {found}.")]
+    #[error("Magic number mismatch: expected {expected}, found: {found}")]
     MagicMismatch { expected: u32, found: u32 },
-    #[error("Invalid format version: {0}.")]
+    #[error("Invalid format version: {0}")]
     InvalidFormatVersion(u32),
-    #[error("Checksum mismatch: expected {expected}, found: {found}.")]
+    #[error("Checksum mismatch: expected {expected}, found: {found}")]
     ChecksumMismatch { expected: u64, found: u64 },
-    #[error("Invalid block.")]
+    #[error("Invalid block")]
     InvalidBlock,
-    #[error("Encode error {0}.")]
+    #[error("Encode error: {0}")]
     EncodeError(String),
-    #[error("Decode error {0}.")]
+    #[error("Decode error: {0}")]
     DecodeError(String),
-    #[error("ObjectStore failed with IO error {0}.")]
+    #[error("ObjectStore failed with IO error: {0}")]
     ObjectIoError(
         #[from]
         #[backtrace]
         ObjectError,
     ),
-    #[error("Meta error {0}.")]
+    #[error("Meta error: {0}")]
     MetaError(String),
-    #[error("SharedBuffer error {0}.")]
+    #[error("SharedBuffer error: {0}")]
     SharedBufferError(String),
-    #[error("Wait epoch error {0}.")]
+    #[error("Wait epoch error: {0}")]
     WaitEpoch(String),
-    #[error("Barrier read is unavailable for now. Likely the cluster is recovering.")]
+    #[error("Barrier read is unavailable for now. Likely the cluster is recovering")]
     ReadCurrentEpoch,
-    #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
+    #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
-    #[error("CompactionExecutor error {0}.")]
+    #[error("CompactionExecutor error: {0}")]
     CompactionExecutor(String),
-    #[error("FileCache error {0}.")]
+    #[error("FileCache error: {0}")]
     FileCache(String),
-    #[error("SstObjectIdTracker error {0}.")]
+    #[error("SstObjectIdTracker error: {0}")]
     SstObjectIdTrackerError(String),
-    #[error("CompactionGroup error {0}.")]
+    #[error("CompactionGroup error: {0}")]
     CompactionGroupError(String),
-    #[error("SstableUpload error {0}.")]
+    #[error("SstableUpload error: {0}")]
     SstableUploadError(String),
-    #[error("Read backup error {0}.")]
+    #[error("Read backup error: {0}")]
     ReadBackupError(String),
-    #[error("Other error {0}.")]
+    #[error("Other error: {0}")]
     Other(String),
 }
 

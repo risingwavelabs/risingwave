@@ -56,10 +56,7 @@
   sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND NOT(v1 OR v2 Or NOT(v1 AND v2 AND true));
-  batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: t.v1 AND Not(t.v1) AND Not(t.v2) AND t.v2 }
-      └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+  batch_plan: 'BatchValues { rows: [] }'
 - name: test boolean expression simplification
   sql: |
     create table t (v1 Boolean, v2 Boolean);
