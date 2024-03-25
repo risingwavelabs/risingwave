@@ -16,6 +16,7 @@
 
 pub mod compaction_config;
 mod overlap_strategy;
+use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
 use risingwave_pb::hummock::compact_task::{self, TaskType};
 
@@ -78,10 +79,7 @@ pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn Overl
 
 impl CompactStatus {
     pub fn new(compaction_group_id: CompactionGroupId, max_level: u64) -> CompactStatus {
-        let mut level_handlers = vec![];
-        for level in 0..=max_level {
-            level_handlers.push(LevelHandler::new(level as u32));
-        }
+        let level_handlers = (0..=max_level as u32).map(LevelHandler::new).collect_vec();
         CompactStatus {
             compaction_group_id,
             level_handlers,
@@ -219,8 +217,9 @@ pub struct CompactionDeveloperConfig {
     pub enable_check_task_level_overlap: bool,
 }
 
-impl CompactionDeveloperConfig {
-    pub fn new_from_meta_opts(opts: &MetaOpts) -> Self {
+impl<T: AsRef<MetaOpts>> From<T> for CompactionDeveloperConfig {
+    fn from(value: T) -> Self {
+        let opts = value.as_ref();
         Self {
             enable_trivial_move: opts.enable_trivial_move,
             enable_check_task_level_overlap: opts.enable_check_task_level_overlap,

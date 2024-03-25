@@ -247,19 +247,14 @@ impl SstObjectIdRange {
 }
 
 pub fn can_concat(ssts: &[SstableInfo]) -> bool {
-    let len = ssts.len();
-    for i in 1..len {
-        if ssts[i - 1]
+    ssts.windows(2).all(|window| {
+        window[0]
             .key_range
             .as_ref()
             .unwrap()
-            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
-            != Ordering::Less
-        {
-            return false;
-        }
-    }
-    true
+            .compare_right_with(&window[1].key_range.as_ref().unwrap().left)
+            == Ordering::Less
+    })
 }
 
 const CHECKPOINT_DIR: &str = "checkpoint";

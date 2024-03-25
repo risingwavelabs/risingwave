@@ -952,9 +952,7 @@ impl HummockManager {
             &mut stats,
             selector,
             table_id_to_option.clone(),
-            Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
-                &self.env.opts,
-            )),
+            Arc::new(CompactionDeveloperConfig::from(&self.env.opts)),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let compact_task = match compact_task {
