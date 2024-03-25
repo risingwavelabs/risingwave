@@ -53,6 +53,16 @@ pub struct SingleNodeOpts {
     node_opts: NodeSpecificOpts,
 }
 
+impl SingleNodeOpts {
+    pub fn new_for_playground() -> Self {
+        let empty_args = vec![] as Vec<String>;
+        let mut opts = SingleNodeOpts::parse_from(empty_args);
+        opts.in_memory = true;
+        opts.max_idle_secs = Some(1800);
+        opts
+    }
+}
+
 /// # Node-Specific Options
 ///
 /// ## Which node-specific options should be here?
