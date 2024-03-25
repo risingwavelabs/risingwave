@@ -39,7 +39,7 @@ tokio-retry = "0.3"
 tracing = "0.1"
 
 [patch.crates-io]
-reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "d293b59197f35ac5fc834a32063a40c1d24b3c75" }
+reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "f6ff677" }
 
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...## [target.'cfg(not(madsim))'.dependencies]
 # workspace-hack = { path = "../workspace-hack" }
