@@ -47,6 +47,12 @@ unzip -o protoc-3.15.8-linux-${PROTOC_ARCH}.zip -d protoc
 mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
 
+echo "--- Install nodejs"
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+cd dashboard && nvm install && nvm use && cd ..
+
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
@@ -59,9 +65,7 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
-# TODO(bugen): It's really hard to get the dashboard built on such old distro.
-#              The assets will be proxied to GitHub during runtime.
-# export ENABLE_BUILD_DASHBOARD=1
+export ENABLE_BUILD_DASHBOARD=1
 cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
