@@ -86,7 +86,7 @@ fn task_main(
 
         writeln!(
             log_buffer,
-            "* Run `{}` to attach to the tmux console.",
+            "* Run {} to attach to the tmux console.",
             style(format!("tmux -L {RISEDEV_NAME} a -t {RISEDEV_NAME}"))
                 .blue()
                 .bold()
