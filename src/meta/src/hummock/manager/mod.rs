@@ -38,8 +38,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
-    get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt,
+    get_table_compaction_group_id_mapping, BranchedSstInfo, HummockLevelsExt,
 };
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
@@ -1617,7 +1616,7 @@ impl HummockManager {
             add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
 
-        let old_version = &versioning.current_version;
+        let old_version: &HummockVersion = &versioning.current_version;
         let mut new_version_delta = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapEntryTransactionWrapper,
@@ -1629,8 +1628,8 @@ impl HummockManager {
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
-        let mut new_hummock_version = old_version.clone();
-        new_hummock_version.id = new_version_delta.id;
+
+        let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
 
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
@@ -1669,6 +1668,11 @@ impl HummockManager {
                         ..Default::default()
                     })),
                 });
+
+                for table_id in &new_fragment_table_info.internal_table_ids {
+                    table_compaction_group_mapping
+                        .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
+                }
             }
 
             if let Some(table_id) = new_fragment_table_info.mv_table_id {
@@ -1695,6 +1699,8 @@ impl HummockManager {
                         ..Default::default()
                     })),
                 });
+                let _ = table_compaction_group_mapping
+                    .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
             }
         }
 
@@ -1747,6 +1753,9 @@ impl HummockManager {
                     delta_type: Some(delta),
                 });
             }
+            for table_id in &unregistered_state_table_ids {
+                table_compaction_group_mapping.remove(table_id);
+            }
         }
 
         let mut incorrect_ssts = vec![];
@@ -1768,13 +1777,10 @@ impl HummockManager {
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
-                    match try_get_compaction_group_id_by_table_id(
-                        &versioning.current_version,
-                        *table_id,
-                    ) {
+                    match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                         Some(compaction_group_id) => {
                             group_table_ids
-                                .entry(compaction_group_id)
+                                .entry(*compaction_group_id)
                                 .or_default()
                                 .push(*table_id);
                         }
@@ -1875,6 +1881,7 @@ impl HummockManager {
             group_deltas.push(group_delta);
         }
 
+        let mut new_hummock_version = old_version.clone();
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_hummock_version.apply_version_delta(new_version_delta.deref());
 
