@@ -389,6 +389,7 @@ impl DdlController {
         }
 
         let ReleaseContext {
+            streaming_job_ids,
             state_table_ids,
             source_ids,
             connections,
@@ -431,7 +432,8 @@ impl DdlController {
         self.stream_manager
             .drop_streaming_jobs_v2(
                 removed_actors.into_iter().map(|id| id as _).collect(),
-                state_table_ids.into_iter().map(|id| id as _).collect(),
+                streaming_job_ids,
+                state_table_ids,
             )
             .await;
 

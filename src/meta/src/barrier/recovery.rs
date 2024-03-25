@@ -355,26 +355,7 @@ impl GlobalBarrierManager {
             .abort_and_mark_blocked("cluster is under recovering");
 
         tracing::info!("recovery start!");
-        self.context
-            .clean_dirty_streaming_jobs()
-            .await
-            .expect("clean dirty streaming jobs");
-
-        self.context
-            .purge_state_table_from_hummock()
-            .await
-            .expect("purge state table from hummock");
-
-        self.context.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
-
-        // Mview progress needs to be recovered.
-        tracing::info!("recovering mview progress");
-        self.context
-            .recover_background_mv_progress()
-            .await
-            .expect("recover mview progress should not fail");
-        tracing::info!("recovered mview progress");
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
@@ -383,6 +364,24 @@ impl GlobalBarrierManager {
         let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    self.context
+                        .clean_dirty_streaming_jobs()
+                        .await
+                        .context("clean dirty streaming jobs")?;
+
+                    self.context
+                        .purge_state_table_from_hummock()
+                        .await
+                        .context("purge state table from hummock")?;
+
+                    // Mview progress needs to be recovered.
+                    tracing::info!("recovering mview progress");
+                    self.context
+                        .recover_background_mv_progress()
+                        .await
+                        .context("recover mview progress should not fail")?;
+                    tracing::info!("recovered mview progress");
+
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self
                         .context
@@ -444,6 +443,8 @@ impl GlobalBarrierManager {
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
                         })?;
+
+                    self.context.sink_manager.reset().await;
 
                     if self
                         .context

@@ -43,8 +43,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     // The metrics of evicted watermark time
     lru_evicted_watermark_time_ms: LabelGuardedIntGauge<3>,
     // Metrics info
-    #[expect(dead_code)]
-    metrics_info: MetricsInfo,
+    _metrics_info: MetricsInfo,
     /// The size reported last time
     last_reported_size_bytes: usize,
 }
@@ -88,7 +87,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             kv_heap_size: 0,
             memory_usage_metrics,
             lru_evicted_watermark_time_ms,
-            metrics_info,
+            _metrics_info: metrics_info,
             last_reported_size_bytes: 0,
         }
     }
@@ -106,8 +105,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     /// Evict epochs lower than the watermark
     fn evict_by_epoch(&mut self, epoch: u64) {
-        while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
-            self.kv_heap_size_dec(key.estimated_size() + value.estimated_size());
+        while let Some((key, value, _)) = self.inner.pop_lru_by_epoch(epoch) {
+            let charge = key.estimated_size() + value.estimated_size();
+            self.kv_heap_size_dec(charge);
         }
         self.report_evicted_watermark_time(epoch);
     }

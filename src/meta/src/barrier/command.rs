@@ -22,7 +22,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::PausedReason;
@@ -145,7 +144,8 @@ pub enum Command {
     /// drop actors, and then delete the table fragments info from meta store.
     DropStreamingJobs {
         actors: Vec<ActorId>,
-        unregister_state_table_ids: Vec<StateTableId>,
+        unregistered_table_fragment_ids: HashSet<TableId>,
+        unregistered_state_table_ids: HashSet<TableId>,
     },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.

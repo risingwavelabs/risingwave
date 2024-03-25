@@ -745,12 +745,19 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = self
+        let node_to_collect = match self
             .control_stream_manager
             .inject_barrier(command_ctx.clone())
-            .inspect_err(|_| {
+        {
+            Ok(node_to_collect) => node_to_collect,
+            Err(err) => {
+                for notifier in notifiers {
+                    notifier.notify_failed(err.clone());
+                }
                 fail_point!("inject_barrier_err_success");
-            })?;
+                return Err(err);
+            }
+        };
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
@@ -1125,17 +1132,18 @@ fn collect_commit_epoch_info(
             ..
         } => (Some(new_table_fragment_info.clone()), HashSet::new()),
         Command::CancelStreamingJob(table_fragments) => {
-            let table_id = table_fragments.table_id().table_id;
-            let mut table_ids = HashSet::from_iter(table_fragments.internal_table_ids());
+            let table_id = table_fragments.table_id();
+            let mut table_ids =
+                HashSet::from_iter(table_fragments.all_table_ids().map(TableId::new));
             table_ids.insert(table_id);
             (None, table_ids)
         }
         Command::DropStreamingJobs {
-            unregister_state_table_ids,
+            unregistered_state_table_ids,
             ..
         } => (
             None,
-            HashSet::from_iter(unregister_state_table_ids.iter().cloned()),
+            HashSet::from_iter(unregistered_state_table_ids.iter().cloned()),
         ),
         _ => (None, HashSet::new()),
     };
