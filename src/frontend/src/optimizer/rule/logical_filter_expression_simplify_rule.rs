@@ -317,4 +317,3 @@ impl ConditionRewriter {
         condition
     }
 }
-
