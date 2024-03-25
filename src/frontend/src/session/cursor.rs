@@ -32,25 +32,30 @@ use crate::session::SessionImpl;
 pub struct Cursor {
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
+    session: Arc<SessionImpl>,
+
     row_stream: Option<PgResponseStream>,
     pg_descs: Option<Vec<PgFieldDescriptor>>,
     remaining_rows: VecDeque<Row>,
-    all_rows: VecDeque<Row>,
 }
 
 impl Cursor {
-    pub fn new(plan_fragmenter_result: BatchPlanFragmenterResult, formats: Vec<Format>) -> Self {
+    pub fn new(
+        plan_fragmenter_result: BatchPlanFragmenterResult,
+        formats: Vec<Format>,
+        session: Arc<SessionImpl>,
+    ) -> Self {
         Self {
             plan_fragmenter_result,
             formats,
+            session,
             row_stream: None,
             pg_descs: None,
             remaining_rows: VecDeque::<Row>::new(),
-            all_rows: VecDeque::<Row>::new(),
         }
     }
 
-    async fn create_stream(&mut self, session: Arc<SessionImpl>) -> Result<()> {
+    async fn create_stream(&mut self) -> Result<()> {
         let BatchPlanFragmenterResult {
             plan_fragmenter,
             query_mode,
@@ -76,18 +81,18 @@ impl Cursor {
         let row_stream: PgResponseStream = match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, can_timeout_cancel).await?,
+                local_execute(self.session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 self.formats.clone(),
-                session.clone(),
+                self.session.clone(),
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                    distribute_execute(self.session.clone(), query, can_timeout_cancel).await?,
                     column_types,
                     self.formats.clone(),
-                    session.clone(),
+                    self.session.clone(),
                 ))
             }
         };
@@ -97,54 +102,36 @@ impl Cursor {
         Ok(())
     }
 
-    pub async fn forward_all(&mut self, session: Arc<SessionImpl>) -> Result<()> {
+    pub async fn next_once(&mut self) -> Result<Option<Row>> {
         if self.row_stream.is_none() {
-            self.create_stream(session).await?;
+            self.create_stream().await?;
         }
-
-        while let Some(rows) = self.row_stream.as_mut().unwrap().next().await {
-            let rows =
-                rows.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
-            self.all_rows.extend(rows);
+        while self.remaining_rows.is_empty() {
+            let rows = self.row_stream.as_mut().unwrap().next().await;
+            let rows = match rows {
+                None => return Ok(None),
+                Some(row) => {
+                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+                }
+            };
+            self.remaining_rows = rows.into_iter().collect();
         }
-        Ok(())
+        let row = self.remaining_rows.pop_front().unwrap();
+        Ok(Some(row))
     }
 
-    // pub async fn next(&mut self, session: Arc<SessionImpl>) -> Result<Option<Row>> {
-    //     if self.row_stream.is_none() {
-    //         self.create_stream(session);
-    //     }
-    //     if self.remaining_rows.is_empty() {
-    //         let rows = self.row_stream.as_mut().unwrap().next().await;
-    //         let rows = match rows {
-    //             None => return Ok(None),
-    //             Some(row) => {
-    //                 row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
-    //             }
-    //         };
-    //         self.remaining_rows = rows.into_iter().collect();
-    //     }
-    //     let row = self.remaining_rows.pop_front().unwrap();
-    //     Ok(Some(row))
-    // }
-
-    pub fn next(&mut self, count: Option<i32>) -> Result<Vec<Row>> {
+    pub async fn next(&mut self, count: Option<i32>) -> Result<Vec<Row>> {
         let fetch_count = count.unwrap_or(1);
         let mut ans = vec![];
-        if fetch_count == 0 {
-            if let Some(row) = self.all_rows.front() {
-                ans.push(row.clone());
-            }
-            Ok(ans)
-        } else if fetch_count < 0 {
+        if fetch_count <= 0 {
             Err(crate::error::ErrorCode::InternalError(
-                "FETCH a negative count is not supported yet".to_string(),
+                "FETCH a non-positive count is not supported yet".to_string(),
             )
             .into())
         } else {
             let mut cur = 0;
             while cur < fetch_count
-                && let Some(row) = self.all_rows.pop_front()
+                && let Some(row) = self.next_once().await?
             {
                 cur += 1;
                 ans.push(row);
@@ -166,12 +153,29 @@ impl SessionImpl {
         }
     }
 
-    pub fn drop_all_cursors(&self) {
-        self.cursors.lock().clear();
+    pub async fn add_cursor(&self, cursor_name: ObjectName, cursor: Cursor) -> Result<()> {
+        if self
+            .cursors
+            .lock()
+            .await
+            .try_insert(cursor_name.clone(), cursor)
+            .is_err()
+        {
+            return Err(ErrorCode::InternalError(format!(
+                "cursor \"{}\" already exists",
+                cursor_name,
+            ))
+            .into());
+        }
+        Ok(())
     }
 
-    pub fn drop_cursor(&self, cursor_name: ObjectName) -> Result<()> {
-        match self.cursors.lock().remove(&cursor_name) {
+    pub async fn drop_all_cursors(&self) {
+        self.cursors.lock().await.clear();
+    }
+
+    pub async fn drop_cursor(&self, cursor_name: ObjectName) -> Result<()> {
+        match self.cursors.lock().await.remove(&cursor_name) {
             Some(_) => Ok(()),
             None => Err(ErrorCode::InternalError(format!(
                 "cursor \"{}\" does not exist",
@@ -181,36 +185,13 @@ impl SessionImpl {
         }
     }
 
-    pub fn add_cursor(&self, cursor_name: ObjectName, cursor: Cursor) -> Result<()> {
-        if self.cursors.lock().contains_key(&cursor_name) {
-            return Err(ErrorCode::InternalError(format!(
-                "cursor \"{}\" already exists",
-                cursor_name,
-            ))
-            .into());
-        }
-        self.cursors.lock().insert(cursor_name, cursor);
-        Ok(())
-    }
-
-    // pub async fn next(
-    //     &mut self,
-    //     cursor_name: &ObjectName,
-    //     session: Arc<SessionImpl>,
-    // ) -> Result<Option<Row>> {
-    //     if let Some(cursor) = self.cursors.get_mut(cursor_name) {
-    //         cursor.next(session).await
-    //     } else {
-    //         Err(
-    //             ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))
-    //                 .into(),
-    //         )
-    //     }
-    // }
-
-    pub fn curosr_next(&self, cursor_name: &ObjectName, count: Option<i32>) -> Result<Vec<Row>> {
-        if let Some(cursor) = self.cursors.lock().get_mut(cursor_name) {
-            cursor.next(count)
+    pub async fn curosr_next(
+        &self,
+        cursor_name: &ObjectName,
+        count: Option<i32>,
+    ) -> Result<Vec<Row>> {
+        if let Some(cursor) = self.cursors.lock().await.get_mut(cursor_name) {
+            cursor.next(count).await
         } else {
             Err(
                 ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))
@@ -219,8 +200,8 @@ impl SessionImpl {
         }
     }
 
-    pub fn pg_descs(&self, cursor_name: &ObjectName) -> Result<Vec<PgFieldDescriptor>> {
-        if let Some(cursor) = self.cursors.lock().get(cursor_name) {
+    pub async fn pg_descs(&self, cursor_name: &ObjectName) -> Result<Vec<PgFieldDescriptor>> {
+        if let Some(cursor) = self.cursors.lock().await.get(cursor_name) {
             cursor.pg_descs()
         } else {
             Err(

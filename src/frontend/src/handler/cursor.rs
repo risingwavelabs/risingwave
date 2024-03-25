@@ -47,33 +47,33 @@ pub async fn handle_declare_cursor(
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
 
-    let mut cursor = Cursor::new(plan_fragmenter_result, formats);
-    cursor.forward_all(session.clone()).await?;
-    session.add_cursor(cursor_name, cursor)?;
+    let cursor = Cursor::new(plan_fragmenter_result, formats, session.clone());
+    // cursor.forward_all(session.clone()).await?;
+    session.add_cursor(cursor_name, cursor).await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-pub fn handle_cursor_fetch(
+pub async fn handle_cursor_fetch(
     handler_args: HandlerArgs,
     cursor_name: ObjectName,
     count: Option<i32>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let rows = session.curosr_next(&cursor_name, count)?;
-    let pg_descs = session.pg_descs(&cursor_name)?;
+    let rows = session.curosr_next(&cursor_name, count).await?;
+    let pg_descs = session.pg_descs(&cursor_name).await?;
     Ok(PgResponse::builder(StatementType::CURSOR_FETCH)
         .values(rows.into(), pg_descs)
         .into())
 }
 
-pub fn handle_close_cursor(
+pub async fn handle_close_cursor(
     handler_args: HandlerArgs,
     cursor_name: Option<ObjectName>,
 ) -> Result<RwPgResponse> {
     if let Some(name) = cursor_name {
-        handler_args.session.drop_cursor(name)?;
+        handler_args.session.drop_cursor(name).await?;
     } else {
-        handler_args.session.drop_all_cursors();
+        handler_args.session.drop_all_cursors().await;
     }
     Ok(PgResponse::empty_result(StatementType::CLOSE_CURSOR))
 }

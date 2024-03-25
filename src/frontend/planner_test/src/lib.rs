@@ -583,10 +583,10 @@ impl TestCase {
                     .await?;
                 }
                 Statement::CursorFetch { cursor_name, count } => {
-                    cursor::handle_cursor_fetch(handler_args, cursor_name, count)?;
+                    cursor::handle_cursor_fetch(handler_args, cursor_name, count).await?;
                 }
                 Statement::CloseCursor { cursor_name } => {
-                    cursor::handle_close_cursor(handler_args, cursor_name)?;
+                    cursor::handle_close_cursor(handler_args, cursor_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }

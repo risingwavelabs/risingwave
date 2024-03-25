@@ -80,7 +80,7 @@ pub async fn handle_commit(
         not_impl!("COMMIT AND CHAIN");
     }
 
-    session.txn_commit_explicit();
+    session.txn_commit_explicit().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }
@@ -97,7 +97,7 @@ pub async fn handle_rollback(
         not_impl!("ROLLBACK AND CHAIN");
     }
 
-    session.txn_rollback_explicit();
+    session.txn_rollback_explicit().await;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }

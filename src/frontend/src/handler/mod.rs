@@ -927,10 +927,10 @@ pub async fn handle(
             cursor::handle_declare_cursor(handler_args, binary, cursor_name, *query, formats).await
         }
         Statement::CursorFetch { cursor_name, count } => {
-            cursor::handle_cursor_fetch(handler_args, cursor_name, count)
+            cursor::handle_cursor_fetch(handler_args, cursor_name, count).await
         }
         Statement::CloseCursor { cursor_name } => {
-            cursor::handle_close_cursor(handler_args, cursor_name)
+            cursor::handle_close_cursor(handler_args, cursor_name).await
         }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }

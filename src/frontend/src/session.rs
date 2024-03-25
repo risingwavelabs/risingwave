@@ -583,7 +583,7 @@ pub struct SessionImpl {
     last_idle_instant: Arc<Mutex<Option<Instant>>>,
 
     /// The cursors declared in the transaction.
-    cursors: Mutex<HashMap<ObjectName, Cursor>>,
+    cursors: tokio::sync::Mutex<HashMap<ObjectName, Cursor>>,
 }
 
 #[derive(Error, Debug)]
