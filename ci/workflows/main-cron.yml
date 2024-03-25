@@ -371,7 +371,7 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 30
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
@@ -390,7 +390,7 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 30
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
@@ -409,7 +409,7 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 30
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release)"
