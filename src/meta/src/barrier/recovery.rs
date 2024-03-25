@@ -388,6 +388,7 @@ impl GlobalBarrierManager {
             async {
                 let recovery_result: MetaResult<_> = try {
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
+                    debug!("run pre_apply_drop_cancel");
                     let _ = self
                         .context
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
@@ -396,6 +397,7 @@ impl GlobalBarrierManager {
                             warn!(error = %err.as_report(), "pre_apply_drop_cancel failed");
                         })?;
 
+                    debug!("run ActiveStreamingWorkerNodes::new_snapshot");
                     let active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
                         self.context.metadata_manager.clone(),
                     )
@@ -410,6 +412,7 @@ impl GlobalBarrierManager {
                         .cloned()
                         .collect_vec();
 
+                    debug!("run list_background_creating_jobs");
                     let background_streaming_jobs = self
                         .context
                         .metadata_manager
@@ -425,6 +428,7 @@ impl GlobalBarrierManager {
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
+                        debug!("run scale actors");
                         self.context
                             .scale_actors(all_nodes.clone())
                             .await
@@ -432,6 +436,7 @@ impl GlobalBarrierManager {
                                 warn!(error = %err.as_report(), "scale actors failed");
                             })?;
 
+                        debug!("run resolve actor info");
                         self.context
                             .resolve_actor_info(all_nodes.clone())
                             .await
@@ -440,6 +445,7 @@ impl GlobalBarrierManager {
                             })?
                     } else {
                         // Migrate actors in expired CN to newly joined one.
+                        debug!("run migrate actors");
                         self.context
                             .migrate_actors(all_nodes.clone())
                             .await
@@ -451,6 +457,7 @@ impl GlobalBarrierManager {
                     let mut control_stream_manager =
                         ControlStreamManager::new(self.context.clone());
 
+                    debug!("run reset control_stream_manager");
                     control_stream_manager
                         .reset(prev_epoch.value().0, active_streaming_nodes.current())
                         .await
@@ -463,6 +470,7 @@ impl GlobalBarrierManager {
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
                         .await?
                     {
+                        debug!("run resolve_actor_info");
                         info = self
                             .context
                             .resolve_actor_info(all_nodes.clone())
