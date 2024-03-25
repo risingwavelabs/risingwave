@@ -209,7 +209,7 @@ gen_events() {
 }
 
 show_kafka_topics() {
-  "${KAFKA_DIR}"/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
+  "${KAFKA_DIR}"/bin/kafka-get-offsets.sh --topic nexmark --bootstrap-server localhost:9092
 }
 
 gen_cpu_flamegraph() {
