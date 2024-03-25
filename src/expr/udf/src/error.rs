@@ -57,7 +57,11 @@ impl Error {
     }
 
     pub fn is_tonic_error(&self) -> bool {
-        matches!(self.inner(), ErrorInner::Tonic(_))
+        match self.inner() {
+            ErrorInner::Tonic(_) => true,
+            ErrorInner::Flight(flight_error) => matches!(flight_error, FlightError::Tonic(_)),
+            _ => false,
+        }
     }
 }
 
