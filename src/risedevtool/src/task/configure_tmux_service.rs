@@ -16,23 +16,24 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use console::style;
-use itertools::Itertools;
 
 use crate::{ExecuteContext, Task};
 
 pub struct ConfigureTmuxTask;
 
-pub const RISEDEV_SESSION_NAME: &str = "risedev";
+pub const RISEDEV_NAME: &str = "risedev";
+
+pub fn new_tmux_command() -> Command {
+    let mut cmd = Command::new("tmux");
+    cmd.arg("-L").arg(RISEDEV_NAME); // `-L` specifies a dedicated tmux server
+    cmd
+}
 
 impl ConfigureTmuxTask {
     pub fn new() -> Result<Self> {
         Ok(Self)
-    }
-
-    fn tmux(&self) -> Command {
-        Command::new("tmux")
     }
 }
 
@@ -45,7 +46,7 @@ impl Task for ConfigureTmuxTask {
         let prefix_path = env::var("PREFIX")?;
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        let mut cmd = self.tmux();
+        let mut cmd = new_tmux_command();
         cmd.arg("-V");
         ctx.run_command(cmd).with_context(|| {
             format!(
@@ -54,47 +55,22 @@ impl Task for ConfigureTmuxTask {
             )
         })?;
 
-        // List previous windows and kill them
-        let mut cmd = self.tmux();
-        cmd.arg("list-windows")
-            .arg("-t")
-            .arg(RISEDEV_SESSION_NAME)
-            .arg("-F")
-            .arg("#{pane_id} #{pane_pid} #{window_name}");
-
-        if let Ok(output) = ctx.run_command(cmd) {
-            for line in String::from_utf8(output.stdout)?.split('\n') {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let [pane_id, pid, name, ..] = line.split(' ').collect_vec()[..] else {
-                    return Err(anyhow!("failed to parse tmux list-windows output"));
-                };
-                ctx.pb
-                    .set_message(format!("killing {} {} {}...", pane_id, pid, name));
-
-                // Send ^C & ^D
-                let mut cmd = self.tmux();
-                cmd.arg("send-keys")
-                    .arg("-t")
-                    .arg(pane_id)
-                    .arg("C-c")
-                    .arg("C-d");
-                ctx.run_command(cmd)?;
-            }
+        let mut cmd = new_tmux_command();
+        cmd.arg("list-sessions");
+        if ctx.run_command(cmd).is_ok() {
+            ctx.pb.set_message("killing previous tmux server...");
+            let mut cmd = new_tmux_command();
+            cmd.arg("kill-server");
+            ctx.run_command(cmd)?;
         }
 
-        let mut cmd = self.tmux();
-        cmd.arg("kill-session").arg("-t").arg(RISEDEV_SESSION_NAME);
-        ctx.run_command(cmd).ok();
+        ctx.pb.set_message("creating new tmux session...");
 
-        ctx.pb.set_message("creating new session...");
-
-        let mut cmd = self.tmux();
-        cmd.arg("new-session")
+        let mut cmd = new_tmux_command();
+        cmd.arg("new-session") // this will automatically create the `risedev` tmux server
             .arg("-d")
             .arg("-s")
-            .arg(RISEDEV_SESSION_NAME)
+            .arg(RISEDEV_NAME)
             .arg("-c")
             .arg(Path::new(&prefix_path))
             .arg(Path::new(&prefix_bin).join("welcome.sh"));
@@ -103,8 +79,7 @@ impl Task for ConfigureTmuxTask {
 
         ctx.complete_spin();
 
-        ctx.pb
-            .set_message(format!("session {}", RISEDEV_SESSION_NAME));
+        ctx.pb.set_message(format!("session {}", RISEDEV_NAME));
 
         Ok(())
     }

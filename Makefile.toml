@@ -91,6 +91,8 @@ if ${is_not_ci}
     set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
   end
 end
+
+set_env TMUX "tmux -L risedev"
 ''',
 ]
 
@@ -155,7 +157,7 @@ category = "Misc"
 description = "List all nodes in the cluster"
 script = '''
 #!/usr/bin/env bash
-tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
 '''
 
 [tasks.lsw]
@@ -163,7 +165,7 @@ category = "Misc"
 description = "List --watch all nodes in the cluster"
 script = '''
 #!/usr/bin/env bash
-watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
+watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
 [tasks.del]
@@ -176,7 +178,7 @@ script = '''
 #!/usr/bin/env bash
 
 risedev_ls () {
-  tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
+  ${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1
 }
 
 err () {
@@ -195,7 +197,7 @@ if [[ -z $(risedev_ls | grep "$1" ) ]]; then
   err
 fi
 
-tmux kill-window -t $1
+${TMUX} kill-window -t $1
 '''
 
 [tasks.f]
@@ -696,13 +698,13 @@ kill_zookeeper() {
 }
 
 # Kill other components
-tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+${TMUX} list-windows -t risedev -F "#{window_name} #{pane_id}" \
 | grep -v 'kafka' \
 | grep -v 'zookeeper' \
 | awk '{ print $2 }' \
-| xargs -I {} tmux send-keys -t {} C-c C-d
+| xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
-if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+if [[ -n $(${TMUX} list-windows -t risedev | grep kafka) ]];
 then
   echo "kill kafka"
   kill_kafka || true
@@ -710,11 +712,11 @@ then
   echo "kill zookeeper"
   kill_zookeeper || true
 
-  # Kill their tmux sessions
-  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+  # Kill their ${TMUX} sessions
+  ${TMUX} list-windows -t risedev -F "#{pane_id}" | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 fi
 
-tmux kill-session -t risedev
+${TMUX} kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
@@ -768,8 +770,8 @@ do
   echo
 done
 
-echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
-tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
+echo "check: $(tput setaf 4)${TMUX} >= v3.2a$(tput sgr0)"
+${TMUX} -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
 echo
 
 echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"

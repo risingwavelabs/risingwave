@@ -27,8 +27,7 @@ use risedev::{
     generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService,
-    PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService,
-    RISEDEV_SESSION_NAME,
+    PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService, RISEDEV_NAME,
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
@@ -87,8 +86,8 @@ fn task_main(
 
         writeln!(
             log_buffer,
-            "* Run {} to attach to the tmux console.",
-            style(format!("tmux a -t {}", RISEDEV_SESSION_NAME))
+            "* Run `{}` to attach to the tmux console.",
+            style(format!("tmux -L {RISEDEV_NAME} a -t {RISEDEV_NAME}"))
                 .blue()
                 .bold()
         )?;
