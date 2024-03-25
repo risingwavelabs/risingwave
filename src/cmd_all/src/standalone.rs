@@ -298,6 +298,7 @@ mod test {
                             backup_storage_url: None,
                             backup_storage_directory: None,
                             heap_profiling_dir: None,
+                            dangerous_max_idle_secs: None,
                         },
                     ),
                     compute_opts: Some(
