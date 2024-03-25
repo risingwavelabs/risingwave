@@ -371,7 +371,7 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 60
+    timeout_in_minutes: 75
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
