@@ -7,8 +7,9 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 RUST_TOOLCHAIN=$(cat rust-toolchain)
-
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
+LATEST_KAFKA_VERSION=$(get_latest_kafka_version)
+KAFKA_DIR="./kafka_2.13-${LATEST_KAFKA_VERSION}"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
 # Perhaps we should have a new docker container just for benchmarking?
@@ -183,8 +184,8 @@ start_nperf() {
 }
 
 start_kafka() {
-  ./kafka_2.13-3.4.1/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.1/config/zookeeper.properties > zookeeper.log 2>&1 &
-  ./kafka_2.13-3.4.1/bin/kafka-server-start.sh ./kafka_2.13-3.4.1/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+  "${KAFKA_DIR}"/bin/zookeeper-server-start.sh "${KAFKA_DIR}"/config/zookeeper.properties > zookeeper.log 2>&1 &
+  "${KAFKA_DIR}"/bin/kafka-server-start.sh "${KAFKA_DIR}"/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
   # buildkite-agent artifact upload ./zookeeper.log
@@ -208,7 +209,7 @@ gen_events() {
 }
 
 show_kafka_topics() {
-  ./kafka_2.13-3.4.1/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
+  "${KAFKA_DIR}"/bin/kafka-get-offsets.sh --topic nexmark --bootstrap-server localhost:9092
 }
 
 gen_cpu_flamegraph() {
