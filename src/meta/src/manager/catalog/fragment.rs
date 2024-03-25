@@ -551,6 +551,7 @@ impl FragmentManager {
         &self,
         table_ids: &HashSet<TableId>,
     ) -> MetaResult<Vec<u32>> {
+        tracing::debug!("acquire_write_lock: drop_table_fragments_vec");
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -638,6 +639,7 @@ impl FragmentManager {
                     .await;
             }
         }
+        tracing::debug!("release_write_lock: drop_table_fragments_vec");
 
         Ok(table_ids_to_unregister_from_hummock)
     }
@@ -732,7 +734,9 @@ impl FragmentManager {
         let mut actor_maps = HashMap::new();
         let mut barrier_inject_actor_maps = HashMap::new();
 
+        tracing::info!("acquire_read_lock: load_all_actors");
         let map = &self.core.read().await.table_fragments;
+        tracing::info!("acquired_read_lock: load_all_actors");
         for fragments in map.values() {
             for (worker_id, actor_states) in fragments.worker_actor_states() {
                 for (actor_id, actor_state) in actor_states {
