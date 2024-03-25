@@ -97,32 +97,30 @@ impl Planner {
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
         if source.is_backfillable_cdc_connector() {
-            Err(ErrorCode::InternalError(
+            return Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
-            .into())
-        } else if source.is_shared()
-            && self
-                .ctx()
-                .session_ctx()
-                .config()
-                .rw_enable_shared_source()
-        {
-            Ok(LogicalSourceScan::new(Rc::new(source.catalog), self.ctx())?.into())
-        } else {
-            let as_of = source.as_of.clone();
-            match as_of {
-                None => {}
-                Some(AsOf::ProcessTime) => {
-                    bail_not_implemented!("As Of ProcessTime() is not supported yet.")
-                }
-                Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
-                    bail_not_implemented!("As Of Timestamp is not supported yet.")
-                }
-                Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
-                    bail_not_implemented!("As Of Version is not supported yet.")
-                }
+            .into());
+        }
+
+        let as_of = source.as_of.clone();
+        match as_of {
+            None => {}
+            Some(AsOf::ProcessTime) => {
+                bail_not_implemented!("As Of ProcessTime() is not supported yet.")
             }
+            Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
+                bail_not_implemented!("As Of Timestamp is not supported yet.")
+            }
+            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                bail_not_implemented!("As Of Version is not supported yet.")
+            }
+        }
+        // XXX: can we unify them into one operator?
+        // Note that batch scan on source goes through the same code path. It makes little sense to use different operators in this case.
+        if source.is_shared() && self.ctx().session_ctx().config().rw_enable_shared_source() {
+            Ok(LogicalSourceScan::new(Rc::new(source.catalog), self.ctx(), as_of)?.into())
+        } else {
             Ok(LogicalSource::with_catalog(
                 Rc::new(source.catalog),
                 SourceNodeKind::CreateMViewOrBatch,

@@ -18,6 +18,7 @@ use std::rc::Rc;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
@@ -55,7 +56,11 @@ pub struct LogicalSourceScan {
 }
 
 impl LogicalSourceScan {
-    pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Result<Self> {
+    pub fn new(
+        source_catalog: Rc<SourceCatalog>,
+        ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
+    ) -> Result<Self> {
         let mut column_catalog = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
 
@@ -77,6 +82,7 @@ impl LogicalSourceScan {
             kind: SourceNodeKind::CreateMViewOrBatch,
             ctx,
             kafka_timestamp_range,
+            as_of,
         };
 
         let base = PlanBase::new_logical_with_core(&core);
