@@ -18,7 +18,7 @@ use bytes::BytesMut;
 use itertools::Itertools;
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
 
-use super::ListRef;
+use super::{DataType, ListRef};
 use crate::types::{JsonbRef, ScalarRefImpl};
 
 impl ToSql for ScalarRefImpl<'_> {
@@ -84,13 +84,28 @@ impl ToSql for ListRef<'_> {
     where
         Self: Sized,
     {
-        matches!(ty.kind(), postgres_types::Kind::Array(_))
+        use postgres_types::Kind::Array;
+        matches!(ty.kind(), Array(t) if !matches!(t.kind(), Array(_)))
     }
 
     fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>>
     where
         Self: Sized,
     {
-        self.iter().collect_vec().to_sql(ty, out)
+        let dt = self.data_type();
+        match dt {
+            DataType::List(ref li) => {
+                if li.is_array() {
+                    Err(format!(
+                        "only one-dimensional arrays can be converted to sql, got type: {}",
+                        dt
+                    )
+                    .into())
+                } else {
+                    self.iter().collect_vec().to_sql(ty, out)
+                }
+            }
+            _ => Err("only accepts array data types".into()),
+        }
     }
 }
