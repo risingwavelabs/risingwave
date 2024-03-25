@@ -542,6 +542,7 @@ pub enum SourceMeta {
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
     Mqtt(MqttMeta),
+    Pulsar(PulsarMeta),
     // For the source that doesn't have meta data.
     Empty,
 }
