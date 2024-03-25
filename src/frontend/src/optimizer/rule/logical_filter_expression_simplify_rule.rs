@@ -42,7 +42,6 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
         // i.e., the specific optimization that will apply to the entire condition
         // e.g., `e and not(e)`
         let predicate = ConditionRewriter::rewrite(filter.predicate().clone());
-        let predicate = rewrite_condition_with_col_self_eq(predicate);
 
         // construct the new filter after predicate rewriting
         let filter = LogicalFilter::create(filter.input(), predicate);
@@ -319,11 +318,3 @@ impl ConditionRewriter {
     }
 }
 
-pub fn rewrite_condition_with_col_self_eq(cond: Condition) -> Condition {
-    let mut ret = Condition::true_cond();
-    for c in cond.conjunctions {
-        let c = Condition::with_expr(ColumnSelfEqualRewriter::rewrite(c));
-        ret = ret.and(c);
-    }
-    ret
-}
