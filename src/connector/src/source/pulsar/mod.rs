@@ -22,6 +22,7 @@ use std::collections::HashMap;
 pub use enumerator::*;
 use serde::Deserialize;
 use serde_with::serde_as;
+pub use source::message::PulsarMeta;
 pub use split::*;
 use with_options::WithOptions;
 

@@ -296,7 +296,7 @@ macro_rules! impl_source_meta_extract_func {
             }
 
             pub fn get_split_id(&self) -> SplitId {
-                &self.$partition_member
+                self.$partition_member.clone()
             }
 
             pub fn get_offset(&self) -> &str {
@@ -331,16 +331,15 @@ macro_rules! impl_source_meta_extract_func {
 
 #[macro_export]
 macro_rules! impl_source_message_get_offset_split {
-    ( $outer_struct: ident, $($get_from_struct: ident), +) => {
+    ( $outer_struct: ident, $meta_member: ident, {$($get_from_struct: ident), +}) => {
         impl $outer_struct {
             pub fn get_split_id(&self) -> SplitId {
-                match &self.meta {
+                match &self.$meta_member {
                     $(
                         SourceMeta::$get_from_struct(meta) => meta.get_split_id().clone(),
                     )+
                     _ => unreachable!(),
                 }
-
             }
 
             pub fn get_offset(&self) -> &str {
@@ -353,4 +352,25 @@ macro_rules! impl_source_message_get_offset_split {
             }
         }
     };
+    ($outer_struct: ident, {$($get_from_struct: ident), +}) => {
+        impl $outer_struct {
+            pub fn get_split_id(&self) -> SplitId {
+                match &self {
+                    $(
+                        SourceMeta::$get_from_struct(meta) => meta.get_split_id().clone(),
+                    )+
+                    _ => unreachable!(),
+                }
+            }
+
+            pub fn get_offset(&self) -> &str {
+                match &self {
+                    $(
+                        SourceMeta::$get_from_struct(meta) => meta.get_offset(),
+                    )+
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
 }

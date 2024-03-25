@@ -25,6 +25,11 @@ pub struct NatsMessage {
     pub payload: Vec<u8>,
 }
 
+pub struct NatsMeta {
+    pub split_id: SplitId,
+    pub offset: i64,
+}
+
 impl From<NatsMessage> for SourceMessage {
     fn from(message: NatsMessage) -> Self {
         SourceMessage {
@@ -42,7 +47,7 @@ impl NatsMessage {
     pub fn new(split_id: SplitId, message: Message) -> Self {
         NatsMessage {
             split_id,
-            sequence_number: message.info().unwrap().stream_sequence.to_string(),
+            sequence_number: message.info().unwrap().stream_sequence as i64,
             payload: message.message.payload.to_vec(),
         }
     }

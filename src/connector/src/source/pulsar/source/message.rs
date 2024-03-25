@@ -13,10 +13,14 @@
 // limitations under the License.
 
 use std::sync::Arc;
+
 use pulsar::consumer::Message;
+use risingwave_common::types::{Datum, ScalarImpl};
 
-use crate::source::{SourceMessage, SourceMeta};
+use crate::impl_source_meta_extract_func;
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
+#[derive(Clone, Debug)]
 pub struct PulsarMeta {
     split_id: Arc<str>,
     offset: String,
@@ -37,8 +41,10 @@ impl From<Message<Vec<u8>>> for SourceMessage {
                     message_id.partition.unwrap_or(-1),
                     message_id.batch_index.unwrap_or(-1)
                 ),
-                split_id: Arc::new(msg.topic),
+                split_id: Arc::from(msg.topic.clone()),
             }),
         }
     }
 }
+
+impl_source_meta_extract_func!(PulsarMeta, offset, split_id);

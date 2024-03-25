@@ -48,6 +48,7 @@ pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::mqtt::MqttMeta;
+use crate::source::pulsar::PulsarMeta;
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -523,14 +524,12 @@ pub struct SourceMessage {
 }
 
 impl_source_message_get_offset_split!(
-    SourceMessage,
-    Kafka,
-    Kinesis,
-    Nexmark,
-    GooglePubsub,
-    Datagen,
-    DebeziumCdc,
-    Mqtt
+    SourceMessage, meta,
+    { Kafka, Kinesis, Nexmark, GooglePubsub, Datagen, DebeziumCdc, Mqtt, Pulsar }
+);
+impl_source_message_get_offset_split!(
+    SourceMeta,
+    { Kafka, Kinesis, Nexmark, GooglePubsub, Datagen, DebeziumCdc, Mqtt, Pulsar }
 );
 
 #[derive(Debug, Clone)]
@@ -550,9 +549,10 @@ pub enum SourceMeta {
 /// Implement Eq manually to ignore the `meta` field.
 impl PartialEq for SourceMessage {
     fn eq(&self, other: &Self) -> bool {
-        self.offset == other.offset
-            && self.split_id == other.split_id
+        self.get_offset() == other.get_offset()
+            && self.get_split_id() == other.get_split_id()
             && self.payload == other.payload
+            && std::mem::discriminant(&self.meta) == std::mem::discriminant(&other.meta)
     }
 }
 impl Eq for SourceMessage {}
