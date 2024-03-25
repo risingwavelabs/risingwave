@@ -308,6 +308,7 @@ pub async fn handle(
             source_schema,
             source_watermarks,
             append_only,
+            on_conflict: _,
             cdc_table_info,
             include_column_options,
         } => {

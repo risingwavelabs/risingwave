@@ -2485,6 +2485,14 @@ impl Parser {
         })
     }
 
+    pub fn parse_on_conflict(&mut self) -> Result<Option<OnConflict>, ParserError> {
+        if self.parse_keywords(&[Keyword::ON, Keyword::CONFLICT]) {
+            self.parse_handle_conflict_behavior()
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_create_table(
         &mut self,
         or_replace: bool,
@@ -2502,6 +2510,9 @@ impl Parser {
         } else {
             false
         };
+
+        let on_conflict = self.parse_on_conflict()?;
+
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
@@ -2517,7 +2528,6 @@ impl Parser {
         } else {
             None // Table is NOT created with an external connector.
         };
-
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             if !source_watermarks.is_empty() {
@@ -2554,6 +2564,7 @@ impl Parser {
             source_schema,
             source_watermarks,
             append_only,
+            on_conflict,
             query,
             cdc_table_info,
             include_column_options: include_options,
@@ -2730,6 +2741,24 @@ impl Parser {
             Ok(Some(ColumnOption::Check(expr)))
         } else if self.parse_keyword(Keyword::AS) {
             Ok(Some(ColumnOption::GeneratedColumns(self.parse_expr()?)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn parse_handle_conflict_behavior(&mut self) -> Result<Option<OnConflict>, ParserError> {
+        if self.parse_keyword(Keyword::OVERWRITE) {
+            Ok(Some(OnConflict::OverWrite))
+        } else if self.parse_keyword(Keyword::IGNORE) {
+            Ok(Some(OnConflict::Ignore))
+        } else if self.parse_keywords(&[
+            Keyword::DO,
+            Keyword::UPDATE,
+            Keyword::IF,
+            Keyword::NOT,
+            Keyword::NULL,
+        ]) {
+            Ok(Some(OnConflict::DoUpdateIfNotNull))
         } else {
             Ok(None)
         }
