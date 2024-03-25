@@ -69,13 +69,20 @@ pub fn fold_boolean_constant(expr: ExprImpl) -> ExprImpl {
     rewriter.rewrite_expr(expr)
 }
 
+/// check `ColumnSelfEqualRewriter`'s comment below.
 pub fn column_self_eq_eliminate(expr: ExprImpl) -> ExprImpl {
     ColumnSelfEqualRewriter::rewrite(expr)
 }
 
+/// for every `(col) == (col)`,
+/// transform to `IsNotNull(col)`
+/// since in the boolean context, `null = (...)` will always
+/// be treated as false.
+/// note: as always, only for *single column*.
 pub struct ColumnSelfEqualRewriter {}
 
 impl ColumnSelfEqualRewriter {
+    /// the exact copy from `logical_filter_expression_simplify_rule`
     fn extract_column(expr: ExprImpl, columns: &mut Vec<ExprImpl>) {
         match expr.clone() {
             ExprImpl::FunctionCall(func_call) => {
@@ -97,6 +104,7 @@ impl ColumnSelfEqualRewriter {
         }
     }
 
+    /// the exact copy from `logical_filter_expression_simplify_rule`
     fn is_not_null(func_type: ExprType) -> bool {
         func_type == ExprType::IsNull
             || func_type == ExprType::IsNotNull
