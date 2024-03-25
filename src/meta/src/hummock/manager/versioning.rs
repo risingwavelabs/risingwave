@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_initial_compaction_group_levels, get_compaction_group_ids, BranchedSstInfo,
@@ -309,7 +308,7 @@ impl HummockManager {
     #[named]
     pub async fn may_fill_backward_snapshot_group(
         &self,
-        existing_table_fragment_state_tables: &[(TableId, HashSet<TableId>)],
+        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
     ) -> Result<()> {
         use crate::model::{
             BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, ValTransaction,

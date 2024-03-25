@@ -17,12 +17,13 @@ use std::mem::size_of;
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version::PbLevels;
-use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
+use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::hummock_version::Levels as PbLevels;
+use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
 use risingwave_pb::hummock::{
-    snapshot_group_delta, HummockVersion as PbHummockVersion,
-    HummockVersionDelta as PbHummockVersionDelta, SnapshotGroup as PbSnapshotGroup,
-    SnapshotGroupDelta as PbSnapshotGroupDelta,
+    snapshot_group_delta, GroupDelta, GroupDestroy, GroupMetaChange,
+    HummockVersion as PbHummockVersion, HummockVersionDelta as PbHummockVersionDelta,
+    SnapshotGroup as PbSnapshotGroup, SnapshotGroupDelta as PbSnapshotGroupDelta,
 };
 
 use crate::table_watermark::TableWatermarks;
@@ -189,7 +190,7 @@ impl HummockVersion {
 
     pub fn gen_fill_backward_compatibility_snapshot_group_delta(
         &self,
-        existing_table_fragment_state_tables: &[(TableId, HashSet<TableId>)],
+        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
     ) -> Option<HummockVersionDelta> {
         if existing_table_fragment_state_tables.is_empty()
             || self.may_fill_backward_compatibility_snapshot_group()
@@ -200,9 +201,12 @@ impl HummockVersion {
             .iter()
             .map(|(table_id, state_table_ids)| {
                 (
-                    SnapshotGroupId(table_id.table_id),
+                    SnapshotGroupId(*table_id),
                     SnapshotGroupDelta::NewSnapshotGroup {
-                        member_table_ids: state_table_ids.clone(),
+                        member_table_ids: state_table_ids
+                            .iter()
+                            .map(|table_id| TableId::new(*table_id))
+                            .collect(),
                         committed_epoch: self.max_committed_epoch,
                         safe_epoch: self.safe_epoch,
                     },
@@ -222,6 +226,86 @@ impl HummockVersion {
             snapshot_group_delta,
         };
         Some(delta)
+    }
+
+    pub fn gen_purge_snapshot_group_delta(
+        &self,
+        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
+    ) -> Option<HummockVersionDelta> {
+        // 1. collect snapshot group id to purge and existing state table ids
+        let mut existing_state_table_ids = HashSet::new();
+        let mut purged_snapshot_group = HashMap::new();
+        for (snapshot_group_id, group) in &self.snapshot_groups {
+            if let Some(existing_table_ids) =
+                existing_table_fragment_state_tables.get(&snapshot_group_id.0)
+            {
+                assert_eq!(existing_table_ids.len(), group.member_table_ids.len());
+                assert!(group
+                    .member_table_ids
+                    .iter()
+                    .all(|table_id| existing_table_ids.contains(&table_id.table_id)));
+                existing_state_table_ids.extend(group.member_table_ids.iter().cloned());
+            } else {
+                purged_snapshot_group.insert(*snapshot_group_id, SnapshotGroupDelta::Destroy);
+            }
+        }
+        let mut group_deltas = HashMap::new();
+        let mut removed_table_ids = Vec::new();
+        for (cg_id, levels) in &self.levels {
+            let mut table_to_removed = HashSet::new();
+            for table_id in &levels.member_table_ids {
+                if !existing_state_table_ids.contains(&TableId::new(*table_id)) {
+                    assert!(table_to_removed.insert(*table_id));
+                }
+            }
+            removed_table_ids.extend(
+                table_to_removed
+                    .iter()
+                    .map(|table_id| TableId::new(*table_id)),
+            );
+            if table_to_removed.len() == levels.member_table_ids.len() {
+                group_deltas.insert(
+                    *cg_id,
+                    PbGroupDeltas {
+                        group_deltas: vec![GroupDelta {
+                            delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
+                        }],
+                    },
+                );
+            } else {
+                group_deltas.insert(
+                    *cg_id,
+                    PbGroupDeltas {
+                        group_deltas: vec![GroupDelta {
+                            delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                                table_ids_remove: table_to_removed.into_iter().collect(),
+                                table_ids_add: vec![],
+                            })),
+                        }],
+                    },
+                );
+            }
+        }
+        if purged_snapshot_group.is_empty()
+            && group_deltas.is_empty()
+            && removed_table_ids.is_empty()
+        {
+            None
+        } else {
+            let delta = HummockVersionDelta {
+                id: self.id + 1,
+                prev_id: self.id,
+                group_deltas,
+                max_committed_epoch: self.max_committed_epoch,
+                safe_epoch: self.safe_epoch,
+                trivial_move: false,
+                gc_object_ids: vec![],
+                new_table_watermarks: Default::default(),
+                removed_table_ids,
+                snapshot_group_delta: purged_snapshot_group,
+            };
+            Some(delta)
+        }
     }
 }
 

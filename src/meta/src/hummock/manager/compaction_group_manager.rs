@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
-    get_member_table_ids, try_get_compaction_group_id_by_table_id, TableGroupInfo,
+    try_get_compaction_group_id_by_table_id, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -149,16 +149,35 @@ impl HummockManager {
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
-        let registered_members =
-            get_member_table_ids(&read_lock!(self, versioning).await.current_version);
-        let to_unregister = registered_members
-            .into_iter()
-            .filter(|table_id| !valid_ids.contains(table_id))
-            .collect_vec();
-        // As we have released versioning lock, the version that `to_unregister` is calculated from
-        // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(&to_unregister).await
+    pub async fn purge(
+        &self,
+        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
+    ) -> Result<()> {
+        use crate::model::{
+            BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, ValTransaction,
+        };
+        let mut versioning = write_lock!(self, versioning).await;
+        if let Some(new_version_delta) = versioning
+            .current_version
+            .gen_purge_snapshot_group_delta(existing_table_fragment_state_tables)
+        {
+            warn!(?new_version_delta, "purge snapshot group");
+            let new_version_delta = create_trx_wrapper!(
+                self.sql_meta_store(),
+                BTreeMapEntryTransactionWrapper,
+                BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    new_version_delta.id,
+                    new_version_delta,
+                )
+            );
+            commit_multi_var!(
+                self.env.meta_store(),
+                self.sql_meta_store(),
+                new_version_delta
+            )?;
+        }
+        Ok(())
     }
 
     /// The implementation acquires `versioning` lock.
