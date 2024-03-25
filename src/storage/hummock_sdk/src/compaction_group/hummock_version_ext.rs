@@ -1375,6 +1375,7 @@ mod tests {
             max_committed_epoch: 0,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            snapshot_groups: HashMap::new(),
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1438,6 +1439,7 @@ mod tests {
             max_committed_epoch: 0,
             safe_epoch: 0,
             table_watermarks: HashMap::new(),
+            snapshot_groups: HashMap::new(),
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1521,6 +1523,7 @@ mod tests {
                 max_committed_epoch: 0,
                 safe_epoch: 0,
                 table_watermarks: HashMap::new(),
+                snapshot_groups: HashMap::new(),
             }
         );
     }

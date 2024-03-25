@@ -305,7 +305,9 @@ impl HummockVersion {
                     .iter()
                     .map(|table_id| TableId::new(*table_id)),
             );
-            if table_to_removed.len() == levels.member_table_ids.len() {
+            if table_to_removed.len() == levels.member_table_ids.len()
+                && *cg_id > StaticCompactionGroupId::End as u64
+            {
                 group_deltas.insert(
                     *cg_id,
                     PbGroupDeltas {
