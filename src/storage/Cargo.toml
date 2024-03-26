@@ -14,6 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+ahash = "0.8"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
@@ -26,7 +27,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = "0.3"
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -42,6 +43,7 @@ prost = { workspace = true }
 rand = "0.8"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -112,7 +114,7 @@ harness = false
 # debug = true
 
 [[bench]]
-name = "bench_lru_cache"
+name = "bench_block_cache"
 harness = false
 
 [[bench]]

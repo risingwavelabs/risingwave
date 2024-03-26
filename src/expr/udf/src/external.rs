@@ -187,7 +187,7 @@ impl ArrowFlightUdfClient {
     ) -> Result<RecordBatch> {
         let mut backoff = Duration::from_millis(100);
         let metrics = &*GLOBAL_METRICS;
-        let labels: &[&str; 4] = &[&self.addr, "external", &id, &fragment_id];
+        let labels: &[&str; 4] = &[&self.addr, "external", id, fragment_id];
         loop {
             match self.call(id, input.clone()).await {
                 Err(err) if err.is_tonic_error() => {

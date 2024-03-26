@@ -95,10 +95,11 @@ pub struct FrontendOpts {
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_addr if not specified.
+    /// Optional, we will use `listen_addr` if not specified.
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
+    // TODO(eric): Remove me
     // TODO: This is currently unused.
     #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
@@ -135,11 +136,11 @@ pub struct FrontendOpts {
     /// Used for control the metrics level, similar to log level.
     /// 0 = disable metrics
     /// >0 = enable metrics
-    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
-    #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
+    #[clap(long, hide = true, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
 }

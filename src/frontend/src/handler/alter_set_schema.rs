@@ -103,6 +103,23 @@ pub async fn handle_alter_set_schema(
                 )?;
                 Object::SinkId(sink.id.sink_id)
             }
+            StatementType::ALTER_SUBSCRIPTION => {
+                let (subscription, old_schema_name) = catalog_reader.get_subscription_by_name(
+                    db_name,
+                    schema_path,
+                    &real_obj_name,
+                )?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
+                session.check_privilege_for_drop_alter(old_schema_name, &**subscription)?;
+                catalog_reader.check_relation_name_duplicated(
+                    db_name,
+                    &new_schema_name,
+                    &subscription.name,
+                )?;
+                Object::SubscriptionId(subscription.id.subscription_id)
+            }
             StatementType::ALTER_CONNECTION => {
                 let (connection, old_schema_name) =
                     catalog_reader.get_connection_by_name(db_name, schema_path, &real_obj_name)?;

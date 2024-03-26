@@ -16,10 +16,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
+use foyer::memory::CacheContext;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
@@ -123,7 +123,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -138,7 +138,7 @@ async fn test_storage_basic() {
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -155,7 +155,7 @@ async fn test_storage_basic() {
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -185,7 +185,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -216,7 +216,7 @@ async fn test_storage_basic() {
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -233,7 +233,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -253,12 +253,13 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .into_stream(to_owned_item);
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
@@ -293,7 +294,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -311,7 +312,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
@@ -330,12 +331,13 @@ async fn test_storage_basic() {
             epoch2,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .into_stream(to_owned_item);
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
@@ -383,12 +385,13 @@ async fn test_storage_basic() {
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .into_stream(to_owned_item);
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
@@ -557,7 +560,7 @@ async fn test_state_store_sync() {
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -599,7 +602,7 @@ async fn test_state_store_sync() {
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -622,12 +625,13 @@ async fn test_state_store_sync() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .into_stream(to_owned_item);
         futures::pin_mut!(iter);
 
         let kv_map_batch_1 = [
@@ -675,12 +679,13 @@ async fn test_state_store_sync() {
                 epoch2,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .into_stream(to_owned_item);
 
         futures::pin_mut!(iter);
 
@@ -806,7 +811,7 @@ async fn test_delete_get() {
             epoch2,
             ReadOptions {
                 prefix_hint: None,
-                cache_policy: CachePolicy::Fill(CachePriority::High),
+                cache_policy: CachePolicy::Fill(CacheContext::Default),
                 ..Default::default()
             }
         )
@@ -903,7 +908,7 @@ async fn test_multiple_epoch_sync() {
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                     )
@@ -919,7 +924,7 @@ async fn test_multiple_epoch_sync() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
 
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -933,7 +938,7 @@ async fn test_multiple_epoch_sync() {
                         epoch3,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                     )
@@ -1034,12 +1039,13 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1059,12 +1065,13 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             let result: Vec<_> = iter.try_collect().await.unwrap();
             assert_eq!(20, result.len());
@@ -1083,12 +1090,13 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1126,12 +1134,13 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1151,12 +1160,13 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1177,12 +1187,13 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
                 .await
-                .unwrap();
+                .unwrap()
+                .into_stream(to_owned_item);
 
             futures::pin_mut!(iter);
 
@@ -1288,13 +1299,14 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1322,13 +1334,14 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
@@ -1357,13 +1370,14 @@ async fn test_hummock_version_reader() {
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1416,13 +1430,14 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1459,13 +1474,14 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(20, result.len());
@@ -1494,13 +1510,14 @@ async fn test_hummock_version_reader() {
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(10, result.len());
@@ -1528,13 +1545,14 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CachePriority::High),
+                            cache_policy: CachePolicy::Fill(CacheContext::Default),
                             ..Default::default()
                         },
                         read_snapshot,
                     )
                     .await
-                    .unwrap();
+                    .unwrap()
+                    .into_stream(to_owned_item);
 
                 let result: Vec<_> = iter.try_collect().await.unwrap();
                 assert_eq!(30, result.len());
@@ -1565,13 +1583,14 @@ async fn test_hummock_version_reader() {
                             ReadOptions {
                                 table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
-                                cache_policy: CachePolicy::Fill(CachePriority::High),
+                                cache_policy: CachePolicy::Fill(CacheContext::Default),
                                 ..Default::default()
                             },
                             read_snapshot,
                         )
                         .await
-                        .unwrap();
+                        .unwrap()
+                        .into_stream(to_owned_item);
 
                     let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(8, result.len());
@@ -1596,13 +1615,14 @@ async fn test_hummock_version_reader() {
                             ReadOptions {
                                 table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
-                                cache_policy: CachePolicy::Fill(CachePriority::High),
+                                cache_policy: CachePolicy::Fill(CacheContext::Default),
                                 ..Default::default()
                             },
                             read_snapshot,
                         )
                         .await
-                        .unwrap();
+                        .unwrap()
+                        .into_stream(to_owned_item);
 
                     let result: Vec<_> = iter.try_collect().await.unwrap();
                     assert_eq!(18, result.len());
@@ -1683,7 +1703,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -1701,7 +1721,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -1719,7 +1739,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -1739,7 +1759,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: Some(0),
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
+                        cache_policy: CachePolicy::Fill(CacheContext::Default),
                         ..Default::default()
                     },
                 )
@@ -1781,7 +1801,7 @@ async fn test_get_with_min_epoch() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -1800,7 +1820,7 @@ async fn test_get_with_min_epoch() {
                     table_id: TEST_TABLE_ID,
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -1820,7 +1840,7 @@ async fn test_get_with_min_epoch() {
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -1841,7 +1861,7 @@ async fn test_get_with_min_epoch() {
                     retention_seconds: Some(0),
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                    cache_policy: CachePolicy::Fill(CacheContext::Default),
                     ..Default::default()
                 },
             )
@@ -1948,6 +1968,7 @@ async fn test_table_watermark() {
             )
             .await
             .unwrap()
+            .into_stream(to_owned_item)
             .map_ok(|(full_key, value)| (full_key.user_key, value))
             .try_collect::<Vec<_>>()
             .await
@@ -2017,6 +2038,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .map_ok(|(full_key, value)| (full_key.user_key, value))
                 .try_collect::<Vec<_>>()
                 .await
@@ -2048,6 +2070,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .try_collect::<Vec<_>>()
                 .await
                 .unwrap();
@@ -2116,6 +2139,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .map_ok(|(full_key, value)| (full_key.user_key, value))
                 .try_collect::<Vec<_>>()
                 .await
@@ -2147,6 +2171,7 @@ async fn test_table_watermark() {
                 )
                 .await
                 .unwrap()
+                .into_stream(to_owned_item)
                 .try_collect::<Vec<_>>()
                 .await
                 .unwrap();
@@ -2218,6 +2243,7 @@ async fn test_table_watermark() {
                     )
                     .await
                     .unwrap()
+                    .into_stream(to_owned_item)
                     .map_ok(|(full_key, value)| (full_key.user_key, value))
                     .try_collect::<Vec<_>>()
                     .await
@@ -2250,6 +2276,7 @@ async fn test_table_watermark() {
                     )
                     .await
                     .unwrap()
+                    .into_stream(to_owned_item)
                     .try_collect::<Vec<_>>()
                     .await
                     .unwrap();

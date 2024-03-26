@@ -191,9 +191,9 @@ impl RearrangedChainExecutor {
 
                 // 7. Rearranged task finished.
                 // The reason for finish must be that we told it to stop.
-                tracing::trace!(actor = self.actor_id, "rearranged task finished");
+                tracing::trace!("rearranged task finished");
                 if stop_rearrange_tx.is_some() {
-                    tracing::error!(actor = self.actor_id, "rearrangement finished passively");
+                    tracing::error!("rearrangement finished passively");
                 }
 
                 // 8. Consume remainings.
@@ -213,7 +213,7 @@ impl RearrangedChainExecutor {
             }
 
             // Consume remaining upstream.
-            tracing::trace!(actor = self.actor_id, "begin to consume remaining upstream");
+            tracing::trace!("begin to consume remaining upstream");
 
             #[for_await]
             for msg in upstream {
