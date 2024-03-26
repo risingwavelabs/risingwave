@@ -21,10 +21,12 @@ use risingwave_meta_model_migration::{
 };
 use risingwave_meta_model_v2::actor_dispatcher::DispatcherType;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment};
-use risingwave_meta_model_v2::{actor, actor_dispatcher, fragment, ActorId, FragmentId};
+use risingwave_meta_model_v2::{
+    actor, actor_dispatcher, fragment, ActorId, FragmentId, ObjectId, TableId,
+};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, JoinType, QueryFilter, QueryResult,
-    QuerySelect, QueryTrait, RelationTrait, Statement,
+    QuerySelect, QueryTrait, RelationTrait, Statement, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -181,7 +183,35 @@ where
 }
 
 impl CatalogController {
-    pub async fn resolve_working_set_for_reschedule<C>(
+    pub async fn resolve_working_set_for_reschedule(
+        &self,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<RescheduleWorkingSet> {
+        let inner = self.inner.read().await;
+        self.resolve_working_set_for_reschedule_helper(&inner.db, fragment_ids)
+            .await
+    }
+
+    pub async fn resolve_working_set_for_reschedule_tables(
+        &self,
+        table_ids: Vec<ObjectId>,
+    ) -> MetaResult<RescheduleWorkingSet> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragment_ids: Vec<FragmentId> = Fragment::find()
+            .filter(fragment::Column::JobId.is_in(table_ids))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|fragment| fragment.fragment_id)
+            .collect();
+
+        self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
+            .await
+    }
+
+    pub async fn resolve_working_set_for_reschedule_helper<C>(
         &self,
         txn: &C,
         fragment_ids: Vec<FragmentId>,

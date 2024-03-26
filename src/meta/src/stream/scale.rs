@@ -30,7 +30,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model_v2::StreamingParallelism;
+use risingwave_meta_model_v2::{ObjectId, StreamingParallelism};
 use risingwave_pb::common::{
     ActorInfo, Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode, WorkerType,
 };
@@ -53,6 +53,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::barrier::{Command, Reschedule, StreamRpcManager};
+use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::serving::{
@@ -1911,22 +1912,48 @@ impl ScaleController {
                     guard.table_fragments(),
                 )?;
             }
-            MetadataManager::V2(_) => {
-                let all_table_fragments = self.list_all_table_fragments().await?;
-                let all_table_fragments = all_table_fragments
-                    .into_iter()
-                    .map(|table_fragments| (table_fragments.table_id(), table_fragments))
-                    .collect::<BTreeMap<_, _>>();
+            MetadataManager::V2(mgr) => {
+                let table_ids = table_parallelisms
+                    .keys()
+                    .map(|id| *id as ObjectId)
+                    .collect();
+                let RescheduleWorkingSet {
+                    fragments,
+                    actors,
+                    actor_dispatchers,
+                    fragment_downstreams,
+                    fragment_upstreams,
+                } = mgr
+                    .catalog_controller
+                    .resolve_working_set_for_reschedule_tables(table_ids)
+                    .await?;
 
-                build_index(
-                    &mut no_shuffle_source_fragment_ids,
-                    &mut no_shuffle_target_fragment_ids,
-                    &mut fragment_distribution_map,
-                    &mut actor_status,
-                    &mut table_fragment_id_map,
-                    &mut fragment_actor_id_map,
-                    &all_table_fragments,
-                )?;
+                for (fragment_id, downstreams) in fragment_downstreams {
+                    for (downstream_fragment_id, dispatcher_type) in downstreams {
+                        if let risingwave_meta_model_v2::actor_dispatcher::DispatcherType::NoShuffle = dispatcher_type {
+                            no_shuffle_source_fragment_ids.insert(fragment_id as FragmentId);
+                            no_shuffle_target_fragment_ids.insert(downstream_fragment_id as FragmentId);
+                        }
+                    }
+                }
+
+                for (fragment_id, fragment) in fragments {
+                    fragment_distribution_map
+                        .insert(fragment_id as FragmentId, fragment.distribution_type());
+
+                    table_fragment_id_map
+                        .entry(fragment.job_id as u32)
+                        .or_default()
+                        .insert(fragment_id as FragmentId);
+                }
+
+                for (actor_id, actor) in actors {
+                    actor_status.insert(actor_id as ActorId, actor.status);
+                    fragment_actor_id_map
+                        .entry(actor.fragment_id as FragmentId)
+                        .or_default()
+                        .insert(actor_id as ActorId);
+                }
             }
         }
 
