@@ -58,6 +58,10 @@ impl BoundSource {
     pub fn is_backfillable_cdc_connector(&self) -> bool {
         self.catalog.with_properties.is_backfillable_cdc_connector()
     }
+
+    pub fn is_shared(&self) -> bool {
+        self.catalog.info.is_shared
+    }
 }
 
 impl Binder {

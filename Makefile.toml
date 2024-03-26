@@ -86,9 +86,9 @@ if ${is_not_ci}
   no_rust_log = not ${rust_log}
 
   if ${no_rust_log}
-    set_env RUST_LOG "pgwire_query_log=info"
+    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info"
   else
-    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+    set_env RUST_LOG "pgwire_query_log=info,hyper::client::connect::http=info,${rust_log}"
   end
 end
 ''',

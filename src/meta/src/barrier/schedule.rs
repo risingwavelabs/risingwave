@@ -279,15 +279,18 @@ impl BarrierScheduler {
 
         for (injected_rx, collect_rx, finish_rx) in contexts {
             // Wait for this command to be injected, and record the result.
+            tracing::trace!("waiting for injected_rx");
             let info = injected_rx.await.ok().context("failed to inject barrier")?;
             infos.push(info);
 
+            tracing::trace!("waiting for collect_rx");
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
                 .await
                 .ok()
                 .context("failed to collect barrier")??;
 
+            tracing::trace!("waiting for finish_rx");
             // Wait for this command to be finished.
             finish_rx.await.ok().context("failed to finish command")??;
         }
@@ -316,9 +319,13 @@ impl BarrierScheduler {
     ///
     /// Returns the barrier info of the actual command.
     pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
-        self.run_multiple_commands(vec![command])
+        tracing::trace!("run_command: {:?}", command);
+        let ret = self
+            .run_multiple_commands(vec![command])
             .await
-            .map(|i| i[0])
+            .map(|i| i[0]);
+        tracing::trace!("run_command finished");
+        ret
     }
 
     /// Flush means waiting for the next barrier to collect.

@@ -206,7 +206,7 @@ message StreamFsFetchNode {
 }
 
 message SourceBackfillNode {
-  uint32 source_id = 1;
+  uint32 upstream_source_id = 1;
   optional uint32 row_id_index = 2;
   repeated plan_common.ColumnCatalog columns = 3;
   catalog.StreamSourceInfo info = 4;
@@ -876,13 +876,14 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_MVIEW = 2;
   FRAGMENT_TYPE_FLAG_SINK = 4;
   FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
+  // Include StreamScan and StreamCdcScan
   FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SUBSCRIPTION = 512;
-  FRAGMENT_TYPE_FLAG_SOURCE_BACKFILL = 1024;
+  FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
 }
 
 // The streaming context associated with a stream plan

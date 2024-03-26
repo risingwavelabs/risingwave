@@ -67,7 +67,6 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         let mut ret = vec![];
         while let Some(item) = state_table_iter.next().await {
             let row = item?.into_owned_row();
-            tracing::debug!("scanning backfill state table, row: {:?}", row);
             let state = match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                     BackfillState::restore_from_json(jsonb_ref.to_owned_scalar())?
