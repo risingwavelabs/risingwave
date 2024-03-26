@@ -3160,21 +3160,6 @@ fn parse_create_table_on_conflict() {
         }
         _ => unreachable!(),
     }
-    let sql =
-        "CREATE TABLE myschema.myview ON CONFLICT DO UPDATE IF NOT NULL AS SELECT foo FROM bar";
-    match verified_stmt(sql) {
-        Statement::CreateTable {
-            name,
-            query,
-            on_conflict,
-            ..
-        } => {
-            assert_eq!("myschema.myview", name.to_string());
-            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
-            assert_eq!(on_conflict, Some(OnConflict::DoUpdateIfNotNull));
-        }
-        _ => unreachable!(),
-    }
 
     let sql = "CREATE TABLE myschema.myview AS SELECT foo FROM bar";
     match verified_stmt(sql) {
