@@ -29,6 +29,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
@@ -37,8 +38,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, statistics_compact_task};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
-    get_table_compaction_group_id_mapping, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockLevelsExt,
+    get_table_compaction_group_id_mapping, BranchedSstInfo, HummockLevelsExt,
 };
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::{
@@ -60,9 +60,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta,
-    PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest, TableOption, TableSchema,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, GroupMetaChange,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
+    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
+    TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -91,7 +92,7 @@ use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 #[cfg(any(test, feature = "test"))]
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::manager::{MetaSrvEnv, MetadataManager, TableId, META_NODE_ID};
+use crate::manager::{MetaSrvEnv, MetadataManager, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, BTreeMapTransaction,
     BTreeMapTransactionWrapper, ClusterId, MetadataModel, MetadataModelError, ValTransaction,
@@ -169,7 +170,7 @@ pub struct HummockManager {
     // 2. When partition count <=1, compactor will still use table_id as the cutting boundary of sst
     // 3. Modify the special configuration item hybrid_vnode_count = 0 to remove the table_id in hybrid cg and no longer perform alignment cutting.
     group_to_table_vnode_partition:
-        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<TableId, u32>>>,
+        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<StateTableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -242,22 +243,41 @@ pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     .collect()
 });
 
+#[derive(Debug, Clone)]
+pub struct NewTableFragmentInfo {
+    pub table_id: TableId,
+    pub mv_table_id: Option<TableId>,
+    pub internal_table_ids: Vec<TableId>,
+}
+
+impl NewTableFragmentInfo {
+    pub fn state_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.mv_table_id
+            .iter()
+            .chain(self.internal_table_ids.iter())
+            .cloned()
+    }
+}
+
 pub struct CommitEpochInfo {
     pub sstables: Vec<ExtendedSstableInfo>,
-    pub new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
+    pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    pub new_table_fragment_info: Option<NewTableFragmentInfo>,
 }
 
 impl CommitEpochInfo {
     pub fn new(
         sstables: Vec<ExtendedSstableInfo>,
-        new_table_watermarks: HashMap<risingwave_common::catalog::TableId, TableWatermarks>,
+        new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        new_table_fragment_info: Option<NewTableFragmentInfo>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
+            new_table_fragment_info,
         }
     }
 
@@ -270,6 +290,7 @@ impl CommitEpochInfo {
             sstables.into_iter().map(Into::into).collect(),
             HashMap::new(),
             sst_to_context,
+            None,
         )
     }
 }
@@ -1566,6 +1587,7 @@ impl HummockManager {
             mut sstables,
             new_table_watermarks,
             sst_to_context,
+            new_table_fragment_info,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1589,7 +1611,7 @@ impl HummockManager {
             add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
 
-        let old_version = &versioning.current_version;
+        let old_version: &HummockVersion = &versioning.current_version;
         let mut new_version_delta = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapEntryTransactionWrapper,
@@ -1601,8 +1623,78 @@ impl HummockManager {
         );
         new_version_delta.max_committed_epoch = epoch;
         new_version_delta.new_table_watermarks = new_table_watermarks;
-        let mut new_hummock_version = old_version.clone();
-        new_hummock_version.id = new_version_delta.id;
+
+        let mut table_compaction_group_mapping = old_version.build_compaction_group_info();
+
+        // Add new table
+        if let Some(new_fragment_table_info) = new_table_fragment_info {
+            if !new_fragment_table_info.internal_table_ids.is_empty() {
+                if let Some(levels) = old_version
+                    .levels
+                    .get(&(StaticCompactionGroupId::StateDefault as u64))
+                {
+                    for table_id in &new_fragment_table_info.internal_table_ids {
+                        if levels.member_table_ids.contains(&table_id.table_id) {
+                            return Err(Error::CompactionGroup(format!(
+                                "table {} already in group {}",
+                                table_id,
+                                StaticCompactionGroupId::StateDefault as u64
+                            )));
+                        }
+                    }
+                }
+
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(StaticCompactionGroupId::StateDefault as u64)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                        table_ids_add: new_fragment_table_info
+                            .internal_table_ids
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect(),
+                        ..Default::default()
+                    })),
+                });
+
+                for table_id in &new_fragment_table_info.internal_table_ids {
+                    table_compaction_group_mapping
+                        .insert(*table_id, StaticCompactionGroupId::StateDefault as u64);
+                }
+            }
+
+            if let Some(table_id) = new_fragment_table_info.mv_table_id {
+                if let Some(levels) = old_version
+                    .levels
+                    .get(&(StaticCompactionGroupId::MaterializedView as u64))
+                {
+                    if levels.member_table_ids.contains(&table_id.table_id) {
+                        return Err(Error::CompactionGroup(format!(
+                            "table {} already in group {}",
+                            table_id,
+                            StaticCompactionGroupId::MaterializedView as u64
+                        )));
+                    }
+                }
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(StaticCompactionGroupId::MaterializedView as u64)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                        table_ids_add: vec![table_id.table_id],
+                        ..Default::default()
+                    })),
+                });
+                let _ = table_compaction_group_mapping
+                    .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
+            }
+        }
+
         let mut incorrect_ssts = vec![];
         let mut new_sst_id_number = 0;
         for ExtendedSstableInfo {
@@ -1622,13 +1714,10 @@ impl HummockManager {
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<u32>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
-                    match try_get_compaction_group_id_by_table_id(
-                        &versioning.current_version,
-                        *table_id,
-                    ) {
+                    match table_compaction_group_mapping.get(&TableId::new(*table_id)) {
                         Some(compaction_group_id) => {
                             group_table_ids
-                                .entry(compaction_group_id)
+                                .entry(*compaction_group_id)
                                 .or_default()
                                 .push(*table_id);
                         }
@@ -1729,6 +1818,7 @@ impl HummockManager {
             group_deltas.push(group_delta);
         }
 
+        let mut new_hummock_version = old_version.clone();
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_hummock_version.apply_version_delta(new_version_delta.deref());
 
@@ -3255,11 +3345,11 @@ pub enum TableAlignRule {
     // The table_id is not optimized for alignment.
     NoOptimization,
     // Move the table_id to a separate compaction group. Currently, the system only supports separate compaction with one table.
-    SplitToDedicatedCg((CompactionGroupId, BTreeMap<TableId, u32>)),
+    SplitToDedicatedCg((CompactionGroupId, BTreeMap<StateTableId, u32>)),
     // In the current group, partition the table's data according to the granularity of the vnode.
-    SplitByVnode((TableId, u32)),
+    SplitByVnode((StateTableId, u32)),
     // In the current group, partition the table's data at the granularity of the table.
-    SplitByTable(TableId),
+    SplitByTable(StateTableId),
 }
 
 fn drop_sst(
