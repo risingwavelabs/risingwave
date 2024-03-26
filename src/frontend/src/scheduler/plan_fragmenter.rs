@@ -334,14 +334,14 @@ impl SourceScanInfo {
                 let time_travel_info = match fetch_info.as_of {
                     Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(v)),
                     Some(AsOf::TimestampNum(ts)) => {
-                        Some(IcebergTimeTravelInfo::TimeStampMs(ts * 1000))
+                        Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000))
                     }
                     Some(AsOf::VersionString(_)) => {
                         bail!("Unsupported version string in iceberg time travel")
                     }
                     Some(AsOf::TimestampString(ts)) => Some(
                         speedate::DateTime::parse_str_rfc3339(&ts)
-                            .map(|t| IcebergTimeTravelInfo::TimeStampMs(t.timestamp_tz() * 1000))
+                            .map(|t| IcebergTimeTravelInfo::TimestampMs(t.timestamp_tz() * 1000))
                             .map_err(|_e| anyhow!("fail to parse timestamp"))?,
                     ),
                     Some(AsOf::ProcessTime) => unreachable!(),

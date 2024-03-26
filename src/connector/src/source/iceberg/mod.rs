@@ -159,7 +159,7 @@ impl SplitEnumerator for IcebergSplitEnumerator {
 
 pub enum IcebergTimeTravelInfo {
     Version(i64),
-    TimeStampMs(i64),
+    TimestampMs(i64),
 }
 
 impl IcebergSplitEnumerator {
@@ -179,7 +179,7 @@ impl IcebergSplitEnumerator {
                 };
                 snapshot.snapshot_id
             }
-            Some(IcebergTimeTravelInfo::TimeStampMs(timestamp)) => {
+            Some(IcebergTimeTravelInfo::TimestampMs(timestamp)) => {
                 match &table.current_table_metadata().snapshots {
                     Some(snapshots) => {
                         let snapshot = snapshots
