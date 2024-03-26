@@ -253,7 +253,8 @@ fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
     }
 }
 
-struct BatchPlanFragmenterResult {
+#[derive(Clone)]
+pub struct BatchPlanFragmenterResult {
     pub(crate) plan_fragmenter: BatchPlanFragmenter,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
@@ -261,7 +262,7 @@ struct BatchPlanFragmenterResult {
     pub(crate) _dependent_relations: Vec<TableId>,
 }
 
-fn gen_batch_plan_fragmenter(
+pub fn gen_batch_plan_fragmenter(
     session: &SessionImpl,
     plan_result: BatchQueryPlanResult,
 ) -> Result<BatchPlanFragmenterResult> {
@@ -450,7 +451,7 @@ async fn execute(
         .into())
 }
 
-async fn distribute_execute(
+pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
@@ -473,7 +474,7 @@ async fn distribute_execute(
 }
 
 #[expect(clippy::unused_async)]
-async fn local_execute(
+pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,

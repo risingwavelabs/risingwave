@@ -152,38 +152,46 @@ impl SessionImpl {
 
     /// Commits an explicit transaction.
     // TODO: handle failed transaction
-    pub fn txn_commit_explicit(&self) {
-        let mut txn = self.txn.lock();
-
-        match &*txn {
-            State::Initial => unreachable!("no transaction in progress"),
-            State::Implicit(_) => {
-                // TODO: should be warning
-                self.notice_to_user("there is no transaction in progress")
+    pub async fn txn_commit_explicit(&self) {
+        {
+            let mut txn = self.txn.lock();
+            match &*txn {
+                State::Initial => unreachable!("no transaction in progress"),
+                State::Implicit(_) => {
+                    // TODO: should be warning
+                    self.notice_to_user("there is no transaction in progress")
+                }
+                State::Explicit(ctx) => match ctx.access_mode {
+                    AccessMode::ReadWrite => unimplemented!(),
+                    AccessMode::ReadOnly => {
+                        *txn = State::Initial;
+                    }
+                },
             }
-            State::Explicit(ctx) => match ctx.access_mode {
-                AccessMode::ReadWrite => unimplemented!(),
-                AccessMode::ReadOnly => *txn = State::Initial,
-            },
         }
+        self.drop_all_cursors().await;
     }
 
     /// Rollbacks an explicit transaction.
     // TODO: handle failed transaction
-    pub fn txn_rollback_explicit(&self) {
-        let mut txn = self.txn.lock();
-
-        match &*txn {
-            State::Initial => unreachable!("no transaction in progress"),
-            State::Implicit(_) => {
-                // TODO: should be warning
-                self.notice_to_user("there is no transaction in progress")
+    pub async fn txn_rollback_explicit(&self) {
+        {
+            let mut txn = self.txn.lock();
+            match &*txn {
+                State::Initial => unreachable!("no transaction in progress"),
+                State::Implicit(_) => {
+                    // TODO: should be warning
+                    self.notice_to_user("there is no transaction in progress")
+                }
+                State::Explicit(ctx) => match ctx.access_mode {
+                    AccessMode::ReadWrite => unimplemented!(),
+                    AccessMode::ReadOnly => {
+                        *txn = State::Initial;
+                    }
+                },
             }
-            State::Explicit(ctx) => match ctx.access_mode {
-                AccessMode::ReadWrite => unimplemented!(),
-                AccessMode::ReadOnly => *txn = State::Initial,
-            },
         }
+        self.drop_all_cursors().await;
     }
 
     /// Returns the transaction context.
