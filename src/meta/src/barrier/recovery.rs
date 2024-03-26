@@ -17,7 +17,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
@@ -47,6 +47,7 @@ use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
+use crate::error::MetaErrorInner;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
@@ -686,7 +687,9 @@ impl GlobalBarrierManagerContext {
 
     async fn scale_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<()> {
         tracing::debug!("acquire reschedule_lock for scale_actors");
-        let _guard = self.scale_controller.reschedule_lock.write().await;
+        let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
+            return Err(anyhow!("failed to acquire reschedule_lock for scale_actors").into());
+        };
         tracing::debug!("acquired reschedule_lock for scale_actors");
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(all_nodes).await,
