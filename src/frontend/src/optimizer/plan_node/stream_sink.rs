@@ -255,7 +255,29 @@ impl StreamSink {
             }
         };
 
-        let default_log_store_type = if default_sink_decouple {
+        match (input.ctx().session_ctx().config().sink_decouple(), &default_sink_decouple) {
+            (SinkDecouple::Enable, risingwave_connector::sink::DecoupleMode::Force(false)) => {
+                return Err(
+                    ErrorCode::SinkError(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        "The sink config cannot be force decoupled. Please fix it by: 1.set sink_decouple to false or default. 2.adjust the sink config."
+                    )))
+                    .into()
+                )
+            },
+            (SinkDecouple::Disable, risingwave_connector::sink::DecoupleMode::Force(true)) => {
+                return Err(
+                    ErrorCode::SinkError(Box::new(Error::new(
+                        ErrorKind::InvalidInput,
+                        "The sink config must be force decoupled. Please fix it by: 1.set sink_decouple to true or default. 2.adjust the sink config."
+                    )))
+                    .into()
+                )
+            },
+            _ => {}
+        };
+
+        let default_log_store_type = if default_sink_decouple.is_decouple() {
             SinkLogStoreType::KvLogStore
         } else {
             SinkLogStoreType::InMemoryLogStore

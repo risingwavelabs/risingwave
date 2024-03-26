@@ -26,7 +26,7 @@ use with_options::WithOptions;
 
 use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
 use super::utils::chunk_to_json;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use super::{DecoupleMode, DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::NatsCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
@@ -97,8 +97,8 @@ impl Sink for NatsSink {
 
     const SINK_NAME: &'static str = NATS_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn default_sink_decouple(desc: &SinkDesc) -> DecoupleMode {
+        DecoupleMode::Recommend(desc.sink_type.is_append_only())
     }
 
     async fn validate(&self) -> Result<()> {

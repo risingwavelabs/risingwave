@@ -326,13 +326,30 @@ impl SinkWriterParam {
     }
 }
 
+pub enum DecoupleMode {
+    Force(bool),
+    Recommend(bool),
+}
+
+impl DecoupleMode {
+    pub fn is_decouple(&self) -> bool {
+        matches!(
+            self,
+            DecoupleMode::Force(true) | DecoupleMode::Recommend(true)
+        )
+    }
+}
+
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+    /// Infer the decouple mode from the sink properties.
+    /// `DecoupleMode::Recommend` means that the sink is recommended to run in this mode but other is also acceptable.
+    /// `DecoupleMode::Force` means that the sink must run in this mode.
+    fn default_sink_decouple(_desc: &SinkDesc) -> DecoupleMode {
+        DecoupleMode::Recommend(false)
     }
 
     async fn validate(&self) -> Result<()>;

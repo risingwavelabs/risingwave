@@ -27,7 +27,7 @@ use tokio_retry::Retry;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
-use super::SinkParam;
+use super::{DecoupleMode, SinkParam};
 use crate::common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::catalog::desc::SinkDesc;
@@ -75,8 +75,8 @@ impl Sink for KinesisSink {
 
     const SINK_NAME: &'static str = KINESIS_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn default_sink_decouple(desc: &SinkDesc) -> DecoupleMode {
+        DecoupleMode::Recommend(desc.sink_type.is_append_only())
     }
 
     async fn validate(&self) -> Result<()> {

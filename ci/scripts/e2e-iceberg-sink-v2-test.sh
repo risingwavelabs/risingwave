@@ -44,6 +44,7 @@ bash ./start_spark_connect_server.sh
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/partition_upsert.toml
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/range_partition_append_only.toml
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/range_partition_upsert.toml
+"$HOME"/.local/bin/poetry run python main.py -t ./test_case/append_only_with_checkpoint_interval.toml
 
 
 echo "--- Kill cluster"

@@ -113,13 +113,16 @@ pub trait FormattedSink {
 pub struct LogSinkerOf<W> {
     writer: W,
     sink_metrics: SinkMetrics,
+
+    commit_checkpoint_interval: u64,
 }
 
 impl<W> LogSinkerOf<W> {
-    pub fn new(writer: W, sink_metrics: SinkMetrics) -> Self {
+    pub fn new(writer: W, sink_metrics: SinkMetrics, commit_checkpoint_interval: u64) -> Self {
         LogSinkerOf {
             writer,
             sink_metrics,
+            commit_checkpoint_interval,
         }
     }
 }
@@ -142,6 +145,9 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
         }
 
         let mut state = LogConsumerState::Uninitialized;
+
+        let mut current_checkpoint: u64 = 0;
+        let commit_checkpoint_interval = self.commit_checkpoint_interval;
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
@@ -194,14 +200,22 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         _ => unreachable!("epoch must have begun before handling barrier"),
                     };
                     if is_checkpoint {
-                        let start_time = Instant::now();
-                        sink_writer.barrier(true).await?;
-                        sink_metrics
-                            .sink_commit_duration_metrics
-                            .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader
-                            .truncate(TruncateOffset::Barrier { epoch })
-                            .await?;
+                        current_checkpoint += 1;
+                        if commit_checkpoint_interval <= 1
+                            || current_checkpoint >= commit_checkpoint_interval
+                        {
+                            let start_time = Instant::now();
+                            sink_writer.barrier(true).await?;
+                            sink_metrics
+                                .sink_commit_duration_metrics
+                                .observe(start_time.elapsed().as_millis() as f64);
+                            log_reader
+                                .truncate(TruncateOffset::Barrier { epoch })
+                                .await?;
+                            current_checkpoint = 0;
+                        } else {
+                            sink_writer.barrier(false).await?;
+                        }
                     } else {
                         sink_writer.barrier(false).await?;
                     }
@@ -224,6 +238,21 @@ where
         LogSinkerOf {
             writer: self,
             sink_metrics,
+            commit_checkpoint_interval: 0,
+        }
+    }
+
+    /// Create a log sinker with a commit checkpoint interval. The sinker should be used with a
+    /// decouple log reader `KvLogStoreReader`.
+    pub fn into_log_sinker_with_checkpoint_interval(
+        self,
+        sink_metrics: SinkMetrics,
+        commit_checkpoint_interval: u64,
+    ) -> LogSinkerOf<Self> {
+        LogSinkerOf {
+            writer: self,
+            sink_metrics,
+            commit_checkpoint_interval,
         }
     }
 }

@@ -1,0 +1,28 @@
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.demo_table',
+    '''
+    CREATE TABLE demo_db.t1 (
+    i1 int,
+    i2 string,
+    i3 string
+    ) USING iceberg TBLPROPERTIES ('format-version'='2');
+    ''',
+    '''
+    CREATE TABLE demo_db.t2 (
+    i1 int,
+    i2 string,
+    i3 string
+    ) USING iceberg TBLPROPERTIES ('format-version'='2');
+    ''',
+]
+
+slt = 'test_case/append_only_with_checkpoint_interval.slt'
+
+cmp_sqls = ["SELECT * FROM demo_db.t1", "SELECT * FROM demo_db.t2"]
+
+drop_sqls = [
+    'DROP TABLE IF EXISTS demo_db.t1',
+    'DROP TABLE IF EXISTS demo_db.t2',
+    'DROP SCHEMA IF EXISTS demo_db',
+]

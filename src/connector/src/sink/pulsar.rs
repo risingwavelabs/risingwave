@@ -27,7 +27,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
-use super::{Sink, SinkError, SinkParam, SinkWriterParam};
+use super::{DecoupleMode, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::SerTo;
@@ -169,8 +169,8 @@ impl Sink for PulsarSink {
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn default_sink_decouple(desc: &SinkDesc) -> DecoupleMode {
+        DecoupleMode::Recommend(desc.sink_type.is_append_only())
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {

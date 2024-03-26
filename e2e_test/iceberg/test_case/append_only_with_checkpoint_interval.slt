@@ -1,0 +1,70 @@
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar) WITH (
+    connector = 'datagen',
+    fields.i1.kind = 'sequence',
+    fields.i2.kind = 'random',
+    fields.i2.length = '32',
+    fields.i2.seed = '4',
+    fields.i3.kind = 'random',
+    fields.i3.length = '64',
+    fields.i3.seed = '5',
+    datagen.rows.per.second = '30000'
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 2s
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE SINK sink1 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'demo_db',
+    table.name = 't1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+CREATE SINK sink2 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'demo_db',
+    table.name = 't2',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 5
+);
+
+sleep 20s
+
+statement ok
+flush;
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SINK sink2;
+
+statement ok
+DROP MATERIALIZED VIEW mv1;
+
+statement ok
+DROP TABLE s1;

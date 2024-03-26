@@ -29,7 +29,7 @@ use with_options::WithOptions;
 use super::catalog::SinkFormatDesc;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
-use super::{DummySinkCommitCoordinator, SinkWriterParam};
+use super::{DecoupleMode, DummySinkCommitCoordinator, SinkWriterParam};
 use crate::mqtt_common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -116,8 +116,8 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn default_sink_decouple(desc: &SinkDesc) -> DecoupleMode {
+        DecoupleMode::Recommend(desc.sink_type.is_append_only())
     }
 
     async fn validate(&self) -> Result<()> {

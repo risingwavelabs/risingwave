@@ -57,6 +57,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
 use super::elasticsearch::{StreamChunkConverter, ES_OPTION_DELIMITER};
+use super::DecoupleMode;
 use crate::error::ConnectorResult;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -145,8 +146,8 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        R::default_sink_decouple(desc)
+    fn default_sink_decouple(desc: &SinkDesc) -> DecoupleMode {
+        DecoupleMode::Recommend(R::default_sink_decouple(desc))
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
