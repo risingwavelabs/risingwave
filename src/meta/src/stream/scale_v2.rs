@@ -37,17 +37,17 @@ use crate::MetaResult;
 
 impl ScaleControllerV2 {
     pub async fn reschedule(&self, reschedule: RescheduleV2) -> MetaResult<()> {
-        let metadata_manager = self.metadata_manager.as_v2_ref();
-
-        let inner = metadata_manager.catalog_controller.inner.write().await;
-        let txn = inner.db.begin().await?;
-
-        let fragment_ids = reschedule.plan.keys().cloned().collect::<Vec<_>>();
-
-        let _working_set = metadata_manager
-            .catalog_controller
-            .resolve_working_set_for_reschedule(&txn, fragment_ids)
-            .await?;
+        // let metadata_manager = self.metadata_manager.as_v2_ref();
+        //
+        // let inner = metadata_manager.catalog_controller.inner.write().await;
+        // let txn = inner.db.begin().await?;
+        //
+        // let fragment_ids = reschedule.plan.keys().cloned().collect::<Vec<_>>();
+        //
+        // let _working_set = metadata_manager
+        //     .catalog_controller
+        //     .resolve_working_set_for_reschedule(&txn, fragment_ids)
+        //     .await?;
 
         Ok(())
     }

@@ -150,12 +150,12 @@ fn construct_no_shuffle_traverse_query_helper(
 
 #[derive(Debug, Clone)]
 pub struct RescheduleWorkingSet {
-    fragments: HashMap<FragmentId, fragment::Model>,
-    actors: HashMap<ActorId, actor::Model>,
-    actor_dispatchers: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+    pub fragments: HashMap<FragmentId, fragment::Model>,
+    pub actors: HashMap<ActorId, actor::Model>,
+    pub actor_dispatchers: HashMap<ActorId, Vec<actor_dispatcher::Model>>,
 
-    fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
-    fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
+pub    fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
+pub    fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
 }
 
 async fn resolve_no_shuffle_query<C>(
@@ -183,7 +183,7 @@ where
 }
 
 impl CatalogController {
-    pub async fn resolve_working_set_for_reschedule(
+    pub async fn resolve_working_set_for_reschedule_fragments(
         &self,
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<RescheduleWorkingSet> {
@@ -340,7 +340,7 @@ mod tests {
         let txn = inner.db.begin().await?;
 
         let working_set = mgr
-            .resolve_working_set_for_reschedule(&txn, vec![8, 7, 6])
+            .resolve_working_set_for_reschedule_fragments(&txn, vec![8, 7, 6])
             .await
             .unwrap();
 
