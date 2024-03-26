@@ -118,7 +118,7 @@ impl StagingSstableInfo {
 pub enum StagingData {
     ImmMem(ImmutableMemtable),
     MergedImmMem(ImmutableMemtable),
-    Sst(StagingSstableInfo),
+    Sst(Arc<StagingSstableInfo>),
 }
 
 pub enum VersionUpdate {
@@ -141,7 +141,7 @@ pub struct StagingVersion {
     pub imm: VecDeque<ImmutableMemtable>,
 
     // newer data comes first
-    pub sst: VecDeque<StagingSstableInfo>,
+    pub sst: VecDeque<Arc<StagingSstableInfo>>,
 }
 
 impl StagingVersion {
