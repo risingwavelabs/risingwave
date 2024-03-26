@@ -380,13 +380,21 @@ impl HummockReadVersion {
                     }));
                 }
 
-                if let Some(committed_watermarks) =
-                    self.committed.table_watermark_index().get(&self.table_id)
+                if let Some(committed_watermarks) = self
+                    .committed
+                    .version()
+                    .table_watermarks
+                    .get(&self.table_id)
                 {
                     if let Some(watermark_index) = &mut self.table_watermarks {
-                        watermark_index.apply_committed_watermarks(committed_watermarks);
+                        watermark_index.apply_committed_watermarks(
+                            committed_watermarks,
+                            self.committed.max_committed_epoch(),
+                        );
                     } else {
-                        self.table_watermarks = Some(committed_watermarks.clone());
+                        self.table_watermarks = Some(
+                            committed_watermarks.build_index(self.committed.max_committed_epoch()),
+                        );
                     }
                 }
             }
@@ -399,7 +407,7 @@ impl HummockReadVersion {
                 .get_or_insert_with(|| {
                     TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
                 })
-                .add_epoch_watermark(epoch, &vnode_watermarks, direction),
+                .add_epoch_watermark(epoch, Arc::from(vnode_watermarks), direction),
         }
     }
 

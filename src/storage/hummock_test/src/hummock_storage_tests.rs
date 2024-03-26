@@ -2186,19 +2186,13 @@ async fn test_table_watermark() {
     let check_version_table_watermark = |version: PinnedVersion| {
         let table_watermarks = version.table_watermark_index().get(&TEST_TABLE_ID).unwrap();
         assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
-        let index = table_watermarks.index();
-        assert_eq!(2, index.len());
-        let vnode1_watermark = index.get(&vnode1).unwrap();
-        assert_eq!(1, vnode1_watermark.len());
         assert_eq!(
-            &gen_inner_key(watermark1),
-            vnode1_watermark.get(&epoch1).unwrap()
+            gen_inner_key(watermark1),
+            table_watermarks.read_watermark(vnode1, epoch1).unwrap()
         );
-        let vnode2_watermark = index.get(&vnode2).unwrap();
-        assert_eq!(1, vnode2_watermark.len());
         assert_eq!(
-            &gen_inner_key(watermark1),
-            vnode2_watermark.get(&epoch1).unwrap()
+            gen_inner_key(watermark1),
+            table_watermarks.read_watermark(vnode2, epoch1).unwrap()
         );
     };
 
