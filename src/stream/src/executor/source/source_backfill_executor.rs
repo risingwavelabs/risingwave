@@ -15,12 +15,11 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::fmt::Formatter;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use either::Either;
-use futures::stream::{select_with_strategy, PollNext};
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use prometheus::IntCounter;
 use risingwave_common::buffer::BitmapBuilder;
@@ -36,6 +35,7 @@ use risingwave_connector::source::{
 use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
 use source_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
+use source_backfill_executor::stream_reader::StreamReaderWithPause;
 use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
@@ -293,42 +293,23 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, unfinished_splits.clone())
             .instrument_await("source_build_reader")
-            .await?;
+            .await?
+            .map_err(StreamExecutorError::connector_error);
 
-        fn select_strategy(_: &mut ()) -> PollNext {
-            futures::stream::PollNext::Left
-        }
+        // Note: When StreamReaderWithPause used in other places, the left side contains only barriers.
+        // Here the left side also contains chunks. Use with caution!
 
         // We choose "preferring upstream" strategy here, because:
         // - When the upstream source's workload is high (i.e., Kafka has new incoming data), it just makes backfilling slower.
         //   For chunks from upstream, they are simply dropped, so there's no much overhead.
         //   So possibly this can also affect other running jobs less.
         // - When the upstream Source's becomes less busy, SourceBackfill can begin to catch up.
-        let mut backfill_stream = select_with_strategy(
-            input.by_ref().map(Either::Left),
-            source_chunk_reader.map(Either::Right),
-            select_strategy,
-        );
-
-        type PausedReader = Option<impl Stream>;
-        let mut paused_reader: PausedReader = None;
-
-        macro_rules! pause_reader {
-            () => {
-                let (left, right) = backfill_stream.into_inner();
-                backfill_stream = select_with_strategy(
-                    left,
-                    futures::stream::pending().boxed().map(Either::Right),
-                    select_strategy,
-                );
-                // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
-                paused_reader = Some(right);
-            };
-        }
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunk>::new(input, source_chunk_reader);
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
-            pause_reader!();
+            stream.pause_stream()
         }
 
         yield Message::Barrier(barrier);
@@ -357,119 +338,63 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             let mut last_barrier_time = Instant::now();
             let mut self_paused = false;
 
-            'backfill_loop: while let Some(either) = backfill_stream.next().await {
-                match either {
+            'backfill_loop: while let Some(msg) = stream.next().await {
+                let Ok(msg) = msg else {
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    self.rebuild_stream_reader_from_error(
+                        &source_desc,
+                        &mut stream,
+                        msg.unwrap_err(),
+                        backfill_stage.get_latest_unfinished_splits()?.clone(),
+                    )
+                    .await?;
+                    continue;
+                };
+                match msg {
                     // Upstream
                     Either::Left(msg) => {
-                        let Ok(msg) = msg else {
-                            let e = msg.unwrap_err();
-                            let core = &self.stream_source_core;
-                            tracing::warn!(
-                                error = ?e.as_report(),
-                                source_id = %core.source_id,
-                                "stream source reader error",
-                            );
-                            GLOBAL_ERROR_METRICS.user_source_error.report([
-                                "SourceReaderError".to_owned(),
-                                core.source_id.to_string(),
-                                core.source_name.to_owned(),
-                                self.actor_ctx.fragment_id.to_string(),
-                            ]);
-
-                            let reader = self
-                                .build_stream_source_reader(
-                                    &source_desc,
-                                    backfill_stage.get_latest_unfinished_splits()?.clone(),
-                                )
-                                .await?;
-
-                            backfill_stream = select_with_strategy(
-                                input.by_ref().map(Either::Left),
-                                reader.map(Either::Right),
-                                select_strategy,
-                            );
-                            continue;
-                        };
                         match msg {
                             Message::Barrier(barrier) => {
                                 last_barrier_time = Instant::now();
 
                                 if self_paused {
-                                    backfill_stream = select_with_strategy(
-                                        input.by_ref().map(Either::Left),
-                                        paused_reader.take().expect("no paused reader to resume"),
-                                        select_strategy,
-                                    );
+                                    stream.resume_stream();
                                     self_paused = false;
                                 }
 
-                                let mut split_changed = false;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
-                                        Mutation::Pause => {
-                                            pause_reader!();
-                                        }
-                                        Mutation::Resume => {
-                                            backfill_stream = select_with_strategy(
-                                                input.by_ref().map(Either::Left),
-                                                paused_reader
-                                                    .take()
-                                                    .expect("no paused reader to resume"),
-                                                select_strategy,
-                                            );
-                                        }
+                                        Mutation::Pause => stream.pause_stream(),
+                                        Mutation::Resume => stream.resume_stream(),
                                         Mutation::SourceChangeSplit(actor_splits) => {
                                             tracing::info!(
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
-                                            split_changed = self
-                                                .apply_split_change(
-                                                    actor_splits,
-                                                    &mut backfill_stage,
-                                                    true,
-                                                )
-                                                .await?;
+
+                                            self.apply_split_change(
+                                                &source_desc,
+                                                &mut stream,
+                                                actor_splits,
+                                                &mut backfill_stage,
+                                                true,
+                                            )
+                                            .await?;
                                         }
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                            split_changed = self
-                                                .apply_split_change(
-                                                    actor_splits,
-                                                    &mut backfill_stage,
-                                                    false,
-                                                )
-                                                .await?;
+                                            self.apply_split_change(
+                                                &source_desc,
+                                                &mut stream,
+                                                actor_splits,
+                                                &mut backfill_stage,
+                                                false,
+                                            )
+                                            .await?;
                                         }
                                         _ => {}
                                     }
-                                }
-                                if split_changed {
-                                    // rebuild backfill_stream
-                                    // Note: we don't put this part in a method, due to some complex lifetime issues.
-
-                                    let latest_unfinished_splits =
-                                        backfill_stage.get_latest_unfinished_splits()?;
-                                    tracing::info!(
-                                        "actor {:?} apply source split change to {:?}",
-                                        self.actor_ctx.id,
-                                        latest_unfinished_splits
-                                    );
-
-                                    // Replace the source reader with a new one of the new state.
-                                    let reader = self
-                                        .build_stream_source_reader(
-                                            &source_desc,
-                                            latest_unfinished_splits.clone(),
-                                        )
-                                        .await?;
-
-                                    backfill_stream = select_with_strategy(
-                                        input.by_ref().map(Either::Left),
-                                        reader.map(Either::Right),
-                                        select_strategy,
-                                    );
                                 }
 
                                 self.backfill_state_store
@@ -526,7 +451,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.info.identity,
                                 last_barrier_time.elapsed()
                             );
-                            pause_reader!();
+                            stream.pause_stream();
 
                             // Only update `max_wait_barrier_time_ms` to capture
                             // `barrier_interval_ms`
@@ -582,11 +507,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
-
+        let (input, _) = stream.into_inner();
         // All splits finished backfilling. Now we only forward the source data.
         #[for_await]
         for msg in input {
-            let msg = msg?;
+            // XXX: This is a little unfortunate that we pay an unnecessary cost because the stream is wrapped in `Either::Left`.
+            // We pay the cost per chunk, so it's not too bad...
+            let msg = msg?.unwrap_left();
             match msg {
                 Message::Barrier(barrier) => {
                     if let Some(ref mutation) = barrier.mutation.as_deref() {
@@ -653,22 +580,28 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     /// For newly added splits, we do not need to backfill and can directly forward from upstream.
     async fn apply_split_change(
         &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut StreamReaderWithPause<true, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
         stage: &mut BackfillStage,
         should_trim_state: bool,
-    ) -> StreamExecutorResult<bool> {
+    ) -> StreamExecutorResult<()> {
         self.source_split_change_count.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, stage, should_trim_state)
                 .await?
             {
-                // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
-                return Ok(true);
+                self.rebuild_stream_reader(
+                    source_desc,
+                    stream,
+                    stage.get_latest_unfinished_splits()?.clone(),
+                )
+                .await?;
             }
         }
 
-        Ok(false)
+        Ok(())
     }
 
     /// Returns `true` if split changed. Otherwise `false`.
@@ -841,6 +774,55 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 )
                 .await?;
         }
+
+        Ok(())
+    }
+
+    /// Rebuild stream if there is a err in stream
+    async fn rebuild_stream_reader_from_error<const BIASED: bool>(
+        &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        e: StreamExecutorError,
+        splits: Vec<SplitImpl>,
+    ) -> StreamExecutorResult<()> {
+        let core = &self.stream_source_core;
+        tracing::warn!(
+            error = ?e.as_report(),
+            actor_id = self.actor_ctx.id,
+            source_id = %core.source_id,
+            "stream source reader error",
+        );
+        GLOBAL_ERROR_METRICS.user_source_error.report([
+            e.variant_name().to_owned(),
+            core.source_id.to_string(),
+            core.source_name.to_owned(),
+            self.actor_ctx.fragment_id.to_string(),
+        ]);
+
+        self.rebuild_stream_reader(source_desc, stream, splits)
+            .await
+    }
+
+    async fn rebuild_stream_reader<const BIASED: bool>(
+        &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
+        splits: Vec<SplitImpl>,
+    ) -> StreamExecutorResult<()> {
+        tracing::info!(
+            "actor {:?} apply source split change to {:?}",
+            self.actor_ctx.id,
+            splits
+        );
+
+        // Replace the source reader with a new one of the new state.
+        let reader = self
+            .build_stream_source_reader(source_desc, splits)
+            .await?
+            .map_err(StreamExecutorError::connector_error);
+
+        stream.replace_data_stream(reader);
 
         Ok(())
     }
