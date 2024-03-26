@@ -612,7 +612,6 @@ impl LogicalOptimizer {
         // Must push down predicates again after split over window so that OverWindow can be
         // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
-        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
         plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
 
