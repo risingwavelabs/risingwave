@@ -2361,8 +2361,8 @@
           └─StreamProject { exprs: [max(max(revenue1.total_revenue))] }
             └─StreamSimpleAgg { aggs: [max(max(revenue1.total_revenue)), count] }
               └─StreamExchange { dist: Single }
-                └─StreamHashAgg { group_key: [$expr2], aggs: [max(revenue1.total_revenue), count] }
-                  └─StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no, Vnode(revenue1.supplier_no) as $expr2] }
+                └─StreamHashAgg { group_key: [_vnode], aggs: [max(revenue1.total_revenue), count] }
+                  └─StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no, Vnode(revenue1.supplier_no) as _vnode] }
                     └─StreamTableScan { table: revenue1, columns: [revenue1.total_revenue, revenue1.supplier_no], stream_scan_type: Backfill, pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) }
   stream_dist_plan: |+
     Fragment 0
@@ -2399,8 +2399,8 @@
         └── StreamExchange Single from 6
 
     Fragment 6
-    StreamHashAgg { group_key: [$expr2], aggs: [max(revenue1.total_revenue), count] } { tables: [ HashAggState: 13, HashAggCall0: 12 ] }
-    └── StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no, Vnode(revenue1.supplier_no) as $expr2] }
+    StreamHashAgg { group_key: [_vnode], aggs: [max(revenue1.total_revenue), count] } { tables: [ HashAggState: 13, HashAggCall0: 12 ] }
+    └── StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no, Vnode(revenue1.supplier_no) as _vnode] }
         └── StreamTableScan { table: revenue1, columns: [revenue1.total_revenue, revenue1.supplier_no], stream_scan_type: Backfill, pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) } { tables: [ StreamScan: 14 ] }
             ├── Upstream
             └── BatchPlanNode
@@ -2430,13 +2430,13 @@
 
     Table 9 { columns: [ vnode, supplier_no, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 10 { columns: [ max(revenue1_total_revenue), $expr2 ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 10 { columns: [ max(revenue1_total_revenue), _vnode ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 11 { columns: [ max(max(revenue1_total_revenue)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 12 { columns: [ $expr2, revenue1_total_revenue, revenue1_supplier_no ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 12 { columns: [ _vnode, revenue1_total_revenue, revenue1_supplier_no ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 13 { columns: [ $expr2, max(revenue1_total_revenue), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 13 { columns: [ _vnode, max(revenue1_total_revenue), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 14 { columns: [ vnode, supplier_no, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
