@@ -80,10 +80,10 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    build_compact_task_level_type_metrics_label, trigger_delta_log_stats, trigger_local_table_stat,
-    trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
-    trigger_write_stop_stats,
+    build_compact_task_level_type_metrics_label, get_or_create_local_table_stat,
+    trigger_delta_log_stats, trigger_local_table_stat, trigger_lsm_stat, trigger_mv_stat,
+    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_split_stat,
+    trigger_sst_stat, trigger_version_stat, trigger_write_stop_stats,
 };
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -1007,7 +1007,7 @@ impl HummockManager {
                     compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
                     target_sub_level_id: compact_task.input.target_sub_level_id,
                     task_type: compact_task.compaction_task_type as i32,
-                    split_weight_by_vnode,
+                    split_weight_by_vnode: vnode_partition_count,
                     ..Default::default()
                 };
 
@@ -1751,6 +1751,21 @@ impl HummockManager {
             &version_stats,
             &table_stats_change,
         );
+        for (table_id, stats) in &table_stats_change {
+            if stats.total_key_size == 0
+                && stats.total_value_size == 0
+                && stats.total_key_count == 0
+            {
+                continue;
+            }
+            let stats_value = std::cmp::max(0, stats.total_key_size + stats.total_value_size);
+            let table_metrics = get_or_create_local_table_stat(
+                &self.metrics,
+                *table_id,
+                &mut versioning.local_metrics,
+            );
+            table_metrics.inc_write_throughput(stats_value as u64);
+        }
         commit_multi_var!(
             self.env.meta_store(),
             self.sql_meta_store(),
