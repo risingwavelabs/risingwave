@@ -332,7 +332,7 @@ where
 
         // Upstream must have dist_key_in_pk_indices, otherwise that means it is singleton distribution,
         // and it should use `no_shuffle_backfill` instead.
-        if IS_REPLICATED {
+        if IS_REPLICATED && is_consistent_op {
             assert!(!dist_key_in_pk_indices.is_empty());
         }
         let distribution =
