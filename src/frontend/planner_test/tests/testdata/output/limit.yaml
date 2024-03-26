@@ -166,6 +166,6 @@
     └─StreamProject { exprs: [t.a] }
       └─StreamTopN { order: [t.a ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [t.a, Vnode(t.a) as $expr1] }
+          └─StreamGroupTopN { order: [t.a ASC], limit: 1, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t.a, Vnode(t.a) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.a], stream_scan_type: Backfill, pk: [t.a], dist: UpstreamHashShard(t.a) }

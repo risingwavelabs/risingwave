@@ -71,11 +71,11 @@
         └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [agg], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum0(count(t.v3)))) as $expr2] }
+    └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum0(count(t.v3)))) as $expr1] }
       └─StreamSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v2)), sum0(count(t.v3)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr1], aggs: [min(t.v1), max(t.v2), count(t.v3), count] }
-            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [min(t.v1), max(t.v2), count(t.v3), count] }
+            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int);
@@ -556,11 +556,11 @@
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [agg], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum0(count(t.v2)))) as $expr2] }
+    └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum0(count(t.v2)))) as $expr1] }
       └─StreamSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v3)), sum0(count(t.v2)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr1], aggs: [min(t.v1), max(t.v3), count(t.v2), count] }
-            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [min(t.v1), max(t.v3), count(t.v2), count] }
+            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: dup group key
   sql: |
@@ -1339,8 +1339,8 @@
     └─StreamProject { exprs: [min(min(t.v3)), sum(sum(t.v1)), t.v1, t.v2, t.v3] }
       └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3], aggs: [min(min(t.v3)), sum(sum(t.v1)), count] }
         └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
-          └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3, $expr1], aggs: [min(t.v3), sum(t.v1), count] }
-            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
+          └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3, _vnode], aggs: [min(t.v3), sum(t.v1), count] }
+            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: enable two phase aggregation with simple agg should have two phase agg
   sql: |
@@ -1358,8 +1358,8 @@
     └─StreamProject { exprs: [min(min(t.v1)), sum(sum(t.v2))] }
       └─StreamSimpleAgg { aggs: [min(min(t.v1)), sum(sum(t.v2)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr1], aggs: [min(t.v1), sum(t.v2), count] }
-            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [min(t.v1), sum(t.v2), count] }
+            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: disable two phase aggregation with simple agg
   sql: |
@@ -1457,12 +1457,12 @@
     └─StreamProject { exprs: [max(max(sum0(count))), window_start] }
       └─StreamHashAgg { group_key: [window_start], aggs: [max(max(sum0(count))), count] }
         └─StreamExchange { dist: HashShard(window_start) }
-          └─StreamHashAgg { group_key: [window_start, $expr2], aggs: [max(sum0(count)), count] }
-            └─StreamProject { exprs: [bid.auction, window_start, sum0(count), Vnode(bid.auction, window_start) as $expr2] }
+          └─StreamHashAgg { group_key: [window_start, $expr1], aggs: [max(sum0(count)), count] }
+            └─StreamProject { exprs: [bid.auction, window_start, sum0(count), Vnode(bid.auction, window_start) as $expr1] }
               └─StreamHashAgg { group_key: [bid.auction, window_start], aggs: [sum0(count), count] }
                 └─StreamExchange { dist: HashShard(bid.auction, window_start) }
-                  └─StreamHashAgg { group_key: [bid.auction, window_start, $expr1], aggs: [count] }
-                    └─StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id) as $expr1] }
+                  └─StreamHashAgg { group_key: [bid.auction, window_start, _vnode], aggs: [count] }
+                    └─StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id) as _vnode] }
                       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
                         └─StreamFilter { predicate: IsNotNull(bid.date_time) }
                           └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], stream_scan_type: Backfill, pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
@@ -1505,8 +1505,8 @@
     └─StreamProject { exprs: [sum0(count), idx.col1] }
       └─StreamHashAgg { group_key: [idx.col1], aggs: [sum0(count), count] }
         └─StreamExchange { dist: HashShard(idx.col1) }
-          └─StreamHashAgg { group_key: [idx.col1, $expr1], aggs: [count] }
-            └─StreamProject { exprs: [idx.col1, idx.id, Vnode(idx.id) as $expr1] }
+          └─StreamHashAgg { group_key: [idx.col1, _vnode], aggs: [count] }
+            └─StreamProject { exprs: [idx.col1, idx.id, Vnode(idx.id) as _vnode] }
               └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], stream_scan_type: Backfill, pk: [idx.id], dist: UpstreamHashShard(idx.id) }
 - name: sort agg on an ascending index
   sql: |
