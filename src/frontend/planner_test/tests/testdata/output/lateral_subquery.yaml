@@ -43,13 +43,13 @@
         ├─StreamExchange { dist: HashShard(salesperson.id, max(all_sales.amount)) }
         │ └─StreamHashJoin { type: Inner, predicate: salesperson.id = all_sales.salesperson_id, output: [salesperson.id, salesperson.name, max(all_sales.amount), salesperson._row_id, all_sales.salesperson_id] }
         │   ├─StreamExchange { dist: HashShard(salesperson.id) }
-        │   │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: Backfill, pk: [salesperson._row_id], dist: UpstreamHashShard(salesperson._row_id) }
+        │   │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: ArrangementBackfill, pk: [salesperson._row_id], dist: UpstreamHashShard(salesperson._row_id) }
         │   └─StreamProject { exprs: [all_sales.salesperson_id, max(all_sales.amount)] }
         │     └─StreamHashAgg { group_key: [all_sales.salesperson_id], aggs: [max(all_sales.amount), count] }
         │       └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
-        │         └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.amount, all_sales._row_id], stream_scan_type: Backfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
+        │         └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
         └─StreamExchange { dist: HashShard(all_sales.salesperson_id, all_sales.amount) }
-          └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: Backfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
+          └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
 - name: lateral join 2
   sql: |
     create table all_sales (salesperson_id int, customer_name varchar, amount int );
@@ -82,12 +82,12 @@
     └─StreamExchange { dist: HashShard(salesperson._row_id, salesperson.id) }
       └─StreamHashJoin { type: Inner, predicate: salesperson.id IS NOT DISTINCT FROM all_sales.salesperson_id, output: [salesperson.name, all_sales.amount, all_sales.customer_name, salesperson._row_id, salesperson.id, all_sales.salesperson_id] }
         ├─StreamExchange { dist: HashShard(salesperson.id) }
-        │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: Backfill, pk: [salesperson._row_id], dist: UpstreamHashShard(salesperson._row_id) }
+        │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: ArrangementBackfill, pk: [salesperson._row_id], dist: UpstreamHashShard(salesperson._row_id) }
         └─StreamGroupTopN { order: [all_sales.amount DESC], limit: 1, offset: 0, group_key: [all_sales.salesperson_id] }
           └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
             └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name, all_sales._row_id] }
               └─StreamFilter { predicate: IsNotNull(all_sales.salesperson_id) }
-                └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: Backfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
+                └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
 - name: lateral join 2 (left join)
   sql: |
     create table all_sales (salesperson_id int, customer_name varchar, amount int );
@@ -120,12 +120,12 @@
     └─StreamExchange { dist: HashShard(salesperson._row_id, salesperson.id) }
       └─StreamHashJoin { type: LeftOuter, predicate: salesperson.id IS NOT DISTINCT FROM all_sales.salesperson_id, output: [salesperson.name, all_sales.amount, all_sales.customer_name, salesperson._row_id, salesperson.id, all_sales.salesperson_id] }
         ├─StreamExchange { dist: HashShard(salesperson.id) }
-        │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: Backfill, pk: [salesperson._row_id], dist: UpstreamHashShard(salesperson._row_id) }
+        │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: ArrangementBackfill, pk: [salesperson._row_id], dist: UpstreamHashShard(salesperson._row_id) }
         └─StreamGroupTopN { order: [all_sales.amount DESC], limit: 1, offset: 0, group_key: [all_sales.salesperson_id] }
           └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
             └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name, all_sales._row_id] }
               └─StreamFilter { predicate: IsNotNull(all_sales.salesperson_id) }
-                └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: Backfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
+                └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, pk: [all_sales._row_id], dist: UpstreamHashShard(all_sales._row_id) }
 - name: lateral join 2 (right join) should throw an error
   sql: |
     create table all_sales (salesperson_id int, customer_name varchar, amount int );
@@ -162,12 +162,12 @@
     └─StreamExchange { dist: HashShard(t.arr, t._row_id, projected_row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, Unnest($0), t._row_id, t.arr, projected_row_id] }
         ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamProjectSet { select_list: [$0, Unnest($0)] }
           └─StreamProject { exprs: [t.arr] }
             └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
               └─StreamExchange { dist: HashShard(t.arr) }
-                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+                └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: https://github.com/risingwavelabs/risingwave/issues/12298
   sql: |
     create table t1(c varchar, n varchar, id varchar, d varchar);
@@ -190,7 +190,7 @@
               │   ├─StreamExchange { dist: HashShard(t1.id) }
               │   │ └─StreamProject { exprs: [t1.n, t1.id, t1._row_id] }
               │   │   └─StreamFilter { predicate: (t1.c = 'abc':Varchar) }
-              │   │     └─StreamTableScan { table: t1, columns: [t1.n, t1.id, t1._row_id, t1.c], stream_scan_type: Backfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+              │   │     └─StreamTableScan { table: t1, columns: [t1.n, t1.id, t1._row_id, t1.c], stream_scan_type: ArrangementBackfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
               │   └─StreamExchange { dist: HashShard(Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3)))) }
               │     └─StreamProjectSet { select_list: [$0, $1, $2, $3, Unnest(Case(($1 <> '':Varchar), ArrayAppend(StringToArray(Trim($1, ',':Varchar), ',':Varchar), $3), Array($3)))] }
               │       └─StreamProject { exprs: [t2.p, t2.p, t2.d, t2.d] }
@@ -198,8 +198,8 @@
               │           └─StreamExchange { dist: HashShard(t2.p, t2.p, t2.d, t2.d) }
               │             └─StreamProject { exprs: [t2.p, t2.p, t2.d, t2.d, t2._row_id] }
               │               └─StreamFilter { predicate: (t2.c = 'abc':Varchar) }
-              │                 └─StreamTableScan { table: t2, columns: [t2.p, t2.p, t2.d, t2.d, t2._row_id, t2.c], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+              │                 └─StreamTableScan { table: t2, columns: [t2.p, t2.p, t2.d, t2.d, t2._row_id, t2.c], stream_scan_type: ArrangementBackfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
               └─StreamExchange { dist: HashShard(t2.p, t2.d) }
                 └─StreamProject { exprs: [t2.p, t2.d, t2._row_id] }
                   └─StreamFilter { predicate: (t2.c = 'abc':Varchar) }
-                    └─StreamTableScan { table: t2, columns: [t2.p, t2.d, t2._row_id, t2.c], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+                    └─StreamTableScan { table: t2, columns: [t2.p, t2.d, t2._row_id, t2.c], stream_scan_type: ArrangementBackfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
