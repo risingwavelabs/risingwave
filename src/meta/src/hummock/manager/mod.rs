@@ -127,8 +127,8 @@ pub struct HummockManager {
     pub env: MetaSrvEnv,
 
     metadata_manager: MetadataManager,
-    /// Lock order: compaction, versioning, compaction_group_manager.
-    /// - Lock compaction first, then versioning, and finally compaction_group_manager.
+    /// Lock order: compaction, versioning, `compaction_group_manager`.
+    /// - Lock compaction first, then versioning, and finally `compaction_group_manager`.
     /// - This order should be strictly followed to prevent deadlock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,

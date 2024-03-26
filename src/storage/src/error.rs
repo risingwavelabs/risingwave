@@ -28,7 +28,7 @@ pub enum ErrorKind {
         HummockError,
     ),
 
-    #[error("Deserialize row error {0}.")]
+    #[error("Deserialize row error: {0}")]
     DeserializeRow(
         #[from]
         #[backtrace]

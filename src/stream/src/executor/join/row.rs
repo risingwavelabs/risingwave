@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::executor::StreamExecutorResult;
 

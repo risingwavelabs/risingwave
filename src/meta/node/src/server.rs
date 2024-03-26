@@ -499,7 +499,6 @@ pub async fn start_service_as_election_leader(
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
             compute_clients: ComputeClientPool::default(),
-            ui_path: address_info.ui_path,
             diagnose_command,
             trace_state,
         };
@@ -863,8 +862,7 @@ pub async fn start_service_as_election_leader(
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        // Join the task while ignoring the cancellation error.
-        let _ = dashboard_task.await;
+        dashboard_task.abort();
     }
     Ok(())
 }

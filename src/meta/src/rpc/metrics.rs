@@ -78,7 +78,7 @@ pub struct MetaMetrics {
     /// ********************************** Hummock ************************************
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// The smallest epoch that has not been GCed.
+    /// The smallest epoch that has not been `GCed`.
     pub safe_epoch: IntGauge,
     /// The smallest epoch that is being pinned.
     pub min_pinned_epoch: IntGauge,

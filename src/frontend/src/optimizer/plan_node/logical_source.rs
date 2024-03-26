@@ -26,6 +26,7 @@ use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
@@ -59,7 +60,7 @@ pub struct LogicalSource {
     /// Expressions to output. This field presents and will be turned to a `Project` when
     /// converting to a physical plan, only if there are generated columns.
     output_exprs: Option<Vec<ExprImpl>>,
-    /// When there are generated columns, the `StreamRowIdGen`'s row_id_index is different from
+    /// When there are generated columns, the `StreamRowIdGen`'s `row_id_index` is different from
     /// the one in `core`. So we store the one in `output_exprs` here.
     output_row_id_index: Option<usize>,
 }
@@ -71,6 +72,7 @@ impl LogicalSource {
         row_id_index: Option<usize>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
         let core = generic::Source {
@@ -80,6 +82,7 @@ impl LogicalSource {
             kind,
             ctx,
             kafka_timestamp_range,
+            as_of,
         };
 
         let base = PlanBase::new_logical_with_core(&core);
@@ -99,6 +102,7 @@ impl LogicalSource {
         source_catalog: Rc<SourceCatalog>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
@@ -112,6 +116,7 @@ impl LogicalSource {
             row_id_index,
             kind,
             ctx,
+            as_of,
         )
     }
 
