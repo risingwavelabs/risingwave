@@ -626,24 +626,24 @@ impl HummockVersion {
                     committed_epoch,
                     safe_epoch,
                 } => {
-                    assert!(
-                        self.snapshot_groups
-                            .insert(
-                                *table_fragments_id,
-                                SnapshotGroup {
-                                    table_fragments_id: *table_fragments_id,
-                                    committed_epoch: *committed_epoch,
-                                    safe_epoch: *safe_epoch,
-                                    member_table_ids: member_table_ids.clone(),
-                                }
-                            )
-                            .is_none(),
-                        "add duplicate snapshot group: {:?} {:?} {} {}",
-                        table_fragments_id,
-                        member_table_ids,
-                        committed_epoch,
-                        safe_epoch
-                    );
+                    if let Some(prev_group) = self.snapshot_groups.insert(
+                        *table_fragments_id,
+                        SnapshotGroup {
+                            table_fragments_id: *table_fragments_id,
+                            committed_epoch: *committed_epoch,
+                            safe_epoch: *safe_epoch,
+                            member_table_ids: member_table_ids.clone(),
+                        },
+                    ) {
+                        panic!(
+                            "add duplicate snapshot group: {:?} {:?} {} {} {:?}",
+                            table_fragments_id,
+                            member_table_ids,
+                            committed_epoch,
+                            safe_epoch,
+                            prev_group
+                        );
+                    }
                 }
                 SnapshotGroupDelta::NewCommittedEpoch(new_committed_epoch) => {
                     if let Some(group) = self.snapshot_groups.get_mut(table_fragments_id) {
