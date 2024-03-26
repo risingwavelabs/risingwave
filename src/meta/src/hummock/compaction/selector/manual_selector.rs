@@ -46,6 +46,8 @@ pub struct ManualCompactionOption {
     pub internal_table_id: HashSet<StateTableId>,
     /// Input level.
     pub level: usize,
+    /// Size limitations of task
+    pub max_compaction_bytes: u64,
 }
 
 impl Default for ManualCompactionOption {
@@ -59,6 +61,7 @@ impl Default for ManualCompactionOption {
             },
             internal_table_id: HashSet::default(),
             level: 1,
+            max_compaction_bytes: u64::MAX,
         }
     }
 }

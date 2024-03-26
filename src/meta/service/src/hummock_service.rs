@@ -229,6 +229,7 @@ impl HummockManagerService for HummockServiceImpl {
         let mut option = ManualCompactionOption {
             level: request.level as usize,
             sst_ids: request.sst_ids,
+            max_compaction_bytes: request.max_compaction_bytes,
             ..Default::default()
         };
 

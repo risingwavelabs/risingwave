@@ -80,7 +80,9 @@ impl ManualCompactionPicker {
                 return None;
             }
         };
+
         // Construct input.
+        let mut total_size = 0;
         for level in l0
             .sub_levels
             .iter()
@@ -92,6 +94,12 @@ impl ManualCompactionPicker {
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),
             });
+
+            total_size += level.total_file_size;
+
+            if total_size > self.option.max_compaction_bytes {
+                break;
+            }
         }
         if input_levels.is_empty() {
             return None;
@@ -134,6 +142,7 @@ impl ManualCompactionPicker {
             return None;
         }
         // Construct input.
+        let mut total_size = 0;
         for idx in 0..=max_sub_level_idx {
             for table in &l0.sub_levels[idx].table_infos {
                 info.update(table);
@@ -142,7 +151,13 @@ impl ManualCompactionPicker {
                 level_idx: 0,
                 level_type: l0.sub_levels[idx].level_type,
                 table_infos: l0.sub_levels[idx].table_infos.clone(),
-            })
+            });
+
+            total_size += l0.sub_levels[idx].total_file_size;
+
+            if total_size > self.option.max_compaction_bytes {
+                break;
+            }
         }
         let target_input_ssts_range =
             info.check_multiple_overlap(&levels.levels[self.target_level - 1].table_infos);
@@ -241,7 +256,8 @@ impl CompactionPicker for ManualCompactionPicker {
             self.option.level == self.target_level || self.option.level + 1 == self.target_level
         );
         // We either include all `select_input_ssts` as input, or return None.
-        let mut select_input_ssts: Vec<SstableInfo> = levels
+        let mut select_total_size = 0;
+        let select_input_ssts: Vec<SstableInfo> = levels
             .get_level(self.option.level)
             .table_infos
             .iter()
@@ -262,9 +278,19 @@ impl CompactionPicker for ManualCompactionPicker {
             })
             .cloned()
             .collect();
+
+        let mut select_input_ssts = select_input_ssts
+            .into_iter()
+            .take_while(|sst| {
+                select_total_size += sst.file_size;
+                select_total_size <= self.option.max_compaction_bytes
+            })
+            .collect_vec();
+
         if select_input_ssts.is_empty() {
             return None;
         }
+
         let target_input_ssts = if target_level == level {
             // For intra level compaction, input SSTs must be consecutive.
             let (left, _) = levels
@@ -514,6 +540,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::from([2]),
+                max_compaction_bytes: u64::MAX,
             };
 
             let target_level = option.level + 1;
@@ -648,6 +675,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
+            max_compaction_bytes: u64::MAX,
         };
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 0);
@@ -674,6 +702,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
+            max_compaction_bytes: u64::MAX,
         };
         let mut picker = ManualCompactionPicker::new(
             Arc::new(RangeOverlapStrategy::default()),
@@ -721,6 +750,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
+            max_compaction_bytes: u64::MAX,
         };
         let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
@@ -772,6 +802,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -814,6 +845,7 @@ pub mod tests {
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -836,6 +868,7 @@ pub mod tests {
                 },
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1, 2, 3]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -880,6 +913,7 @@ pub mod tests {
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -924,6 +958,7 @@ pub mod tests {
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
                 internal_table_id: HashSet::from([1]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -967,6 +1002,7 @@ pub mod tests {
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1000,6 +1036,7 @@ pub mod tests {
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1023,6 +1060,7 @@ pub mod tests {
                 },
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1]),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1074,6 +1112,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1120,6 +1159,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
+                max_compaction_bytes: u64::MAX,
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1191,6 +1231,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
+                max_compaction_bytes: u64::MAX,
             };
             let mut selector = ManualCompactionSelector::new(option);
             let task = selector
@@ -1228,6 +1269,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
+                max_compaction_bytes: u64::MAX,
             };
             let mut selector = ManualCompactionSelector::new(option);
             let task = selector
@@ -1301,6 +1343,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 3,
+                max_compaction_bytes: u64::MAX,
             };
             let mut selector = ManualCompactionSelector::new(option);
             let task = selector
@@ -1340,6 +1383,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 4,
+                max_compaction_bytes: u64::MAX,
             };
             let mut selector = ManualCompactionSelector::new(option);
             let task = selector
@@ -1365,5 +1409,94 @@ pub mod tests {
                 compact_task::TaskType::Manual
             ));
         }
+    }
+
+    #[test]
+    fn test_l0_size_limit() {
+        let (levels, levels_handler) = generate_test_levels();
+
+        // target_level == 0, None
+        let option = ManualCompactionOption {
+            sst_ids: vec![],
+            level: 0,
+            key_range: KeyRange {
+                left: vec![],
+                right: vec![],
+                right_exclusive: false,
+            },
+            internal_table_id: HashSet::default(),
+            max_compaction_bytes: 1000,
+        };
+        let mut picker = ManualCompactionPicker::new(
+            Arc::new(RangeOverlapStrategy::default()),
+            option.clone(),
+            0,
+        );
+        let mut local_stats = LocalPickerStatistic::default();
+        assert!(picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .is_none());
+
+        // pick_l0_to_base_level
+        let mut picker =
+            ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
+        let mut expected = [vec![5, 6], vec![7, 8]];
+        expected.reverse();
+        let result = picker
+            .pick_compaction(&levels, &levels_handler, &mut local_stats)
+            .unwrap();
+        assert_eq!(result.input_levels.len(), 3);
+        assert!(is_l0_to_lbase(&result));
+        assert_eq!(result.target_level, 1);
+        for (l, e) in expected.iter().enumerate().take(2) {
+            assert_eq!(
+                result.input_levels[l]
+                    .table_infos
+                    .iter()
+                    .map(|s| s.get_sst_id())
+                    .collect_vec(),
+                *e
+            );
+        }
+        assert_eq!(
+            result.input_levels[2].table_infos,
+            vec![levels.levels[0].table_infos[0].clone()]
+        );
+    }
+
+    #[test]
+    fn test_ln_to_ln_size_limit() {
+        let (levels, levels_handler) = generate_intra_test_levels();
+        let option = ManualCompactionOption {
+            sst_ids: Vec::default(),
+            level: 1,
+            key_range: KeyRange {
+                left: vec![],
+                right: vec![],
+                right_exclusive: false,
+            },
+            internal_table_id: HashSet::default(),
+            max_compaction_bytes: 300,
+        };
+        let mut picker = ManualCompactionPicker::new(
+            Arc::new(RangeOverlapStrategy::default()),
+            option.clone(),
+            1,
+        );
+        let result = picker
+            .pick_compaction(
+                &levels,
+                &levels_handler,
+                &mut LocalPickerStatistic::default(),
+            )
+            .unwrap();
+        let expected = vec![1, 2];
+        assert_eq!(result.input_levels.len(), expected.len());
+        let a = result.input_levels[0]
+            .table_infos
+            .iter()
+            .map(|s| s.get_sst_id())
+            .collect_vec();
+        assert_eq!(a, expected);
     }
 }
