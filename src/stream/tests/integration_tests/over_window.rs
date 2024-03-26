@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::session_config::OverWindowCachePolicy;
 use risingwave_expr::aggregate::{AggArgs, AggKind};
 use risingwave_expr::window_function::{
@@ -87,6 +88,8 @@ async fn create_executor<S: StateStore>(
         order_key_order_types,
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
+        latest_sequence: Arc::new(AtomicSequence::new(0)),
+        evict_sequence: Arc::new(AtomicSequence::new(0)),
         metrics: Arc::new(StreamingMetrics::unused()),
         chunk_size: 1024,
         cache_policy: OverWindowCachePolicy::Recent,

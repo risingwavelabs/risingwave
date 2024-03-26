@@ -30,6 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::MetricLevel;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -136,6 +137,9 @@ pub struct ExecutorParams {
     /// `watermark_epoch` field in `MemoryManager`
     pub watermark_epoch: AtomicU64Ref,
 
+    pub latest_sequence: Arc<AtomicSequence>,
+    pub evict_sequence: Arc<AtomicSequence>,
+
     pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
@@ -162,6 +166,8 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
     ) -> Self {
         let await_tree_reg = await_tree_config
             .clone()
@@ -177,6 +183,8 @@ impl LocalStreamManager {
             await_tree_reg.clone(),
             barrier_await_tree_reg.clone(),
             watermark_epoch,
+            latest_sequence,
+            evict_sequence,
             actor_op_rx,
         );
         Self {
@@ -499,6 +507,8 @@ impl StreamActorManager {
             vnode_bitmap,
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
+            latest_sequence: self.latest_sequence.clone(),
+            evict_sequence: self.evict_sequence.clone(),
             shared_context: shared_context.clone(),
             local_barrier_manager: shared_context.local_barrier_manager.clone(),
             create_actor_context: create_actor_context.clone(),

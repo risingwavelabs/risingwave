@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::hash::Hash;
+use std::sync::Arc;
 
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common_estimate_size::EstimateSize;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
@@ -27,8 +29,18 @@ pub struct DedupCache<K: Hash + Eq + EstimateSize> {
 }
 
 impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics_info: MetricsInfo,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
+    ) -> Self {
+        let cache = ManagedLruCache::unbounded(
+            watermark_epoch,
+            metrics_info,
+            latest_sequence,
+            evict_sequence,
+        );
         Self { inner: cache }
     }
 
@@ -40,7 +52,7 @@ impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
 
     /// Insert a `key` into the cache without checking for duplication.
     pub fn insert(&mut self, key: K) {
-        self.inner.push(key, ());
+        self.inner.put(key, ());
     }
 
     /// Check whether the given key is in the cache.
@@ -53,9 +65,9 @@ impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
         self.inner.evict()
     }
 
-    pub fn update_epoch(&mut self, epoch: u64) {
+    pub fn update_epoch(&mut self, _epoch: u64) {
         // Update the current epoch in `ManagedLruCache`
-        self.inner.update_epoch(epoch)
+        // self.inner.update_epoch(epoch)
     }
 
     /// Clear everything in the cache.
@@ -69,12 +81,17 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
-    use super::DedupCache;
+    use super::*;
     use crate::common::metrics::MetricsInfo;
 
     #[test]
     fn test_dedup_cache() {
-        let mut cache = DedupCache::new(Arc::new(AtomicU64::new(10000)), MetricsInfo::for_test());
+        let mut cache = DedupCache::new(
+            Arc::new(AtomicU64::new(10000)),
+            MetricsInfo::for_test(),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+        );
 
         cache.insert(10);
         assert!(cache.contains(&10));

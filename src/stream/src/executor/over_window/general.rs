@@ -24,6 +24,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{DataType, DefaultOrdered};
@@ -40,7 +41,7 @@ use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
 };
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
@@ -77,6 +78,8 @@ struct ExecutorInner<S: StateStore> {
 
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
     metrics: Arc<StreamingMetrics>,
 
     /// The maximum size of the chunk produced by executor at a time.
@@ -145,6 +148,8 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
+    pub latest_sequence: Arc<AtomicSequence>,
+    pub evict_sequence: Arc<AtomicSequence>,
     pub metrics: Arc<StreamingMetrics>,
 
     pub chunk_size: usize,
@@ -195,6 +200,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
+                latest_sequence: args.latest_sequence,
+                evict_sequence: args.evict_sequence,
                 metrics: args.metrics,
                 chunk_size: args.chunk_size,
                 cache_policy,
@@ -610,7 +617,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
         );
 
         let mut vars = ExecutionVars {
-            cached_partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
+            cached_partitions: ManagedLruCache::unbounded(
+                this.watermark_epoch.clone(),
+                metrics_info,
+                this.latest_sequence.clone(),
+                this.evict_sequence.clone(),
+            ),
             recently_accessed_ranges: Default::default(),
             stats: Default::default(),
             _phantom: PhantomData::<S>,
@@ -619,7 +631,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         this.state_table.init_epoch(barrier.epoch);
-        vars.cached_partitions.update_epoch(barrier.epoch.curr);
+        // vars.cached_partitions.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);
 
@@ -688,7 +700,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         }
                     }
 
-                    vars.cached_partitions.update_epoch(barrier.epoch.curr);
+                    // vars.cached_partitions.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }

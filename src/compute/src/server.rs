@@ -14,7 +14,7 @@
 
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use risingwave_batch::monitor::{
@@ -26,6 +26,7 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -81,6 +82,11 @@ use crate::rpc::service::monitor_service::{
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
+
+pub static GLOBAL_LATEST_SEQUENCE: LazyLock<Arc<AtomicSequence>> =
+    LazyLock::new(|| Arc::new(AtomicSequence::default()));
+pub static GLOBAL_EVICT_SEQUENCE: LazyLock<Arc<AtomicSequence>> =
+    LazyLock::new(|| Arc::new(AtomicSequence::default()));
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -298,6 +304,8 @@ pub async fn compute_node_serve(
             .developer
             .memory_controller_threshold_stable,
         metrics: streaming_metrics.clone(),
+        latest_sequence: GLOBAL_LATEST_SEQUENCE.clone(),
+        evict_sequence: GLOBAL_EVICT_SEQUENCE.clone(),
     });
 
     // Run a background memory manager
@@ -372,6 +380,8 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         await_tree_config.clone(),
         memory_mgr.get_watermark_epoch(),
+        GLOBAL_LATEST_SEQUENCE.clone(),
+        GLOBAL_EVICT_SEQUENCE.clone(),
     );
 
     let grpc_await_tree_reg = await_tree_config

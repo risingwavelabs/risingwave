@@ -18,6 +18,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -55,6 +56,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
     ) -> StreamResult<Self> {
         Ok(TopNExecutorWrapper {
             input,
@@ -67,6 +70,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
                 group_by,
                 state_table,
                 watermark_epoch,
+                latest_sequence,
+                evict_sequence,
                 ctx,
             )?,
         })
@@ -111,6 +116,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         ctx: ActorContextRef,
     ) -> StreamResult<Self> {
         let metrics_info = MetricsInfo::new(
@@ -130,7 +137,12 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(watermark_epoch, metrics_info),
+            caches: GroupTopNCache::new(
+                watermark_epoch,
+                metrics_info,
+                latest_sequence,
+                evict_sequence,
+            ),
             cache_key_serde,
             ctx,
         })
@@ -178,7 +190,7 @@ where
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
-                self.caches.push(group_cache_key.clone(), topn_cache);
+                self.caches.put(group_cache_key.clone(), topn_cache);
             }
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
@@ -219,8 +231,8 @@ where
         self.caches.evict()
     }
 
-    fn update_epoch(&mut self, epoch: u64) {
-        self.caches.update_epoch(epoch)
+    fn update_epoch(&mut self, _epoch: u64) {
+        // self.caches.update_epoch(epoch)
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

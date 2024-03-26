@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_non_strict_from_prost, NonStrictExpression};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
@@ -113,6 +114,8 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             table_output_indices,
             table_stream_key_indices,
             watermark_epoch: params.watermark_epoch,
+            latest_sequence: params.latest_sequence,
+            evict_sequence: params.evict_sequence,
             chunk_size: params.env.config().developer.chunk_size,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
@@ -137,6 +140,8 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     table_output_indices: Vec<usize>,
     table_stream_key_indices: Vec<usize>,
     watermark_epoch: AtomicU64Ref,
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
     chunk_size: usize,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
@@ -168,6 +173,8 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     self.table_output_indices,
                     self.table_stream_key_indices,
                     self.watermark_epoch,
+                    self.latest_sequence,
+                    self.evict_sequence,
                     self.metrics,
                     self.chunk_size,
                     self.join_key_data_types,

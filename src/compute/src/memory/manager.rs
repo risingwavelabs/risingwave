@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -30,12 +31,16 @@ pub struct MemoryManagerConfig {
     pub threshold_stable: f64,
 
     pub metrics: Arc<StreamingMetrics>,
+    pub latest_sequence: Arc<AtomicSequence>,
+    pub evict_sequence: Arc<AtomicSequence>,
 }
 
 /// Compute node uses [`MemoryManager`] to limit the memory usage.
 pub struct MemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
+
+    evict_sequence: Arc<AtomicSequence>,
 
     metrics: Arc<StreamingMetrics>,
 
@@ -53,6 +58,7 @@ impl MemoryManager {
 
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
+            evict_sequence: config.evict_sequence.clone(),
             metrics: config.metrics,
             controller,
         })
@@ -91,8 +97,10 @@ impl MemoryManager {
                 }
 
                 _ = tick_interval.tick() => {
-                    let new_watermark_epoch = self.controller.lock().unwrap().tick(interval_ms);
+                    let (new_watermark_epoch, new_watermark_sequence) = self.controller.lock().unwrap().tick(interval_ms);
+
                     self.watermark_epoch.store(new_watermark_epoch.0, Ordering::Relaxed);
+                    self.evict_sequence.store(new_watermark_sequence, Ordering::Relaxed);
 
                     self.metrics.lru_runtime_loop_count.inc();
                 }

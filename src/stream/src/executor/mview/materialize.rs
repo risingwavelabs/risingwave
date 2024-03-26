@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -36,7 +37,7 @@ use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
@@ -79,6 +80,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         conflict_behavior: ConflictBehavior,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -103,7 +106,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             state_table,
             arrange_key_indices,
             actor_context,
-            materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                metrics_info,
+                latest_sequence,
+                evict_sequence,
+            ),
             conflict_behavior,
         }
     }
@@ -223,7 +231,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
-                    self.materialize_cache.data.update_epoch(b.epoch.curr);
+                    // self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
@@ -296,7 +304,12 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             state_table,
             arrange_key_indices: arrange_columns.clone(),
             actor_context: ActorContext::for_test(0),
-            materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                MetricsInfo::for_test(),
+                Arc::new(AtomicSequence::new(0)),
+                Arc::new(AtomicSequence::new(0)),
+            ),
             conflict_behavior,
         }
     }
@@ -448,9 +461,18 @@ pub struct MaterializeCache<SD> {
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            new_unbounded(watermark_epoch, metrics_info.clone());
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics_info: MetricsInfo,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
+    ) -> Self {
+        let cache: ManagedLruCache<Vec<u8>, CacheValue> = ManagedLruCache::unbounded(
+            watermark_epoch,
+            metrics_info.clone(),
+            latest_sequence,
+            evict_sequence,
+        );
         Self {
             data: cache,
             metrics_info,
@@ -508,10 +530,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     if update_cache {
                         match conflict_behavior {
                             ConflictBehavior::Overwrite => {
-                                self.data.push(key, Some(CompactedRow { row: value }));
+                                self.data.put(key, Some(CompactedRow { row: value }));
                             }
                             ConflictBehavior::IgnoreConflict => {
-                                self.data.push(key, Some(CompactedRow { row: value }));
+                                self.data.put(key, Some(CompactedRow { row: value }));
                             }
                             _ => unreachable!(),
                         }
@@ -542,7 +564,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
 
                     if update_cache {
-                        self.data.push(key, None);
+                        self.data.put(key, None);
                     }
                 }
             }
@@ -581,8 +603,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
             match conflict_behavior {
-                ConflictBehavior::Overwrite => self.data.push(key, value?),
-                ConflictBehavior::IgnoreConflict => self.data.push(key, value?),
+                ConflictBehavior::Overwrite => self.data.put(key, value?),
+                ConflictBehavior::IgnoreConflict => self.data.put(key, value?),
                 _ => unreachable!(),
             };
         }

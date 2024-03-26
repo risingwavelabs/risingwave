@@ -73,6 +73,8 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
 
             state_table,
             watermark_epoch: params.watermark_epoch,
+            latest_sequence: params.latest_sequence,
+            evict_sequence: params.evict_sequence,
             metrics: params.executor_stats,
 
             chunk_size: params.env.config().developer.chunk_size,

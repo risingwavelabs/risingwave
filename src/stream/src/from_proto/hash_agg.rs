@@ -109,6 +109,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 intermediate_state_table,
                 distinct_dedup_tables,
                 watermark_epoch: params.watermark_epoch,
+                latest_sequence: params.latest_sequence,
+                evict_sequence: params.evict_sequence,
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,

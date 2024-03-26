@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use risingwave_common::lru::AtomicSequence;
 use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
@@ -43,6 +45,8 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub intermediate_state_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
+    pub latest_sequence: Arc<AtomicSequence>,
+    pub evict_sequence: Arc<AtomicSequence>,
 
     // extra
     pub extra: E,

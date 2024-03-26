@@ -23,6 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -41,7 +42,7 @@ use super::sort_buffer::SortBuffer;
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, StreamExecutorResult, Watermark,
 };
-use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::cache::{cache_may_stale, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
@@ -124,6 +125,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     /// Watermark epoch.
     watermark_epoch: AtomicU64Ref,
+
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
 
     /// State cache size for extreme agg.
     extreme_cache_size: usize,
@@ -230,6 +234,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
+                latest_sequence: args.latest_sequence,
+                evict_sequence: args.evict_sequence,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
@@ -587,15 +593,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(
+            agg_group_cache: ManagedLruCache::unbounded_with_hasher(
                 this.watermark_epoch.clone(),
                 agg_group_cache_metrics_info,
+                this.latest_sequence.clone(),
+                this.evict_sequence.clone(),
                 PrecomputedBuildHasher,
             ),
             dirty_groups: Default::default(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 this.watermark_epoch.clone(),
+                this.latest_sequence.clone(),
+                this.evict_sequence.clone(),
                 &this.distinct_dedup_tables,
                 this.actor_ctx.clone(),
             ),
@@ -620,10 +630,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         this.all_state_tables_mut().for_each(|table| {
             table.init_epoch(barrier.epoch);
         });
-        vars.agg_group_cache.update_epoch(barrier.epoch.curr);
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
+        // vars.agg_group_cache.update_epoch(barrier.epoch.curr);
+        // vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+        //     cache.update_epoch(barrier.epoch.curr);
+        // });
 
         yield Message::Barrier(barrier);
 
@@ -696,10 +706,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
 
                     // Update the current epoch.
-                    vars.agg_group_cache.update_epoch(barrier.epoch.curr);
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
+                    // vars.agg_group_cache.update_epoch(barrier.epoch.curr);
+                    // vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+                    //     cache.update_epoch(barrier.epoch.curr);
+                    // });
 
                     yield Message::Barrier(barrier);
                 }

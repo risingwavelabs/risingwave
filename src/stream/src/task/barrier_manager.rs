@@ -45,6 +45,7 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -285,6 +286,8 @@ pub(crate) struct StreamActorManager {
 
     /// Watermark epoch number.
     pub(super) watermark_epoch: AtomicU64Ref,
+    pub(super) latest_sequence: Arc<AtomicSequence>,
+    pub(super) evict_sequence: Arc<AtomicSequence>,
 
     /// Manages the await-trees of all actors.
     pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
@@ -741,12 +744,15 @@ pub struct LocalBarrierManager {
 
 impl LocalBarrierWorker {
     /// Create a [`LocalBarrierWorker`] with managed mode.
+    #[expect(clippy::too_many_arguments)]
     pub fn spawn(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
         barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
         let runtime = {
@@ -765,6 +771,8 @@ impl LocalBarrierWorker {
             env: env.clone(),
             streaming_metrics,
             watermark_epoch,
+            latest_sequence,
+            evict_sequence,
             await_tree_reg,
             runtime: runtime.into(),
         });
@@ -872,6 +880,8 @@ impl LocalBarrierManager {
             None,
             None,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             rx,
         );
         EventSender(tx)

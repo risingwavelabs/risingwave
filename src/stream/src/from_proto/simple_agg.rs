@@ -70,6 +70,8 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             intermediate_state_table,
             distinct_dedup_tables,
             watermark_epoch: params.watermark_epoch,
+            latest_sequence: params.latest_sequence,
+            evict_sequence: params.evict_sequence,
             extra: SimpleAggExecutorExtraArgs {},
         })?;
 

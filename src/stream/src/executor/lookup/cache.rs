@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common_estimate_size::collections::{EstimatedHashSet, EstimatedVec};
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
@@ -35,7 +38,7 @@ impl LookupCache {
 
     /// Update a key after lookup cache misses.
     pub fn batch_update(&mut self, key: OwnedRow, value: EstimatedVec<OwnedRow>) {
-        self.data.push(key, LookupEntryState::from_vec(value));
+        self.data.put(key, LookupEntryState::from_vec(value));
     }
 
     /// Apply a batch from the arrangement side
@@ -70,8 +73,8 @@ impl LookupCache {
     }
 
     /// Update the current epoch.
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.data.update_epoch(epoch);
+    pub fn update_epoch(&mut self, _epoch: u64) {
+        // self.data.update_epoch(epoch);
     }
 
     /// Clear the cache.
@@ -79,8 +82,18 @@ impl LookupCache {
         self.data.clear();
     }
 
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics_info: MetricsInfo,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
+    ) -> Self {
+        let cache = ManagedLruCache::unbounded(
+            watermark_epoch,
+            metrics_info,
+            latest_sequence,
+            evict_sequence,
+        );
         Self { data: cache }
     }
 }

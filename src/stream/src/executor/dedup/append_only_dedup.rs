@@ -19,6 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
@@ -45,12 +46,15 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> AppendOnlyDedupExecutor<S> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
         dedup_cols: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let metrics_info =
@@ -60,7 +64,12 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             input: Some(input),
             dedup_cols,
             state_table,
-            cache: DedupCache::new(watermark_epoch, metrics_info),
+            cache: DedupCache::new(
+                watermark_epoch,
+                metrics_info,
+                latest_sequence,
+                evict_sequence,
+            ),
         }
     }
 
@@ -240,6 +249,8 @@ mod tests {
             dedup_col_indices,
             state_table,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             Arc::new(StreamingMetrics::unused()),
         )
         .boxed()

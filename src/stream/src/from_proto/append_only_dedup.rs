@@ -43,6 +43,8 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
             params.info.pk_indices.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
             state_table,
             params.watermark_epoch,
+            params.latest_sequence,
+            params.evict_sequence,
             params.executor_stats.clone(),
         );
         Ok((params.info, exec).into())

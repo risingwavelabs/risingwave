@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -222,6 +223,8 @@ async fn test_lookup_this_epoch() {
             vec![0, 1],
         ),
         watermark_epoch: Arc::new(AtomicU64::new(0)),
+        latest_sequence: Arc::new(AtomicSequence::new(0)),
+        evict_sequence: Arc::new(AtomicSequence::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -296,6 +299,8 @@ async fn test_lookup_last_epoch() {
             vec![0, 1],
         ),
         watermark_epoch: Arc::new(AtomicU64::new(0)),
+        latest_sequence: Arc::new(AtomicSequence::new(0)),
+        evict_sequence: Arc::new(AtomicSequence::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();

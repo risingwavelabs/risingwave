@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use risingwave_common::lru::{AtomicSequence, Sequence};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -77,6 +79,9 @@ pub struct LruWatermarkController {
 
     /// The state from previous tick
     state: State,
+
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Sequence,
 }
 
 impl LruWatermarkController {
@@ -92,6 +97,8 @@ impl LruWatermarkController {
             threshold_graceful,
             threshold_aggressive,
             state: State::default(),
+            latest_sequence: config.latest_sequence.clone(),
+            evict_sequence: 0,
         }
     }
 }
@@ -131,7 +138,7 @@ fn jemalloc_memory_stats() -> MemoryStats {
 }
 
 impl LruWatermarkController {
-    pub fn tick(&mut self, interval_ms: u32) -> Epoch {
+    pub fn tick(&mut self, interval_ms: u32) -> (Epoch, Sequence) {
         // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
         let MemoryStats {
             allocated: jemalloc_allocated_bytes,
@@ -145,6 +152,17 @@ impl LruWatermarkController {
 
         let last_step = self.state.lru_watermark_step;
         let last_used_memory_bytes = self.state.used_memory_bytes;
+
+        let target_memory_bytes = self.threshold_graceful;
+        if cur_used_memory_bytes > target_memory_bytes {
+            let ratio =
+                (cur_used_memory_bytes - target_memory_bytes) as f64 / cur_used_memory_bytes as f64;
+            let latest_sequence = self.latest_sequence.load(Ordering::Relaxed);
+            let sequence_diff =
+                ((latest_sequence - self.evict_sequence) as f64 * ratio) as Sequence;
+            self.evict_sequence = self.evict_sequence.max(latest_sequence - sequence_diff);
+        }
+        let sequence = self.evict_sequence;
 
         // The watermark calculation works in the following way:
         //
@@ -224,6 +242,6 @@ impl LruWatermarkController {
             .set(jvm_allocated_bytes as i64);
         self.metrics.jvm_active_bytes.set(jvm_active_bytes as i64);
 
-        Epoch::from_physical_time(watermark_time_ms)
+        (Epoch::from_physical_time(watermark_time_ms), sequence)
     }
 }

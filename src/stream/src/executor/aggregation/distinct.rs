@@ -20,13 +20,14 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, Op};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::{AggCall, GroupKey};
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, StreamExecutorResult};
@@ -40,9 +41,19 @@ struct ColumnDeduplicater<S: StateStore> {
 }
 
 impl<S: StateStore> ColumnDeduplicater<S> {
-    fn new(watermark_epoch: Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
+    fn new(
+        watermark_epoch: Arc<AtomicU64>,
+        metrics_info: MetricsInfo,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
+    ) -> Self {
         Self {
-            cache: new_unbounded(watermark_epoch, metrics_info),
+            cache: ManagedLruCache::unbounded(
+                watermark_epoch,
+                metrics_info,
+                latest_sequence,
+                evict_sequence,
+            ),
             _phantom: PhantomData,
         }
     }
@@ -219,6 +230,8 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub fn new(
         agg_calls: &[AggCall],
         watermark_epoch: Arc<AtomicU64>,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         distinct_dedup_tables: &HashMap<usize, StateTable<S>>,
         ctx: ActorContextRef,
     ) -> Self {
@@ -238,7 +251,12 @@ impl<S: StateStore> DistinctDeduplicater<S> {
                     "distinct dedup",
                 );
                 let call_indices: Box<[_]> = indices_and_calls.into_iter().map(|v| v.0).collect();
-                let deduplicater = ColumnDeduplicater::new(watermark_epoch.clone(), metrics_info);
+                let deduplicater = ColumnDeduplicater::new(
+                    watermark_epoch.clone(),
+                    metrics_info,
+                    latest_sequence.clone(),
+                    evict_sequence.clone(),
+                );
                 (distinct_col, (call_indices, deduplicater))
             })
             .collect();
@@ -391,6 +409,8 @@ mod tests {
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             &dedup_tables,
             ActorContext::for_test(0),
         );
@@ -482,6 +502,8 @@ mod tests {
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             &dedup_tables,
             ActorContext::for_test(0),
         );
@@ -571,6 +593,8 @@ mod tests {
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             &dedup_tables,
             ActorContext::for_test(0),
         );

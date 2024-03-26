@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -98,6 +101,10 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub watermark_epoch: AtomicU64Ref,
 
+    pub latest_sequence: Arc<AtomicSequence>,
+
+    pub evict_sequence: Arc<AtomicSequence>,
+
     pub chunk_size: usize,
 }
 
@@ -116,6 +123,8 @@ impl<S: StateStore> LookupExecutor<S> {
             column_mapping,
             storage_table,
             watermark_epoch,
+            latest_sequence,
+            evict_sequence,
             chunk_size,
         } = params;
 
@@ -218,7 +227,12 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(watermark_epoch, metrics_info),
+            lookup_cache: LookupCache::new(
+                watermark_epoch,
+                metrics_info,
+                latest_sequence,
+                evict_sequence,
+            ),
             chunk_size,
         }
     }

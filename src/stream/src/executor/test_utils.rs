@@ -275,6 +275,7 @@ pub mod agg_executor {
     use futures::future;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
+    use risingwave_common::lru::AtomicSequence;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{AggCall, AggKind};
@@ -491,6 +492,8 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            latest_sequence: Arc::new(AtomicSequence::new(0)),
+            evict_sequence: Arc::new(AtomicSequence::new(0)),
 
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
@@ -558,6 +561,8 @@ pub mod agg_executor {
             intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            latest_sequence: Arc::new(AtomicSequence::new(0)),
+            evict_sequence: Arc::new(AtomicSequence::new(0)),
             extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap();
