@@ -161,8 +161,14 @@ impl Component {
     fn commands() -> Vec<Command> {
         Self::iter()
             .map(|c| {
+                let is_playground = matches!(c, Component::Playground);
                 let name: &'static str = c.into();
                 let command = Command::new(name).visible_aliases(c.aliases());
+                let command = if is_playground {
+                    command.hide(true)
+                } else {
+                    command
+                };
                 c.augment_args(command)
             })
             .collect()
