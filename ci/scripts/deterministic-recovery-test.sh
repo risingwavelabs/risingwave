@@ -16,7 +16,8 @@ risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug,\
 risingwave_stream::executor::backfill=trace,\
 risingwave_meta::barrier::progress=debug,\
-risingwave_meta::stream::stream_manager=debug"
+risingwave_meta::stream::stream_manager=debug,\
+risingwave_meta::barrier::schedule=trace"
 
 
 # Extra logs you can enable if the existing trace does not give enough info.

@@ -428,6 +428,9 @@ impl GlobalBarrierManager {
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
+                        // TODO: Let this part fail.
+                        // try_lock.
+                        // print warning lock
                         debug!("run scale actors");
                         self.context
                             .scale_actors(all_nodes.clone())
