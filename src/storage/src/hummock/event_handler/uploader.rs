@@ -409,10 +409,6 @@ impl UnsealedEpochData {
         }
     }
 
-    fn get_imm_data_size(&self) -> usize {
-        self.imms.iter().map(|imm| imm.size()).sum()
-    }
-
     fn add_table_watermarks(
         &mut self,
         table_id: TableId,
@@ -1066,15 +1062,7 @@ impl HummockUploader {
 
         if self.context.buffer_tracker.need_more_flush() {
             // iterate from older epoch to newer epoch
-            let mut unseal_epochs = vec![];
-            for (epoch, unsealed_data) in self.unsealed_data.iter() {
-                unseal_epochs.push((unsealed_data.get_imm_data_size(), *epoch));
-            }
-            // flush large data at first to avoid generate small files.
-            unseal_epochs.sort_by_key(|item| item.0);
-            unseal_epochs.reverse();
-            for (_, epoch) in unseal_epochs {
-                let unsealed_data = self.unsealed_data.get_mut(&epoch).unwrap();
+            for unsealed_data in self.unsealed_data.values_mut() {
                 unsealed_data.flush(&self.context);
                 if !self.context.buffer_tracker.need_more_flush() {
                     break;
