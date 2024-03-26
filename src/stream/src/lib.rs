@@ -68,6 +68,7 @@ mod consistency {
 
     use std::sync::LazyLock;
 
+    use risingwave_common::config::default;
     use risingwave_common::util::env_var::env_var_is_true;
 
     static INSANE_MODE: LazyLock<bool> =
@@ -78,9 +79,13 @@ mod consistency {
     }
 
     pub(crate) fn enable_strict_consistency() -> bool {
-        crate::CONFIG
-            .try_with(|config| config.unsafe_enable_strict_consistency)
-            .expect("streaming CONFIG is not set, which is highly probably a bug")
+        let res = crate::CONFIG.try_with(|config| config.unsafe_enable_strict_consistency);
+        if cfg!(test) {
+            // use default value in tests
+            res.unwrap_or_else(|_| default::streaming::unsafe_enable_strict_consistency())
+        } else {
+            res.expect("streaming CONFIG is not set, which is highly probably a bug")
+        }
     }
 
     macro_rules! inconsistency_panic {
