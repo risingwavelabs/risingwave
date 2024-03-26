@@ -520,7 +520,7 @@ pub struct NatsCommon {
     #[serde(rename = "filter_subject")]
     pub filter_subject: Option<String>,
     #[serde(rename = "durable")]
-    #[serde_as(as = "DisplayFromStr")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub durable: Option<bool>,
     #[serde(rename = "connect_mode")]
     pub connect_mode: String,
@@ -619,11 +619,14 @@ impl NatsCommon {
             Some(ref v) => v.split(',').map(|s| s.to_string()).collect::<Vec<String>>(),
             None => Vec::new(),
         };
-        let durable_name = match self.durable.as_deref() {
-            Some(v) => match v.parse::<bool>() {
-                Ok(true) => Some(name.clone()),
-                _ => None,
-            },
+        let durable_name = match self.durable {
+            Some(v) => {
+                if v {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            }
             None => None,
         };
         let mut config = jetstream::consumer::pull::Config {
