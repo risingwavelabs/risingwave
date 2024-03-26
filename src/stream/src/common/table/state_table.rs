@@ -330,6 +330,11 @@ where
             pk_indices.iter().position(|&i| vnode_col_idx == i)
         });
 
+        // Upstream must have dist_key_in_pk_indices, otherwise that means it is singleton distribution,
+        // and it should use `no_shuffle_backfill` instead.
+        if IS_REPLICATED {
+            assert!(!dist_key_in_pk_indices.is_empty());
+        }
         let distribution =
             TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
 

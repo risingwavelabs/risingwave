@@ -67,6 +67,13 @@ impl StreamTableScan {
                 None => Distribution::SomeShard,
             }
         };
+        // For single distribution, we can't use arrangement backfill.
+        let stream_scan_type = match stream_scan_type {
+            StreamScanType::ArrangementBackfill if distribution == Distribution::Single => {
+                StreamScanType::Backfill
+            }
+            _ => stream_scan_type,
+        };
 
         let base = PlanBase::new_stream_with_core(
             &core,
