@@ -8,6 +8,26 @@
         properties.bootstrap.server = '6',
         scan.startup.mode = 'earliest',
     ) FORMAT PLAIN ENCODE JSON;
+- sql: |
+    /* The shared source config doesn't affect table with connector. */
+    EXPLAIN CREATE TABLE s(x int,y int)
+    WITH(
+        connector='kafka',
+        topic = 'mytopic',
+        properties.bootstrap.server = '6',
+        scan.startup.mode = 'earliest',
+    ) FORMAT PLAIN ENCODE JSON;
+  explain_output: |
+    StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamUnion { all: true }
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamSource { source: s, columns: [x, y, _row_id] }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamDml { columns: [x, y, _row_id] }
+            └─StreamSource
+  with_config_map:
+    rw_enable_shared_source: 'true'
 - before:
   - create_source
   sql: |

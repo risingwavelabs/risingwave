@@ -8,6 +8,19 @@
         scan.startup.mode = 'earliest',
     ) FORMAT PLAIN ENCODE JSON;
   expected_outputs: []
+- with_config_map:
+    rw_enable_shared_source: true
+  sql: |
+    /* The shared source config doesn't affect table with connector. */
+    EXPLAIN CREATE TABLE s(x int,y int)
+    WITH(
+        connector='kafka',
+        topic = 'mytopic',
+        properties.bootstrap.server = '6',
+        scan.startup.mode = 'earliest',
+    ) FORMAT PLAIN ENCODE JSON;
+  expected_outputs:
+    - explain_output
 # Note: The execution order is first apply config, then execute "before", then execute "sql"
 # We use with_config_map to control the config when CREATE SOURCE, and use another SET statement to change the config for CREATE MV
 #
