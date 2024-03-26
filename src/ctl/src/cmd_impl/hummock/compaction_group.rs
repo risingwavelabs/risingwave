@@ -118,15 +118,14 @@ pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
     table_ids_to_new_group: &[StateTableId],
-    partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let new_group_id = meta_client
-        .split_compaction_group(group_id, table_ids_to_new_group, partition_vnode_count)
+        .split_compaction_group(group_id, table_ids_to_new_group)
         .await?;
     println!(
-        "Succeed: split compaction group {}. tables {:#?} are moved to new group {} partition_vnode_count {}",
-        group_id, table_ids_to_new_group, new_group_id, partition_vnode_count
+        "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
+        group_id, table_ids_to_new_group, new_group_id
     );
     Ok(())
 }
