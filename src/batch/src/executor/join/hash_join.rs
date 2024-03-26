@@ -497,10 +497,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     continue;
                 }
                 non_equi_state.found_matched = false;
-                non_equi_state
-                    .first_output_row_id
-                    .push(chunk_builder.buffered_count());
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
+                    non_equi_state
+                        .first_output_row_id
+                        .push(chunk_builder.buffered_count());
+
                     let mut build_row_id_iter = next_build_row_with_same_key
                         .row_id_iter(Some(*first_matched_build_row_id))
                         .peekable();
@@ -641,11 +642,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 if !visible {
                     continue;
                 }
-                non_equi_state
-                    .first_output_row_id
-                    .push(chunk_builder.buffered_count());
                 non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
+                    non_equi_state
+                        .first_output_row_id
+                        .push(chunk_builder.buffered_count());
+
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
@@ -2412,13 +2414,13 @@ mod tests {
 
         let expected_chunk = DataChunk::from_pretty(
             "i   f   i   F
-             1   6.1 .   .
              2   .   .   .
-             .   8.4 .   .
              3   3.9 .   .
-             .   .   .   .
              4   6.6 4   7.5
              3   .   .   .
+             1   6.1 .   .
+             .   8.4 .   .
+             .   .   .   .
              .   0.7 .   .
              5   .   .   .
              .   5.5 .   .",
