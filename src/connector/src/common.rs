@@ -520,7 +520,8 @@ pub struct NatsCommon {
     #[serde(rename = "filter_subject")]
     pub filter_subject: Option<String>,
     #[serde(rename = "durable")]
-    pub durable: Option<String>,
+    #[serde_as(as = "DisplayFromStr")]
+    pub durable: Option<bool>,
     #[serde(rename = "connect_mode")]
     pub connect_mode: String,
     #[serde(rename = "username")]
