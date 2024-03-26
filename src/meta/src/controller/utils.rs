@@ -754,7 +754,8 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
         | PbObject::SourceId(id)
         | PbObject::SinkId(id)
         | PbObject::ViewId(id)
-        | PbObject::FunctionId(id) => *id as _,
+        | PbObject::FunctionId(id)
+        | PbObject::SubscriptionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
 }
