@@ -40,6 +40,42 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         revision: _,
     } = get_cluster_info(context).await?;
 
+    let mut actor_splits_map: BTreeMap<u32, String> = BTreeMap::new();
+
+    // build actor_splits_map
+    for table_fragment in &table_fragments {
+        if table_fragment.actor_splits.is_empty() {
+            continue;
+        }
+
+        for fragment in table_fragment.fragments.values() {
+            let fragment_type_mask = fragment.fragment_type_mask;
+            if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
+                && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
+            {
+                // no source or source backfill
+                continue;
+            }
+            if fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0 {
+                // skip dummy source for dml fragment
+                continue;
+            }
+
+            for actor in &fragment.actors {
+                if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
+                    let splits = splits
+                        .iter()
+                        .map(|split| SplitImpl::try_from(split).unwrap())
+                        .map(|split| split.id())
+                        .collect_vec()
+                        .join(",");
+                    actor_splits_map.insert(actor.actor_id, splits);
+                }
+            }
+        }
+    }
+
+    // print in the second iteration. Otherwise we don't have upstream splits info
     for table_fragment in &table_fragments {
         if table_fragment.actor_splits.is_empty() {
             continue;
@@ -50,27 +86,52 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
-                || fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+                && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
             {
+                // no source or source backfill
+                continue;
+            }
+            if fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0 {
                 // skip dummy source for dml fragment
                 continue;
             }
 
-            println!("\tFragment #{}", fragment.fragment_id);
+            println!(
+                "\tFragment #{} ({})",
+                fragment.fragment_id,
+                if fragment_type_mask == FragmentTypeFlag::Source as u32 {
+                    "Source"
+                } else {
+                    "SourceScan"
+                }
+            );
             for actor in &fragment.actors {
-                if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
-                    let splits = splits
-                        .iter()
-                        .map(|split| SplitImpl::try_from(split).unwrap())
-                        .map(|split| split.id())
-                        .collect_vec();
-
+                if let Some(splits) = actor_splits_map.get(&actor.actor_id) {
                     println!(
-                        "\t\tActor #{:<3} ({}): [{}]",
+                        "\t\tActor #{:<3} ({} splits): [{}]{}",
                         actor.actor_id,
                         splits.len(),
-                        splits.join(",")
+                        splits,
+                        if !actor.upstream_actor_id.is_empty() {
+                            assert!(
+                                actor.upstream_actor_id.len() == 1,
+                                "should have only one upstream actor, got {actor:?}"
+                            );
+                            let upstream_splits =
+                                actor_splits_map.get(&actor.upstream_actor_id[0]).unwrap();
+                            format!(
+                                " <- Upstream Actor #{}: [{}]",
+                                actor.upstream_actor_id[0], upstream_splits
+                            )
+                        } else {
+                            "".to_string()
+                        }
                     );
+                } else {
+                    println!(
+                        "\t\tActor #{:<3} (not found in actor_splits)",
+                        actor.actor_id,
+                    )
                 }
             }
         }

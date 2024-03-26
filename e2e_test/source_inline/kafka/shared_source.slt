@@ -210,5 +210,12 @@ internal_table.mjs --name mv_1 --type sourcebackfill
 3,"""Finished"""
 
 
+# scale down
+statement ok
+ALTER MATERIALIZED VIEW mv_1 SET PARALLELISM TO 2;
+
+
+halt
+
 statement ok
 drop source s0 cascade;
