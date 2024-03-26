@@ -852,8 +852,7 @@ pub async fn start_service_as_election_leader(
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        // Join the task while ignoring the cancellation error.
-        let _ = dashboard_task.await;
+        dashboard_task.abort();
     }
     Ok(())
 }
