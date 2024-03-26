@@ -5,6 +5,9 @@ statement ok
 insert into t1 values (1,4,2), (2,3,3);
 
 statement ok
+insert into t1 values (3,4,5), (3,6,7);
+
+statement ok
 insert into t1 values (1,5,3);
 
 statement ok
@@ -15,12 +18,16 @@ select v1, v2, v3 from mv1;
 ----
 1 4 2
 2 3 3
+3 4 5
 
 statement ok
 create table t2 (v1 int, v2 int, v3 int, primary key(v1)) on conflict overwrite;
 
 statement ok
 insert into t2 values (1,4,2), (2,3,3);
+
+statement ok
+insert into t2 values (3,4,5), (3,6,7);
 
 statement ok
 insert into t2 values (1,5,3);
@@ -33,6 +40,7 @@ select v1, v2, v3 from mv2;
 ----
 1 5 3
 2 3 3
+3 6 7
 
 statement ok
 drop materialized view mv1;
