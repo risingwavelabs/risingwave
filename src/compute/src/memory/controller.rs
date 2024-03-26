@@ -160,7 +160,7 @@ impl LruWatermarkController {
             let latest_sequence = self.latest_sequence.load(Ordering::Relaxed);
             let sequence_diff =
                 ((latest_sequence - self.evict_sequence) as f64 * ratio) as Sequence;
-            self.evict_sequence = self.evict_sequence.max(latest_sequence - sequence_diff);
+            self.evict_sequence = latest_sequence.min(self.evict_sequence + sequence_diff);
         }
         let sequence = self.evict_sequence;
 
