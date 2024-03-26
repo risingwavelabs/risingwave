@@ -95,7 +95,7 @@ kill_cluster() {
   fi
   set -e
 
-  $TMUX kill-session -t risedev
+  $TMUX kill-server
   test $? -eq 0 || {
     echo "Failed to stop all RiseDev components."
     exit 1

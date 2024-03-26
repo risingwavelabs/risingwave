@@ -716,7 +716,6 @@ then
   ${TMUX} list-windows -t risedev -F "#{pane_id}" | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 fi
 
-${TMUX} kill-session -t risedev
 ${TMUX} kill-server
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
