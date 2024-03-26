@@ -14,12 +14,13 @@
 
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::iter::once;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fail::fail_point;
@@ -40,7 +41,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
     get_table_compaction_group_id_mapping, BranchedSstInfo, HummockLevelsExt,
 };
-use risingwave_hummock_sdk::version::{HummockVersionDelta, SnapshotGroupDelta, SnapshotGroupId};
+use risingwave_hummock_sdk::version::{HummockVersionDelta, SnapshotGroupDelta};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, ExtendedSstableInfo,
     HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
@@ -60,10 +61,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, GroupMetaChange,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
-    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
-    TableOption, TableSchema,
+    CompactTask, CompactTaskAssignment, CompactionConfig,
+    CompactionGroupInfo as PbCompactionGroupInfo, GroupDelta, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersionStats, IntraLevelDelta, SstableInfo,
+    SubscribeCompactionEventRequest, TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -1628,54 +1629,16 @@ impl HummockManager {
 
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
-            let snapshot_group_id =
-                SnapshotGroupId::from(new_fragment_table_info.table_id.table_id);
-            if old_version.snapshot_groups.contains_key(&snapshot_group_id) {
-                return Err(anyhow!(
-                    "new fragment already exists: {}",
-                    new_fragment_table_info.table_id
-                )
-                .into());
-            }
-            new_version_delta.snapshot_group_delta.insert(
-                snapshot_group_id,
-                SnapshotGroupDelta::NewSnapshotGroup {
-                    member_table_ids: new_fragment_table_info.state_table_ids().collect(),
-                    safe_epoch: old_version.safe_epoch,
-                    committed_epoch: epoch,
-                },
-            );
+            let mut cg_table_ids = HashMap::new();
             if !new_fragment_table_info.internal_table_ids.is_empty() {
-                if let Some(levels) = old_version
-                    .levels
-                    .get(&(StaticCompactionGroupId::StateDefault as u64))
-                {
-                    for table_id in &new_fragment_table_info.internal_table_ids {
-                        if levels.member_table_ids.contains(&table_id.table_id) {
-                            return Err(Error::CompactionGroup(format!(
-                                "table {} already in group {}",
-                                table_id,
-                                StaticCompactionGroupId::StateDefault as u64
-                            )));
-                        }
-                    }
-                }
-
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(StaticCompactionGroupId::StateDefault as u64)
-                    .or_default()
-                    .group_deltas;
-                group_deltas.push(GroupDelta {
-                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_add: new_fragment_table_info
-                            .internal_table_ids
-                            .iter()
-                            .map(|table_id| table_id.table_id)
-                            .collect(),
-                        ..Default::default()
-                    })),
-                });
+                cg_table_ids.insert(
+                    StaticCompactionGroupId::StateDefault as u64,
+                    new_fragment_table_info
+                        .internal_table_ids
+                        .iter()
+                        .map(|table_id| table_id.table_id)
+                        .collect(),
+                );
 
                 for table_id in &new_fragment_table_info.internal_table_ids {
                     table_compaction_group_mapping
@@ -1684,32 +1647,24 @@ impl HummockManager {
             }
 
             if let Some(table_id) = new_fragment_table_info.mv_table_id {
-                if let Some(levels) = old_version
-                    .levels
-                    .get(&(StaticCompactionGroupId::MaterializedView as u64))
-                {
-                    if levels.member_table_ids.contains(&table_id.table_id) {
-                        return Err(Error::CompactionGroup(format!(
-                            "table {} already in group {}",
-                            table_id,
-                            StaticCompactionGroupId::MaterializedView as u64
-                        )));
-                    }
-                }
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(StaticCompactionGroupId::MaterializedView as u64)
-                    .or_default()
-                    .group_deltas;
-                group_deltas.push(GroupDelta {
-                    delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_add: vec![table_id.table_id],
-                        ..Default::default()
-                    })),
-                });
-                let _ = table_compaction_group_mapping
+                cg_table_ids.insert(
+                    StaticCompactionGroupId::MaterializedView as u64,
+                    HashSet::from_iter(once(table_id.table_id)),
+                );
+                table_compaction_group_mapping
                     .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
             }
+
+            let table_fragments_id = new_fragment_table_info.table_id;
+
+            let (snapshot_group_delta, compaction_group_deltas) = self
+                .gen_register_table_fragments_delta(table_fragments_id, cg_table_ids, old_version)
+                .await?;
+
+            new_version_delta
+                .snapshot_group_delta
+                .insert(table_fragments_id, snapshot_group_delta);
+            new_version_delta.group_deltas = compaction_group_deltas;
         }
 
         let mut incorrect_ssts = vec![];
@@ -2066,10 +2021,12 @@ impl HummockManager {
         }
 
         for group in &compaction_groups {
-            let mut pairs = vec![];
-            for table_id in group.member_table_ids.clone() {
-                pairs.push((table_id as StateTableId, group.id));
+            for table_id in &group.member_table_ids {
+                self.register_single_table_fragments(TableId::new(*table_id), group.id)
+                    .await
+                    .unwrap();
             }
+            tracing::info!("Registered table ids {:?}", group.member_table_ids);
             let group_config = group.compaction_config.clone().unwrap();
             self.compaction_group_manager
                 .write()
@@ -2077,8 +2034,6 @@ impl HummockManager {
                 .init_compaction_config_for_replay(group.id, group_config, self.env.meta_store())
                 .await
                 .unwrap();
-            self.register_table_ids(&pairs).await?;
-            tracing::info!("Registered table ids {:?}", pairs);
         }
 
         // Notify that tables have created

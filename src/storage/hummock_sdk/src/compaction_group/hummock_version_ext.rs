@@ -619,7 +619,7 @@ impl HummockVersion {
                 });
             self.safe_epoch = version_delta.safe_epoch;
         }
-        for (group_id, group_delta) in &version_delta.snapshot_group_delta {
+        for (table_fragments_id, group_delta) in &version_delta.snapshot_group_delta {
             match group_delta {
                 SnapshotGroupDelta::NewSnapshotGroup {
                     member_table_ids,
@@ -629,9 +629,9 @@ impl HummockVersion {
                     assert!(
                         self.snapshot_groups
                             .insert(
-                                *group_id,
+                                *table_fragments_id,
                                 SnapshotGroup {
-                                    group_id: *group_id,
+                                    table_fragments_id: *table_fragments_id,
                                     committed_epoch: *committed_epoch,
                                     safe_epoch: *safe_epoch,
                                     member_table_ids: member_table_ids.clone(),
@@ -639,18 +639,18 @@ impl HummockVersion {
                             )
                             .is_none(),
                         "add duplicate snapshot group: {:?} {:?} {} {}",
-                        group_id,
+                        table_fragments_id,
                         member_table_ids,
                         committed_epoch,
                         safe_epoch
                     );
                 }
                 SnapshotGroupDelta::NewCommittedEpoch(new_committed_epoch) => {
-                    if let Some(group) = self.snapshot_groups.get_mut(group_id) {
+                    if let Some(group) = self.snapshot_groups.get_mut(table_fragments_id) {
                         assert!(
                             *new_committed_epoch >= group.committed_epoch,
                             "snapshot group {:?} has regressed committed epoch {}, prev is {}",
-                            group_id,
+                            table_fragments_id,
                             new_committed_epoch,
                             group.committed_epoch,
                         );
@@ -658,11 +658,11 @@ impl HummockVersion {
                     }
                 }
                 SnapshotGroupDelta::NewSafeEpoch(new_safe_epoch) => {
-                    if let Some(group) = self.snapshot_groups.get_mut(group_id) {
+                    if let Some(group) = self.snapshot_groups.get_mut(table_fragments_id) {
                         assert!(
                             *new_safe_epoch >= group.safe_epoch,
                             "snapshot group {:?} has regressed safe epoch {}, prev is {}",
-                            group_id,
+                            table_fragments_id,
                             new_safe_epoch,
                             group.safe_epoch
                         );
@@ -670,8 +670,8 @@ impl HummockVersion {
                     }
                 }
                 SnapshotGroupDelta::Destroy => {
-                    if self.snapshot_groups.remove(group_id).is_none() {
-                        warn!(?group_id, "remove non-existing snapshot group");
+                    if self.snapshot_groups.remove(table_fragments_id).is_none() {
+                        warn!(?table_fragments_id, "remove non-existing snapshot group");
                     }
                 }
             }

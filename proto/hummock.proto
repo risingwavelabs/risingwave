@@ -138,7 +138,7 @@ message TableWatermarks {
 }
 
 message SnapshotGroup {
-  uint32 group_id = 1;
+  uint32 table_fragments_id = 1;
   repeated uint32 member_table_ids = 2;
   uint64 committed_epoch = 3;
   // Snapshots with epoch less than the safe epoch have been GCed.

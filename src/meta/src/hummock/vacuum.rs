@@ -237,7 +237,7 @@ mod tests {
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
         hummock_manager.create_version_checkpoint(1).await.unwrap();
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 8);
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
         assert!(hummock_manager.get_objects_to_delete().await.is_empty());
