@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+
+use crate::source::cdc::external::CdcTableType;
+use crate::source::iceberg::ICEBERG_CONNECTOR;
+use crate::source::{
+    GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, UPSTREAM_SOURCE_KEY,
+};
 
 /// Marker trait for `WITH` options. Only for `#[derive(WithOptions)]`, should not be used manually.
 ///
@@ -52,6 +58,76 @@ impl WithOptions for i32 {}
 impl WithOptions for i64 {}
 impl WithOptions for f64 {}
 impl WithOptions for std::time::Duration {}
+impl WithOptions for crate::mqtt_common::QualityOfService {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for nexmark::config::RateShape {}
 impl WithOptions for nexmark::event::EventType {}
+
+pub trait Get {
+    fn get(&self, key: &str) -> Option<&String>;
+}
+
+impl Get for HashMap<String, String> {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.get(key)
+    }
+}
+
+impl Get for BTreeMap<String, String> {
+    fn get(&self, key: &str) -> Option<&String> {
+        self.get(key)
+    }
+}
+
+/// Utility methods for `WITH` properties (`HashMap` and `BTreeMap`).
+pub trait WithPropertiesExt: Get + Sized {
+    #[inline(always)]
+    fn get_connector(&self) -> Option<String> {
+        self.get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase())
+    }
+
+    #[inline(always)]
+    fn is_kafka_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == KAFKA_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn is_cdc_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector.contains("-cdc")
+    }
+
+    fn is_backfillable_cdc_connector(&self) -> bool {
+        self.is_cdc_connector() && CdcTableType::from_properties(self).can_backfill()
+    }
+
+    #[inline(always)]
+    fn is_iceberg_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == ICEBERG_CONNECTOR
+    }
+
+    fn connector_need_pk(&self) -> bool {
+        // Currently only iceberg connector doesn't need primary key
+        !self.is_iceberg_connector()
+    }
+
+    fn is_new_fs_connector(&self) -> bool {
+        self.get(UPSTREAM_SOURCE_KEY)
+            .map(|s| {
+                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
+                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+            })
+            .unwrap_or(false)
+    }
+}
+
+impl<T: Get> WithPropertiesExt for T {}

@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use bytes::Bytes;
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{OwnedRow, Row, RowDeserializer};
-use crate::estimate_size::EstimateSize;
 use crate::types::DataType;
 use crate::util::value_encoding;
 

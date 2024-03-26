@@ -19,6 +19,7 @@ After you learn about the basics of RisingWave, take a look at our [developer gu
 * [Design of Batch Local Execution Mode](./batch-local-execution-mode.md)
 * [Consistent Hash](./consistent-hash.md)
 * [Build RisingWave with Multiple Object Storage Backends](./multi-object-store.md)
+* [Backfill](./backfill.md)
 
 ## Images
 

@@ -95,7 +95,7 @@ where
 
     /// The directory for checking status.
     ///
-    /// RiseDev will instruct every task to output their status to a file in temporary folder. By
+    /// `RiseDev` will instruct every task to output their status to a file in temporary folder. By
     /// checking this file, we can know whether a task has early exited.
     pub status_dir: Arc<TempDir>,
 

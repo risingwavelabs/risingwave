@@ -1,0 +1,110 @@
+# cycle check
+
+statement ok
+create table t_a(v int primary key);
+
+statement ok
+create table t_b(v int primary key);
+
+statement ok
+create table t_c(v int primary key);
+
+statement ok
+create sink s_a into t_b as select v from t_a;
+
+statement ok
+create sink s_b into t_c as select v from t_b;
+
+statement error Creating such a sink will result in circular dependency
+create sink s_c into t_a as select v from t_c;
+
+statement ok
+drop sink s_a;
+
+statement ok
+drop sink s_b;
+
+statement ok
+drop table t_a;
+
+statement ok
+drop table t_b;
+
+statement ok
+drop table t_c;
+
+# cycle check (with materialize view)
+
+statement ok
+create table t_a(v int primary key);
+
+statement ok
+create materialized view m_a as select v from t_a;
+
+statement ok
+create table t_b(v int primary key);
+
+statement ok
+create sink s_a into t_b as select v from m_a;
+
+statement error Creating such a sink will result in circular dependency
+create sink s_b into t_a as select v from t_b;
+
+statement ok
+drop sink s_a;
+
+statement ok
+drop table t_b;
+
+statement ok
+drop materialized view m_a;
+
+statement ok
+drop table t_a;
+
+# cycle check (with source)
+
+statement ok
+create source ss_a (v1 int, v2 float) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end  = '10',
+    fields.v2.kind = 'sequence',
+    fields.v2.start = '11',
+    fields.v2.end = '20',
+    datagen.rows.per.second = '15',
+    datagen.split.num = '1'
+);
+
+statement ok
+create table t_a(v int primary key);
+
+statement ok
+create sink s_a into t_a as select v1 from ss_a;
+
+statement ok
+drop sink s_a;
+
+statement ok
+drop table t_a;
+
+statement ok
+drop source ss_a;
+
+# cycle check (with index)
+
+statement ok
+create table t_a(v int primary key);
+
+statement ok
+create index i_a on t_a(v);
+
+statement error Creating such a sink will result in circular dependency
+create sink s_a into t_a as select v from i_a;
+
+statement ok
+drop index i_a;
+
+statement ok
+drop table t_a;

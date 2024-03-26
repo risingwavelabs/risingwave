@@ -71,7 +71,7 @@ pub struct QueryExecution {
     query: Arc<Query>,
     state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
-    /// Identified by process_id, secret_key. Query in the same session should have same key.
+    /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
@@ -598,7 +598,7 @@ pub(crate) mod tests {
             table_catalog.into(),
             vec![],
             ctx,
-            false,
+            None,
             Cardinality::unknown(),
         )
         .to_batch()

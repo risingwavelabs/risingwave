@@ -80,6 +80,7 @@ mod upsert_parser;
 mod util;
 
 pub use debezium::DEBEZIUM_IGNORE_KEY;
+use risingwave_common::buffer::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
@@ -138,6 +139,63 @@ impl SourceStreamChunkBuilder {
 
     pub fn is_empty(&self) -> bool {
         self.op_builder.is_empty()
+    }
+}
+
+/// A builder for building a [`StreamChunk`] that contains only heartbeat rows.
+/// Some connectors may emit heartbeat messages to the downstream, and the cdc source
+/// rely on the heartbeat messages to keep the source offset up-to-date with upstream.
+pub struct HeartbeatChunkBuilder {
+    builder: SourceStreamChunkBuilder,
+}
+
+impl HeartbeatChunkBuilder {
+    fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
+        let builders = descs
+            .iter()
+            .map(|desc| desc.data_type.create_array_builder(cap))
+            .collect();
+
+        Self {
+            builder: SourceStreamChunkBuilder {
+                descs,
+                builders,
+                op_builder: Vec::with_capacity(cap),
+            },
+        }
+    }
+
+    fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
+        self.builder.row_writer()
+    }
+
+    /// Consumes the builder and returns a [`StreamChunk`] with all rows marked as invisible
+    fn finish(self) -> StreamChunk {
+        // heartbeat chunk should be invisible
+        let builder = self.builder;
+        let visibility = BitmapBuilder::zeroed(builder.op_builder.len());
+        StreamChunk::with_visibility(
+            builder.op_builder,
+            builder
+                .builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect(),
+            visibility.finish(),
+        )
+    }
+
+    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
+    /// the builders of the next [`StreamChunk`].
+    #[must_use]
+    fn take(&mut self, next_cap: usize) -> StreamChunk {
+        let descs = std::mem::take(&mut self.builder.descs);
+        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
+        builder.finish()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.builder.is_empty()
     }
 }
 
@@ -560,6 +618,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
+
+    fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
+        _ = writer.insert(|_column| Ok(None));
+    }
 }
 
 #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
@@ -616,6 +678,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
+    let mut heartbeat_builder = HeartbeatChunkBuilder::with_capacity(columns.clone(), 0);
     let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
@@ -657,7 +720,15 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
         let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
-                tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
+                tracing::debug!(
+                    offset = msg.offset,
+                    "got a empty message, could be a heartbeat"
+                );
+                parser.emit_empty_row(heartbeat_builder.row_writer().with_meta(MessageMeta {
+                    meta: &msg.meta,
+                    split_id: &msg.split_id,
+                    offset: &msg.offset,
+                }));
                 continue;
             }
 
@@ -750,6 +821,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             }
         }
 
+        // emit heartbeat for each message batch
+        // we must emit heartbeat chunk before the data chunk,
+        // otherwise the source offset could be backward due to the heartbeat
+        if !heartbeat_builder.is_empty() {
+            yield heartbeat_builder.take(0);
+        }
+
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
             yield_asap = false;
@@ -837,7 +915,7 @@ pub enum ByteStreamSourceParserImpl {
 pub type ParsedStreamImpl = impl ChunkSourceStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
-    /// Converts this parser into a stream of [`StreamChunk`].
+    /// Converts this `SourceMessage` stream into a stream of [`StreamChunk`].
     pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
@@ -1055,7 +1133,7 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.topic.clone_from(get_kafka_topic(with_properties)?);
                     config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(
@@ -1085,7 +1163,7 @@ impl SpecificParserConfig {
                     config.enable_upsert = true;
                 }
                 if info.use_schema_registry {
-                    config.topic = get_kafka_topic(with_properties)?.clone();
+                    config.topic.clone_from(get_kafka_topic(with_properties)?);
                     config.client_config = SchemaRegistryAuth::from(&info.format_encode_options);
                 } else {
                     config.aws_auth_props = Some(

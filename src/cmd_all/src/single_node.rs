@@ -41,6 +41,14 @@ pub struct SingleNodeOpts {
     #[clap(long, env = "RW_SINGLE_NODE_STORE_DIRECTORY")]
     store_directory: Option<String>,
 
+    /// Start RisingWave in-memory.
+    #[clap(long, env = "RW_SINGLE_NODE_IN_MEMORY")]
+    in_memory: bool,
+
+    /// Exit RisingWave after specified seconds of inactivity.
+    #[clap(long, hide = true, env = "RW_SINGLE_NODE_MAX_IDLE_SECS")]
+    max_idle_secs: Option<u64>,
+
     #[clap(flatten)]
     node_opts: NodeSpecificOpts,
 }
@@ -84,14 +92,14 @@ pub struct NodeSpecificOpts {
 
     // ------- Meta Node Options -------
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
-    /// This address is used to serve PromQL queries to Prometheus.
+    /// This address is used to serve `PromQL` queries to Prometheus.
     /// It is also used by Grafana Dashboard Service to fetch metrics and visualize them.
     #[clap(long)]
     pub prometheus_endpoint: Option<String>,
 
     /// The additional selector used when querying Prometheus.
     ///
-    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
     #[clap(long)]
     pub prometheus_selector: Option<String>,
 
@@ -109,17 +117,27 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     let mut frontend_opts = FrontendOpts::parse_from(&empty_args);
     let mut compactor_opts = CompactorOpts::parse_from(&empty_args);
 
+    if let Some(max_idle_secs) = opts.max_idle_secs {
+        meta_opts.dangerous_max_idle_secs = Some(max_idle_secs);
+    }
+
     if let Some(prometheus_listener_addr) = &opts.prometheus_listener_addr {
         meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
-        compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
-        frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
-        compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+        compute_opts
+            .prometheus_listener_addr
+            .clone_from(prometheus_listener_addr);
+        frontend_opts
+            .prometheus_listener_addr
+            .clone_from(prometheus_listener_addr);
+        compactor_opts
+            .prometheus_listener_addr
+            .clone_from(prometheus_listener_addr);
     }
     if let Some(config_path) = &opts.config_path {
-        meta_opts.config_path = config_path.clone();
-        compute_opts.config_path = config_path.clone();
-        frontend_opts.config_path = config_path.clone();
-        compactor_opts.config_path = config_path.clone();
+        meta_opts.config_path.clone_from(config_path);
+        compute_opts.config_path.clone_from(config_path);
+        frontend_opts.config_path.clone_from(config_path);
+        compactor_opts.config_path.clone_from(config_path);
     }
 
     let store_directory = opts.store_directory.unwrap_or_else(|| {
@@ -128,18 +146,22 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         home_path.to_str().unwrap().to_string()
     });
 
-    // Set state store for meta (if not set)
+    // Set state store for meta (if not set). It could be set by environment variables before this.
     if meta_opts.state_store.is_none() {
-        let state_store_dir = format!("{}/state_store", &store_directory);
-        std::fs::create_dir_all(&state_store_dir).unwrap();
-        let state_store_url = format!("hummock+fs://{}", &state_store_dir);
-        meta_opts.state_store = Some(state_store_url);
+        if opts.in_memory {
+            meta_opts.state_store = Some("hummock+memory".to_string());
+        } else {
+            let state_store_dir = format!("{}/state_store", &store_directory);
+            std::fs::create_dir_all(&state_store_dir).unwrap();
+            let state_store_url = format!("hummock+fs://{}", &state_store_dir);
+            meta_opts.state_store = Some(state_store_url);
+        }
 
         // FIXME: otherwise it reports: missing system param "data_directory", but I think it should be set by this way...
         meta_opts.data_directory = Some("hummock_001".to_string());
     }
 
-    // Set meta store for meta (if not set)
+    // Set meta store for meta (if not set). It could be set by environment variables before this.
     let meta_backend_is_set = match meta_opts.backend {
         Some(MetaBackend::Etcd) => !meta_opts.etcd_endpoints.is_empty(),
         Some(MetaBackend::Sql) => meta_opts.sql_endpoint.is_some(),
@@ -147,11 +169,16 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         None => false,
     };
     if !meta_backend_is_set {
-        meta_opts.backend = Some(MetaBackend::Sql);
-        let meta_store_dir = format!("{}/meta_store", &store_directory);
-        std::fs::create_dir_all(&meta_store_dir).unwrap();
-        let meta_store_endpoint = format!("sqlite://{}/single_node.db?mode=rwc", &meta_store_dir);
-        meta_opts.sql_endpoint = Some(meta_store_endpoint);
+        if opts.in_memory {
+            meta_opts.backend = Some(MetaBackend::Mem);
+        } else {
+            meta_opts.backend = Some(MetaBackend::Sql);
+            let meta_store_dir = format!("{}/meta_store", &store_directory);
+            std::fs::create_dir_all(&meta_store_dir).unwrap();
+            let meta_store_endpoint =
+                format!("sqlite://{}/single_node.db?mode=rwc", &meta_store_dir);
+            meta_opts.sql_endpoint = Some(meta_store_endpoint);
+        }
     }
 
     // Set listen addresses (force to override)
@@ -160,7 +187,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     compute_opts.listen_addr = "0.0.0.0:5688".to_string();
     compactor_opts.listen_addr = "0.0.0.0:6660".to_string();
     if let Some(frontend_addr) = &opts.node_opts.listen_addr {
-        frontend_opts.listen_addr = frontend_addr.clone();
+        frontend_opts.listen_addr.clone_from(frontend_addr);
     }
 
     // Set Meta addresses for all nodes (force to override)

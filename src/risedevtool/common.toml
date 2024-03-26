@@ -14,7 +14,6 @@ PREFIX_CONFIG = "${PREFIX}/config"
 PREFIX_DATA = "${PREFIX}/data"
 PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
-PREFIX_UI = "${PREFIX}/ui"
 PREFIX_DOCKER = "${PREFIX}/rw-docker"
 PREFIX_PROFILING = "${PREFIX}/profiling"
 

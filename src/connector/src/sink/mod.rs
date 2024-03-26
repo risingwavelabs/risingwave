@@ -28,6 +28,7 @@ pub mod kafka;
 pub mod kinesis;
 pub mod log_store;
 pub mod mock_coordination_client;
+pub mod mqtt;
 pub mod nats;
 pub mod pulsar;
 pub mod redis;
@@ -81,6 +82,7 @@ macro_rules! for_all_sinks {
                 { Kinesis, $crate::sink::kinesis::KinesisSink },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
                 { Iceberg, $crate::sink::iceberg::IcebergSink },
+                { Mqtt, $crate::sink::mqtt::MqttSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
@@ -503,6 +505,12 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Redis error: {0}")]
     Redis(String),
+    #[error("Mqtt error: {0}")]
+    Mqtt(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Nats error: {0}")]
     Nats(
         #[source]

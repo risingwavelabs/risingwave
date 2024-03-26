@@ -21,6 +21,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
+use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
@@ -39,8 +40,10 @@ use super::version::{read_filter_for_version, CommittedVersion, HummockVersionRe
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
-use crate::hummock::compactor::CompactorContext;
-use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::compactor::{
+    new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext,
+};
+use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
@@ -59,7 +62,7 @@ use crate::store::*;
 use crate::StateStore;
 
 struct HummockStorageShutdownGuard {
-    shutdown_sender: UnboundedSender<HummockEvent>,
+    shutdown_sender: HummockEventSender,
 }
 
 impl Drop for HummockStorageShutdownGuard {
@@ -78,7 +81,7 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    hummock_event_sender: UnboundedSender<HummockEvent>,
+    hummock_event_sender: HummockEventSender,
     // only used in test for setting hummock version in uploader
     _version_update_sender: UnboundedSender<HummockVersionUpdate>,
 
@@ -104,10 +107,12 @@ pub struct HummockStorage {
 
     backup_reader: BackupReaderRef,
 
-    /// current_epoch < min_current_epoch cannot be read.
+    /// `current_epoch` < `min_current_epoch` cannot be read.
     min_current_epoch: Arc<AtomicU64>,
 
     write_limiter: WriteLimiterRef,
+
+    compact_await_tree_reg: Option<CompactionAwaitTreeRegRef>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -135,6 +140,7 @@ impl HummockStorage {
         filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
+        await_tree_config: Option<await_tree::Config>,
     ) -> HummockResult<Self> {
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -176,10 +182,14 @@ impl HummockStorage {
         let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             filter_key_extractor_manager.clone(),
         );
+
+        let await_tree_reg = await_tree_config.map(new_compaction_await_tree_reg_ref);
+
         let compactor_context = CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             compactor_metrics.clone(),
+            await_tree_reg.clone(),
         );
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -217,6 +227,7 @@ impl HummockStorage {
             backup_reader,
             min_current_epoch,
             write_limiter,
+            compact_await_tree_reg: await_tree_reg,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -260,7 +271,7 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<HummockStorageIterator> {
         let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
                 .await?
@@ -439,10 +450,15 @@ impl HummockStorage {
     pub fn backup_reader(&self) -> BackupReaderRef {
         self.backup_reader.clone()
     }
+
+    pub fn compaction_await_tree_reg(&self) -> Option<&RwLock<await_tree::Registry<String>>> {
+        self.compact_await_tree_reg.as_ref().map(AsRef::as_ref)
+    }
 }
 
 impl StateStoreRead for HummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+    type Iter = HummockStorageIterator;
 
     fn get(
         &self,
@@ -458,7 +474,7 @@ impl StateStoreRead for HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+    ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
         let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
         assert_eq!(
             r_vnode_exclusive - l_vnode_inclusive,
@@ -468,6 +484,15 @@ impl StateStoreRead for HummockStorage {
             read_options.table_id
         );
         self.iter_inner(key_range, epoch, read_options)
+    }
+
+    async fn iter_log(
+        &self,
+        _epoch_range: (u64, u64),
+        _key_range: TableKeyRange,
+        _options: ReadLogOptions,
+    ) -> StorageResult<Self::ChangeLogIter> {
+        unimplemented!()
     }
 }
 
@@ -572,6 +597,8 @@ impl StateStore for HummockStorage {
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::version::HummockVersion;
 
+use crate::panic_store::PanicStateStoreIter;
+
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
     pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
@@ -633,6 +660,7 @@ impl HummockStorage {
             Arc::new(RpcFilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
+            None,
         )
         .await
     }

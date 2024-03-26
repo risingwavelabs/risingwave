@@ -95,6 +95,11 @@ public class SourceValidateHandler {
 
         boolean isCdcSourceJob = request.getIsSourceJob();
         boolean isBackfillTable = request.getIsBackfillTable();
+        LOG.info(
+                "source_id: {}, is_cdc_source_job: {}, is_backfill_table: {}",
+                request.getSourceId(),
+                isCdcSourceJob,
+                isBackfillTable);
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {

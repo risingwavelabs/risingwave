@@ -123,27 +123,33 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
 
     if let Some(config_path) = opts.config_path.as_ref() {
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.config_path = config_path.clone();
+            meta_opts.config_path.clone_from(config_path);
         }
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.config_path = config_path.clone();
+            compute_opts.config_path.clone_from(config_path);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.config_path = config_path.clone();
+            frontend_opts.config_path.clone_from(config_path);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.config_path = config_path.clone();
+            compactor_opts.config_path.clone_from(config_path);
         }
     }
     if let Some(prometheus_listener_addr) = opts.prometheus_listener_addr.as_ref() {
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compute_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            frontend_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compactor_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
             meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
@@ -272,7 +278,6 @@ mod test {
                             etcd_username: "",
                             etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: None,
-                            dashboard_ui_path: None,
                             prometheus_endpoint: None,
                             prometheus_selector: None,
                             privatelink_endpoint_default_tags: None,
@@ -292,6 +297,7 @@ mod test {
                             backup_storage_url: None,
                             backup_storage_directory: None,
                             heap_profiling_dir: None,
+                            dangerous_max_idle_secs: None,
                         },
                     ),
                     compute_opts: Some(

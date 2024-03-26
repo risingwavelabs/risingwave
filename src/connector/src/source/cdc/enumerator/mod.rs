@@ -35,7 +35,7 @@ pub const DATABASE_SERVERS_KEY: &str = "database.servers";
 
 #[derive(Debug)]
 pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
-    /// The source_id in the catalog
+    /// The `source_id` in the catalog
     source_id: u32,
     worker_node_addrs: Vec<HostAddr>,
     _phantom: PhantomData<T>,

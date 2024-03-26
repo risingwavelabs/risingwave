@@ -23,8 +23,8 @@ use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 
 use crate::object::{
-    BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter,
-    ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    prefix, BoxedStreamingUploader, ObjectDataStream, ObjectError, ObjectMetadata,
+    ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -61,8 +61,18 @@ impl OpendalObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for OpendalObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
-        String::default()
+    fn get_object_prefix(&self, obj_id: u64) -> String {
+        match self.engine_type {
+            EngineType::S3 => prefix::s3::get_object_prefix(obj_id),
+            EngineType::Memory => String::default(),
+            EngineType::Hdfs => String::default(),
+            EngineType::Gcs => String::default(),
+            EngineType::Obs => String::default(),
+            EngineType::Oss => String::default(),
+            EngineType::Webhdfs => String::default(),
+            EngineType::Azblob => String::default(),
+            EngineType::Fs => String::default(),
+        }
     }
 
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
