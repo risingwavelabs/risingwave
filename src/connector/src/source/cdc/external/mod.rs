@@ -15,6 +15,9 @@
 pub mod mock_external_table;
 mod postgres;
 
+#[cfg(not(madsim))]
+mod maybe_tls_connector;
+
 use std::collections::HashMap;
 use std::fmt;
 
