@@ -1126,36 +1126,21 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
-    let (new_table_fragment_info, unregistered_state_table_ids) = match &command_ctx.command {
-        Command::CreateStreamingJob {
-            table_fragments, ..
-        } => (
-            Some(NewTableFragmentInfo {
-                table_id: table_fragments.table_id(),
-                mv_table_id: table_fragments.mv_table_id().map(TableId::new),
-                internal_table_ids: table_fragments
-                    .internal_table_ids()
-                    .into_iter()
-                    .map(TableId::new)
-                    .collect(),
-            }),
-            HashSet::new(),
-        ),
-        Command::CancelStreamingJob(table_fragments) => {
-            let table_id = table_fragments.table_id();
-            let mut table_ids =
-                HashSet::from_iter(table_fragments.all_table_ids().map(TableId::new));
-            table_ids.insert(table_id);
-            (None, table_ids)
-        }
-        Command::DropStreamingJobs {
-            unregistered_state_table_ids,
-            ..
-        } => (
-            None,
-            HashSet::from_iter(unregistered_state_table_ids.iter().cloned()),
-        ),
-        _ => (None, HashSet::new()),
+    let new_table_fragment_info = if let Command::CreateStreamingJob {
+        table_fragments, ..
+    } = &command_ctx.command
+    {
+        Some(NewTableFragmentInfo {
+            table_id: table_fragments.table_id(),
+            mv_table_id: table_fragments.mv_table_id().map(TableId::new),
+            internal_table_ids: table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .map(TableId::new)
+                .collect(),
+        })
+    } else {
+        None
     };
 
     let info = CommitEpochInfo::new(
@@ -1178,7 +1163,6 @@ fn collect_commit_epoch_info(
         ),
         sst_to_worker,
         new_table_fragment_info,
-        unregistered_state_table_ids,
     );
     (info, progresses)
 }
