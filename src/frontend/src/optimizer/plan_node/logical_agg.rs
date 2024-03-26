@@ -90,9 +90,9 @@ impl LogicalAgg {
         let input_col_num = stream_input.schema().len();
 
         // Generate vnode via project
-        let (project, vnode_col_idx) = generic::Project::with_vnode_col(stream_input, dist_key);
         // TODO(kwannoel): We should apply Project optimization rules here.
-        let project = StreamProject::new(project);
+        let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
+        let vnode_col_idx = project.base.schema().len() - 1;
 
         // Generate local agg step
         let mut local_group_key = self.group_key().clone();

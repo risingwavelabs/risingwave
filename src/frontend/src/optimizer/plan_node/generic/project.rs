@@ -188,8 +188,8 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         Self::new(exprs, input)
     }
 
-    /// Creates a `Project` with an additional `_vnode` column.
-    pub fn with_vnode_col(input: PlanRef, dist_key: &[usize]) -> (Self, usize) {
+    /// Creates a `Project` with an additional `_vnode` column at the end of the schema.
+    pub fn with_vnode_col(input: PlanRef, dist_key: &[usize]) -> Self {
         let input_fields = input.schema().fields();
         let mut new_exprs: Vec<_> = input_fields
             .iter()
@@ -211,7 +211,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
 
         let mut new = Self::new(new_exprs, input);
         new.field_names.insert(vnode_expr_idx, "_vnode".to_string());
-        (new, vnode_expr_idx)
+        new
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {

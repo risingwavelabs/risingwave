@@ -137,8 +137,8 @@ impl LogicalTopN {
         dist_key: &[usize],
     ) -> Result<PlanRef> {
         // use projectiton to add a column for vnode, and use this column as group key.
-        let (project, vnode_col_idx) = generic::Project::with_vnode_col(stream_input, dist_key);
-        let project = StreamProject::new(project);
+        let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
+        let vnode_col_idx = project.base.schema().len() - 1;
 
         let limit_attr = TopNLimit::new(
             self.limit_attr().limit() + self.offset(),
@@ -165,10 +165,10 @@ impl LogicalTopN {
         let global_top_n = StreamTopN::new(global_top_n);
 
         // use another projection to remove the column we added before.
-        let n_total_cols = global_top_n.base.schema().len();
+        assert_eq!(vnode_col_idx, global_top_n.base.schema().len() - 1);
         let project = StreamProject::new(generic::Project::with_out_col_idx(
             global_top_n.into(),
-            (0..n_total_cols).filter(|&i| i != vnode_col_idx),
+            0..vnode_col_idx,
         ));
         Ok(project.into())
     }
