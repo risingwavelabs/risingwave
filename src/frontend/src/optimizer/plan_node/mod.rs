@@ -848,7 +848,6 @@ mod logical_project_set;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
-mod logical_source_scan;
 mod logical_sys_scan;
 mod logical_table_function;
 mod logical_topn;
@@ -942,7 +941,6 @@ pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
-pub use logical_source_scan::LogicalSourceScan;
 pub use logical_sys_scan::LogicalSysScan;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
@@ -1017,7 +1015,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, CdcScan }
             , { Logical, SysScan }
             , { Logical, Source }
-            , { Logical, SourceScan }
             , { Logical, Insert }
             , { Logical, Delete }
             , { Logical, Update }
@@ -1116,7 +1113,6 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, CdcScan }
             , { Logical, SysScan }
             , { Logical, Source }
-            , { Logical, SourceScan }
             , { Logical, Insert }
             , { Logical, Delete }
             , { Logical, Update }

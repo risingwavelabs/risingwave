@@ -243,7 +243,10 @@ pub struct ConfigMap {
     #[parameter(default = false)]
     background_ddl: bool,
 
-    /// Enable reusable source. Currently only for Kafka.
+    /// Enable shared source. Currently only for Kafka.
+    ///
+    /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
+    /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
     #[parameter(default = false)]
     rw_enable_shared_source: bool,
 

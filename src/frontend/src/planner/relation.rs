@@ -29,7 +29,7 @@ use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    LogicalSource, LogicalSourceScan, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -116,19 +116,13 @@ impl Planner {
                 bail_not_implemented!("As Of Version is not supported yet.")
             }
         }
-        // XXX: can we unify them into one operator?
-        // Note that batch scan on source goes through the same code path. It makes little sense to use different operators in this case.
-        if source.is_shared() && self.ctx().session_ctx().config().rw_enable_shared_source() {
-            Ok(LogicalSourceScan::new(Rc::new(source.catalog), self.ctx(), as_of)?.into())
-        } else {
-            Ok(LogicalSource::with_catalog(
-                Rc::new(source.catalog),
-                SourceNodeKind::CreateMViewOrBatch,
-                self.ctx(),
-                as_of,
-            )?
-            .into())
-        }
+        Ok(LogicalSource::with_catalog(
+            Rc::new(source.catalog),
+            SourceNodeKind::CreateMViewOrBatch,
+            self.ctx(),
+            as_of,
+        )?
+        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

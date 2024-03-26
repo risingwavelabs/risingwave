@@ -1426,7 +1426,7 @@ pub async fn handle_create_source(
             let context = OptimizerContext::from_handler_args(handler_args);
             let source_node = LogicalSource::with_catalog(
                 Rc::new(SourceCatalog::from(&source)),
-                SourceNodeKind::CreateSourceWithStreamjob,
+                SourceNodeKind::CreateSharedSource,
                 context.into(),
                 None,
             )?;

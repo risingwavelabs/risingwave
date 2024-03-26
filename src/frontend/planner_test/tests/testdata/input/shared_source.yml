@@ -1,0 +1,55 @@
+- id: create_source
+  sql: |
+    CREATE SOURCE s(x int,y int)
+    WITH(
+        connector='kafka',
+        topic = 'mytopic',
+        properties.bootstrap.server = '6',
+        scan.startup.mode = 'earliest',
+    ) FORMAT PLAIN ENCODE JSON;
+  expected_outputs: []
+# Note: The execution order is first apply config, then execute "before", then execute "sql"
+# We use with_config_map to control the config when CREATE SOURCE, and use another SET statement to change the config for CREATE MV
+#
+# batch: All 4 plans should be the same.
+# stream: StreamSourceScan (with backfill) should be used only for the last 1. All other 3 use StreamSource.
+- with_config_map:
+    rw_enable_shared_source: false
+  before:
+    - create_source
+  sql: |
+    SET rw_enable_shared_source = false;
+    select * from s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- with_config_map:
+    rw_enable_shared_source: false
+  before:
+    - create_source
+  sql: |
+    SET rw_enable_shared_source = true;
+    select * from s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- with_config_map:
+    rw_enable_shared_source: true
+  before:
+    - create_source
+  sql: |
+    SET rw_enable_shared_source = false;
+    select * from s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- with_config_map:
+    rw_enable_shared_source: true
+  before:
+    - create_source
+  sql: |
+    SET rw_enable_shared_source = true;
+    select * from s;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
