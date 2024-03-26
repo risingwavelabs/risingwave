@@ -107,6 +107,17 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_new_fs_connector())
     }
 
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_iceberg_connector())
+    }
+
+    /// Currently, only iceberg source supports time travel.
+    pub fn support_time_travel(&self) -> bool {
+        self.is_iceberg_connector()
+    }
+
     /// The columns in stream/batch source node indicate the actual columns it will produce,
     /// instead of the columns defined in source catalog. The difference is generated columns.
     pub fn exclude_generated_columns(mut self) -> (Self, Option<usize>) {
