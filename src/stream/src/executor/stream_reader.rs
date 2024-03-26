@@ -104,6 +104,10 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
         assert!(self.paused, "not paused");
         self.paused = false;
     }
+
+    pub fn into_inner(self) -> (ReaderArm<M>, ReaderArm<M>) {
+        self.inner.into_inner()
+    }
 }
 
 impl<const BIASED: bool, M> Stream for StreamReaderWithPause<BIASED, M> {
