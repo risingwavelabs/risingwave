@@ -219,8 +219,12 @@ pub async fn standalone(
     if is_in_memory {
         eprintln!(
             "{}",
-            console::style("WARNING: You are using RisingWave's in-memory mode.
-It SHOULD NEVER be used in benchmarks and production environment!!!").red().bold()
+            console::style(
+                "WARNING: You are using RisingWave's in-memory mode.
+It SHOULD NEVER be used in benchmarks and production environment!!!"
+            )
+            .red()
+            .bold()
         );
     }
 
