@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::TopNLimit;
+use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, Logical,
@@ -25,7 +25,6 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
@@ -137,27 +136,9 @@ impl LogicalTopN {
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
-        let input_fields = stream_input.schema().fields();
-
         // use projectiton to add a column for vnode, and use this column as group key.
-        let mut exprs: Vec<_> = input_fields
-            .iter()
-            .enumerate()
-            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
-            .collect();
-
-        exprs.push(
-            FunctionCall::new(
-                ExprType::Vnode,
-                dist_key
-                    .iter()
-                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
-                    .collect(),
-            )?
-            .into(),
-        );
-        let vnode_col_idx = exprs.len() - 1;
-        let project = StreamProject::new(generic::Project::new(exprs.clone(), stream_input));
+        let (project, vnode_col_idx) = generic::Project::with_vnode_col(stream_input, dist_key);
+        let project = StreamProject::new(project);
 
         let limit_attr = TopNLimit::new(
             self.limit_attr().limit() + self.offset(),
@@ -184,8 +165,11 @@ impl LogicalTopN {
         let global_top_n = StreamTopN::new(global_top_n);
 
         // use another projection to remove the column we added before.
-        exprs.pop();
-        let project = StreamProject::new(generic::Project::new(exprs, global_top_n.into()));
+        let n_total_cols = global_top_n.base.schema().len();
+        let project = StreamProject::new(generic::Project::with_out_col_idx(
+            global_top_n.into(),
+            (0..n_total_cols).filter(|&i| i != vnode_col_idx),
+        ));
         Ok(project.into())
     }
 }

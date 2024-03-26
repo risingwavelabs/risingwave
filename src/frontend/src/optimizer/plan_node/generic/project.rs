@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -22,7 +22,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{
-    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
+    FunctionCall, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
@@ -49,6 +50,8 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
 #[allow(clippy::manual_non_exhaustive)]
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
+    /// Mapping from expr index to field name. May not contain all exprs.
+    pub field_names: BTreeMap<usize, String>,
     pub input: PlanRef,
     // we need some check when construct the `Project::new`
     _private: (),
@@ -81,7 +84,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
                 // Get field info from o2i.
                 let (name, sub_fields, type_name) = match o2i.try_map(i) {
                     Some(input_idx) => {
-                        let field = input_schema.fields()[input_idx].clone();
+                        let mut field = input_schema.fields()[input_idx].clone();
+                        if let Some(name) = self.field_names.get(&i) {
+                            field.name = name.clone();
+                        }
                         (field.name, field.sub_fields, field.type_name)
                     }
                     None => match expr {
@@ -90,11 +96,14 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
                             vec![],
                             String::new(),
                         ),
-                        _ => (
-                            format!("$expr{}", ctx.next_expr_display_id()),
-                            vec![],
-                            String::new(),
-                        ),
+                        _ => {
+                            let name = if let Some(name) = self.field_names.get(&i) {
+                                name.clone()
+                            } else {
+                                format!("$expr{}", ctx.next_expr_display_id())
+                            };
+                            (name, vec![], String::new())
+                        }
                     },
                 };
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
@@ -132,6 +141,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         }
         Project {
             exprs,
+            field_names: Default::default(),
             input,
             _private: (),
         }
@@ -176,6 +186,31 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
             .collect();
         Self::new(exprs, input)
+    }
+
+    pub fn with_vnode_col(input: PlanRef, dist_key: &[usize]) -> (Self, usize) {
+        let input_fields = input.schema().fields();
+        let mut new_exprs: Vec<_> = input_fields
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
+            .collect();
+        new_exprs.push(
+            FunctionCall::new(
+                ExprType::Vnode,
+                dist_key
+                    .iter()
+                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
+                    .collect(),
+            )
+            .expect("Vnode function call should be valid here")
+            .into(),
+        );
+        let vnode_expr_idx = new_exprs.len() - 1;
+
+        let mut new = Self::new(new_exprs, input);
+        new.field_names.insert(vnode_expr_idx, "_vnode".to_string());
+        (new, vnode_expr_idx)
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
