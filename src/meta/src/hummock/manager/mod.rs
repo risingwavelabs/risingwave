@@ -60,10 +60,10 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
     Event as ResponseEvent, PullTaskAck,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, GroupDestroy,
-    GroupMetaChange, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
-    HummockVersionStats, IntraLevelDelta, PbCompactionGroupInfo, SstableInfo,
-    SubscribeCompactionEventRequest, TableOption, TableSchema,
+    CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta, GroupMetaChange,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersionStats,
+    IntraLevelDelta, PbCompactionGroupInfo, SstableInfo, SubscribeCompactionEventRequest,
+    TableOption, TableSchema,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use rw_futures_util::{pending_on_none, select_all};
@@ -74,7 +74,7 @@ use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, LocalSelectorStatistic, ManualCompactionOption, ManualCompactionSelector,
@@ -264,7 +264,6 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_info: Option<NewTableFragmentInfo>,
-    pub unregistered_table_fragment_ids: HashSet<TableId>,
 }
 
 impl CommitEpochInfo {
@@ -273,14 +272,12 @@ impl CommitEpochInfo {
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
         new_table_fragment_info: Option<NewTableFragmentInfo>,
-        unregistered_table_fragment_ids: HashSet<TableId>,
     ) -> Self {
         Self {
             sstables,
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
-            unregistered_table_fragment_ids,
         }
     }
 
@@ -294,7 +291,6 @@ impl CommitEpochInfo {
             HashMap::new(),
             sst_to_context,
             None,
-            HashSet::new(),
         )
     }
 }
@@ -1592,7 +1588,6 @@ impl HummockManager {
             new_table_watermarks,
             sst_to_context,
             new_table_fragment_info,
-            unregistered_table_fragment_ids,
         } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1633,10 +1628,6 @@ impl HummockManager {
 
         // Add new table
         if let Some(new_fragment_table_info) = new_table_fragment_info {
-            assert!(
-                unregistered_table_fragment_ids.is_empty(),
-                "cannot unregister state table and register state table at the same epoch"
-            );
             let snapshot_group_id =
                 SnapshotGroupId::from(new_fragment_table_info.table_id.table_id);
             if old_version.snapshot_groups.contains_key(&snapshot_group_id) {
@@ -1718,83 +1709,6 @@ impl HummockManager {
                 });
                 let _ = table_compaction_group_mapping
                     .insert(table_id, StaticCompactionGroupId::MaterializedView as u64);
-            }
-        }
-
-        // unregister table
-        if !unregistered_table_fragment_ids.is_empty() {
-            let mut unregistered_state_table_ids = HashSet::new();
-            for (snapshot_group_id, group) in &old_version.snapshot_groups {
-                if unregistered_table_fragment_ids
-                    .contains(&TableId::new(u32::from(*snapshot_group_id)))
-                {
-                    unregistered_state_table_ids.extend(group.member_table_ids.iter().cloned());
-                    new_version_delta
-                        .snapshot_group_delta
-                        .insert(*snapshot_group_id, SnapshotGroupDelta::Destroy);
-                }
-            }
-
-            let mut group_unregistered_table_ids: HashMap<_, Vec<_>> = HashMap::new();
-            for (group_id, group) in &old_version.levels {
-                for table_id in &group.member_table_ids {
-                    if unregistered_state_table_ids.contains(&TableId::new(*table_id)) {
-                        group_unregistered_table_ids
-                            .entry(*group_id)
-                            .or_default()
-                            .push(*table_id);
-                    }
-                }
-            }
-            for (group_id, unregistered_state_table_ids) in group_unregistered_table_ids {
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(group_id)
-                    .or_default()
-                    .group_deltas;
-                let original_member_table_ids = &old_version
-                    .levels
-                    .get(&group_id)
-                    .expect("should exist")
-                    .member_table_ids;
-                let delta = if unregistered_state_table_ids.len() == original_member_table_ids.len()
-                    && group_id > StaticCompactionGroupId::End as u64
-                {
-                    info!(
-                        group_id,
-                        ?original_member_table_ids,
-                        ?unregistered_state_table_ids,
-                        "compaction group will be destroyed"
-                    );
-                    DeltaType::GroupDestroy(GroupDestroy {})
-                } else {
-                    info!(
-                        group_id,
-                        ?unregistered_state_table_ids,
-                        "remove member table id from compaction group"
-                    );
-                    DeltaType::GroupMetaChange(GroupMetaChange {
-                        table_ids_remove: unregistered_state_table_ids,
-                        ..Default::default()
-                    })
-                };
-                group_deltas.push(GroupDelta {
-                    delta_type: Some(delta),
-                });
-            }
-            for table_id in &unregistered_state_table_ids {
-                table_compaction_group_mapping.remove(table_id);
-            }
-        }
-
-        for snapshot_group_id in old_version.snapshot_groups.keys() {
-            if !unregistered_table_fragment_ids
-                .contains(&TableId::new(u32::from(*snapshot_group_id)))
-            {
-                new_version_delta.snapshot_group_delta.insert(
-                    *snapshot_group_id,
-                    SnapshotGroupDelta::NewCommittedEpoch(epoch),
-                );
             }
         }
 

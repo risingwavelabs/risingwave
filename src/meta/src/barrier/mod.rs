@@ -16,7 +16,6 @@ use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
-use std::iter::once;
 use std::mem::{replace, take};
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +58,7 @@ use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
-use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -1127,19 +1126,21 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
-    let (new_table_fragment_info, unregistered_table_fragment_ids) = match &command_ctx.command {
-        Command::CreateStreamingJob {
-            new_table_fragment_info,
-            ..
-        } => (Some(new_table_fragment_info.clone()), HashSet::new()),
-        Command::CancelStreamingJob(table_fragments) => {
-            (None, HashSet::from_iter(once(table_fragments.table_id())))
-        }
-        Command::DropStreamingJobs {
-            unregistered_table_fragment_ids,
-            ..
-        } => (None, unregistered_table_fragment_ids.clone()),
-        _ => (None, HashSet::new()),
+    let new_table_fragment_info = if let Command::CreateStreamingJob {
+        table_fragments, ..
+    } = &command_ctx.command
+    {
+        Some(NewTableFragmentInfo {
+            table_id: table_fragments.table_id(),
+            mv_table_id: table_fragments.mv_table_id().map(TableId::new),
+            internal_table_ids: table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .map(TableId::new)
+                .collect(),
+        })
+    } else {
+        None
     };
 
     let info = CommitEpochInfo::new(
@@ -1162,7 +1163,6 @@ fn collect_commit_epoch_info(
         ),
         sst_to_worker,
         new_table_fragment_info,
-        unregistered_table_fragment_ids,
     );
     (info, progresses)
 }
