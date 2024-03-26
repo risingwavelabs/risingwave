@@ -1068,20 +1068,6 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Executor Evicted Cache Memory",
-                    "The operator-level evicted memory statistics collected by each LRU cache",
-                    [
-                        panels.target(
-                            f"sum({metric('stream_memory_evicted')}) by (table_id, sequence)",
-                            "table {{table_id}} sequence: {{sequence}}",
-                        ),
-                        panels.target_hidden(
-                            f"{metric('stream_memory_evicted')}",
-                            "table {{table_id}} actor {{actor_id}} sequence: {{sequence}} epoch: {{epoch}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
                     "Executor Cache Memory Usage of Materialized Views",
                     "Memory usage aggregated by materialized views",
                     [
@@ -4349,6 +4335,7 @@ dashboard = Dashboard(
     sharedCrosshair=True,
     templating=templating,
     version=dashboard_version,
+    refresh="",
     panels=[
         *section_actor_info(panels),
         *section_cluster_node(panels),
