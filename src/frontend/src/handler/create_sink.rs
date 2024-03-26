@@ -93,7 +93,7 @@ pub fn gen_sink_plan(
         CreateSink::From(from_name) => {
             sink_from_table_name = from_name.0.last().unwrap().real_value();
             direct_sink = true;
-            Box::new(gen_query_from_table_name(from_name)?)
+            Box::new(gen_query_from_table_name(from_name))
         }
         CreateSink::AsQuery(query) => {
             sink_from_table_name = sink_table_name.clone();

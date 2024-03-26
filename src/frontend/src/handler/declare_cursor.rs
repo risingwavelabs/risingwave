@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::time::Duration;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{DeclareCursorStatement, Ident, ObjectName, Statement};
 
 use super::query::handle_query;
 use super::util::{
-    convert_epoch_to_logstore_i64, gen_query_from_logstore_ge_rw_timestamp,
-    gen_query_from_table_name,
+    convert_epoch_to_logstore_i64, convert_unix_millis_to_logstore_i64,
+    gen_query_from_logstore_ge_rw_timestamp, gen_query_from_table_name,
 };
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
-use crate::session::cursor_manager::Cursor;
 use crate::Binder;
 
 pub async fn handle_declare_cursor(
@@ -55,45 +53,61 @@ pub async fn handle_declare_cursor(
         )]);
         let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
             subscription_from_table_name,
-        )?));
+        )));
         let res = handle_query(handle_args, query_stmt, formats).await?;
-        let start_rw_timestamp = session
-            .get_epoch_from_exn_ctx()
+        let start_epoch = session
+            .get_pinned_snapshot()
             .ok_or_else(|| {
                 ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
             })?
             .epoch_with_frontend_pinned()
             .ok_or_else(|| {
-                ErrorCode::InternalError("Fetch Cursor don't support setting an epoch".to_string())
+                ErrorCode::InternalError("Fetch Cursor can't support setting an epoch".to_string())
             })?
             .0;
 
-        (convert_epoch_to_logstore_i64(start_rw_timestamp), res)
+        (convert_epoch_to_logstore_i64(start_epoch), res)
     } else {
-        let start_rw_timestamp = convert_epoch_to_logstore_i64(start_rw_timestamp);
-        let query_stmt =
-            gen_query_from_logstore_ge_rw_timestamp(stmt.cursor_from.clone(), start_rw_timestamp)?;
+        check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
+        let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
+        let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+            &subscription.get_log_store_name()?,
+            start_rw_timestamp,
+        )));
         let res = handle_query(handle_args, query_stmt, formats).await?;
         (start_rw_timestamp, res)
     };
     // Create cursor based on the response
-    let cursor_retention_secs = std::cmp::min(
-        session.statement_timeout(),
-        Duration::from_secs(subscription.get_retention_seconds()?),
-    );
     let cursor_manager = session.get_cursor_manager();
     let mut cursor_manager = cursor_manager.lock().await;
-    let cursor = Cursor::new(
-        cursor_name.clone(),
-        res,
-        start_rw_timestamp,
-        is_snapshot,
-        true,
-        stmt.cursor_from.clone(),
-    )
-    .await?;
-    cursor_manager.add_cursor_retention_secs(stmt.cursor_from.clone(), cursor_retention_secs);
-    cursor_manager.add_cursor(cursor)?;
+    cursor_manager
+        .add_cursor(
+            cursor_name.clone(),
+            res,
+            start_rw_timestamp,
+            is_snapshot,
+            false,
+            stmt.cursor_from.clone(),
+            subscription.get_retention_seconds()?,
+        )
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
+}
+
+fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<()> {
+    let now = Epoch::now().as_unix_millis();
+    let min_unix_millis = now - retention_seconds * 1000;
+    if unix_millis > now {
+        return Err(ErrorCode::InternalError(format!(
+            "rw_timestamp is too large, need to be less than the current unix_millis {:?}",
+            now
+        ))
+        .into());
+    }
+    if unix_millis < min_unix_millis {
+        return Err(ErrorCode::InternalError(
+            format!("rw_timestamp is too small, need to be large than the current unix_millis {:?} - subscription's retention time {:?}",now,retention_seconds * 1000)).into());
+    }
+    Ok(())
 }

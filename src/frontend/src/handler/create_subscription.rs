@@ -54,7 +54,7 @@ pub fn gen_subscription_plan(
         .unwrap()
         .real_value()
         .clone();
-    let query = Box::new(gen_query_from_table_name(stmt.subscription_from)?);
+    let query = Box::new(gen_query_from_table_name(stmt.subscription_from));
 
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;

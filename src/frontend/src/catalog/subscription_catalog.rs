@@ -70,6 +70,7 @@ pub struct SubscriptionCatalog {
 
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
+    pub subscription_internal_table_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -122,6 +123,16 @@ impl SubscriptionCatalog {
         self.definition.clone()
     }
 
+    pub fn get_log_store_name(&self) -> Result<String> {
+        let log_store_name = self
+            .subscription_internal_table_name
+            .clone()
+            .ok_or_else(|| {
+                ErrorCode::InternalError("Fetch Cursor can't find log_store's name".to_string())
+            })?;
+        Ok(log_store_name)
+    }
+
     pub fn to_proto(&self) -> PbSubscription {
         assert!(!self.dependent_relations.is_empty());
         PbSubscription {
@@ -150,6 +161,7 @@ impl SubscriptionCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
+            subscription_internal_table_name: self.subscription_internal_table_name.clone(),
         }
     }
 }
@@ -185,6 +197,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
+            subscription_internal_table_name: prost.subscription_internal_table_name.clone(),
         }
     }
 }

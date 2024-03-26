@@ -195,7 +195,7 @@ impl SessionImpl {
         })
     }
 
-    pub fn get_epoch_from_exn_ctx(&self) -> Option<ReadSnapshot> {
+    pub fn get_pinned_snapshot(&self) -> Option<ReadSnapshot> {
         self.txn_ctx().snapshot.clone()
     }
 

@@ -31,7 +31,7 @@ pub async fn handle_close_cursor(
         .get_cursor_manager()
         .lock()
         .await
-        .remove_cursor(cursor_name)?;
+        .remove_cursor(cursor_name);
 
     Ok(PgResponse::empty_result(StatementType::CLOSE_CURSOR))
 }

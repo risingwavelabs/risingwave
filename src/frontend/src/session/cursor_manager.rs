@@ -26,7 +26,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::error::{ErrorCode, Result};
-use crate::handler::util::convert_logstore_i64_to_epoch;
+use crate::handler::util::convert_logstore_i64_to_unix_millis;
 use crate::handler::RwPgResponse;
 pub struct Cursor {
     cursor_name: String,
@@ -79,7 +79,7 @@ impl Cursor {
                 // and query_timestamp and start_timestamp must be equal to each other to prevent data errors caused by two long cursor times
                 return Err(ErrorCode::InternalError(format!(
                     " No data found for rw_timestamp {:?}, data may have been recycled, please recreate cursor"
-                ,convert_logstore_i64_to_epoch(start_timestamp))).into());
+                ,convert_logstore_i64_to_unix_millis(start_timestamp))).into());
             }
             (query_timestamp, data_chunk_cache)
         };
@@ -96,31 +96,12 @@ impl Cursor {
     }
 
     pub async fn next(&mut self) -> Result<CursorRowValue> {
-        let stream = self.rw_pg_response.values_stream();
         loop {
-            if self.data_chunk_cache.is_empty() {
-                // 1. Cache is empty, need to query data
-                if let Some(row_set) = stream.next().await {
-                    // 1a. Get the data from the stream and consume it in the next cycle
-                    self.data_chunk_cache = VecDeque::from(row_set.map_err(|e| {
-                        ErrorCode::InternalError(format!(
-                            "Cursor get next chunk error {:?}",
-                            e.to_string()
-                        ))
-                    })?);
-                } else {
-                    // 1b. No data was fetched and next_rw_timestamp was not found, so need to query using the rw_timestamp+1.
-                    return Ok(CursorRowValue::QueryWithStartRwTimestamp(
-                        self.rw_timestamp,
-                        self.subscription_name.clone(),
-                    ));
-                }
-            }
             if let Some(row) = self.data_chunk_cache.pop_front() {
-                // 2. fetch data
+                // 1. fetch data
                 let new_row = row.take();
                 if self.is_snapshot {
-                    // 2a. The rw_timestamp in the table is all the same, so don't need to check.
+                    // 1a. The rw_timestamp in the table is all the same, so don't need to check.
                     return Ok(CursorRowValue::Row((
                         Row::new(build_row_with_snapshot(new_row, self.rw_timestamp)),
                         self.pg_desc.clone(),
@@ -135,17 +116,34 @@ impl Cursor {
                     .unwrap();
 
                 if timestamp_row != self.rw_timestamp {
-                    // 2b. Find next_rw_timestamp, need update cursor with next_rw_timestamp.
+                    // 1b. Find next_rw_timestamp, need update cursor with next_rw_timestamp.
                     return Ok(CursorRowValue::QueryWithNextRwTimestamp(
                         timestamp_row,
                         self.subscription_name.clone(),
                     ));
                 } else {
-                    // 2c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
+                    // 1c. The rw_timestamp of this row is equal to self.rw_timestamp, return row
                     return Ok(CursorRowValue::Row((
                         Row::new(build_row_with_logstore(new_row, timestamp_row)?),
                         self.pg_desc.clone(),
                     )));
+                }
+            } else {
+                // 2. Cache is empty, need to query data
+                if let Some(row_set) = self.rw_pg_response.values_stream().next().await {
+                    // 1a. Get the data from the stream and consume it in the next cycle
+                    self.data_chunk_cache = VecDeque::from(row_set.map_err(|e| {
+                        ErrorCode::InternalError(format!(
+                            "Cursor get next chunk error {:?}",
+                            e.to_string()
+                        ))
+                    })?);
+                } else {
+                    // 2b. No data was fetched and next_rw_timestamp was not found, so need to query using the rw_timestamp+1.
+                    return Ok(CursorRowValue::QueryWithStartRwTimestamp(
+                        self.rw_timestamp,
+                        self.subscription_name.clone(),
+                    ));
                 }
             }
         }
@@ -155,7 +153,7 @@ impl Cursor {
 pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>, rw_timestamp: i64) -> Vec<Option<Bytes>> {
     let mut new_row = vec![
         Some(Bytes::from(
-            convert_logstore_i64_to_epoch(rw_timestamp).to_string(),
+            convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
         )),
         Some(Bytes::from(1i16.to_string())),
     ];
@@ -169,7 +167,7 @@ pub fn build_row_with_logstore(
 ) -> Result<Vec<Option<Bytes>>> {
     // remove sqr_id, vnode ,_row_id
     let mut new_row = vec![Some(Bytes::from(
-        convert_logstore_i64_to_epoch(rw_timestamp).to_string(),
+        convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
     ))];
     new_row.extend(row.drain(3..row.len() - 1).collect_vec());
     Ok(new_row)
@@ -204,61 +202,74 @@ pub enum CursorRowValue {
 #[derive(Default)]
 pub struct CursorManager {
     cursor_map: HashMap<String, (Cursor, Instant)>,
-    // Save subsciption's retentain_secs
-    cursor_retention_secs_maps: HashMap<ObjectName, Duration>,
 }
 
 impl CursorManager {
-    pub fn add_cursor_retention_secs(
+    pub async fn add_cursor(
         &mut self,
+        cursor_name: String,
+        rw_pg_response: RwPgResponse,
+        start_timestamp: i64,
+        is_snapshot: bool,
+        need_check_timestamp: bool,
         subscription_name: ObjectName,
-        retention_secs: Duration,
-    ) {
-        self.cursor_retention_secs_maps
-            .insert(subscription_name, retention_secs);
-    }
-
-    pub fn add_cursor(&mut self, cursor: Cursor) -> Result<()> {
-        let cursor_need_drop_time = Instant::now()
-            + *self
-                .cursor_retention_secs_maps
-                .get(&cursor.subscription_name)
-                .ok_or_else(|| {
-                    ErrorCode::InternalError(format!(
-                        "Cursor can't find retention time for subscription_name: {:?}",
-                        cursor.subscription_name
-                    ))
-                })?;
+        retention_secs: u64,
+    ) -> Result<()> {
+        if self.cursor_map.contains_key(&cursor_name) {
+            return Err(ErrorCode::InternalError(format!(
+                "Cursor `{}` already exists",
+                cursor_name
+            ))
+            .into());
+        }
+        let cursor = Cursor::new(
+            cursor_name,
+            rw_pg_response,
+            start_timestamp,
+            is_snapshot,
+            need_check_timestamp,
+            subscription_name,
+        )
+        .await?;
+        let cursor_need_drop_time = Instant::now() + Duration::from_secs(retention_secs);
         self.cursor_map
             .insert(cursor.cursor_name.clone(), (cursor, cursor_need_drop_time));
         Ok(())
     }
 
-    pub fn update_cursor(&mut self, cursor: Cursor) -> Result<()> {
-        let cursor_need_drop_time = Instant::now()
-            + *self
-                .cursor_retention_secs_maps
-                .get(&cursor.subscription_name)
-                .ok_or_else(|| {
-                    ErrorCode::InternalError(format!(
-                        "Cursor can't find retention time for subscription_name: {:?}",
-                        cursor.subscription_name
-                    ))
-                })?;
+    pub async fn update_cursor(
+        &mut self,
+        cursor_name: String,
+        rw_pg_response: RwPgResponse,
+        start_timestamp: i64,
+        is_snapshot: bool,
+        need_check_timestamp: bool,
+        subscription_name: ObjectName,
+        retention_secs: u64,
+    ) -> Result<()> {
+        let cursor = Cursor::new(
+            cursor_name.clone(),
+            rw_pg_response,
+            start_timestamp,
+            is_snapshot,
+            need_check_timestamp,
+            subscription_name.clone(),
+        )
+        .await?;
+        let cursor_need_drop_time = Instant::now() + Duration::from_secs(retention_secs);
         self.cursor_map
             .insert(cursor.cursor_name.clone(), (cursor, cursor_need_drop_time));
         Ok(())
     }
 
-    pub fn remove_cursor(&mut self, cursor_name: String) -> Result<()> {
+    pub fn remove_cursor(&mut self, cursor_name: String) {
         self.cursor_map.remove(&cursor_name);
-        Ok(())
     }
 
     pub async fn get_row_with_cursor(&mut self, cursor_name: String) -> Result<CursorRowValue> {
         if let Some((cursor, cursor_need_drop_time)) = self.cursor_map.get_mut(&cursor_name) {
             if Instant::now() > *cursor_need_drop_time {
-                self.remove_cursor(cursor_name)?;
+                self.remove_cursor(cursor_name);
                 return Err(ErrorCode::InternalError(
                     "The cursor has exceeded its maximum lifetime, please recreate it.".to_string(),
                 )
@@ -266,7 +277,7 @@ impl CursorManager {
             }
             cursor.next().await
         } else {
-            Err(ErrorCode::ItemNotFound(format!("Don't find cursor `{}`", cursor_name)).into())
+            Err(ErrorCode::ItemNotFound(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
     }
 }
