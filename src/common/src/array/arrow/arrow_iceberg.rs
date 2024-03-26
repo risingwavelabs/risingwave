@@ -64,8 +64,15 @@ impl ToArrowArrayWithTypeConvert for IcebergArrowConvert {
                         };
                         Some(value)
                     }
-                    crate::array::Decimal::PositiveInf => None,
-                    crate::array::Decimal::NegativeInf => None,
+                    // For Inf, we replace them with the max/min value within the precision.
+                    crate::array::Decimal::PositiveInf => {
+                        let max_value = 10_i128.pow(precision as u32) - 1;
+                        Some(max_value)
+                    }
+                    crate::array::Decimal::NegativeInf => {
+                        let max_value = 10_i128.pow(precision as u32) - 1;
+                        Some(-max_value)
+                    }
                     crate::array::Decimal::NaN => None,
                 })
             })
@@ -156,14 +163,14 @@ mod test {
             Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
-        let ty = arrow_schema::DataType::Decimal128(38, 3);
+        let ty = arrow_schema::DataType::Decimal128(6, 3);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
         let expect_array = Arc::new(
             arrow_array::Decimal128Array::from(vec![
                 None,
                 None,
-                None,
-                None,
+                Some(999999),
+                Some(-999999),
                 Some(123400),
                 Some(123456),
             ])

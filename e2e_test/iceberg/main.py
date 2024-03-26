@@ -84,7 +84,7 @@ def verify_result(args,verify_sql,verify_schema,verify_data):
                 tc.assertEqual(row1[idx], row2[idx])
             elif ty == "decimal":
                 if row2[idx] == "none":
-                    tc.assert_(row1[idx] is None)
+                    tc.assertTrue(row1[idx] is None)
                 else:
                     tc.assertEqual(row1[idx], decimal.Decimal(row2[idx]))
             else:
