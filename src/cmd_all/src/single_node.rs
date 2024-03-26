@@ -58,7 +58,6 @@ impl SingleNodeOpts {
         let empty_args = vec![] as Vec<String>;
         let mut opts = SingleNodeOpts::parse_from(empty_args);
         opts.in_memory = true;
-        opts.max_idle_secs = Some(1800);
         opts
     }
 }
