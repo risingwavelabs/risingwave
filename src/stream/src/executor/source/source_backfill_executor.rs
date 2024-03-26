@@ -520,11 +520,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     // backfill
                     Either::Right(msg) => {
                         let chunk = msg?;
-                        // TODO(optimize): actually each msg is from one split. We can
-                        // include split from the message and avoid iterating over all rows.
-                        let split_offset_mapping =
-                            get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx)
-                                .unwrap();
+
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
@@ -546,8 +542,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.system_params.load().barrier_interval_ms() as u128
                                     * WAIT_BARRIER_MULTIPLE_TIMES;
                         }
-                        split_offset_mapping.iter().for_each(|(split_id, offset)| {
+                        // TODO(optimize): actually each msg is from one split. We can
+                        // include split from the message and avoid iterating over all rows.
+                        let mut new_vis = BitmapBuilder::zeroed(chunk.visibility().len());
+
+                        for (i, (_, row)) in chunk.rows().enumerate() {
+                            let split_id: Arc<str> =
+                                row.datum_at(split_idx).unwrap().into_utf8().into();
+                            let offset: String =
+                                row.datum_at(offset_idx).unwrap().into_utf8().into();
                             // update backfill progress
+                            let mut vis = true;
                             match backfill_stage.states.entry(split_id.clone()) {
                                 Entry::Occupied(mut entry) => {
                                     let state = entry.get_mut();
@@ -559,6 +564,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         BackfillState::SourceCachingUp(_)
                                         | BackfillState::Finished => {
                                             // backfilling stopped. ignore
+                                            vis = false
                                         }
                                     }
                                 }
@@ -566,11 +572,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     entry.insert(BackfillState::Backfilling(Some(offset.clone())));
                                 }
                             }
-                        });
+                            new_vis.set(i, vis);
+                        }
 
-                        source_backfill_row_count.inc_by(chunk.cardinality() as u64);
-
-                        yield Message::Chunk(chunk);
+                        let new_vis = new_vis.finish();
+                        let card = new_vis.count_ones();
+                        if card != 0 {
+                            let new_chunk = chunk.clone_with_vis(new_vis);
+                            yield Message::Chunk(new_chunk);
+                            source_backfill_row_count.inc_by(card as u64);
+                        }
                     }
                 }
             }
