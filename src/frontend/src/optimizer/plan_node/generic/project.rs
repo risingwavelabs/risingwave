@@ -188,6 +188,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         Self::new(exprs, input)
     }
 
+    /// Creates a `Project` with an additional `_vnode` column.
     pub fn with_vnode_col(input: PlanRef, dist_key: &[usize]) -> (Self, usize) {
         let input_fields = input.schema().fields();
         let mut new_exprs: Vec<_> = input_fields
