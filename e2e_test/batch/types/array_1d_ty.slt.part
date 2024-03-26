@@ -1,0 +1,217 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select ARRAY['foo', 'bar', null];
+----
+{foo,bar,NULL}
+
+query T
+select ARRAY[1,2+3,4*5+1];
+----
+{1,5,21}
+
+query T
+select ARRAY[null];
+----
+{NULL}
+
+statement error
+select ARRAY[];
+
+query T
+select ARRAY[]::int[];
+----
+{}
+
+statement ok
+create table t (v1 int);
+
+statement ok
+insert into t values (1), (2), (3);
+
+query T rowsort
+select ARRAY[1, v1*2] from t;
+----
+{1,2}
+{1,4}
+{1,6}
+
+query I rowsort
+select * from t where Array[1,v1*2] < Array[1,6];
+----
+1
+2
+
+query I rowsort
+select * from t where Array[1,v1*2] <= Array[1,6];
+----
+1
+2
+3
+
+query I rowsort
+select * from t where Array[1,v1*2] > Array[1,2];
+----
+2
+3
+
+query I rowsort
+select * from t where Array[1,v1*2] >= Array[1,2];
+----
+1
+2
+3
+
+query I
+select * from t where Array[1,v1*2] = Array[1,6];
+----
+3
+
+query I rowsort
+select * from t where Array[1,v1*2] != Array[1,6];
+----
+1
+2
+
+query T
+select min(ARRAY[1, v1*2]) from t;
+----
+{1,2}
+
+query T
+select max(ARRAY[1, v1*2]) from t;
+----
+{1,6}
+
+query T
+select CAST(NULL as bool[]) from t;
+----
+NULL
+NULL
+NULL
+
+query T
+select array[false, false] from t;
+----
+{f,f}
+{f,f}
+{f,f}
+
+statement ok
+drop table t;
+
+# Comments from Xiangjin:
+# In RisingWave, assume arr is of type T[][][]:
+#
+#    arr[x] is of type T[][]
+#    arr[x][y] is interpreted as (arr[x])[y], and of type T[]
+#    arr[x0:x1] is of type T[][][]
+#    arr[x0:x1][y0:y1] is interpreted as (arr[x0:x1])[y0:y1], and of type T[][][]
+#    arr[x0:x1][y] is interpreted as (arr[x0:x1])[y], and of type T[][]
+#
+# In PostgreSQL, a 3d array arr would still have type T[]:
+#
+#    arr[x] or arr[x][y] is of type T but value null due to insufficient number of indices
+#    arr[x][y][z] is of type T
+#    arr[x0:x1][y0:y1][z0:z1] is of type T[] and 3d
+#    arr[x0:x1] is interpreted as arr[x0:x1][:][:], and of type T[] 3d
+#    arr[x0:x1][y] is interpreted as arr[x0:x1][1:y][:], and of type T[] 3d
+
+# array range access
+query T
+select array[1,NULL,2][-1:134124523];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[3:1];
+----
+{}
+
+query T
+select (array[1,NULL,2])[:3];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[:2];
+----
+{1,NULL}
+
+query T
+select (array[1,NULL,2])[:1];
+----
+{1}
+
+query T
+select (array[1,NULL,2])[:999];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[:0];
+----
+{}
+
+query T
+select (array[1,NULL,2])[:-1];
+----
+{}
+
+query T
+select (array[1,NULL,2])[-1:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[0:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[1:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[2:];
+----
+{NULL,2}
+
+query T
+select (array[1,NULL,2])[3:];
+----
+{2}
+
+query T
+select (array[1,NULL,2])[4:];
+----
+{}
+
+query T
+select (array[1,NULL,2])[5:];
+----
+{}
+
+query T
+select (array[1,NULL,2])[:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[5:-1];
+----
+{}
+
+query T
+select (array[1,NULL,2])[2:1];
+----
+{}
+
+# index larger than int32
+statement error cannot cast type "bigint" to "integer" in Implicit context
+select (array[1,NULL,2])[1:4294967296];
+
+statement error cannot cast type "bigint" to "integer" in Implicit context
+select (array[1,NULL,2])[4294967296:3];
