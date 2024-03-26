@@ -1031,8 +1031,9 @@ mod tests {
         let ty = DataType::Int32;
 
         let mut rng = rand::thread_rng();
+
         let left: ExprImpl = FunctionCall::new(
-            ExprType::Equal,
+            ExprType::LessThanOrEqual,
             vec![
                 InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
                 InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
@@ -1040,6 +1041,7 @@ mod tests {
         )
         .unwrap()
         .into();
+
         let right: ExprImpl = FunctionCall::new(
             ExprType::LessThan,
             vec![
@@ -1057,6 +1059,7 @@ mod tests {
         )
         .unwrap()
         .into();
+
         let other: ExprImpl = FunctionCall::new(
             ExprType::GreaterThan,
             vec![
@@ -1074,7 +1077,9 @@ mod tests {
         let cond = Condition::with_expr(other.clone())
             .and(Condition::with_expr(right.clone()))
             .and(Condition::with_expr(left.clone()));
+
         let res = cond.split(left_col_num, right_col_num);
+
         assert_eq!(res.0.conjunctions, vec![left]);
         assert_eq!(res.1.conjunctions, vec![right]);
         assert_eq!(res.2.conjunctions, vec![other]);
