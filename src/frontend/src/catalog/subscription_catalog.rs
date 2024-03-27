@@ -21,6 +21,7 @@ use risingwave_common::types::Interval;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbStreamJobStatus, PbSubscription};
+use thiserror_ext::AsReport;
 
 use super::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
@@ -110,7 +111,7 @@ impl SubscriptionCatalog {
             .map_err(|err| {
                 ErrorCode::InternalError(format!(
                     "Retention needs to be set in Interval format: {:?}",
-                    err.to_string()
+                    err.to_report_string()
                 ))
             })?
             .epoch_in_micros()

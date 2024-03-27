@@ -810,6 +810,7 @@ impl fmt::Display for WithProperties {
 pub enum Since {
     TimestampMsNum(u64),
     ProcessTime,
+    Begin,
     WithSnapshot,
 }
 
@@ -819,7 +820,8 @@ impl fmt::Display for Since {
         match self {
             TimestampMsNum(ts) => write!(f, " SINCE {}", ts),
             ProcessTime => write!(f, " SINCE PROCTIME()"),
-            WithSnapshot => write!(f, " SINCE SNAPSHOT()"),
+            Begin => write!(f, " SINCE BEGIN()"),
+            WithSnapshot => write!(f, ""),
         }
     }
 }
@@ -829,12 +831,6 @@ impl ParseTo for Since {
         p.parse_since()
     }
 }
-
-// impl From<Option<Ident>> for Since {
-//     fn from(value: Option<Ident>) -> Self {
-//         Self(value)
-//     }
-// }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

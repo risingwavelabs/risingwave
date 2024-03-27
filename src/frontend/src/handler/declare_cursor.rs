@@ -60,6 +60,17 @@ pub async fn handle_declare_cursor(
             let res = handle_query(handle_args, query_stmt, formats).await?;
             (start_rw_timestamp, res, false)
         }
+        risingwave_sqlparser::ast::Since::Begin => {
+            let min_unix_millis =
+                Epoch::now().as_unix_millis() - subscription.get_retention_seconds()? * 1000;
+            let start_rw_timestamp = convert_unix_millis_to_logstore_i64(min_unix_millis);
+            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                &subscription.get_log_store_name()?,
+                start_rw_timestamp,
+            )));
+            let res = handle_query(handle_args, query_stmt, formats).await?;
+            (start_rw_timestamp, res, false)
+        }
         risingwave_sqlparser::ast::Since::WithSnapshot => {
             let subscription_from_table_name = ObjectName(vec![Ident::from(
                 subscription.subscription_from_name.as_ref(),
@@ -105,15 +116,13 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
     let now = Epoch::now().as_unix_millis();
     let min_unix_millis = now - retention_seconds * 1000;
     if unix_millis > now {
-        return Err(ErrorCode::InternalError(format!(
-            "rw_timestamp is too large, need to be less than the current unix_millis {:?}",
-            now
-        ))
+        return Err(ErrorCode::InternalError(
+            "rw_timestamp is too large, need to be less than the current unix_millis".to_string(),
+        )
         .into());
     }
     if unix_millis < min_unix_millis {
-        return Err(ErrorCode::InternalError(
-            format!("rw_timestamp is too small, need to be large than the current unix_millis {:?} - subscription's retention time {:?}",now,retention_seconds * 1000)).into());
+        return Err(ErrorCode::InternalError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_string()).into());
     }
     Ok(())
 }

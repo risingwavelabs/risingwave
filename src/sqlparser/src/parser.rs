@@ -2912,10 +2912,10 @@ impl Parser {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
                         Ok(Since::ProcessTime)
-                    } else if ident.real_value() == "snapshot" {
+                    } else if ident.real_value() == "begin" {
                         self.expect_token(&Token::LParen)?;
                         self.expect_token(&Token::RParen)?;
-                        Ok(Since::WithSnapshot)
+                        Ok(Since::Begin)
                     } else {
                         parser_err!(format!(
                             "Expected proctime() or snapshot(), found: {}",

@@ -151,10 +151,7 @@ impl Cursor {
 }
 
 pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>) -> Vec<Option<Bytes>> {
-    let mut new_row = vec![
-        Some(Bytes::from("snapshot".to_string())),
-        Some(Bytes::from(1i16.to_string())),
-    ];
+    let mut new_row = vec![None, Some(Bytes::from(1i16.to_string()))];
     new_row.extend(row);
     new_row
 }
@@ -175,8 +172,8 @@ pub fn build_desc(mut descs: Vec<PgFieldDescriptor>, is_snapshot: bool) -> Vec<P
     let mut new_descs = vec![
         PgFieldDescriptor::new(
             "rw_timestamp".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
+            DataType::Int64.to_oid(),
+            DataType::Int64.type_len(),
         ),
         PgFieldDescriptor::new(
             "op".to_owned(),
