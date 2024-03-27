@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context as _};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
 use serde_derive::Deserialize;
@@ -116,8 +117,12 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()> {

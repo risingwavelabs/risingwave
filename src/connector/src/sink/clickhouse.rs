@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
@@ -326,8 +327,12 @@ impl Sink for ClickHouseSink {
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()> {
