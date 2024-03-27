@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, Criterion};
+use foyer::memory as foyer;
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
@@ -88,7 +89,7 @@ pub struct LruCacheImpl {
 impl LruCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(3, capacity, 0)),
+            inner: Arc::new(LruCache::new(8, capacity, 0)),
             fake_io_latency,
         }
     }
@@ -112,6 +113,68 @@ impl CacheBase for LruCacheImpl {
             })
             .await?;
         Ok((*entry).clone())
+    }
+}
+
+pub struct FoyerCache {
+    inner: foyer::Cache<(u64, u64), Arc<Block>>,
+    fake_io_latency: Duration,
+}
+
+impl FoyerCache {
+    pub fn lru(capacity: usize, fake_io_latency: Duration) -> Self {
+        let inner = foyer::Cache::lru(foyer::LruCacheConfig {
+            capacity,
+            shards: 8,
+            eviction_config: foyer::LruConfig {
+                high_priority_pool_ratio: 0.0,
+            },
+            object_pool_capacity: 8 * 1024,
+            hash_builder: ahash::RandomState::default(),
+            event_listener: foyer::DefaultCacheEventListener::default(),
+        });
+        Self {
+            inner,
+            fake_io_latency,
+        }
+    }
+
+    pub fn lfu(capacity: usize, fake_io_latency: Duration) -> Self {
+        let inner = foyer::Cache::lfu(foyer::LfuCacheConfig {
+            capacity,
+            shards: 8,
+            eviction_config: foyer::LfuConfig {
+                window_capacity_ratio: 0.1,
+                protected_capacity_ratio: 0.8,
+                cmsketch_eps: 0.001,
+                cmsketch_confidence: 0.9,
+            },
+            object_pool_capacity: 8 * 1024,
+            hash_builder: ahash::RandomState::default(),
+            event_listener: foyer::DefaultCacheEventListener::default(),
+        });
+        Self {
+            inner,
+            fake_io_latency,
+        }
+    }
+}
+
+#[async_trait]
+impl CacheBase for FoyerCache {
+    async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
+        let entry = self
+            .inner
+            .entry((sst_object_id, block_idx), || {
+                let latency = self.fake_io_latency;
+                async move {
+                    get_fake_block(sst_object_id, block_idx, latency)
+                        .await
+                        .map(|block| (Arc::new(block), 1, foyer::CacheContext::Default))
+                }
+            })
+            .await?;
+        Ok(entry.value().clone())
     }
 }
 
@@ -193,15 +256,27 @@ fn bench_block_cache(c: &mut Criterion) {
     bench_cache(block_cache, c, 10000);
     let block_cache = Arc::new(LruCacheImpl::new(2048, Duration::from_millis(0)));
     bench_cache(block_cache, c, 10000);
+    let block_cache = Arc::new(FoyerCache::lru(2048, Duration::from_millis(0)));
+    bench_cache(block_cache, c, 10000);
+    let block_cache = Arc::new(FoyerCache::lfu(2048, Duration::from_millis(0)));
+    bench_cache(block_cache, c, 10000);
 
     let block_cache = Arc::new(MokaCache::new(2048, Duration::from_millis(1)));
     bench_cache(block_cache, c, 1000);
     let block_cache = Arc::new(LruCacheImpl::new(2048, Duration::from_millis(1)));
     bench_cache(block_cache, c, 1000);
+    let block_cache = Arc::new(FoyerCache::lru(2048, Duration::from_millis(1)));
+    bench_cache(block_cache, c, 1000);
+    let block_cache = Arc::new(FoyerCache::lfu(2048, Duration::from_millis(1)));
+    bench_cache(block_cache, c, 1000);
 
     let block_cache = Arc::new(MokaCache::new(256, Duration::from_millis(10)));
     bench_cache(block_cache, c, 200);
     let block_cache = Arc::new(LruCacheImpl::new(256, Duration::from_millis(10)));
+    bench_cache(block_cache, c, 200);
+    let block_cache = Arc::new(FoyerCache::lru(256, Duration::from_millis(10)));
+    bench_cache(block_cache, c, 200);
+    let block_cache = Arc::new(FoyerCache::lfu(256, Duration::from_millis(10)));
     bench_cache(block_cache, c, 200);
 }
 

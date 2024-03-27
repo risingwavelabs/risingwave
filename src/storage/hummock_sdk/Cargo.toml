@@ -21,6 +21,7 @@ itertools = "0.12"
 parse-display = "0.9"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_pb = { workspace = true }
 tracing = "0.1"
 
@@ -29,5 +30,3 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
 workspace = true
-
-

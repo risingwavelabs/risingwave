@@ -1828,16 +1828,17 @@ impl ScaleController {
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
             table_fragments: &BTreeMap<TableId, TableFragments>,
-        ) {
+        ) -> MetaResult<()> {
             // This is only for assertion purposes and will be removed once the dispatcher_id is guaranteed to always correspond to the downstream fragment_id,
             // such as through the foreign key constraints in the SQL backend.
             let mut actor_fragment_id_map_for_check = HashMap::new();
             for table_fragments in table_fragments.values() {
                 for (fragment_id, fragment) in &table_fragments.fragments {
                     for actor in &fragment.actors {
-                        debug_assert!(actor_fragment_id_map_for_check
-                            .insert(actor.actor_id, *fragment_id)
-                            .is_none());
+                        let prev =
+                            actor_fragment_id_map_for_check.insert(actor.actor_id, *fragment_id);
+
+                        debug_assert!(prev.is_none());
                     }
                 }
             }
@@ -1870,9 +1871,10 @@ impl ScaleController {
                                         dispatcher.dispatcher_id as FragmentId
                                     );
                                 } else {
-                                    tracing::warn!(
-                                        "downstream actor id {} not found in fragment_actor_id_map",
-                                        downstream_actor_id
+                                    bail!(
+                                        "downstream actor id {} from actor {} not found in fragment_actor_id_map",
+                                        downstream_actor_id,
+                                        actor.actor_id,
                                     );
                                 }
 
@@ -1892,6 +1894,8 @@ impl ScaleController {
 
                 actor_status.extend(table_fragments.actor_status.clone());
             }
+
+            Ok(())
         }
 
         match &self.metadata_manager {
@@ -1905,7 +1909,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     guard.table_fragments(),
-                );
+                )?;
             }
             MetadataManager::V2(_) => {
                 let all_table_fragments = self.list_all_table_fragments().await?;
@@ -1922,7 +1926,7 @@ impl ScaleController {
                     &mut table_fragment_id_map,
                     &mut fragment_actor_id_map,
                     &all_table_fragments,
-                );
+                )?;
             }
         }
 

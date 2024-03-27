@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::config::MetaBackend;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -185,7 +186,9 @@ pub async fn standalone(
 ) -> Result<()> {
     tracing::info!("launching Risingwave in standalone mode");
 
+    let mut is_in_memory = false;
     if let Some(opts) = meta_opts {
+        is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
         let _meta_handle = tokio::spawn(async move {
@@ -210,9 +213,20 @@ pub async fn standalone(
     }
 
     // wait for log messages to be flushed
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
     eprintln!("-------------------------------");
     eprintln!("RisingWave standalone mode is ready.");
+    if is_in_memory {
+        eprintln!(
+            "{}",
+            console::style(
+                "WARNING: You are using RisingWave's in-memory mode.
+It SHOULD NEVER be used in benchmarks and production environment!!!"
+            )
+            .red()
+            .bold()
+        );
+    }
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
@@ -298,6 +312,7 @@ mod test {
                             backup_storage_url: None,
                             backup_storage_directory: None,
                             heap_profiling_dir: None,
+                            dangerous_max_idle_secs: None,
                         },
                     ),
                     compute_opts: Some(
