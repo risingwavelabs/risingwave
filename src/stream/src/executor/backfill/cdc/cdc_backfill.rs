@@ -273,8 +273,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
-                                                if let Some(rate_limit) = some.get(&self.actor_ctx.id) {
-                                                    self.chunk_size = rate_limit.map(|x| x as usize).unwrap_or(self.chunk_size);
+                                                if let Some(rate_limit) =
+                                                    some.get(&self.actor_ctx.id)
+                                                {
+                                                    self.chunk_size = rate_limit
+                                                        .map(|x| x as usize)
+                                                        .unwrap_or(self.chunk_size);
                                                     // todo: if changed, we need to update the right snapshot stream
                                                 }
                                             }
