@@ -13,15 +13,19 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
@@ -61,6 +65,47 @@ pub struct SourceExecutor<S: StateStore> {
 
     // config for the connector node
     connector_params: ConnectorParams,
+}
+
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u32>) {
+    let get_rate_limiter = |rate_limit: u32| {
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+        let clock = MonotonicClock;
+        RateLimiter::direct_with_clock(quota, &clock)
+    };
+    let limiter = rate_limit.map(get_rate_limiter);
+    if rate_limit.is_some() {
+        tracing::info!(rate_limit = ?rate_limit, "applied rate limit");
+    }
+    #[for_await]
+    for batch in stream {
+        let chunk: StreamChunk = batch?;
+        let chunk_cardinality = chunk.cardinality();
+        let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+            // pass empty chunk
+            yield chunk;
+            continue;
+        };
+        if let Some(limiter) = &limiter {
+            let limit = NonZeroU32::new(rate_limit.unwrap()).unwrap();
+            if n <= limit {
+                // `InsufficientCapacity` should never happen because we have done the check
+                limiter.until_n_ready(n).await.unwrap();
+                yield chunk;
+            } else {
+                // Cut the chunk into smaller chunks
+                for chunk in chunk.split(limit.get() as usize) {
+                    let n = NonZeroU32::new(chunk.cardinality() as u32).unwrap();
+                    // Ditto.
+                    limiter.until_n_ready(n).await.unwrap();
+                    yield chunk;
+                }
+            }
+        } else {
+            yield chunk;
+        }
+    }
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -109,11 +154,13 @@ impl<S: StateStore> SourceExecutor<S> {
                 .source_name
                 .clone(),
         );
-        source_desc
+        let stream = source_desc
             .source
             .to_stream(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error);
+
+        Ok(apply_rate_limit(stream?, self.source_ctrl_opts.rate_limit).boxed())
     }
 
     /// `source_id | source_name | actor_id | fragment_id`

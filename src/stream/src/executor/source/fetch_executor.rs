@@ -40,6 +40,7 @@ use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 
 use super::{get_split_offset_col_idx, SourceStateTableHandler};
+use crate::executor::source_executor::apply_rate_limit;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
     expect_first_barrier, get_split_offset_mapping_from_chunk, prune_additional_cols,
@@ -159,11 +160,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_desc: &SourceDesc,
         batch: SplitBatch,
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
-        source_desc
+        let rate_limit = source_ctx.source_ctrl_opts.rate_limit;
+        let stream = source_desc
             .source
             .to_stream(batch, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(apply_rate_limit(stream, rate_limit).boxed())
     }
 
     fn build_source_ctx(
