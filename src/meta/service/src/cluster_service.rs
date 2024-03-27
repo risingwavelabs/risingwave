@@ -48,16 +48,6 @@ impl ClusterService for ClusterServiceImpl {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
         let host: HostAddress = req.get_host()?.clone();
-        #[cfg(not(madsim))]
-        {
-            use risingwave_common::util::addr::try_resolve_dns;
-            use tracing::{error, info};
-            let socket_addr = try_resolve_dns(&host.host, host.port).await.map_err(|e| {
-                error!(e);
-                Status::internal(e)
-            })?;
-            info!(?socket_addr, ?host, "resolve host addr");
-        }
         let property = req
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
@@ -123,6 +113,16 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<ActivateWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let host = req.get_host()?.clone();
+        #[cfg(not(madsim))]
+        {
+            use risingwave_common::util::addr::try_resolve_dns;
+            use tracing::{error, info};
+            let socket_addr = try_resolve_dns(&host.host, host.port).await.map_err(|e| {
+                error!(e);
+                Status::internal(e)
+            })?;
+            info!(?socket_addr, ?host, "resolve host addr");
+        }
         match &self.metadata_manager {
             MetadataManager::V1(mgr) => mgr.cluster_manager.activate_worker_node(host).await?,
             MetadataManager::V2(mgr) => {

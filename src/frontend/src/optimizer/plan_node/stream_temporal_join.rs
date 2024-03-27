@@ -17,6 +17,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::GenericPlanRef;
 use super::stream::prelude::*;
@@ -54,7 +55,7 @@ impl StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(scan.core().for_system_time_as_of_proctime);
+        assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
 
         let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
         let dist = l2o.rewrite_provided_distribution(core.left.distribution());

@@ -16,10 +16,10 @@ use std::collections::BTreeSet;
 
 use futures_util::FutureExt;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
-use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
+use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use smallvec::SmallVec;
 
 use super::buffer::{RangeWindow, RowsWindow, WindowBuffer, WindowImpl};

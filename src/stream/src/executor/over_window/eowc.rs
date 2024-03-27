@@ -21,14 +21,14 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::collections::EstimatedVecDeque;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
+use risingwave_common_estimate_size::collections::EstimatedVecDeque;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::window_function::{
     create_window_state, StateEvictHint, StateKey, WindowFuncCall, WindowStates,
 };

@@ -19,6 +19,7 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::StreamScanType;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
@@ -932,7 +933,7 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_proctime()
+            matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
         } else {
             false
         }
@@ -999,7 +1000,7 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_proctime() {
+        if !matches!(logical_scan.as_of(), Some(AsOf::ProcessTime)) {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
                 "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),

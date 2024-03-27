@@ -17,12 +17,12 @@ use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
 };
