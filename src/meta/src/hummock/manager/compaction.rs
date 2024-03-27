@@ -141,11 +141,15 @@ impl HummockManager {
                         .await;
 
                     match compact_ret {
-                        Ok(compact_tasks) => {
+                        Ok((compact_tasks, trivial_tasks)) => {
                             if compact_tasks.is_empty() {
                                 break;
                             }
                             generated_task_count += compact_tasks.len();
+                            for task in trivial_tasks {
+                                existed_groups.push(task.compaction_group_id);
+                                wait_compact_groups.insert(task.compaction_group_id);
+                            }
                             for task in compact_tasks {
                                 let task_id = task.task_id;
                                 existed_groups.push(task.compaction_group_id);
@@ -164,6 +168,8 @@ impl HummockManager {
                                     break;
                                 }
                             }
+                            existed_groups.sort();
+                            existed_groups.dedup();
                         }
                         Err(err) => {
                             tracing::warn!(error = %err.as_report(), "Failed to get compaction task");

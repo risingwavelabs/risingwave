@@ -859,7 +859,7 @@ impl HummockManager {
         &self,
         compaction_groups: Vec<CompactionGroupId>,
         selector: &mut Box<dyn CompactionSelector>,
-    ) -> crate::hummock::error::Result<Vec<CompactTask>> {
+    ) -> crate::hummock::error::Result<(Vec<CompactTask>, Vec<CompactTask>)> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
@@ -913,6 +913,7 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
+        const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
         for compaction_group_id in compaction_groups {
             if current_version.levels.get(&compaction_group_id).is_none() {
                 continue;
@@ -960,6 +961,7 @@ impl HummockManager {
                 }
             }
 
+            let mut trivial_move_count = 0;
             while let Some(compact_task) = compact_status.get_compact_task(
                 current_version.get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
@@ -1056,6 +1058,10 @@ impl HummockManager {
                     );
                     current_version.apply_version_delta(&version_delta);
                     trivial_tasks.push(compact_task);
+                    trivial_move_count += 1;
+                    if trivial_move_count >= MAX_TRIVIAL_MOVE_TASK_COUNT {
+                        break;
+                    }
                 } else {
                     let mut table_to_vnode_partition = match self
                         .group_to_table_vnode_partition
@@ -1217,7 +1223,7 @@ impl HummockManager {
             drop(compaction_guard);
             self.check_state_consistency().await;
         }
-        Ok(pick_tasks)
+        Ok((pick_tasks, trivial_tasks))
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
@@ -1253,7 +1259,7 @@ impl HummockManager {
         &self,
         compaction_groups: Vec<CompactionGroupId>,
         selector: &mut Box<dyn CompactionSelector>,
-    ) -> Result<Vec<CompactTask>> {
+    ) -> Result<(Vec<CompactTask>, Vec<CompactTask>)> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
@@ -1270,7 +1276,7 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        let mut normal_tasks = self
+        let (mut normal_tasks, _) = self
             .get_compact_tasks_impl(vec![compaction_group_id], selector)
             .await?;
         Ok(normal_tasks.pop())
