@@ -18,8 +18,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::{
-    CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
-    LocalPickerStatistic, TierCompactionPicker,
+    CompactionInput, CompactionPicker, CompactionTaskValidator, IntraCompactionPicker,
+    LevelCompactionPicker, LocalPickerStatistic, TierCompactionPicker,
 };
 use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
 use crate::hummock::compaction::CompactionDeveloperConfig;
@@ -90,6 +90,19 @@ impl EmergencyCompactionPicker {
 
             if let Some(ret) =
                 base_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
+            {
+                return Some(ret);
+            }
+
+            let mut intra_level_compaction_picker = IntraCompactionPicker::new_with_validator(
+                self.config.clone(),
+                unused_validator.clone(),
+                self.developer_config.clone(),
+            );
+
+            // If we can not compact l0 to base level, we try to compact l0 by intra level compaction
+            if let Some(ret) =
+                intra_level_compaction_picker.pick_compaction(levels, level_handlers, stats)
             {
                 return Some(ret);
             }
