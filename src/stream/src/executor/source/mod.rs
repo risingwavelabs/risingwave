@@ -60,7 +60,9 @@ pub fn get_split_offset_mapping_from_chunk(
     offset_idx: usize,
 ) -> Option<HashMap<SplitId, String>> {
     let mut split_offset_mapping = HashMap::new();
-    for (_, row) in chunk.rows() {
+    // All rows (including those visible or invisible) will be used to update the source offset.
+    for i in 0..chunk.capacity() {
+        let (_, row, _) = chunk.row_at(i);
         let split_id = row.datum_at(split_idx).unwrap().into_utf8().into();
         let offset = row.datum_at(offset_idx).unwrap().into_utf8();
         split_offset_mapping.insert(split_id, offset.to_string());

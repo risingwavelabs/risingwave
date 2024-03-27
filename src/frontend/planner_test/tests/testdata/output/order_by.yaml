@@ -88,8 +88,8 @@
     └─StreamProject { exprs: [t.v1, t.v2, t._row_id] }
       └─StreamTopN { order: [t.v1 DESC], limit: 5, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t.v1 DESC], limit: 5, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
+          └─StreamGroupTopN { order: [t.v1 DESC], limit: 5, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -120,8 +120,8 @@
     └─StreamProject { exprs: [t.v1, t.v2, t._row_id] }
       └─StreamTopN { order: [t.v1 DESC], limit: 5, offset: 7 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [t.v1 DESC], limit: 12, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
+          └─StreamGroupTopN { order: [t.v1 DESC], limit: 12, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by expression that would be valid in select list
   sql: |
