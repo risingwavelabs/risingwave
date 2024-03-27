@@ -9380,6 +9380,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
+ "memcomparable",
  "prost 0.12.1",
  "regex",
  "risingwave_common",

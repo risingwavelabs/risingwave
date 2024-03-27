@@ -20,23 +20,39 @@ use etcd_client::ConnectOptions;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::system_param::system_params_to_model;
 use risingwave_meta::controller::SqlMetaStore;
+use risingwave_meta::hummock::compaction::CompactStatus;
+use risingwave_meta::hummock::model::CompactionGroup;
 use risingwave_meta::manager::model::SystemParamsModel;
 use risingwave_meta::model;
-use risingwave_meta::model::{ClusterId, MetadataModel, TableParallelism};
-use risingwave_meta::storage::{EtcdMetaStore, MetaStoreBoxExt, WrappedEtcdClient as EtcdClient};
+use risingwave_meta::model::{ClusterId, MetadataModel, NotificationVersion, TableParallelism};
+use risingwave_meta::storage::{
+    EtcdMetaStore, MetaStore, MetaStoreBoxExt, MetaStoreError, MetaStoreRef,
+    WrappedEtcdClient as EtcdClient, DEFAULT_COLUMN_FAMILY,
+};
+use risingwave_meta::stream::TableRevision;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
+use risingwave_meta_model_v2::catalog_version::VersionCategory;
+use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::fragment::StreamNode;
+use risingwave_meta_model_v2::hummock_sequence::{
+    COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
+};
+use risingwave_meta_model_v2::hummock_version_stats::TableStats;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::{
-    Actor, ActorDispatcher, Cluster, Connection, Database, Fragment, Function, Index, Object,
-    ObjectDependency, Schema, Sink, Source, StreamingJob, Subscription, SystemParameter, Table,
-    User, UserPrivilege, View, Worker, WorkerProperty,
+    Actor, ActorDispatcher, CatalogVersion, Cluster, Connection, Database, Fragment, Function,
+    Index, Object, ObjectDependency, Schema, Sink, Source, StreamingJob, Subscription,
+    SystemParameter, Table, User, UserPrivilege, View, Worker, WorkerProperty,
 };
 use risingwave_meta_model_v2::{
-    cluster, connection, database, function, index, object, object_dependency, schema, sink,
+    catalog_version, cluster, compaction_config, compaction_status, compaction_task, connection,
+    database, function, hummock_pinned_snapshot, hummock_pinned_version, hummock_sequence,
+    hummock_version_delta, hummock_version_stats, index, object, object_dependency, schema, sink,
     source, streaming_job, subscription, table, user, user_privilege, view, worker,
     worker_property, CreateType, JobStatus, StreamingParallelism,
 };
@@ -45,13 +61,20 @@ use risingwave_pb::catalog::{
     PbTable, PbView,
 };
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::{
+    CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats,
+};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PbSystemParams;
 use risingwave_pb::user::grant_privilege::PbObject as GrantObject;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::prelude::DateTime;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, NotSet, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbBackend, EntityTrait, IntoActiveModel, NotSet,
+    QueryFilter, QuerySelect, Statement,
+};
+use thiserror_ext::AsReport;
 use uuid::Uuid;
 
 pub struct EtcdBackend {
@@ -536,10 +559,216 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("user privileges migrated");
 
     // notification.
+    let notification_version = NotificationVersion::new(&meta_store).await;
+    CatalogVersion::insert(catalog_version::ActiveModel {
+        name: Set(VersionCategory::Notification),
+        version: Set(notification_version.version() as _),
+    })
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("notification version migrated");
+
+    // table revision.
+    let table_revision = TableRevision::get(&meta_store).await?;
+    CatalogVersion::insert(catalog_version::ActiveModel {
+        name: Set(VersionCategory::TableRevision),
+        version: Set(table_revision.inner() as _),
+    })
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("table revision migrated");
 
     // hummock.
+    // hummock pinned snapshots
+    let pinned_snapshots = HummockPinnedSnapshot::list(&meta_store).await?;
+    hummock_pinned_snapshot::Entity::insert_many(
+        pinned_snapshots
+            .into_iter()
+            .map(|ps| hummock_pinned_snapshot::ActiveModel {
+                context_id: Set(ps.context_id as _),
+                min_pinned_snapshot: Set(ps.minimal_pinned_snapshot as _),
+            })
+            .collect_vec(),
+    )
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("hummock pinned snapshots migrated");
 
-    // Rest sequence for all tables.
+    // hummock pinned version
+    let pinned_version = HummockPinnedVersion::list(&meta_store).await?;
+    hummock_pinned_version::Entity::insert_many(
+        pinned_version
+            .into_iter()
+            .map(|pv| hummock_pinned_version::ActiveModel {
+                context_id: Set(pv.context_id as _),
+                min_pinned_id: Set(pv.min_pinned_id as _),
+            })
+            .collect_vec(),
+    )
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("hummock pinned version migrated");
+
+    // hummock version delta
+    let version_delta = HummockVersionDelta::list(&meta_store).await?;
+    hummock_version_delta::Entity::insert_many(
+        version_delta
+            .into_iter()
+            .map(|vd| hummock_version_delta::ActiveModel {
+                id: Set(vd.id as _),
+                prev_id: Set(vd.prev_id as _),
+                max_committed_epoch: Set(vd.max_committed_epoch as _),
+                safe_epoch: Set(vd.safe_epoch as _),
+                trivial_move: Set(vd.trivial_move),
+                full_version_delta: Set(vd.to_protobuf().into()),
+            })
+            .collect_vec(),
+    )
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("hummock version delta migrated");
+
+    // hummock version stat
+    let version_stats = HummockVersionStats::list(&meta_store)
+        .await?
+        .into_iter()
+        .next();
+    if let Some(version_stats) = version_stats {
+        hummock_version_stats::Entity::insert(hummock_version_stats::ActiveModel {
+            id: Set(version_stats.hummock_version_id as _),
+            stats: Set(TableStats(version_stats.table_stats)),
+        })
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
+    println!("hummock version stats migrated");
+
+    // compaction
+    // compaction config
+    let compaction_groups = CompactionGroup::list(&meta_store).await?;
+    compaction_config::Entity::insert_many(
+        compaction_groups
+            .into_iter()
+            .map(|cg| compaction_config::ActiveModel {
+                compaction_group_id: Set(cg.group_id as _),
+                config: Set((*cg.compaction_config).clone().into()),
+            })
+            .collect_vec(),
+    )
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("compaction config migrated");
+
+    // compaction status
+    let compaction_statuses = CompactStatus::list(&meta_store).await?;
+    compaction_status::Entity::insert_many(
+        compaction_statuses
+            .into_iter()
+            .map(|cs| compaction_status::ActiveModel {
+                compaction_group_id: Set(cs.compaction_group_id as _),
+                status: Set(LevelHandlers(cs.level_handlers.iter().map_into().collect())),
+            })
+            .collect_vec(),
+    )
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("compaction status migrated");
+
+    // compaction task
+    let compaction_tasks = CompactTaskAssignment::list(&meta_store).await?;
+    compaction_task::Entity::insert_many(compaction_tasks.into_iter().map(|ct| {
+        let context_id = ct.context_id;
+        let task = ct.compact_task.unwrap();
+        compaction_task::ActiveModel {
+            id: Set(task.task_id as _),
+            context_id: Set(context_id as _),
+            task: Set(task.into()),
+        }
+    }))
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("compaction task migrated");
+
+    // hummock sequence
+    let sst_obj_id = load_current_id(&meta_store, "hummock_ss_table_id", Some(1)).await;
+    let compaction_task_id = load_current_id(&meta_store, "hummock_compaction_task", Some(1)).await;
+    let compaction_group_id = load_current_id(
+        &meta_store,
+        "compaction_group",
+        Some(StaticCompactionGroupId::End as u64 + 1),
+    )
+    .await;
+    let backup_id = load_current_id(&meta_store, "backup", Some(1)).await;
+    hummock_sequence::Entity::insert_many(vec![
+        hummock_sequence::ActiveModel {
+            name: Set(SSTABLE_OBJECT_ID.into()),
+            seq: Set(sst_obj_id as _),
+        },
+        hummock_sequence::ActiveModel {
+            name: Set(COMPACTION_TASK_ID.into()),
+            seq: Set(compaction_task_id as _),
+        },
+        hummock_sequence::ActiveModel {
+            name: Set(COMPACTION_GROUP_ID.into()),
+            seq: Set(compaction_group_id as _),
+        },
+        hummock_sequence::ActiveModel {
+            name: Set(META_BACKUP_ID.into()),
+            seq: Set(backup_id as _),
+        },
+    ])
+    .exec(&meta_store_sql.conn)
+    .await?;
+    println!("hummock sequence migrated");
+
+    // Rest sequence for object and user.
+    match meta_store_sql.conn.get_database_backend() {
+        DbBackend::MySql => {
+            meta_store_sql
+                .conn
+                .execute(Statement::from_string(
+                    DatabaseBackend::MySql,
+                    "ALTER TABLE object AUTO_INCREMENT = (SELECT MAX(oid) + 1 FROM object);",
+                ))
+                .await?;
+            meta_store_sql
+                .conn
+                .execute(Statement::from_string(
+                    DatabaseBackend::MySql,
+                    "ALTER TABLE user AUTO_INCREMENT = (SELECT MAX(user_id) + 1 FROM user);",
+                ))
+                .await?;
+        }
+        DbBackend::Postgres => {
+            meta_store_sql
+                .conn
+                .execute(Statement::from_string(
+                    DatabaseBackend::Postgres,
+                    "SELECT setval('object_oid_seq', (SELECT MAX(oid) FROM object) + 1);",
+                ))
+                .await?;
+            meta_store_sql
+                .conn
+                .execute(Statement::from_string(
+                    DatabaseBackend::Postgres,
+                    "SELECT setval('user_user_id_seq', (SELECT MAX(user_id) FROM user) + 1);",
+                ))
+                .await?;
+        }
+        DbBackend::Sqlite => {}
+    }
 
     Ok(())
+}
+
+async fn load_current_id(meta_store: &MetaStoreRef, category: &str, start: Option<u64>) -> u64 {
+    let category_gen_key = format!("{}_id_next_generator", category);
+    let res = meta_store
+        .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
+        .await;
+    match res {
+        Ok(value) => memcomparable::from_slice(&value).unwrap(),
+        Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
+        Err(e) => panic!("{}", e.as_report()),
+    }
 }
