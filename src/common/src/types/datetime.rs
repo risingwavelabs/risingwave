@@ -23,13 +23,13 @@ use std::str::FromStr;
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use thiserror::Error;
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, Interval};
 use crate::array::{ArrayError, ArrayResult};
-use crate::estimate_size::ZeroHeapSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.

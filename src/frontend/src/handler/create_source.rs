@@ -1424,6 +1424,7 @@ pub async fn handle_create_source(
                 Rc::new(SourceCatalog::from(&source)),
                 SourceNodeKind::CreateSourceWithStreamjob,
                 context.into(),
+                None,
             )?;
 
             // generate stream graph for cdc source job

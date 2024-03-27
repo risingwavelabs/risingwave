@@ -199,7 +199,7 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
-        for_system_time_as_of_proctime: false,
+        as_of: None,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -225,7 +225,7 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp
     let table_factor = TableFactor::Table {
         name: ObjectName(vec![logstore_name.into()]),
         alias: None,
-        for_system_time_as_of_proctime: false,
+        as_of: None,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,

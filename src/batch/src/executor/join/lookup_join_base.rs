@@ -26,6 +26,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::BoxedExpression;
 
 use crate::error::BatchError;
@@ -34,7 +35,6 @@ use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
-use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::task::ShutdownToken;
 
 /// Lookup Join Base.

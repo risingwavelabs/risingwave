@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::ArrayBuilderImpl;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, ListValue, ScalarRefImpl};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate;
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;

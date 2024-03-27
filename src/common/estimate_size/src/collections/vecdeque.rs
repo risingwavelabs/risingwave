@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 
 use educe::Educe;
 
-use crate::estimate_size::{EstimateSize, KvSize};
+use crate::{EstimateSize, KvSize};
 
 #[derive(Educe)]
 #[educe(Default)]
