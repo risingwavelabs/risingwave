@@ -54,8 +54,9 @@ use risingwave_meta_model_v2::{
     database, function, hummock_pinned_snapshot, hummock_pinned_version, hummock_sequence,
     hummock_version_delta, hummock_version_stats, index, object, object_dependency, schema, sink,
     source, streaming_job, subscription, table, user, user_privilege, view, worker,
-    worker_property, CreateType, JobStatus, StreamingParallelism,
+    worker_property, CreateType, JobStatus, ObjectId, StreamingParallelism,
 };
+use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbSubscription,
     PbTable, PbView,
@@ -229,9 +230,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // database
     let mut db_rewrite = HashMap::new();
-    for db in databases {
+    for mut db in databases {
         let id = next_available_id();
         db_rewrite.insert(db.id, id);
+        db.id = id as _;
 
         let obj = object::ActiveModel {
             oid: Set(id as _),
@@ -248,9 +250,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // schema
     let mut schema_rewrite = HashMap::new();
-    for schema in schemas {
+    for mut schema in schemas {
         let id = next_available_id();
         schema_rewrite.insert(schema.id, id);
+        schema.id = id as _;
 
         let obj = object::ActiveModel {
             oid: Set(id as _),
@@ -268,9 +271,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // function
     let mut function_rewrite = HashMap::new();
-    for function in functions {
+    for mut function in functions {
         let id = next_available_id();
         function_rewrite.insert(function.id, id);
+        function.id = id as _;
 
         let obj = object::ActiveModel {
             oid: Set(id as _),
@@ -289,9 +293,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // connection mapping
     let mut connection_rewrite = HashMap::new();
-    for connection in connections {
+    for mut connection in connections {
         let id = next_available_id();
         connection_rewrite.insert(connection.id, id);
+        connection.id = id as _;
 
         let obj = object::ActiveModel {
             oid: Set(id as _),
@@ -334,11 +339,33 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             }
         };
     }
-    insert_objects!(tables, ObjectType::Table);
     insert_objects!(sources, ObjectType::Source);
     insert_objects!(sinks, ObjectType::Sink);
     insert_objects!(indexes, ObjectType::Index);
     insert_objects!(subscriptions, ObjectType::Subscription);
+    for table in &tables {
+        if table.table_type() == PbTableType::Index {
+            // we only store index object.
+            continue;
+        }
+        let mut obj = object::ActiveModel {
+            oid: Set(table.id as _),
+            obj_type: Set(ObjectType::Table),
+            owner_id: Set(table.owner as _),
+            database_id: Set(Some(*db_rewrite.get(&table.database_id).unwrap() as _)),
+            schema_id: Set(Some(*schema_rewrite.get(&table.schema_id).unwrap() as _)),
+            ..Default::default()
+        };
+        if let Some(epoch) = table.initialized_at_epoch.map(Epoch::from) {
+            obj.initialized_at =
+                Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+        }
+        if let Some(epoch) = table.created_at_epoch.map(Epoch::from) {
+            obj.created_at =
+                Set(DateTime::from_timestamp_millis(epoch.as_unix_millis() as _).unwrap());
+        }
+        Object::insert(obj).exec(&meta_store_sql.conn).await?;
+    }
     for view in &views {
         let obj = object::ActiveModel {
             oid: Set(view.id as _),
@@ -353,6 +380,11 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // table fragments.
     let table_fragments = model::TableFragments::list(&meta_store).await?;
+    let mut fragment_job_map = HashMap::new();
+    let mut fragments = vec![];
+    let mut actors = vec![];
+    let mut actor_dispatchers = vec![];
+
     for table_fragment in table_fragments {
         let streaming_parallelism = match &table_fragment.assigned_parallelism {
             TableParallelism::Adaptive => StreamingParallelism::Adaptive,
@@ -379,145 +411,160 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             table_fragment.to_protobuf(),
         )
         .unwrap();
-        let (fragments, actor_with_dispatchers): (Vec<_>, Vec<_>) = fragment_actors
-            .into_iter()
-            .map(|(fragment, actors, actor_dispatchers)| (fragment, (actors, actor_dispatchers)))
-            .unzip();
-        for fragment in fragments {
-            // rewrite conflict ids.
-            let mut stream_node = fragment.stream_node.to_protobuf();
-            visit_stream_node_tables(&mut stream_node, |table, _| {
-                table.database_id = *db_rewrite.get(&table.database_id).unwrap();
-                table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
-            });
-            // Question: Do we need to rewrite the function ids?
-            let mut fragment = fragment.into_active_model();
-            fragment.stream_node = Set(StreamNode::from_protobuf(&stream_node));
-            Fragment::insert(fragment)
+        for (fragment, a, ad) in fragment_actors {
+            fragment_job_map.insert(
+                fragment.fragment_id as u32,
+                table_fragment.table_id().table_id as ObjectId,
+            );
+            fragments.push(fragment);
+            actors.extend(a);
+            actor_dispatchers.extend(ad);
+        }
+    }
+    for fragment in fragments {
+        // rewrite conflict ids.
+        let mut stream_node = fragment.stream_node.to_protobuf();
+        visit_stream_node_tables(&mut stream_node, |table, _| {
+            table.database_id = *db_rewrite.get(&table.database_id).unwrap();
+            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
+        });
+        // Question: Do we need to rewrite the function ids?
+        let mut fragment = fragment.into_active_model();
+        fragment.stream_node = Set(StreamNode::from_protobuf(&stream_node));
+        Fragment::insert(fragment)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
+    // Add actors and actor dispatchers.
+    for actor in actors {
+        let actor = actor.into_active_model();
+        Actor::insert(actor).exec(&meta_store_sql.conn).await?;
+    }
+    for (_, actor_dispatchers) in actor_dispatchers {
+        for actor_dispatcher in actor_dispatchers {
+            let mut actor_dispatcher = actor_dispatcher.into_active_model();
+            actor_dispatcher.id = NotSet;
+            ActorDispatcher::insert(actor_dispatcher)
                 .exec(&meta_store_sql.conn)
                 .await?;
-        }
-        // Add actors and actor dispatchers.
-        for (actors, actor_dispatchers) in actor_with_dispatchers {
-            for actor in actors {
-                let actor = actor.into_active_model();
-                Actor::insert(actor).exec(&meta_store_sql.conn).await?;
-            }
-            for (_, actor_dispatchers) in actor_dispatchers {
-                for actor_dispatcher in actor_dispatchers {
-                    let mut actor_dispatcher = actor_dispatcher.into_active_model();
-                    actor_dispatcher.id = NotSet;
-                    ActorDispatcher::insert(actor_dispatcher)
-                        .exec(&meta_store_sql.conn)
-                        .await?;
-                }
-            }
         }
     }
     println!("table fragments migrated");
 
     // catalogs.
     // source
-    let source_models: Vec<source::ActiveModel> = sources
-        .into_iter()
-        .map(|mut src| {
-            src.connection_id.as_mut().map(|id| {
-                *id = *connection_rewrite.get(&id).unwrap();
-            });
-            src.into()
-        })
-        .collect();
-    Source::insert_many(source_models)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !sources.is_empty() {
+        let source_models: Vec<source::ActiveModel> = sources
+            .into_iter()
+            .map(|mut src| {
+                src.connection_id.as_mut().map(|id| {
+                    *id = *connection_rewrite.get(&id).unwrap();
+                });
+                src.into()
+            })
+            .collect();
+        Source::insert_many(source_models)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("sources migrated");
 
     let mut object_dependencies = vec![];
 
     // table
-    let table_models: Vec<table::ActiveModel> = tables
-        .into_iter()
-        .map(|t| {
-            object_dependencies.extend(t.dependent_relations.iter().map(|id| {
-                object_dependency::ActiveModel {
-                    id: NotSet,
-                    oid: Set(*id as _),
-                    used_by: Set(t.id as _),
-                }
-            }));
-            t.into()
-        })
-        .collect_vec();
-    Table::insert_many(table_models)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    for table in tables {
+        let job_id = if table.table_type() == PbTableType::Internal {
+            Set(Some(*fragment_job_map.get(&table.fragment_id).unwrap()))
+        } else {
+            NotSet
+        };
+        object_dependencies.extend(table.dependent_relations.iter().map(|id| {
+            object_dependency::ActiveModel {
+                id: NotSet,
+                oid: Set(*id as _),
+                used_by: Set(table.id as _),
+            }
+        }));
+        let mut t: table::ActiveModel = table.into();
+        t.belongs_to_job_id = job_id;
+        Table::insert(t).exec(&meta_store_sql.conn).await?;
+    }
     println!("tables migrated");
 
     // index
-    let index_models: Vec<index::ActiveModel> = indexes.into_iter().map(|i| i.into()).collect_vec();
-    Index::insert_many(index_models)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !indexes.is_empty() {
+        let index_models: Vec<index::ActiveModel> =
+            indexes.into_iter().map(|i| i.into()).collect_vec();
+        Index::insert_many(index_models)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("indexes migrated");
 
     // sink
-    let sink_models: Vec<sink::ActiveModel> = sinks
-        .into_iter()
-        .map(|mut s| {
-            object_dependencies.extend(s.dependent_relations.iter().map(|id| {
-                object_dependency::ActiveModel {
-                    id: NotSet,
-                    oid: Set(*id as _),
-                    used_by: Set(s.id as _),
-                }
-            }));
-            s.connection_id.as_mut().map(|id| {
-                *id = *connection_rewrite.get(&id).unwrap();
-            });
-            s.into()
-        })
-        .collect();
-    Sink::insert_many(sink_models)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !sinks.is_empty() {
+        let sink_models: Vec<sink::ActiveModel> = sinks
+            .into_iter()
+            .map(|mut s| {
+                object_dependencies.extend(s.dependent_relations.iter().map(|id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(*id as _),
+                        used_by: Set(s.id as _),
+                    }
+                }));
+                s.connection_id.as_mut().map(|id| {
+                    *id = *connection_rewrite.get(&id).unwrap();
+                });
+                s.into()
+            })
+            .collect();
+        Sink::insert_many(sink_models)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("sinks migrated");
 
     // view
-    let view_models: Vec<view::ActiveModel> = views
-        .into_iter()
-        .map(|v| {
-            object_dependencies.extend(v.dependent_relations.iter().map(|id| {
-                object_dependency::ActiveModel {
-                    id: NotSet,
-                    oid: Set(*id as _),
-                    used_by: Set(v.id as _),
-                }
-            }));
-            v.into()
-        })
-        .collect();
-    View::insert_many(view_models)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !views.is_empty() {
+        let view_models: Vec<view::ActiveModel> = views
+            .into_iter()
+            .map(|v| {
+                object_dependencies.extend(v.dependent_relations.iter().map(|id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(*id as _),
+                        used_by: Set(v.id as _),
+                    }
+                }));
+                v.into()
+            })
+            .collect();
+        View::insert_many(view_models)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("views migrated");
 
     // subscriptions
-    let subscription_models: Vec<subscription::ActiveModel> = subscriptions
-        .into_iter()
-        .map(|s| {
-            object_dependencies.extend(s.dependent_relations.iter().map(|id| {
-                object_dependency::ActiveModel {
-                    id: NotSet,
-                    oid: Set(*id as _),
-                    used_by: Set(s.id as _),
-                }
-            }));
-            s.into()
-        })
-        .collect();
-    Subscription::insert_many(subscription_models)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !subscriptions.is_empty() {
+        let subscription_models: Vec<subscription::ActiveModel> = subscriptions
+            .into_iter()
+            .map(|s| {
+                object_dependencies.extend(s.dependent_relations.iter().map(|id| {
+                    object_dependency::ActiveModel {
+                        id: NotSet,
+                        oid: Set(*id as _),
+                        used_by: Set(s.id as _),
+                    }
+                }));
+                s.into()
+            })
+            .collect();
+        Subscription::insert_many(subscription_models)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("subscriptions migrated");
 
     // object_dependency
@@ -553,9 +600,11 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             }
         }
     }
-    UserPrivilege::insert_many(privileges)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !privileges.is_empty() {
+        UserPrivilege::insert_many(privileges)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("user privileges migrated");
 
     // notification.
@@ -581,51 +630,57 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // hummock.
     // hummock pinned snapshots
     let pinned_snapshots = HummockPinnedSnapshot::list(&meta_store).await?;
-    hummock_pinned_snapshot::Entity::insert_many(
-        pinned_snapshots
-            .into_iter()
-            .map(|ps| hummock_pinned_snapshot::ActiveModel {
-                context_id: Set(ps.context_id as _),
-                min_pinned_snapshot: Set(ps.minimal_pinned_snapshot as _),
-            })
-            .collect_vec(),
-    )
-    .exec(&meta_store_sql.conn)
-    .await?;
+    if !pinned_snapshots.is_empty() {
+        hummock_pinned_snapshot::Entity::insert_many(
+            pinned_snapshots
+                .into_iter()
+                .map(|ps| hummock_pinned_snapshot::ActiveModel {
+                    context_id: Set(ps.context_id as _),
+                    min_pinned_snapshot: Set(ps.minimal_pinned_snapshot as _),
+                })
+                .collect_vec(),
+        )
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
     println!("hummock pinned snapshots migrated");
 
     // hummock pinned version
     let pinned_version = HummockPinnedVersion::list(&meta_store).await?;
-    hummock_pinned_version::Entity::insert_many(
-        pinned_version
-            .into_iter()
-            .map(|pv| hummock_pinned_version::ActiveModel {
-                context_id: Set(pv.context_id as _),
-                min_pinned_id: Set(pv.min_pinned_id as _),
-            })
-            .collect_vec(),
-    )
-    .exec(&meta_store_sql.conn)
-    .await?;
+    if !pinned_version.is_empty() {
+        hummock_pinned_version::Entity::insert_many(
+            pinned_version
+                .into_iter()
+                .map(|pv| hummock_pinned_version::ActiveModel {
+                    context_id: Set(pv.context_id as _),
+                    min_pinned_id: Set(pv.min_pinned_id as _),
+                })
+                .collect_vec(),
+        )
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
     println!("hummock pinned version migrated");
 
     // hummock version delta
     let version_delta = HummockVersionDelta::list(&meta_store).await?;
-    hummock_version_delta::Entity::insert_many(
-        version_delta
-            .into_iter()
-            .map(|vd| hummock_version_delta::ActiveModel {
-                id: Set(vd.id as _),
-                prev_id: Set(vd.prev_id as _),
-                max_committed_epoch: Set(vd.max_committed_epoch as _),
-                safe_epoch: Set(vd.safe_epoch as _),
-                trivial_move: Set(vd.trivial_move),
-                full_version_delta: Set(vd.to_protobuf().into()),
-            })
-            .collect_vec(),
-    )
-    .exec(&meta_store_sql.conn)
-    .await?;
+    if !version_delta.is_empty() {
+        hummock_version_delta::Entity::insert_many(
+            version_delta
+                .into_iter()
+                .map(|vd| hummock_version_delta::ActiveModel {
+                    id: Set(vd.id as _),
+                    prev_id: Set(vd.prev_id as _),
+                    max_committed_epoch: Set(vd.max_committed_epoch as _),
+                    safe_epoch: Set(vd.safe_epoch as _),
+                    trivial_move: Set(vd.trivial_move),
+                    full_version_delta: Set(vd.to_protobuf().into()),
+                })
+                .collect_vec(),
+        )
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
     println!("hummock version delta migrated");
 
     // hummock version stat
@@ -646,47 +701,53 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // compaction
     // compaction config
     let compaction_groups = CompactionGroup::list(&meta_store).await?;
-    compaction_config::Entity::insert_many(
-        compaction_groups
-            .into_iter()
-            .map(|cg| compaction_config::ActiveModel {
-                compaction_group_id: Set(cg.group_id as _),
-                config: Set((*cg.compaction_config).clone().into()),
-            })
-            .collect_vec(),
-    )
-    .exec(&meta_store_sql.conn)
-    .await?;
+    if !compaction_groups.is_empty() {
+        compaction_config::Entity::insert_many(
+            compaction_groups
+                .into_iter()
+                .map(|cg| compaction_config::ActiveModel {
+                    compaction_group_id: Set(cg.group_id as _),
+                    config: Set((*cg.compaction_config).clone().into()),
+                })
+                .collect_vec(),
+        )
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
     println!("compaction config migrated");
 
     // compaction status
     let compaction_statuses = CompactStatus::list(&meta_store).await?;
-    compaction_status::Entity::insert_many(
-        compaction_statuses
-            .into_iter()
-            .map(|cs| compaction_status::ActiveModel {
-                compaction_group_id: Set(cs.compaction_group_id as _),
-                status: Set(LevelHandlers(cs.level_handlers.iter().map_into().collect())),
-            })
-            .collect_vec(),
-    )
-    .exec(&meta_store_sql.conn)
-    .await?;
+    if !compaction_statuses.is_empty() {
+        compaction_status::Entity::insert_many(
+            compaction_statuses
+                .into_iter()
+                .map(|cs| compaction_status::ActiveModel {
+                    compaction_group_id: Set(cs.compaction_group_id as _),
+                    status: Set(LevelHandlers(cs.level_handlers.iter().map_into().collect())),
+                })
+                .collect_vec(),
+        )
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
     println!("compaction status migrated");
 
     // compaction task
     let compaction_tasks = CompactTaskAssignment::list(&meta_store).await?;
-    compaction_task::Entity::insert_many(compaction_tasks.into_iter().map(|ct| {
-        let context_id = ct.context_id;
-        let task = ct.compact_task.unwrap();
-        compaction_task::ActiveModel {
-            id: Set(task.task_id as _),
-            context_id: Set(context_id as _),
-            task: Set(task.into()),
-        }
-    }))
-    .exec(&meta_store_sql.conn)
-    .await?;
+    if !compaction_tasks.is_empty() {
+        compaction_task::Entity::insert_many(compaction_tasks.into_iter().map(|ct| {
+            let context_id = ct.context_id;
+            let task = ct.compact_task.unwrap();
+            compaction_task::ActiveModel {
+                id: Set(task.task_id as _),
+                context_id: Set(context_id as _),
+                task: Set(task.into()),
+            }
+        }))
+        .exec(&meta_store_sql.conn)
+        .await?;
+    }
     println!("compaction task migrated");
 
     // hummock sequence
@@ -751,7 +812,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::Postgres,
-                    "SELECT setval('user_user_id_seq', (SELECT MAX(user_id) FROM user) + 1);",
+                    "SELECT setval('user_user_id_seq', (SELECT MAX(user_id) FROM \"user\") + 1);",
                 ))
                 .await?;
         }
