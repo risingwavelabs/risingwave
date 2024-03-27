@@ -34,7 +34,6 @@ use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
-use risingwave_connector::ConnectorParams;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;

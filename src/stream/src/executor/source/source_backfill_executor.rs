@@ -33,7 +33,6 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
-use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use serde::{Deserialize, Serialize};
 use source_backfill_executor::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
@@ -138,9 +137,6 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
-
-    // config for the connector node
-    connector_params: ConnectorParams,
 }
 
 /// Local variables used in the backfill stage.
@@ -172,7 +168,6 @@ impl BackfillStage {
 }
 
 impl<S: StateStore> SourceBackfillExecutorInner<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         info: ExecutorInfo,
@@ -180,7 +175,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         metrics: Arc<StreamingMetrics>,
         system_params: SystemParamsReaderRef,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
         backfill_state_store: BackfillStateTableHandler<S>,
     ) -> Self {
         let source_split_change_count = metrics.source_split_change_count.with_label_values(&[
@@ -198,7 +192,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             source_split_change_count,
             system_params,
             source_ctrl_opts,
-            connector_params,
         }
     }
 

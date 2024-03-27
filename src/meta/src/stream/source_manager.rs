@@ -52,7 +52,6 @@ pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 /// and sends a split assignment command if split changes detected ([`Self::tick`]).
 pub struct SourceManager {
     pub paused: Mutex<()>,
-    env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
@@ -615,7 +614,6 @@ impl SourceManager {
         ));
 
         Ok(Self {
-            env,
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
