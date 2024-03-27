@@ -46,3 +46,4 @@
                   └─StreamExchange { dist: HashShard(t.id) }
                     └─StreamFilter { predicate: IsNotNull(t.id) }
                       └─StreamTableScan { table: t, columns: [t.id, t._row_id], stream_scan_type: Backfill, pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+
