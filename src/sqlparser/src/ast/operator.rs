@@ -81,20 +81,32 @@ pub enum BinaryOperator {
     And,
     Or,
     Xor,
-    Like,
-    NotLike,
-    ILike,
-    NotILike,
     BitwiseOr,
     BitwiseAnd,
     BitwiseXor,
+    /// Bitwise XOR, e.g. `a # b` (PostgreSQL-specific)
     PGBitwiseXor,
+    /// Bitwise shift left, e.g. `a << b` (PostgreSQL-specific)
     PGBitwiseShiftLeft,
+    /// Bitwise shift right, e.g. `a >> b` (PostgreSQL-specific)
     PGBitwiseShiftRight,
+    /// String matches regular expression (case sensitively), e.g. `a ~ b` (PostgreSQL-specific)
     PGRegexMatch,
+    /// String matches regular expression (case insensitively), e.g. `a ~* b` (PostgreSQL-specific)
     PGRegexIMatch,
+    /// String does not match regular expression (case sensitively), e.g. `a !~ b` (PostgreSQL-specific)
     PGRegexNotMatch,
+    /// String does not match regular expression (case insensitively), e.g. `a !~* b` (PostgreSQL-specific)
     PGRegexNotIMatch,
+    /// String matches pattern (case sensitively), e.g. `a ~~ b` (PostgreSQL-specific)
+    PGLikeMatch,
+    /// String matches pattern (case insensitively), e.g. `a ~~* b` (PostgreSQL-specific)
+    PGILikeMatch,
+    /// String does not match pattern (case sensitively), e.g. `a !~~ b` (PostgreSQL-specific)
+    PGNotLikeMatch,
+    /// String does not match pattern (case insensitively), e.g. `a !~~* b` (PostgreSQL-specific)
+    PGNotILikeMatch,
+    /// String "starts with", eg: `a ^@ b` (PostgreSQL-specific)
     Arrow,
     LongArrow,
     HashArrow,
@@ -133,10 +145,6 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::And => "AND",
             BinaryOperator::Or => "OR",
             BinaryOperator::Xor => "XOR",
-            BinaryOperator::Like => "LIKE",
-            BinaryOperator::NotLike => "NOT LIKE",
-            BinaryOperator::ILike => "ILIKE",
-            BinaryOperator::NotILike => "NOT ILIKE",
             BinaryOperator::BitwiseOr => "|",
             BinaryOperator::BitwiseAnd => "&",
             BinaryOperator::BitwiseXor => "^",
@@ -147,6 +155,10 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGRegexIMatch => "~*",
             BinaryOperator::PGRegexNotMatch => "!~",
             BinaryOperator::PGRegexNotIMatch => "!~*",
+            BinaryOperator::PGLikeMatch => "~~",
+            BinaryOperator::PGILikeMatch => "~~*",
+            BinaryOperator::PGNotLikeMatch => "!~~",
+            BinaryOperator::PGNotILikeMatch => "!~~*",
             BinaryOperator::Arrow => "->",
             BinaryOperator::LongArrow => "->>",
             BinaryOperator::HashArrow => "#>",

@@ -161,7 +161,8 @@ pub enum Precedence {
     UnaryNot,   // 15 in upstream
     Is,         // 17 in upstream
     Cmp,
-    Between,
+    Like,    // 19 in upstream
+    Between, // 20 in upstream
     Other,
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
@@ -1409,10 +1410,10 @@ impl Parser {
             Token::TildeAsterisk => Some(BinaryOperator::PGRegexIMatch),
             Token::ExclamationMarkTilde => Some(BinaryOperator::PGRegexNotMatch),
             Token::ExclamationMarkTildeAsterisk => Some(BinaryOperator::PGRegexNotIMatch),
-            Token::DoubleTilde => Some(BinaryOperator::Like),
-            Token::DoubleTildeAsterisk => Some(BinaryOperator::ILike),
-            Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::NotLike),
-            Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::NotILike),
+            Token::DoubleTilde => Some(BinaryOperator::PGLikeMatch),
+            Token::DoubleTildeAsterisk => Some(BinaryOperator::PGILikeMatch),
+            Token::ExclamationMarkDoubleTilde => Some(BinaryOperator::PGNotLikeMatch),
+            Token::ExclamationMarkDoubleTildeAsterisk => Some(BinaryOperator::PGNotILikeMatch),
             Token::Arrow => Some(BinaryOperator::Arrow),
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
@@ -1428,17 +1429,6 @@ impl Parser {
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
-                Keyword::LIKE => Some(BinaryOperator::Like),
-                Keyword::ILIKE => Some(BinaryOperator::ILike),
-                Keyword::NOT => {
-                    if self.parse_keyword(Keyword::LIKE) {
-                        Some(BinaryOperator::NotLike)
-                    } else if self.parse_keyword(Keyword::ILIKE) {
-                        Some(BinaryOperator::NotILike)
-                    } else {
-                        None
-                    }
-                }
                 Keyword::XOR => Some(BinaryOperator::Xor),
                 Keyword::OPERATOR if self.peek_token() == Token::LParen => Some(
                     BinaryOperator::PGQualified(Box::new(self.parse_qualified_operator()?)),
@@ -1539,15 +1529,39 @@ impl Parser {
                         self.expected("Expected Token::Word after AT", tok)
                     }
                 }
-                Keyword::NOT | Keyword::IN | Keyword::BETWEEN | Keyword::SIMILAR => {
+                Keyword::NOT
+                | Keyword::IN
+                | Keyword::BETWEEN
+                | Keyword::LIKE
+                | Keyword::ILIKE
+                | Keyword::SIMILAR => {
                     self.prev_token();
                     let negated = self.parse_keyword(Keyword::NOT);
                     if self.parse_keyword(Keyword::IN) {
                         self.parse_in(expr, negated)
                     } else if self.parse_keyword(Keyword::BETWEEN) {
                         self.parse_between(expr, negated)
+                    } else if self.parse_keyword(Keyword::LIKE) {
+                        Ok(Expr::Like {
+                            negated,
+                            expr: Box::new(expr),
+                            pattern: Box::new(self.parse_subexpr(Precedence::Like)?),
+                            escape_char: self.parse_escape_char()?,
+                        })
+                    } else if self.parse_keyword(Keyword::ILIKE) {
+                        Ok(Expr::ILike {
+                            negated,
+                            expr: Box::new(expr),
+                            pattern: Box::new(self.parse_subexpr(Precedence::Like)?),
+                            escape_char: self.parse_escape_char()?,
+                        })
                     } else if self.parse_keywords(&[Keyword::SIMILAR, Keyword::TO]) {
-                        self.parse_similar_to(expr, negated)
+                        Ok(Expr::SimilarTo {
+                            negated,
+                            expr: Box::new(expr),
+                            pattern: Box::new(self.parse_subexpr(Precedence::Like)?),
+                            escape_char: self.parse_escape_char()?,
+                        })
                     } else {
                         self.expected("IN, BETWEEN or SIMILAR TO after NOT", self.peek_token())
                     }
@@ -1568,6 +1582,15 @@ impl Parser {
         } else {
             // Can only happen if `get_next_precedence` got out of sync with this function
             parser_err!(format!("No infix parser for token {:?}", tok))
+        }
+    }
+
+    /// parse the ESCAPE CHAR portion of LIKE, ILIKE, and SIMILAR TO
+    pub fn parse_escape_char(&mut self) -> Result<Option<char>, ParserError> {
+        if self.parse_keyword(Keyword::ESCAPE) {
+            Ok(Some(self.parse_literal_char()?))
+        } else {
+            Ok(None)
         }
     }
 
@@ -1705,23 +1728,6 @@ impl Parser {
         })
     }
 
-    /// Parses `SIMILAR TO <pat> [ ESCAPE <esc_text> ]`
-    pub fn parse_similar_to(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
-        let pat = self.parse_subexpr(Precedence::Between)?;
-        let esc_text = if self.parse_keyword(Keyword::ESCAPE) {
-            Some(Box::new(self.parse_subexpr(Precedence::Between)?))
-        } else {
-            None
-        };
-
-        Ok(Expr::SimilarTo {
-            expr: Box::new(expr),
-            negated,
-            pat: Box::new(pat),
-            esc_text,
-        })
-    }
-
     /// Parse a postgresql casting style which is in the form of `expr::datatype`
     pub fn parse_pg_cast(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         Ok(Expr::Cast {
@@ -1740,6 +1746,31 @@ impl Parser {
             Token::Word(w) if w.keyword == Keyword::OR => Ok(P::LogicalOr),
             Token::Word(w) if w.keyword == Keyword::XOR => Ok(P::LogicalXor),
             Token::Word(w) if w.keyword == Keyword::AND => Ok(P::LogicalAnd),
+            Token::Word(w) if w.keyword == Keyword::AT => {
+                match (self.peek_nth_token(1).token, self.peek_nth_token(2).token) {
+                    (Token::Word(w), Token::Word(w2))
+                        if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
+                    {
+                        Ok(P::Other)
+                    }
+                    _ => Ok(P::Zero),
+                }
+            }
+
+            Token::Word(w) if w.keyword == Keyword::NOT => match self.peek_nth_token(1).token {
+                // The precedence of NOT varies depending on keyword that
+                // follows it. If it is followed by IN, BETWEEN, or LIKE,
+                // it takes on the precedence of those tokens. Otherwise it
+                // is not an infix operator, and therefore has zero
+                // precedence.
+                Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
+                Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
+                Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
+                Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Like),
+                Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Like),
+                _ => Ok(P::Zero),
+            },
+
             Token::Word(w) if w.keyword == Keyword::IS => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::ISNULL => Ok(P::Is),
             Token::Word(w) if w.keyword == Keyword::NOTNULL => Ok(P::Is),
@@ -1751,24 +1782,11 @@ impl Parser {
             | Token::GtEq
             | Token::DoubleEq
             | Token::Spaceship => Ok(P::Cmp),
-            Token::Word(w) if w.keyword == Keyword::NOT => match self.peek_nth_token(1).token {
-                // The precedence of NOT varies depending on keyword that
-                // follows it. If it is followed by IN, BETWEEN, or LIKE,
-                // it takes on the precedence of those tokens. Otherwise it
-                // is not an infix operator, and therefore has zero
-                // precedence.
-                Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
-                Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
-                Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Between),
-                Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Between),
-                Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Between),
-                _ => Ok(P::Zero),
-            },
-            Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
             Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
-            Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Between),
-            Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Between),
-            Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Between),
+            Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
+            Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
+            Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Like),
+            Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Like),
             Token::Tilde
             | Token::TildeAsterisk
             | Token::ExclamationMarkTilde
@@ -1795,16 +1813,6 @@ impl Parser {
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
                 Ok(P::Other)
-            }
-            Token::Word(w) if w.keyword == Keyword::AT => {
-                match (self.peek_nth_token(1).token, self.peek_nth_token(2).token) {
-                    (Token::Word(w), Token::Word(w2))
-                        if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
-                    {
-                        Ok(P::Other)
-                    }
-                    _ => Ok(P::Zero),
-                }
             }
             // In some languages (incl. rust, c), bitwise operators have precedence:
             //   or < xor < and < shift
@@ -3422,6 +3430,14 @@ impl Parser {
             columns,
             values,
         })
+    }
+
+    fn parse_literal_char(&mut self) -> Result<char, ParserError> {
+        let s = self.parse_literal_string()?;
+        if s.len() != 1 {
+            return parser_err!(format!("Expect a char, found {s:?}"));
+        }
+        Ok(s.chars().next().unwrap())
     }
 
     /// Parse a tab separated values in
