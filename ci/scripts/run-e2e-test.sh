@@ -71,8 +71,11 @@ download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" ta
 mkdir -p e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download udf.wasm e2e_test/udf/wasm/target/wasm32-wasi/release/
 buildkite-agent artifact download risingwave-udf-example.jar ./
+mkdir -p e2e_test/udf/sse/server/target/release/
+buildkite-agent artifact download sse-server e2e_test/udf/sse/server/target/release/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
+chmod +x ./e2e_test/udf/sse/server/target/release/sse-server
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 echo "--- e2e, $mode, streaming"
@@ -122,6 +125,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/deno_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop

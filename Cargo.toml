@@ -66,7 +66,7 @@ members = [
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]
-exclude = ["e2e_test/udf/wasm", "lints"]
+exclude = ["e2e_test/udf/sse/server", "e2e_test/udf/wasm", "lints"]
 resolver = "2"
 
 [workspace.package]
@@ -138,6 +138,8 @@ arrow-select = "50"
 arrow-ord = "50"
 arrow-row = "50"
 arrow-udf-js = "0.1"
+# FIXME: Use the latest version of arrow-udf-js-deno when it is released.
+arrow-udf-js-deno = { git = "https://github.com/bakjos/arrow-udf.git", rev = "a810d2c" }
 arrow-udf-wasm = { version = "0.2", features = ["build"] }
 arrow-udf-python = { git = "https://github.com/risingwavelabs/arrow-udf.git", rev = "6c32f71" }
 arrow-array-deltalake = { package = "arrow-array", version = "48.0.1" }
@@ -304,6 +306,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+# patch to remove preserve_order from serde_json
+deno_core = { git = "https://github.com/bakjos/deno_core", rev = "70d1544" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
