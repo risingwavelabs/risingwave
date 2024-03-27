@@ -526,6 +526,10 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
+    /// Control the strictness of stream consistency.
+    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
+    pub unsafe_enable_strict_consistency: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -684,6 +688,7 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
+    // DEPRECATED: This config will be deprecated in the future version, use `storage.compactor_iter_max_io_retry_times` instead.
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
@@ -694,12 +699,12 @@ pub struct StorageConfig {
     pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
     pub compactor_fast_max_compact_delete_ratio: u32,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
     pub compactor_fast_max_compact_task_size: u64,
+    #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
+    pub compactor_iter_max_io_retry_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1325,6 +1330,10 @@ pub mod default {
             10 * 60 * 1000
         }
 
+        pub fn compactor_iter_max_io_retry_times() -> usize {
+            8
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1372,6 +1381,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn unsafe_enable_strict_consistency() -> bool {
+            true
         }
     }
 
