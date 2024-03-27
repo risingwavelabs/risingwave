@@ -30,6 +30,10 @@ pub struct MemoryManagerConfig {
     pub threshold_graceful: f64,
     pub threshold_stable: f64,
 
+    pub eviction_factor_stable: f64,
+    pub eviction_factor_graceful: f64,
+    pub eviction_factor_aggressive: f64,
+
     pub metrics: Arc<StreamingMetrics>,
     pub latest_sequence: Arc<AtomicSequence>,
     pub evict_sequence: Arc<AtomicSequence>,

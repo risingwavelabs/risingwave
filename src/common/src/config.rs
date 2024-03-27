@@ -913,6 +913,15 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::memory_controller_threshold_stable")]
     pub memory_controller_threshold_stable: f64,
 
+    #[serde(default = "default::developer::memory_controller_eviction_factor_aggressive")]
+    pub memory_controller_eviction_factor_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_eviction_factor_graceful")]
+    pub memory_controller_eviction_factor_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_eviction_factor_stable")]
+    pub memory_controller_eviction_factor_stable: f64,
+
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
     /// Enable arrangement backfill
     /// If true, the arrangement backfill will be disabled,
@@ -1546,12 +1555,27 @@ pub mod default {
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
+
         pub fn memory_controller_threshold_graceful() -> f64 {
             0.8
         }
+
         pub fn memory_controller_threshold_stable() -> f64 {
             0.7
         }
+
+        pub fn memory_controller_eviction_factor_aggressive() -> f64 {
+            2.0
+        }
+
+        pub fn memory_controller_eviction_factor_graceful() -> f64 {
+            1.5
+        }
+
+        pub fn memory_controller_eviction_factor_stable() -> f64 {
+            1.0
+        }
+
         pub fn stream_enable_arrangement_backfill() -> bool {
             true
         }
