@@ -62,8 +62,7 @@ pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
 
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
-    #[cfg(test)]
-    pub(crate) fn with_epoch(
+    pub fn new(
         iterator: I,
         key_range: UserKeyRange,
         read_epoch: u64,
@@ -196,15 +195,15 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// `rewind` or `seek` methods are called.
     ///
     /// Note: before call the function you need to ensure that the iterator is valid.
-    pub fn key(&self) -> &FullKey<Bytes> {
+    pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        &self.last_key
+        self.last_key.to_ref()
     }
 
     /// The returned value is in the form of user value.
     ///
-    /// Note: before calling the function you need to ensure that the iterator is valid.
-    pub fn value(&self) -> &Bytes {
+    /// Note: before call the function you need to ensure that the iterator is valid.
+    pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
         &self.last_val
     }
@@ -277,7 +276,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
+        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with maximum epoch.
@@ -286,7 +285,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         key_range: UserKeyRange,
         min_epoch: HummockEpoch,
     ) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
+        Self::new(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
     }
 }
 

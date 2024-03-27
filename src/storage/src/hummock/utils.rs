@@ -23,9 +23,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use foyer::memory::CacheContext;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::key::{
-    bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
-};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, UserKeyRangeRef};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
@@ -97,19 +95,17 @@ pub fn validate_table_key_range(version: &HummockVersion) {
     }
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
-where
-    R: RangeBounds<TableKey<B>>,
-    B: AsRef<[u8]> + EmptySliceRef,
-{
+pub fn filter_single_sst<'a>(
+    info: &'a SstableInfo,
+    table_id: TableId,
+    user_key_range: &'a UserKeyRangeRef<'a>,
+) -> bool {
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = FullKey::decode(table_range.left.as_slice()).user_key;
     let table_end = FullKey::decode(table_range.right.as_slice()).user_key;
-    let (left, right) = bound_table_key_range(table_id, table_key_range);
-    let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
-    let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
+
     range_overlap(
-        &(left, right),
+        user_key_range,
         &table_start,
         if table_range.right_exclusive {
             Bound::Excluded(&table_end)
@@ -134,17 +130,13 @@ pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: UserKey<&[u8]>) -> usize
 
 /// Prune overlapping SSTs that does not overlap with a specific key range or does not overlap with
 /// a specific table id. Returns the sst ids after pruning.
-pub fn prune_overlapping_ssts<'a, R, B>(
+pub fn prune_overlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
     table_id: TableId,
-    table_key_range: &'a R,
-) -> impl DoubleEndedIterator<Item = &'a SstableInfo>
-where
-    R: RangeBounds<TableKey<B>>,
-    B: AsRef<[u8]> + EmptySliceRef,
-{
+    user_key_range: UserKeyRangeRef<'a>,
+) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     ssts.iter()
-        .filter(move |info| filter_single_sst(info, table_id, table_key_range))
+        .filter(move |info| filter_single_sst(info, table_id, &user_key_range))
 }
 
 /// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap

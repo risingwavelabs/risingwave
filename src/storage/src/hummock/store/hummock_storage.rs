@@ -52,8 +52,8 @@ use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::utils::{validate_safe_epoch, wait_for_epoch};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, MemoryLimiter,
-    SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
+    HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
+    MemoryLimiter, SstableObjectIdManager, SstableObjectIdManagerRef, SstableStoreRef,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::{CompactorMetrics, HummockStateStoreMetrics, StoreLocalStatistic};
@@ -284,6 +284,24 @@ impl HummockStorage {
             .await
     }
 
+    async fn rev_iter_inner(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<HummockStorageRevIterator> {
+        let (key_range, read_version_tuple) = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, key_range)
+                .await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, key_range)?
+        };
+
+        self.hummock_version_reader
+            .rev_iter(key_range, epoch, read_options, read_version_tuple)
+            .await
+    }
+
     async fn build_read_version_tuple_from_backup(
         &self,
         epoch: u64,
@@ -459,6 +477,7 @@ impl HummockStorage {
 impl StateStoreRead for HummockStorage {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
     type Iter = HummockStorageIterator;
+    type RevIter = HummockStorageRevIterator;
 
     fn get(
         &self,
@@ -484,6 +503,23 @@ impl StateStoreRead for HummockStorage {
             read_options.table_id
         );
         self.iter_inner(key_range, epoch, read_options)
+    }
+
+    fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
+        let (l_vnode_inclusive, r_vnode_exclusive) = vnode_range(&key_range);
+        assert_eq!(
+            r_vnode_exclusive - l_vnode_inclusive,
+            1,
+            "read range {:?} for table {} iter contains more than one vnode",
+            key_range,
+            read_options.table_id
+        );
+        self.rev_iter_inner(key_range, epoch, read_options)
     }
 
     async fn iter_log(
