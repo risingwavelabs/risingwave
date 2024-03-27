@@ -3126,6 +3126,54 @@ fn parse_create_materialized_view_emit_immediately() {
 }
 
 #[test]
+fn parse_create_table_on_conflict() {
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT OVERWRITE AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateTable {
+            name,
+            query,
+            on_conflict,
+            ..
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
+            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT IGNORE AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateTable {
+            name,
+            query,
+            on_conflict,
+            ..
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
+            assert_eq!(on_conflict, Some(OnConflict::Ignore));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "CREATE TABLE myschema.myview AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateTable {
+            name,
+            query,
+            on_conflict,
+            ..
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
+            assert_eq!(on_conflict, None);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_create_materialized_view_emit_on_window_close() {
     let sql =
         "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT ON WINDOW CLOSE";
