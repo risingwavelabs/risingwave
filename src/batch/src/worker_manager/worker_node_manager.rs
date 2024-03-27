@@ -277,6 +277,11 @@ impl WorkerNodeManager {
     }
 
     pub fn mask_worker_node(&self, worker_node_id: u32, duration: Duration) {
+        tracing::info!(
+            "Mask worker node {} for {:?} temporarily",
+            worker_node_id,
+            duration
+        );
         let mut worker_node_mask = self.worker_node_mask.write().unwrap();
         if worker_node_mask.contains(&worker_node_id) {
             return;
