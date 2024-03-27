@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::num::NonZeroU32;
 
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::OwnedRow;
@@ -104,9 +107,22 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
         let mut builder = DataChunkBuilder::new(self.inner.schema().data_types(), args.chunk_size);
         let chunk_stream = iter_chunks(row_stream, &mut builder);
+
+        let limiter = {
+            let quota = Quota::per_second(NonZeroU32::new(args.chunk_size as u32).unwrap());
+            let clock = MonotonicClock;
+            RateLimiter::direct_with_clock(quota, &clock)
+        };
         #[for_await]
         for chunk in chunk_stream {
-            yield Some(chunk?);
+            let chunk = chunk?;
+            if chunk.cardinality() != 0 {
+                limiter
+                    .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
+                    .await
+                    .unwrap();
+            }
+            yield Some(chunk);
         }
         yield None;
     }
