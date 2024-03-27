@@ -103,7 +103,7 @@ impl Cursor {
                 if self.is_snapshot {
                     // 1a. The rw_timestamp in the table is all the same, so don't need to check.
                     return Ok(CursorRowValue::Row((
-                        Row::new(build_row_with_snapshot(new_row, self.rw_timestamp)),
+                        Row::new(build_row_with_snapshot(new_row)),
                         self.pg_desc.clone(),
                     )));
                 }
@@ -150,11 +150,9 @@ impl Cursor {
     }
 }
 
-pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>, rw_timestamp: i64) -> Vec<Option<Bytes>> {
+pub fn build_row_with_snapshot(row: Vec<Option<Bytes>>) -> Vec<Option<Bytes>> {
     let mut new_row = vec![
-        Some(Bytes::from(
-            convert_logstore_i64_to_unix_millis(rw_timestamp).to_string(),
-        )),
+        Some(Bytes::from("snapshot".to_string())),
         Some(Bytes::from(1i16.to_string())),
     ];
     new_row.extend(row);

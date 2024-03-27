@@ -37,45 +37,51 @@ pub async fn handle_declare_cursor(
         Binder::resolve_schema_qualified_name(db_name, stmt.cursor_name.clone())?;
 
     let cursor_from_subscription_name = stmt.cursor_from.0.last().unwrap().real_value().clone();
-    let start_rw_timestamp = stmt
-        .rw_timestamp
-        .0
-        .map(|ident| ident.real_value().parse::<u64>().unwrap())
-        .unwrap_or_else(|| 0);
-    let is_snapshot = start_rw_timestamp == 0;
     let subscription =
         session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
-
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
-    let (start_rw_timestamp, res) = if is_snapshot {
-        let subscription_from_table_name = ObjectName(vec![Ident::from(
-            subscription.subscription_from_name.as_ref(),
-        )]);
-        let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
-            subscription_from_table_name,
-        )));
-        let res = handle_query(handle_args, query_stmt, formats).await?;
-        let start_epoch = session
-            .get_pinned_snapshot()
-            .ok_or_else(|| {
-                ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
-            })?
-            .epoch_with_frontend_pinned()
-            .ok_or_else(|| {
-                ErrorCode::InternalError("Fetch Cursor can't support setting an epoch".to_string())
-            })?
-            .0;
-
-        (convert_epoch_to_logstore_i64(start_epoch), res)
-    } else {
-        check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
-        let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
-        let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
-            &subscription.get_log_store_name()?,
-            start_rw_timestamp,
-        )));
-        let res = handle_query(handle_args, query_stmt, formats).await?;
-        (start_rw_timestamp, res)
+    let (start_rw_timestamp, res, is_snapshot) = match stmt.rw_timestamp {
+        risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
+            check_cursor_unix_millis(start_rw_timestamp, subscription.get_retention_seconds()?)?;
+            let start_rw_timestamp = convert_unix_millis_to_logstore_i64(start_rw_timestamp);
+            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                &subscription.get_log_store_name()?,
+                start_rw_timestamp,
+            )));
+            let res = handle_query(handle_args, query_stmt, formats).await?;
+            (start_rw_timestamp, res, false)
+        }
+        risingwave_sqlparser::ast::Since::ProcessTime => {
+            let start_rw_timestamp = convert_epoch_to_logstore_i64(Epoch::now().0);
+            let query_stmt = Statement::Query(Box::new(gen_query_from_logstore_ge_rw_timestamp(
+                &subscription.get_log_store_name()?,
+                start_rw_timestamp,
+            )));
+            let res = handle_query(handle_args, query_stmt, formats).await?;
+            (start_rw_timestamp, res, false)
+        }
+        risingwave_sqlparser::ast::Since::WithSnapshot => {
+            let subscription_from_table_name = ObjectName(vec![Ident::from(
+                subscription.subscription_from_name.as_ref(),
+            )]);
+            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name(
+                subscription_from_table_name,
+            )));
+            let res = handle_query(handle_args, query_stmt, formats).await?;
+            let pinned_epoch = session
+                .get_pinned_snapshot()
+                .ok_or_else(|| {
+                    ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_string())
+                })?
+                .epoch_with_frontend_pinned()
+                .ok_or_else(|| {
+                    ErrorCode::InternalError(
+                        "Fetch Cursor can't support setting an epoch".to_string(),
+                    )
+                })?
+                .0;
+            (convert_epoch_to_logstore_i64(pinned_epoch), res, true)
+        }
     };
     // Create cursor based on the response
     let cursor_manager = session.get_cursor_manager();

@@ -647,7 +647,7 @@ impl fmt::Display for CreateSubscriptionStatement {
 pub struct DeclareCursorStatement {
     pub cursor_name: ObjectName,
     pub cursor_from: ObjectName,
-    pub rw_timestamp: RwTimestamp,
+    pub rw_timestamp: Since,
 }
 
 impl ParseTo for DeclareCursorStatement {
@@ -664,7 +664,7 @@ impl ParseTo for DeclareCursorStatement {
             )?
         };
 
-        impl_parse_to!(rw_timestamp: RwTimestamp, p);
+        impl_parse_to!(rw_timestamp: Since, p);
 
         Ok(Self {
             cursor_name,
@@ -805,31 +805,36 @@ impl fmt::Display for WithProperties {
     }
 }
 
-/// RwTimestamp, used for cursor
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct RwTimestamp(pub Option<Ident>);
+pub enum Since {
+    TimestampMsNum(u64),
+    ProcessTime,
+    WithSnapshot,
+}
 
-impl fmt::Display for RwTimestamp {
+impl fmt::Display for Since {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.0 {
-            Some(ident) => write!(f, "SINCE {}", ident),
-            None => Ok(()),
+        use Since::*;
+        match self {
+            TimestampMsNum(ts) => write!(f, " SINCE {}", ts),
+            ProcessTime => write!(f, " SINCE PROCTIME()"),
+            WithSnapshot => write!(f, " SINCE SNAPSHOT()"),
         }
     }
 }
 
-impl ParseTo for RwTimestamp {
+impl ParseTo for Since {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        p.parse_rw_timestamp()
+        p.parse_since()
     }
 }
 
-impl From<Option<Ident>> for RwTimestamp {
-    fn from(value: Option<Ident>) -> Self {
-        Self(value)
-    }
-}
+// impl From<Option<Ident>> for Since {
+//     fn from(value: Option<Ident>) -> Self {
+//         Self(value)
+//     }
+// }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

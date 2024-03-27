@@ -260,7 +260,7 @@ pub fn gen_query_from_logstore_ge_rw_timestamp(logstore_name: &str, rw_timestamp
 
 pub fn convert_unix_millis_to_logstore_i64(unix_millis: u64) -> i64 {
     let epoch = Epoch::from_unix_millis(unix_millis);
-    epoch.0 as i64 ^ (1i64 << 63)
+    convert_epoch_to_logstore_i64(epoch.0)
 }
 
 pub fn convert_epoch_to_logstore_i64(epoch: u64) -> i64 {

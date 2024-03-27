@@ -2901,13 +2901,42 @@ impl Parser {
         Ok(SqlOption { name, value })
     }
 
-    pub fn parse_rw_timestamp(&mut self) -> Result<RwTimestamp, ParserError> {
-        let rw_timestamp = if self.parse_keyword(Keyword::SINCE) {
-            Some(Ident::from(self.parse_number_value()?.as_str()))
+    pub fn parse_since(&mut self) -> Result<Since, ParserError> {
+        if self.parse_keyword(Keyword::SINCE) {
+            let token = self.next_token();
+            match token.token {
+                Token::Word(w) => {
+                    let ident = w.to_ident()?;
+                    // Backward compatibility for now.
+                    if ident.real_value() == "proctime" || ident.real_value() == "now" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Since::ProcessTime)
+                    } else if ident.real_value() == "snapshot" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Since::WithSnapshot)
+                    } else {
+                        parser_err!(format!(
+                            "Expected proctime() or snapshot(), found: {}",
+                            ident.real_value()
+                        ))
+                    }
+                }
+                Token::Number(s) => {
+                    let num = s.parse::<u64>().map_err(|e| {
+                        ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
+                    });
+                    Ok(Since::TimestampMsNum(num?))
+                }
+                unexpected => self.expected(
+                    "Proctime(), Number",
+                    unexpected.with_location(token.location),
+                ),
+            }
         } else {
-            None
-        };
-        Ok(RwTimestamp::from(rw_timestamp))
+            Ok(Since::WithSnapshot)
+        }
     }
 
     pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
