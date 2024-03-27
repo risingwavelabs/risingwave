@@ -825,10 +825,10 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries(
-                    "Barrier pending time",
-                    "The duration since the last barrier has completed",
+                    "Barrier pending time (secs)",
+                    "The duration since the last barrier has completed. "
+                    "Note that the metrics might be larger than the real value up to the Prometheus scrape interval.",
                     [
-                        # now - last_committed_barrier_time
                         panels.target(
                             f"time() - {metric('last_committed_barrier_time')}", "barrier_pending_time"
                         )

@@ -70,7 +70,7 @@ pub struct MetaMetrics {
     pub all_barrier_nums: IntGauge,
     /// The number of in-flight barriers
     pub in_flight_barrier_nums: IntGauge,
-    /// The timestamp (epoch time) of the last committed barrier.
+    /// The timestamp (epoch seconds) of the last committed barrier.
     pub last_committed_barrier_time: IntGauge,
 
     /// ********************************** Recovery ************************************
@@ -229,7 +229,7 @@ impl MetaMetrics {
         .unwrap();
         let last_committed_barrier_time = register_int_gauge_with_registry!(
             "last_committed_barrier_time",
-            "The timestamp (epoch time) of the last commited barrier",
+            "The timestamp (epoch seconds) of the last committed barrier",
             registry
         )
         .unwrap();
