@@ -575,6 +575,8 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // user privilege
     let mut privileges = vec![];
+    assert!(!users.is_empty());
+    let next_user_id = users.iter().map(|u| u.id + 1).max().unwrap();
     for user in users {
         for gp in user.grant_privileges {
             let id = match gp.get_object()? {
@@ -785,18 +787,19 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // Rest sequence for object and user.
     match meta_store_sql.conn.get_database_backend() {
         DbBackend::MySql => {
+            let next_object_id = next_available_id();
             meta_store_sql
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::MySql,
-                    "ALTER TABLE object AUTO_INCREMENT = (SELECT MAX(oid) + 1 FROM object);",
+                    format!("ALTER TABLE object AUTO_INCREMENT = {next_object_id};"),
                 ))
                 .await?;
             meta_store_sql
                 .conn
                 .execute(Statement::from_string(
                     DatabaseBackend::MySql,
-                    "ALTER TABLE user AUTO_INCREMENT = (SELECT MAX(user_id) + 1 FROM user);",
+                    format!("ALTER TABLE user AUTO_INCREMENT = {next_user_id};"),
                 ))
                 .await?;
         }
