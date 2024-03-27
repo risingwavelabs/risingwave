@@ -824,6 +824,16 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries(
+                    "Barrier pending time",
+                    "The duration since the last barrier has completed",
+                    [
+                        # now - last_committed_barrier_time
+                        panels.target(
+                            f"time() - {metric('last_committed_barrier_time')}", "barrier_pending_time"
+                        )
+                    ],
+                ),
                 panels.timeseries_count(
                     "Barrier Number",
                     "The number of barriers that have been ingested but not completely processed. This metric reflects the "
