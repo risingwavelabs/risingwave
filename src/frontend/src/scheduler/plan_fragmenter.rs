@@ -24,6 +24,7 @@ use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
+use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::hash::table_distribution::TableDistribution;
@@ -31,7 +32,7 @@ use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{OpendalGcs, OpendalS3};
-use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
+use risingwave_connector::source::iceberg::{IcebergSplitEnumerator, IcebergTimeTravelInfo};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
@@ -41,6 +42,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldPb;
+use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
@@ -50,7 +52,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
 use crate::error::RwError;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{BatchSource, PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
@@ -266,6 +268,7 @@ impl Query {
 pub struct SourceFetchInfo {
     pub connector: ConnectorProperties,
     pub timebound: (Option<i64>, Option<i64>),
+    pub as_of: Option<AsOf>,
 }
 
 #[derive(Clone, Debug)]
@@ -328,8 +331,25 @@ impl SourceScanInfo {
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::default().into())
                         .await?;
 
+                let time_travel_info = match fetch_info.as_of {
+                    Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(v)),
+                    Some(AsOf::TimestampNum(ts)) => {
+                        Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000))
+                    }
+                    Some(AsOf::VersionString(_)) => {
+                        bail!("Unsupported version string in iceberg time travel")
+                    }
+                    Some(AsOf::TimestampString(ts)) => Some(
+                        speedate::DateTime::parse_str_rfc3339(&ts)
+                            .map(|t| IcebergTimeTravelInfo::TimestampMs(t.timestamp_tz() * 1000))
+                            .map_err(|_e| anyhow!("fail to parse timestamp"))?,
+                    ),
+                    Some(AsOf::ProcessTime) => unreachable!(),
+                    None => None,
+                };
+
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(batch_parallelism)
+                    .list_splits_batch(time_travel_info, batch_parallelism)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -979,6 +999,7 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(source_node) = node.as_batch_source() {
+            let source_node: &BatchSource = source_node;
             let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(
@@ -986,9 +1007,11 @@ impl BatchPlanFragmenter {
                     false,
                 )?;
                 let timestamp_bound = source_node.kafka_timestamp_range_value();
+                let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
                     timebound: timestamp_bound,
+                    as_of,
                 })));
             }
         }
