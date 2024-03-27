@@ -48,7 +48,7 @@ use crate::{
 
 mod datetime;
 mod decimal;
-mod fields;
+pub mod fields;
 mod interval;
 mod jsonb;
 mod macros;

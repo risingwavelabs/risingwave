@@ -11,7 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use super::DataType;
+
+use std::marker::PhantomData;
+
+use super::{DataType, Datum, ToOwnedDatum, WithDataType};
 use crate::row::OwnedRow;
 use crate::util::chunk_coalesce::DataChunkBuilder;
 
@@ -77,6 +80,69 @@ pub trait Fields {
             capacity,
         )
     }
+}
+
+/// A helper struct to represent an always-`NULL` column of a specific type.
+pub struct Null<T>(PhantomData<T>);
+
+/// Create a [`Null`] value for an always-`NULL` column.
+pub fn null<T>() -> Null<T> {
+    Null(PhantomData)
+}
+
+impl<T> WithDataType for Null<T>
+where
+    T: WithDataType,
+{
+    fn default_data_type() -> DataType {
+        T::default_data_type()
+    }
+}
+
+impl<T> ToOwnedDatum for Null<T> {
+    fn to_owned_datum(self) -> Datum {
+        None
+    }
+}
+
+mod __const {
+    /// Marker trait for constant types.
+    pub trait Const: Default {}
+}
+
+macro_rules! def_const_type {
+    ($ty:ident, $dt:ident) => {
+        paste::paste! {
+            /// A helper struct to represent a column which always has a constant value.
+            #[derive(Default)]
+            pub struct [<Const $ty:camel>]<const VALUE: $ty>;
+
+            impl<const VALUE: $ty> __const::Const for [<Const $ty:camel>]<VALUE> {}
+
+            impl<const VALUE: $ty> WithDataType for [<Const $ty:camel>]<VALUE> {
+                fn default_data_type() -> DataType {
+                    DataType::$dt
+                }
+            }
+
+            impl<const VALUE: $ty> ToOwnedDatum for [<Const $ty:camel>]<VALUE> {
+                fn to_owned_datum(self) -> Datum {
+                    Some(VALUE).to_owned_datum()
+                }
+            }
+        }
+    };
+}
+
+def_const_type!(bool, Boolean);
+def_const_type!(i16, Int16);
+def_const_type!(i32, Int32);
+def_const_type!(i64, Int64);
+// TODO: string constants requiring the feature `adt_const_params`
+
+/// Create a value for a constant column.
+pub fn constant<T: __const::Const>() -> T {
+    T::default()
 }
 
 #[cfg(test)]
