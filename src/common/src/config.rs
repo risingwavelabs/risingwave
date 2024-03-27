@@ -500,6 +500,10 @@ pub struct BatchConfig {
     #[serde(default = "default::batch::frontend_compute_runtime_worker_threads")]
     /// frontend compute runtime worker threads
     pub frontend_compute_runtime_worker_threads: usize,
+
+    /// This is the secs used to mask a worker unavailable temporarily.
+    #[serde(default = "default::batch::mask_worker_temporary_secs")]
+    pub mask_worker_temporary_secs: usize,
 }
 
 /// The section `[streaming]` in `risingwave.toml`.
@@ -1571,6 +1575,10 @@ pub mod default {
 
         pub fn frontend_compute_runtime_worker_threads() -> usize {
             4
+        }
+
+        pub fn mask_worker_temporary_secs() -> usize {
+            30
         }
     }
 

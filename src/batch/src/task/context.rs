@@ -27,6 +27,7 @@ use super::TaskId;
 use crate::error::Result;
 use crate::monitor::{BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
+use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 
 /// Context for batch task execution.
 ///
@@ -65,6 +66,8 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn mem_usage(&self) -> usize;
 
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
+
+    fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef>;
 }
 
 /// Batch task context on compute node.
@@ -148,6 +151,10 @@ impl BatchTaskContext for ComputeNodeContext {
         } else {
             MemoryContext::none()
         }
+    }
+
+    fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
+        None
     }
 }
 
