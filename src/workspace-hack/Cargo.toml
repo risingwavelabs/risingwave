@@ -112,7 +112,7 @@ redis = { version = "0.25", features = ["async-std-comp", "tokio-comp"] }
 regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
-reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rustc-hash = { version = "1" }
