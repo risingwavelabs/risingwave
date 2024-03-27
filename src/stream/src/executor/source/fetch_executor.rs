@@ -67,13 +67,11 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
 }
 
 impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         upstream: Executor,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,

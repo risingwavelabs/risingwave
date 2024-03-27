@@ -218,7 +218,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
-            self.connector_params.connector_client.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
