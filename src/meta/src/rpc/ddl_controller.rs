@@ -1302,6 +1302,8 @@ impl DdlController {
         default_parallelism: Option<NonZeroUsize>,
         cluster_info: &StreamingClusterInfo,
     ) -> MetaResult<NonZeroUsize> {
+        const MAX_PARALLELISM: NonZeroUsize = NonZeroUsize::new(VirtualNode::COUNT).unwrap();
+
         if cluster_info.parallel_units.is_empty() {
             return Err(MetaError::unavailable(
                 "No available parallel units to schedule",
@@ -1310,21 +1312,13 @@ impl DdlController {
 
         let available_parallel_units =
             NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+
         // Use configured parallel units if no default parallelism is specified.
-        let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
-            DefaultParallelism::Full => {
-                if available_parallel_units.get() > VirtualNode::COUNT {
-                    tracing::warn!(
-                        "Too many parallel units, use {} instead",
-                        VirtualNode::COUNT
-                    );
-                    NonZeroUsize::new(VirtualNode::COUNT).unwrap()
-                } else {
-                    available_parallel_units
-                }
-            }
-            DefaultParallelism::Default(num) => *num,
-        });
+        let parallelism =
+            default_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
+                DefaultParallelism::Full => available_parallel_units,
+                DefaultParallelism::Default(num) => *num,
+            });
 
         if parallelism > available_parallel_units {
             return Err(MetaError::unavailable(format!(
@@ -1333,7 +1327,12 @@ impl DdlController {
             )));
         }
 
-        Ok(parallelism)
+        if available_parallel_units > MAX_PARALLELISM {
+            tracing::warn!("Too many parallel units, use {} instead", MAX_PARALLELISM);
+            Ok(MAX_PARALLELISM)
+        } else {
+            Ok(parallelism)
+        }
     }
 
     /// Builds the actor graph:
