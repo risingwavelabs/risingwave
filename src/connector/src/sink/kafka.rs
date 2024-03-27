@@ -26,6 +26,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
@@ -306,8 +307,12 @@ impl Sink for KafkaSink {
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
