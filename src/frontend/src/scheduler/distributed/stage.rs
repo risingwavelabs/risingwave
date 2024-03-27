@@ -1032,16 +1032,14 @@ impl StageRunner {
         if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
             return;
         }
-        let duration = std::cmp::max(
-            Duration::from_secs(
-                self.ctx
-                    .session
-                    .env()
-                    .meta_config()
-                    .max_heartbeat_interval_secs as _,
-            ) / 10,
-            Duration::from_secs(1),
-        );
+        let duration = Duration::from_secs(std::cmp::max(
+            self.ctx
+                .session
+                .env()
+                .batch_config()
+                .mask_worker_temporary_secs as u64,
+            1,
+        ));
         self.worker_node_manager
             .manager
             .mask_worker_node(worker.id, duration);

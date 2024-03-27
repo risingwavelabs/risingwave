@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
@@ -99,7 +102,33 @@ impl CreateSource for DefaultCreateSource {
 
             Ok(ExchangeSourceImpl::Grpc(
                 GrpcExchangeSource::create(
-                    self.client_pool.get_by_addr(peer_addr).await?,
+                    self.client_pool
+                        .get_by_addr(peer_addr.clone())
+                        .await
+                        .inspect_err(|_| {
+                            if let Some(worker_node_manager) = context.worker_node_manager() {
+                                if let Some(worker) = worker_node_manager
+                                    .list_worker_nodes()
+                                    .iter()
+                                    .find(|worker| {
+                                        worker
+                                            .host
+                                            .as_ref()
+                                            .map_or(false, |h| HostAddr::from(h) == peer_addr)
+                                            && worker
+                                                .property
+                                                .as_ref()
+                                                .map_or(false, |p| p.is_serving)
+                                    })
+                                {
+                                    let duration = Duration::from_secs(std::cmp::max(
+                                        context.get_config().mask_worker_temporary_secs as u64,
+                                        1,
+                                    ));
+                                    worker_node_manager.mask_worker_node(worker.id, duration);
+                                }
+                            }
+                        })?,
                     task_output_id.clone(),
                     prost_source.local_execute_plan.clone(),
                 )
