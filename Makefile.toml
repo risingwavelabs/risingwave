@@ -697,14 +697,19 @@ kill_zookeeper() {
   wait_zookeeper_exit
 }
 
+if ! ${TMUX} ls &>/dev/null ; then
+  echo "No risedev cluster to kill. Exiting..."
+  exit 0
+fi
+
 # Kill other components
-${TMUX} list-windows -t risedev -F "#{window_name} #{pane_id}" \
+${TMUX} list-windows -F "#{window_name} #{pane_id}" \
 | grep -v 'kafka' \
 | grep -v 'zookeeper' \
 | awk '{ print $2 }' \
 | xargs -I {} ${TMUX} send-keys -t {} C-c C-d
 
-if [[ -n $(${TMUX} list-windows -t risedev | grep kafka) ]];
+if [[ -n $(${TMUX} list-windows | grep kafka) ]];
 then
   echo "kill kafka"
   kill_kafka || true

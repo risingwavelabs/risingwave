@@ -16,7 +16,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use console::style;
 
 use crate::{ExecuteContext, Task};
@@ -58,11 +58,10 @@ impl Task for ConfigureTmuxTask {
         let mut cmd = new_tmux_command();
         cmd.arg("list-sessions");
         if ctx.run_command(cmd).is_ok() {
-            ctx.pb.set_message("killing previous session...");
-
-            let mut cmd = Command::new("./risedev");
-            cmd.arg("kill-risedev");
-            ctx.run_command(cmd)?;
+            bail!(
+                "A previous cluster is already running. Please kill it first with {}.",
+                style("./risedev k").blue().bold()
+            );
         }
 
         ctx.pb.set_message("creating new session...");
