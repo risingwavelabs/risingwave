@@ -973,7 +973,6 @@ mod tests {
 
             let source_manager = Arc::new(
                 SourceManager::new(
-                    env.clone(),
                     barrier_scheduler.clone(),
                     metadata_manager.clone(),
                     meta_metrics.clone(),

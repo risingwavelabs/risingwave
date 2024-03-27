@@ -39,7 +39,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{MetaSrvEnv, MetadataManager, SourceId};
+use crate::manager::{MetadataManager, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
@@ -544,7 +544,6 @@ impl SourceManager {
     const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
         metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
