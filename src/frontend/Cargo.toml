@@ -19,7 +19,7 @@ anyhow = "1"
 arc-swap = "1"
 arrow-schema = { workspace = true }
 arrow-udf-wasm = { workspace = true }
-async-recursion = "1.0.5"
+async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 auto_impl = "1"
