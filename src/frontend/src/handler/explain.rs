@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
@@ -32,7 +33,6 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;

@@ -27,8 +27,10 @@ use futures::stream::Fuse;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
@@ -61,7 +63,6 @@ use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
@@ -696,6 +697,7 @@ impl StageRunner {
         self.worker_node_manager
             .manager
             .get_streaming_fragment_mapping(fragment_id)
+            .map_err(|e| e.into())
     }
 
     fn choose_worker(
@@ -714,7 +716,7 @@ impl StageRunner {
                 .manager
                 .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
             if candidates.is_empty() {
-                return Err(SchedulerError::EmptyWorkerNodes);
+                return Err(BatchError::EmptyWorkerNodes.into());
             }
             let candidate = if self.stage.batch_enable_distributed_dml {
                 // If distributed dml is enabled, we need to try our best to distribute dml tasks evenly to each worker.
@@ -750,7 +752,7 @@ impl StageRunner {
                 .manager
                 .get_workers_by_parallel_unit_ids(&[pu])?;
             if candidates.is_empty() {
-                return Err(SchedulerError::EmptyWorkerNodes);
+                return Err(BatchError::EmptyWorkerNodes.into());
             }
             Ok(Some(candidates[0].clone()))
         } else {
