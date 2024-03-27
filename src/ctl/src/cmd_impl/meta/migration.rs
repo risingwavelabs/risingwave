@@ -195,7 +195,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .await?;
 
     // user
-    // FIXME: add user_privileges.
     let user_models = users
         .iter()
         .map(|u| user::ActiveModel::from(u.clone()))
@@ -396,8 +395,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // catalogs.
     // source
-    let source_models: Vec<source::ActiveModel> =
-        sources.into_iter().map(|src| src.into()).collect();
+    let source_models: Vec<source::ActiveModel> = sources
+        .into_iter()
+        .map(|mut src| {
+            src.connection_id.as_mut().map(|id| {
+                *id = *connection_rewrite.get(&id).unwrap();
+            });
+            src.into()
+        })
+        .collect();
     Source::insert_many(source_models)
         .exec(&meta_store_sql.conn)
         .await?;
@@ -434,7 +440,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // sink
     let sink_models: Vec<sink::ActiveModel> = sinks
         .into_iter()
-        .map(|s| {
+        .map(|mut s| {
             object_dependencies.extend(s.dependent_relations.iter().map(|id| {
                 object_dependency::ActiveModel {
                     id: NotSet,
@@ -442,6 +448,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     used_by: Set(s.id as _),
                 }
             }));
+            s.connection_id.as_mut().map(|id| {
+                *id = *connection_rewrite.get(&id).unwrap();
+            });
             s.into()
         })
         .collect();
