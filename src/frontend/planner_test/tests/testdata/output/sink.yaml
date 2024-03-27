@@ -45,7 +45,7 @@
         └── stream key: [ t1.v3, t1.v4 ]
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5, t1.v4], stream_scan_type: Backfill, pk: [t1.v3, t1.v4], dist: UpstreamHashShard(t1.v3, t1.v4) }
+    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5, t1.v4], stream_scan_type: ArrangementBackfill, pk: [t1.v3, t1.v4], dist: UpstreamHashShard(t1.v3, t1.v4) }
     ├── tables: [ StreamScan: 1 ]
     ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5, t1.v4 ]
     ├── stream key: [ t1.v3, t1.v4 ]
@@ -97,7 +97,7 @@
         └── stream key: [ t1.v1, t1.v2 ]
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5], stream_scan_type: Backfill, pk: [t1.v1, t1.v2], dist: UpstreamHashShard(t1.v1, t1.v2) }
+    StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1.v5], stream_scan_type: ArrangementBackfill, pk: [t1.v1, t1.v2], dist: UpstreamHashShard(t1.v1, t1.v2) }
     ├── tables: [ StreamScan: 1 ]
     ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5 ]
     ├── stream key: [ t1.v1, t1.v2 ]
