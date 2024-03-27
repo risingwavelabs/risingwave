@@ -1975,11 +1975,11 @@ impl fmt::Display for Statement {
                 )
             }
             Statement::DeclareCursor { cursor_name, query } => {
-                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name,query)
+                write!(f, "DECLARE {} CURSOR FOR {}", cursor_name, query)
             },
             Statement::CursorFetch { cursor_name , count} => {
                 if let Some(count) = count {
-                    write!(f, "FETCH {} FROM {}",count, cursor_name)
+                    write!(f, "FETCH {} FROM {}", count, cursor_name)
                 } else {
                     write!(f, "FETCH NEXT FROM {}", cursor_name)
                 }

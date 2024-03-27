@@ -1,0 +1,91 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table a(aid int, c1 int);
+
+statement ok
+insert into a values(1, 11), (2, 12), (3, 13);
+
+statement ok
+create table test(a int,b varchar);
+
+statement ok
+insert into test values(1, 'hello'), (2, 'world'), (3, 'risingwave'), (4, 'labs');
+
+statement error DECLARE CURSOR can only be used in transaction blocks
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test where a > 2 ORDER BY a;
+
+statement ok
+START TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+
+statement ok
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test where a > 2 ORDER BY a;
+
+statement error cursor "test_cursor" already exists
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test where a > 2;
+
+statement error table or source not found: test
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test_non_existent where a > 2;
+
+statement error cursor "test_cursor_non_existent" does not exist
+FETCH NEXT from test_cursor_non_existent;
+
+query II
+FETCH NEXT from test_cursor;
+----
+3 risingwave
+
+query II
+FETCH NEXT from test_cursor;
+----
+4 labs
+
+query II
+FETCH NEXT from test_cursor;
+----
+
+statement error cursor "test_cursor_non_existent" does not exist
+CLOSE test_cursor_non_existent;
+
+statement ok
+CLOSE test_cursor;
+
+statement error cursor "test_cursor" does not exist
+FETCH NEXT from test_cursor;
+
+statement ok
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test JOIN a ON test.a > 1 and a.aid = test.a ORDER BY test.a;
+
+query IIII
+FETCH NEXT from test_cursor;
+----
+2 world   2 12
+
+query IIII
+FETCH NEXT from test_cursor;
+----
+3 risingwave   3 13
+
+query IIII
+FETCH NEXT from test_cursor;
+----
+
+statement ok
+COMMIT;
+
+statement ok
+drop table test;
+
+statement ok
+drop table a;

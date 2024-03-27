@@ -161,6 +161,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/read_only_multi_conn.slt",
     "transaction/read_only.slt",
     "transaction/tolerance.slt",
+    "transaction/cursor.slt",
+    "transaction/cursor_multi_conn.slt",
 ];
 
 /// Wait for background mv to finish creating

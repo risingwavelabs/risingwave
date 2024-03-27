@@ -1,0 +1,87 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table test(a int,b varchar);
+
+statement ok
+insert into test values(1, 'hello'), (2, 'world'), (3, 'risingwave');
+
+statement ok
+START TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+
+statement ok
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test where a > 2 ORDER BY a;
+
+query II
+FETCH NEXT from test_cursor;
+----
+3 risingwave
+
+connection other
+statement ok
+flush;
+
+connection other
+statement ok
+insert into test values(4, 'labs');
+
+connection other
+statement ok
+flush;
+
+connection other
+query II
+SELECT * FROM test where a > 2 ORDER BY a;
+----
+3 risingwave
+4 labs
+
+connection other
+statement ok
+START TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+
+connection other
+statement ok
+DECLARE
+    test_cursor CURSOR FOR
+        SELECT * FROM test where a > 2 ORDER BY a;
+
+connection other
+query II
+FETCH NEXT from test_cursor;
+----
+3 risingwave
+
+connection other
+query II
+FETCH NEXT from test_cursor;
+----
+4 labs
+
+connection other
+query II
+FETCH NEXT from test_cursor;
+----
+
+connection other
+statement ok
+COMMIT;
+
+query II
+FETCH NEXT from test_cursor;
+----
+
+statement ok
+COMMIT;
+
+query II
+SELECT * FROM test where a > 2 ORDER BY a;
+----
+3 risingwave
+4 labs
+
+statement ok
+drop table test;

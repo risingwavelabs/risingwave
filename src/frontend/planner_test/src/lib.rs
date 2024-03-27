@@ -571,8 +571,7 @@ impl TestCase {
                         .await?;
                 }
                 Statement::DeclareCursor { cursor_name, query } => {
-                    cursor::handle_declare_cursor(handler_args, cursor_name, *query)
-                        .await?;
+                    cursor::handle_declare_cursor(handler_args, cursor_name, *query).await?;
                 }
                 Statement::CursorFetch { cursor_name, count } => {
                     cursor::handle_cursor_fetch(handler_args, cursor_name, count).await?;

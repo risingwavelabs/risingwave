@@ -159,10 +159,9 @@ impl SessionImpl {
             .try_insert(cursor_name.clone(), cursor)
             .is_err()
         {
-            return Err(ErrorCode::InternalError(format!(
-                "cursor \"{}\" already exists",
-                cursor_name,
-            ))
+            return Err(ErrorCode::CatalogError(
+                format!("cursor \"{cursor_name}\" already exists").into(),
+            )
             .into());
         }
         Ok(())
@@ -175,10 +174,9 @@ impl SessionImpl {
     pub async fn drop_cursor(&self, cursor_name: ObjectName) -> Result<()> {
         match self.cursors.lock().await.remove(&cursor_name) {
             Some(_) => Ok(()),
-            None => Err(ErrorCode::InternalError(format!(
-                "cursor \"{}\" does not exist",
-                cursor_name
-            ))
+            None => Err(ErrorCode::CatalogError(
+                format!("cursor \"{cursor_name}\" does not exist").into(),
+            )
             .into()),
         }
     }
@@ -192,7 +190,7 @@ impl SessionImpl {
             Ok((cursor.next(count).await?, cursor.pg_descs()))
         } else {
             Err(
-                ErrorCode::InternalError(format!("cursor \"{}\" does not exist", cursor_name,))
+                ErrorCode::CatalogError(format!("cursor \"{cursor_name}\" does not exist").into())
                     .into(),
             )
         }

@@ -473,7 +473,6 @@ pub async fn distribute_execute(
         .map_err(|err| err.into())
 }
 
-#[expect(clippy::unused_async)]
 pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
