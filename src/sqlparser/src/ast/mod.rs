@@ -53,7 +53,8 @@ pub use self::value::{
     Value,
 };
 pub use crate::ast::ddl::{
-    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
+    AlterViewOperation,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError};
@@ -883,6 +884,7 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
+    Subscription { schema: Option<Ident> },
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
@@ -932,6 +934,7 @@ impl fmt::Display for ShowObject {
             }
             ShowObject::Jobs => write!(f, "JOBS"),
             ShowObject::ProcessList => write!(f, "PROCESSLIST"),
+            ShowObject::Subscription { schema } => write!(f, "SUBSCRIPTIONS{}", fmt_schema(schema)),
         }
     }
 }
@@ -946,6 +949,7 @@ pub enum ShowCreateType {
     Source,
     Sink,
     Function,
+    Subscription,
 }
 
 impl fmt::Display for ShowCreateType {
@@ -958,6 +962,7 @@ impl fmt::Display for ShowCreateType {
             ShowCreateType::Source => f.write_str("SOURCE"),
             ShowCreateType::Sink => f.write_str("SINK"),
             ShowCreateType::Function => f.write_str("FUNCTION"),
+            ShowCreateType::Subscription => f.write_str("SUBSCRIPTION"),
         }
     }
 }
@@ -1128,6 +1133,8 @@ pub enum Statement {
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
         append_only: bool,
+        /// On conflict behavior
+        on_conflict: Option<OnConflict>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1153,6 +1160,10 @@ pub enum Statement {
     /// CREATE SINK
     CreateSink {
         stmt: CreateSinkStatement,
+    },
+    /// CREATE SUBSCRIPTION
+    CreateSubscription {
+        stmt: CreateSubscriptionStatement,
     },
     /// CREATE CONNECTION
     CreateConnection {
@@ -1217,6 +1228,10 @@ pub enum Statement {
         /// Sink name
         name: ObjectName,
         operation: AlterSinkOperation,
+    },
+    AlterSubscription {
+        name: ObjectName,
+        operation: AlterSubscriptionOperation,
     },
     /// ALTER SOURCE
     AlterSource {
@@ -1621,6 +1636,7 @@ impl fmt::Display for Statement {
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -1648,6 +1664,11 @@ impl fmt::Display for Statement {
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+
+
+                if let Some(on_conflict_behavior) = on_conflict {
+                    write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
@@ -1718,6 +1739,7 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterDatabase { name, operation } => {
                 write!(f, "ALTER DATABASE {} {}", name, operation)
@@ -1736,6 +1758,9 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSink { name, operation } => {
                 write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSubscription { name, operation } => {
+                write!(f, "ALTER SUBSCRIPTION {} {}", name, operation)
             }
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
@@ -2341,6 +2366,7 @@ pub enum ObjectType {
     Database,
     User,
     Connection,
+    Subscription,
 }
 
 impl fmt::Display for ObjectType {
@@ -2356,6 +2382,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
             ObjectType::Connection => "CONNECTION",
+            ObjectType::Subscription => "SUBSCRIPTION",
         })
     }
 }
@@ -2382,9 +2409,11 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
             ObjectType::Connection
+        } else if parser.parse_keyword(Keyword::SUBSCRIPTION) {
+            ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
@@ -2417,6 +2446,24 @@ impl fmt::Display for EmitMode {
         f.write_str(match self {
             EmitMode::Immediately => "IMMEDIATELY",
             EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum OnConflict {
+    OverWrite,
+    Ignore,
+    DoUpdateIfNotNull,
+}
+
+impl fmt::Display for OnConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            OnConflict::OverWrite => "OVERWRITE",
+            OnConflict::Ignore => "IGNORE",
+            OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
         })
     }
 }
@@ -2867,6 +2914,30 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AsOf {
+    ProcessTime,
+    // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
+    TimestampNum(i64),
+    TimestampString(String),
+    VersionNum(i64),
+    VersionString(String),
+}
+
+impl fmt::Display for AsOf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use AsOf::*;
+        match self {
+            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
+            TimestampString(ts) => write!(f, " FOR SYSTEM_TIME AS OF '{}'", ts),
+            VersionNum(v) => write!(f, " FOR SYSTEM_VERSION AS OF {}", v),
+            VersionString(v) => write!(f, " FOR SYSTEM_VERSION AS OF '{}'", v),
         }
     }
 }

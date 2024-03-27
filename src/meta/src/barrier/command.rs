@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 use super::info::{ActorDesc, CommandActorChanges, InflightActorInfo};
 use super::trace::TracedEpoch;
 use crate::barrier::GlobalBarrierManagerContext;
-use crate::manager::{DdlType, LocalNotification, MetadataManager, WorkerId};
+use crate::manager::{DdlType, MetadataManager, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 use crate::MetaResult;
@@ -141,7 +141,11 @@ pub enum Command {
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropStreamingJobs(Vec<ActorId>),
+    DropStreamingJobs {
+        actors: Vec<ActorId>,
+        unregistered_table_fragment_ids: HashSet<TableId>,
+        unregistered_state_table_ids: HashSet<TableId>,
+    },
 
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
@@ -192,7 +196,7 @@ pub enum Command {
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of FlowControl Executor after StreamScan or Source.
+    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
     Throttle(ThrottleConfig),
 }
 
@@ -214,7 +218,7 @@ impl Command {
             Command::Plain(_) => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
-            Command::DropStreamingJobs(actors) => Some(CommandActorChanges {
+            Command::DropStreamingJobs { actors, .. } => Some(CommandActorChanges {
                 to_add: Default::default(),
                 to_remove: actors.iter().cloned().collect(),
             }),
@@ -401,7 +405,7 @@ impl CommandContext {
                     }))
                 }
 
-                Command::DropStreamingJobs(actors) => Some(Mutation::Stop(StopMutation {
+                Command::DropStreamingJobs { actors, .. } => Some(Mutation::Stop(StopMutation {
                     actors: actors.clone(),
                 })),
 
@@ -793,9 +797,22 @@ impl CommandContext {
                     .await;
             }
 
-            Command::DropStreamingJobs(actors) => {
+            Command::DropStreamingJobs {
+                actors,
+                unregistered_state_table_ids,
+                ..
+            } => {
                 // Tell compute nodes to drop actors.
                 self.clean_up(actors.clone()).await?;
+
+                let unregistered_state_table_ids = unregistered_state_table_ids
+                    .iter()
+                    .map(|table_id| table_id.table_id)
+                    .collect_vec();
+                self.barrier_manager_context
+                    .hummock_manager
+                    .unregister_table_ids(&unregistered_state_table_ids)
+                    .await?;
             }
 
             Command::CancelStreamingJob(table_fragments) => {
@@ -815,12 +832,9 @@ impl CommandContext {
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
                 self.barrier_manager_context
-                    .env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        table_ids,
-                    ))
-                    .await;
+                    .hummock_manager
+                    .unregister_table_ids(&table_ids)
+                    .await?;
 
                 match &self.barrier_manager_context.metadata_manager {
                     MetadataManager::V1(mgr) => {

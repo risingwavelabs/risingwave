@@ -36,3 +36,9 @@ select * from test_window;
 ----
 2
 3
+
+statement ok
+drop materialized view test_last_ingestion_time cascade;
+
+statement ok
+drop materialized view test_records;

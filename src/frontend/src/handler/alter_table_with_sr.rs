@@ -19,7 +19,9 @@ use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::alter_source_with_sr::alter_definition_format_encode;
-use super::alter_table_column::{fetch_table_catalog_for_alter, replace_table_with_definition};
+use super::alter_table_column::{
+    fetch_table_catalog_for_alter, replace_table_with_definition, schema_has_schema_registry,
+};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result, RwError};
@@ -54,11 +56,20 @@ pub async fn handle_refresh_schema(
         )));
     }
 
-    let connector_schema =
-        get_connector_schema_from_table(&original_table)?.ok_or(ErrorCode::NotSupported(
-            "Tables without schema registry cannot refreshed".to_string(),
-            "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_string(),
-        ))?;
+    let connector_schema = {
+        let connector_schema = get_connector_schema_from_table(&original_table)?;
+        if !connector_schema
+            .as_ref()
+            .is_some_and(schema_has_schema_registry)
+        {
+            return Err(ErrorCode::NotSupported(
+                "tables without schema registry cannot refreshed".to_string(),
+                "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_string(),
+            )
+            .into());
+        }
+        connector_schema.unwrap()
+    };
 
     let definition = alter_definition_format_encode(
         &original_table.definition,
@@ -70,13 +81,12 @@ pub async fn handle_refresh_schema(
         .try_into()
         .unwrap();
 
-    let source_schema = get_connector_schema_from_table(&original_table)?;
     replace_table_with_definition(
         &session,
         table_name,
         definition,
         &original_table,
-        source_schema,
+        Some(connector_schema),
     )
     .await?;
 

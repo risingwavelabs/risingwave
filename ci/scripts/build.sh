@@ -28,7 +28,7 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
 fi
 
 echo "--- Rust cargo-sort check"
-cargo sort --check --workspace
+cargo sort --check --workspace --grouped
 
 echo "--- Rust cargo-hakari check"
 cargo hakari generate --diff

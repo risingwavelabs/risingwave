@@ -58,11 +58,11 @@ use crate::executor::{
 };
 use crate::from_proto::create_executor;
 use crate::task::barrier_manager::{
-    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
+    ControlStreamHandle, CreateActorOutput, EventSender, LocalActorOperation, LocalBarrierWorker,
 };
 use crate::task::{
-    ActorId, FragmentId, LocalBarrierManager, SharedContext, StreamActorManager,
-    StreamActorManagerState, StreamEnvironment, UpDownActorIds,
+    ActorId, CreateActorContext, FragmentId, LocalBarrierManager, SharedContext,
+    StreamActorManager, StreamActorManagerState, StreamEnvironment, UpDownActorIds,
 };
 
 #[cfg(test)]
@@ -77,6 +77,7 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 #[derive(Clone)]
 pub struct LocalStreamManager {
     await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
 
     pub env: StreamEnvironment,
 
@@ -117,7 +118,7 @@ pub struct ExecutorParams {
     /// The input executor.
     pub input: Vec<Executor>,
 
-    /// FragmentId of the actor
+    /// `FragmentId` of the actor
     pub fragment_id: FragmentId,
 
     /// Metrics
@@ -138,6 +139,8 @@ pub struct ExecutorParams {
     pub shared_context: Arc<SharedContext>,
 
     pub local_barrier_manager: LocalBarrierManager,
+
+    pub create_actor_context: CreateActorContext,
 }
 
 impl Debug for ExecutorParams {
@@ -160,7 +163,10 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        let await_tree_reg =
+        let await_tree_reg = await_tree_config
+            .clone()
+            .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
+        let barrier_await_tree_reg =
             await_tree_config.map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
@@ -169,11 +175,13 @@ impl LocalStreamManager {
             env.clone(),
             streaming_metrics,
             await_tree_reg.clone(),
+            barrier_await_tree_reg.clone(),
             watermark_epoch,
             actor_op_rx,
         );
         Self {
             await_tree_reg,
+            barrier_await_tree_reg,
             env,
             actor_op_tx: EventSender(actor_op_tx),
         }
@@ -195,6 +203,16 @@ impl LocalStreamManager {
                 {
                     writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
                 }
+
+                for (e, trace) in self
+                    .barrier_await_tree_reg
+                    .as_ref()
+                    .expect("async stack trace not enabled")
+                    .lock()
+                    .iter()
+                {
+                    writeln!(o, ">> Barrier {}\n\n{}", e, trace).ok();
+                }
             }
         })
     }
@@ -202,6 +220,14 @@ impl LocalStreamManager {
     /// Get await-tree contexts for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
         match &self.await_tree_reg.as_ref() {
+            Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
+            None => Default::default(),
+        }
+    }
+
+    /// Get await-tree contexts for all barrier.
+    pub fn get_barrier_traces(&self) -> HashMap<u64, await_tree::TreeContext> {
+        match &self.barrier_await_tree_reg.as_ref() {
             Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }
@@ -344,10 +370,11 @@ impl LocalBarrierWorker {
             }
         };
         let actor_manager = self.actor_manager.clone();
-        let join_handle = self
-            .actor_manager
-            .runtime
-            .spawn(actor_manager.create_actors(actors, self.current_shared_context.clone()));
+        let create_actors_fut = crate::CONFIG.scope(
+            self.actor_manager.env.config().clone(),
+            actor_manager.create_actors(actors, self.current_shared_context.clone()),
+        );
+        let join_handle = self.actor_manager.runtime.spawn(create_actors_fut);
         self.actor_manager_state
             .creating_actors
             .push(AttachedFuture::new(join_handle, result_sender));
@@ -393,6 +420,7 @@ impl StreamActorManager {
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
+        create_actor_context: &CreateActorContext,
     ) -> StreamResult<Executor> {
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
@@ -426,6 +454,7 @@ impl StreamActorManager {
                     has_stateful || is_stateful,
                     subtasks,
                     shared_context,
+                    create_actor_context,
                 )
                 .await?,
             );
@@ -473,6 +502,7 @@ impl StreamActorManager {
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
             local_barrier_manager: shared_context.local_barrier_manager.clone(),
+            create_actor_context: create_actor_context.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -502,6 +532,7 @@ impl StreamActorManager {
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
+    #[expect(clippy::too_many_arguments)]
     async fn create_nodes(
         &self,
         fragment_id: FragmentId,
@@ -510,6 +541,7 @@ impl StreamActorManager {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         shared_context: &Arc<SharedContext>,
+        create_actor_context: &CreateActorContext,
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
@@ -524,6 +556,7 @@ impl StreamActorManager {
                 false,
                 &mut subtasks,
                 shared_context,
+                create_actor_context,
             )
             .await
         })?;
@@ -535,8 +568,9 @@ impl StreamActorManager {
         self: Arc<Self>,
         actors: Vec<StreamActor>,
         shared_context: Arc<SharedContext>,
-    ) -> StreamResult<Vec<Actor<DispatchExecutor>>> {
+    ) -> StreamResult<CreateActorOutput> {
         let mut ret = Vec::with_capacity(actors.len());
+        let create_actor_context = CreateActorContext::default();
         for actor in actors {
             let actor_id = actor.actor_id;
             let actor_context = ActorContext::create(
@@ -556,6 +590,7 @@ impl StreamActorManager {
                     &actor_context,
                     vnode_bitmap,
                     &shared_context,
+                    &create_actor_context,
                 )
                 // If hummock tracing is not enabled, it directly returns wrapped future.
                 .may_trace_hummock()
@@ -579,7 +614,10 @@ impl StreamActorManager {
 
             ret.push(actor);
         }
-        Ok(ret)
+        Ok(CreateActorOutput {
+            actors: ret,
+            senders: create_actor_context.collect_senders(),
+        })
     }
 }
 
@@ -610,13 +648,17 @@ impl LocalBarrierWorker {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
+                let with_config =
+                    crate::CONFIG.scope(self.actor_manager.env.config().clone(), instrumented);
+
+                // TODO: are the following lines still useful?
                 #[cfg(enable_task_local_alloc)]
                 {
                     let metrics = streaming_metrics.clone();
                     let actor_id_str = actor_id.to_string();
                     let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
-                        instrumented,
+                        with_config,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
@@ -627,11 +669,11 @@ impl LocalBarrierWorker {
                             actor_context.store_mem_usage(bytes);
                         },
                     );
-                    self.runtime.spawn(allocation_stated)
+                    self.actor_manager.runtime.spawn(allocation_stated)
                 }
                 #[cfg(not(enable_task_local_alloc))]
                 {
-                    self.actor_manager.runtime.spawn(instrumented)
+                    self.actor_manager.runtime.spawn(with_config)
                 }
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
