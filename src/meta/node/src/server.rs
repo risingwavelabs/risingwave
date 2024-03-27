@@ -19,7 +19,6 @@ use anyhow::Context;
 use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
-use itertools::Itertools;
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
 use risingwave_common::config::MetaBackend;
@@ -499,7 +498,6 @@ pub async fn start_service_as_election_leader(
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
             compute_clients: ComputeClientPool::default(),
-            ui_path: address_info.ui_path,
             diagnose_command,
             trace_state,
         };
@@ -563,30 +561,11 @@ pub async fn start_service_as_election_leader(
             metadata_manager.clone(),
             barrier_scheduler.clone(),
             source_manager.clone(),
-            hummock_manager.clone(),
             stream_rpc_manager,
             scale_controller.clone(),
         )
         .unwrap(),
     );
-
-    let all_state_table_ids = match &metadata_manager {
-        MetadataManager::V1(mgr) => mgr
-            .catalog_manager
-            .list_tables()
-            .await
-            .into_iter()
-            .map(|t| t.id)
-            .collect_vec(),
-        MetadataManager::V2(mgr) => mgr
-            .catalog_controller
-            .list_all_state_table_ids()
-            .await?
-            .into_iter()
-            .map(|id| id as u32)
-            .collect_vec(),
-    };
-    hummock_manager.purge(&all_state_table_ids).await;
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -863,8 +842,7 @@ pub async fn start_service_as_election_leader(
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {
-        // Join the task while ignoring the cancellation error.
-        let _ = dashboard_task.await;
+        dashboard_task.abort();
     }
     Ok(())
 }

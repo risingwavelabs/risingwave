@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,7 +21,6 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_meta_model_v2::StreamingParallelism;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::State;
@@ -28,6 +28,9 @@ use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
+use risingwave_pb::stream_service::{
+    streaming_control_stream_response, StreamingControlStreamResponse,
+};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -38,10 +41,12 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::InflightActorInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
+use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::state::BarrierManagerState;
 use crate::barrier::{Command, GlobalBarrierManager, GlobalBarrierManagerContext};
 use crate::controller::catalog::ReleaseContext;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
 use crate::MetaResult;
@@ -85,18 +90,10 @@ impl GlobalBarrierManagerContext {
                     .collect();
                 debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
-                let unregister_table_ids = mgr
+                let _unregister_table_ids = mgr
                     .fragment_manager
                     .drop_table_fragments_vec(&to_drop_streaming_ids)
                     .await?;
-
-                // unregister compaction group for dirty table fragments.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        unregister_table_ids,
-                    ))
-                    .await;
 
                 // clean up source connector dirty changes.
                 self.source_manager
@@ -104,22 +101,8 @@ impl GlobalBarrierManagerContext {
                     .await;
             }
             MetadataManager::V2(mgr) => {
-                let ReleaseContext {
-                    state_table_ids,
-                    source_ids,
-                    ..
-                } = mgr.catalog_controller.clean_dirty_creating_jobs().await?;
-
-                // unregister compaction group for cleaned state tables.
-                self.env
-                    .notification_manager()
-                    .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                        state_table_ids
-                            .into_iter()
-                            .map(|id| id as StateTableId)
-                            .collect_vec(),
-                    ))
-                    .await;
+                let ReleaseContext { source_ids, .. } =
+                    mgr.catalog_controller.clean_dirty_creating_jobs().await?;
 
                 // unregister cleaned sources.
                 self.source_manager
@@ -128,6 +111,27 @@ impl GlobalBarrierManagerContext {
             }
         }
 
+        Ok(())
+    }
+
+    async fn purge_state_table_from_hummock(&self) -> MetaResult<()> {
+        let all_state_table_ids = match &self.metadata_manager {
+            MetadataManager::V1(mgr) => mgr
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
+            MetadataManager::V2(mgr) => mgr
+                .catalog_controller
+                .list_all_state_table_ids()
+                .await?
+                .into_iter()
+                .map(|id| id as u32)
+                .collect_vec(),
+        };
+        self.hummock_manager.purge(&all_state_table_ids).await?;
         Ok(())
     }
 
@@ -302,39 +306,45 @@ impl GlobalBarrierManagerContext {
 
         Ok(())
     }
-}
 
-impl GlobalBarrierManager {
     /// Pre buffered drop and cancel command, return true if any.
-    async fn pre_apply_drop_cancel(&self) -> MetaResult<bool> {
-        let (dropped_actors, cancelled) = self.scheduled_barriers.pre_apply_drop_cancel_scheduled();
+    async fn pre_apply_drop_cancel(
+        &self,
+        scheduled_barriers: &ScheduledBarriers,
+    ) -> MetaResult<bool> {
+        let (dropped_actors, cancelled) = scheduled_barriers.pre_apply_drop_cancel_scheduled();
         let applied = !dropped_actors.is_empty() || !cancelled.is_empty();
         if !cancelled.is_empty() {
-            match &self.context.metadata_manager {
+            let unregister_table_ids = match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
-                    let unregister_table_ids = mgr
-                        .fragment_manager
+                    mgr.fragment_manager
                         .drop_table_fragments_vec(&cancelled)
-                        .await?;
-                    self.env
-                        .notification_manager()
-                        .notify_local_subscribers(LocalNotification::UnregisterTablesFromHummock(
-                            unregister_table_ids,
-                        ))
-                        .await;
+                        .await?
                 }
                 MetadataManager::V2(mgr) => {
+                    let mut unregister_table_ids = Vec::new();
                     for job_id in cancelled {
-                        mgr.catalog_controller
+                        let (_, table_ids_to_unregister) = mgr
+                            .catalog_controller
                             .try_abort_creating_streaming_job(job_id.table_id as _, true)
                             .await?;
+                        unregister_table_ids.extend(table_ids_to_unregister);
                     }
+                    unregister_table_ids
+                        .into_iter()
+                        .map(|table_id| table_id as u32)
+                        .collect()
                 }
-            }
+            };
+            self.hummock_manager
+                .unregister_table_ids(&unregister_table_ids)
+                .await?;
         }
         Ok(applied)
     }
+}
 
+impl GlobalBarrierManager {
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -355,31 +365,38 @@ impl GlobalBarrierManager {
             .abort_and_mark_blocked("cluster is under recovering");
 
         tracing::info!("recovery start!");
-        self.context
-            .clean_dirty_streaming_jobs()
-            .await
-            .expect("clean dirty streaming jobs");
-
-        self.context.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
-
-        // Mview progress needs to be recovered.
-        tracing::info!("recovering mview progress");
-        self.context
-            .recover_background_mv_progress()
-            .await
-            .expect("recover mview progress should not fail");
-        tracing::info!("recovered mview progress");
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
         let recovery_timer = self.context.metrics.recovery_latency.start_timer();
 
-        let (state, active_streaming_nodes) = tokio_retry::Retry::spawn(retry_strategy, || {
+        let new_state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    self.context
+                        .clean_dirty_streaming_jobs()
+                        .await
+                        .context("clean dirty streaming jobs")?;
+
+                    self.context
+                        .purge_state_table_from_hummock()
+                        .await
+                        .context("purge state table from hummock")?;
+
+                    // Mview progress needs to be recovered.
+                    tracing::info!("recovering mview progress");
+                    self.context
+                        .recover_background_mv_progress()
+                        .await
+                        .context("recover mview progress should not fail")?;
+                    tracing::info!("recovered mview progress");
+
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.pre_apply_drop_cancel().await?;
+                    let _ = self
+                        .context
+                        .pre_apply_drop_cancel(&self.scheduled_barriers)
+                        .await?;
 
                     let active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
                         self.context.metadata_manager.clone(),
@@ -427,14 +444,23 @@ impl GlobalBarrierManager {
                             })?
                     };
 
-                    // Reset all compute nodes, stop and drop existing actors.
-                    self.reset_compute_nodes(&info, prev_epoch.value().0)
+                    let mut control_stream_manager =
+                        ControlStreamManager::new(self.context.clone());
+
+                    control_stream_manager
+                        .reset(prev_epoch.value().0, active_streaming_nodes.current())
                         .await
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "reset compute nodes failed");
                         })?;
 
-                    if self.pre_apply_drop_cancel().await? {
+                    self.context.sink_manager.reset().await;
+
+                    if self
+                        .context
+                        .pre_apply_drop_cancel(&self.scheduled_barriers)
+                        .await?
+                    {
                         info = self
                             .context
                             .resolve_actor_info(all_nodes.clone())
@@ -445,10 +471,10 @@ impl GlobalBarrierManager {
                     }
 
                     // update and build all actors.
-                    self.update_actors(&info).await.inspect_err(|err| {
+                    self.context.update_actors(&info).await.inspect_err(|err| {
                         warn!(error = %err.as_report(), "update actors failed");
                     })?;
-                    self.build_actors(&info).await.inspect_err(|err| {
+                    self.context.build_actors(&info).await.inspect_err(|err| {
                         warn!(error = %err.as_report(), "build_actors failed");
                     })?;
 
@@ -478,30 +504,25 @@ impl GlobalBarrierManager {
                         tracing::Span::current(), // recovery span
                     ));
 
-                    let res = match self
-                        .context
-                        .inject_barrier(command_ctx.clone(), None, None)
-                        .await
-                        .result
-                    {
-                        Ok(response) => {
-                            if let Err(err) = command_ctx.post_collect().await {
-                                warn!(error = %err.as_report(), "post_collect failed");
-                                Err(err)
-                            } else {
-                                Ok((new_epoch.clone(), response))
+                    let mut node_to_collect =
+                        control_stream_manager.inject_barrier(command_ctx.clone())?;
+                    while !node_to_collect.is_empty() {
+                        let (worker_id, _, resp) = control_stream_manager.next_response().await?;
+                        assert_matches!(
+                            resp,
+                            StreamingControlStreamResponse {
+                                response: Some(
+                                    streaming_control_stream_response::Response::CompleteBarrier(_)
+                                )
                             }
-                        }
-                        Err(err) => {
-                            warn!(error = %err.as_report(), "inject_barrier failed");
-                            Err(err)
-                        }
-                    };
-                    let (new_epoch, _) = res?;
+                        );
+                        assert!(node_to_collect.remove(&worker_id));
+                    }
 
                     (
                         BarrierManagerState::new(new_epoch, info, command_ctx.next_paused_reason()),
                         active_streaming_nodes,
+                        control_stream_manager,
                     )
                 };
                 if recovery_result.is_err() {
@@ -517,14 +538,17 @@ impl GlobalBarrierManager {
         recovery_timer.observe_duration();
         self.scheduled_barriers.mark_ready();
 
+        (
+            self.state,
+            self.active_streaming_nodes,
+            self.control_stream_manager,
+        ) = new_state;
+
         tracing::info!(
-            epoch = state.in_flight_prev_epoch().value().0,
-            paused = ?state.paused_reason(),
+            epoch = self.state.in_flight_prev_epoch().value().0,
+            paused = ?self.state.paused_reason(),
             "recovery success"
         );
-
-        self.state = state;
-        self.active_streaming_nodes = active_streaming_nodes;
     }
 }
 
@@ -648,7 +672,9 @@ impl GlobalBarrierManagerContext {
     }
 
     async fn scale_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<()> {
-        let _guard = self.scale_controller.reschedule_lock.write().await;
+        let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
+            return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
+        };
         match &self.metadata_manager {
             MetadataManager::V1(_) => self.scale_actors_v1(all_nodes).await,
             MetadataManager::V2(_) => self.scale_actors_v2(all_nodes).await,
@@ -1013,9 +1039,7 @@ impl GlobalBarrierManagerContext {
         new_plan.insert(self.env.meta_store_checked()).await?;
         Ok(new_plan)
     }
-}
 
-impl GlobalBarrierManager {
     /// Update all actors in compute nodes.
     async fn update_actors(&self, info: &InflightActorInfo) -> MetaResult<()> {
         if info.actor_map.is_empty() {
@@ -1041,7 +1065,7 @@ impl GlobalBarrierManager {
             .flatten_ok()
             .try_collect()?;
 
-        let mut all_node_actors = self.context.metadata_manager.all_node_actors(false).await?;
+        let mut all_node_actors = self.metadata_manager.all_node_actors(false).await?;
 
         // Check if any actors were dropped after info resolved.
         if all_node_actors.iter().any(|(node_id, node_actors)| {
@@ -1055,8 +1079,7 @@ impl GlobalBarrierManager {
             return Err(anyhow!("actors dropped during update").into());
         }
 
-        self.context
-            .stream_rpc_manager
+        self.stream_rpc_manager
             .broadcast_update_actor_info(
                 &info.node_map,
                 info.actor_map.keys().cloned(),
@@ -1080,8 +1103,7 @@ impl GlobalBarrierManager {
             return Ok(());
         }
 
-        self.context
-            .stream_rpc_manager
+        self.stream_rpc_manager
             .build_actors(
                 &info.node_map,
                 info.actor_map.iter().map(|(node_id, actors)| {
@@ -1090,23 +1112,6 @@ impl GlobalBarrierManager {
                 }),
             )
             .await?;
-
-        Ok(())
-    }
-
-    /// Reset all compute nodes by calling `force_stop_actors`.
-    async fn reset_compute_nodes(
-        &self,
-        info: &InflightActorInfo,
-        prev_epoch: u64,
-    ) -> MetaResult<()> {
-        debug!(prev_epoch, worker = ?info.node_map.keys().collect_vec(), "force stop actors");
-        self.context
-            .stream_rpc_manager
-            .force_stop_actors(info.node_map.values(), prev_epoch)
-            .await?;
-
-        debug!(prev_epoch, "all compute nodes have been reset.");
 
         Ok(())
     }

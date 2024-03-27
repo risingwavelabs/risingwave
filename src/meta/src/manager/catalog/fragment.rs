@@ -113,7 +113,7 @@ pub struct FragmentManager {
 }
 
 pub struct ActorInfos {
-    /// node_id => actor_ids
+    /// `node_id` => `actor_ids`
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable barrier inject actors
@@ -439,8 +439,8 @@ impl FragmentManager {
                                 if m.upstream_fragment_id == merge_update.upstream_fragment_id {
                                     m.upstream_fragment_id =
                                         merge_update.new_upstream_fragment_id.unwrap();
-                                    m.upstream_actor_id =
-                                        merge_update.added_upstream_actor_id.clone();
+                                    m.upstream_actor_id
+                                        .clone_from(&merge_update.added_upstream_actor_id);
                                 }
                                 upstream_actor_ids.extend(m.upstream_actor_id.clone());
                             }

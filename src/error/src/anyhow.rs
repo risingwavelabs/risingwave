@@ -154,3 +154,4 @@ macro_rules! def_anyhow_newtype {
         )*
     };
 }
+pub use def_anyhow_newtype;

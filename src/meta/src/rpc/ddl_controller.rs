@@ -1148,7 +1148,7 @@ impl DdlController {
                     StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
                     StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
                     StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
-                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Sink),
+                    StreamingJobId::Subscription(id) => (id as _, ObjectType::Subscription),
                 };
 
                 let version = self
@@ -1469,10 +1469,7 @@ impl DdlController {
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
-            option: CreateStreamingJobOption {
-                new_independent_compaction_group: false,
-            },
+            option: CreateStreamingJobOption {},
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -1957,9 +1954,9 @@ impl DdlController {
                         .alter_database_name(database_id, new_name)
                         .await
                 }
-                alter_name_request::Object::SubscriptionId(sink_id) => {
+                alter_name_request::Object::SubscriptionId(subscription_id) => {
                     mgr.catalog_manager
-                        .alter_subscription_name(sink_id, new_name)
+                        .alter_subscription_name(subscription_id, new_name)
                         .await
                 }
             },
@@ -2060,8 +2057,8 @@ impl DdlController {
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
-        let timeout_secs = 30 * 60;
-        for _ in 0..timeout_secs {
+        let timeout_ms = 30 * 60 * 1000;
+        for _ in 0..timeout_ms {
             match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     if mgr
@@ -2085,10 +2082,10 @@ impl DdlController {
                 }
             }
 
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(1)).await;
         }
         Err(MetaError::cancelled(format!(
-            "timeout after {timeout_secs}s"
+            "timeout after {timeout_ms}ms"
         )))
     }
 
