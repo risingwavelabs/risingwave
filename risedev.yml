@@ -70,7 +70,7 @@ profile:
       - use: frontend
       - use: compactor
 
-  # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
+  # `dev-compute-node` have the same settings as default except the compute node will be started by user.
   dev-compute-node:
     steps:
       - use: meta-node
@@ -1043,6 +1043,13 @@ template:
     # Other etcd nodes
     provide-etcd: "etcd*"
 
+  sqlite:
+    # Id of this instance
+    id: sqlite
+
+    # File name of the sqlite database
+    file: metadata.db
+
   compute-node:
     # Compute-node advertise address
     address: "127.0.0.1"
@@ -1116,6 +1123,9 @@ template:
 
     # Etcd backend config
     provide-etcd-backend: "etcd*"
+
+    # Sqlite backend config
+    provide-sqlite-backend: "sqlite*"
 
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"
