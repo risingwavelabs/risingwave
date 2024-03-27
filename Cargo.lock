@@ -14386,7 +14386,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml_datetime",
- "toml_edit 0.19.15",
  "tonic 0.10.2",
  "tower",
  "tracing",
