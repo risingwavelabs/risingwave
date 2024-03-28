@@ -29,8 +29,8 @@ use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::SourceSchemaCompatExt;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
-    explain, variable, HandlerArgs,
+    create_index, create_mv, create_schema, create_source, create_table, create_view, cursor,
+    drop_table, explain, variable, HandlerArgs,
 };
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
@@ -569,6 +569,15 @@ impl TestCase {
                 } => {
                     create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
                         .await?;
+                }
+                Statement::DeclareCursor { cursor_name, query } => {
+                    cursor::handle_declare_cursor(handler_args, cursor_name, *query).await?;
+                }
+                Statement::CursorFetch { cursor_name, count } => {
+                    cursor::handle_cursor_fetch(handler_args, cursor_name, count).await?;
+                }
+                Statement::CloseCursor { cursor_name } => {
+                    cursor::handle_close_cursor(handler_args, cursor_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
