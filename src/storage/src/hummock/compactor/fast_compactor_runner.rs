@@ -22,6 +22,7 @@ use std::time::Instant;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
+use prometheus::core::Collector;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStats;
@@ -179,6 +180,9 @@ pub struct ConcatSstableIterator {
 
     stats: StoreLocalStatistic,
     task_progress: Arc<TaskProgress>,
+
+    /// Statistics.
+    compactor_metrics: Arc<CompactorMetrics>,
 }
 
 impl ConcatSstableIterator {
@@ -189,7 +193,9 @@ impl ConcatSstableIterator {
         sst_infos: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
+        compactor_metrics: Arc<CompactorMetrics>,
     ) -> Self {
+        compactor_metrics.compaction_reading_sst_counts.inc();
         Self {
             sstable_iter: None,
             cur_idx: 0,
@@ -197,6 +203,7 @@ impl ConcatSstableIterator {
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
+            compactor_metrics,
         }
     }
 
@@ -256,6 +263,12 @@ impl ConcatSstableIterator {
             self.sstable_iter = Some(sstable_iter);
         }
         Ok(())
+    }
+}
+
+impl Drop for ConcatSstableIterator {
+    fn drop(&mut self) {
+        self.compactor_metrics.compaction_reading_sst_counts.desc();
     }
 }
 
@@ -325,15 +338,18 @@ impl CompactorRunner {
             task.target_level,
             compact_task_to_string(&task)
         );
+        let metrics = context.compactor_metrics.clone();
         let left = Box::new(ConcatSstableIterator::new(
             task.input_ssts[0].table_infos.clone(),
             context.sstable_store.clone(),
             task_progress.clone(),
+            metrics.clone(),
         ));
         let right = Box::new(ConcatSstableIterator::new(
             task.input_ssts[1].table_infos.clone(),
             context.sstable_store,
             task_progress.clone(),
+            metrics.clone(),
         ));
         let state = SkipWatermarkState::from_safe_epoch_watermarks(&task.table_watermarks);
 
@@ -342,7 +358,7 @@ impl CompactorRunner {
             left,
             right,
             task_id: task.task_id,
-            metrics: context.compactor_metrics.clone(),
+            metrics,
             compression_algorithm,
         }
     }

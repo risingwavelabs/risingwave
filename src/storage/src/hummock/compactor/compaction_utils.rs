@@ -365,6 +365,7 @@ pub async fn check_compaction_result(
                 context.sstable_store.clone(),
                 Arc::new(TaskProgress::default()),
                 context.storage_opts.compactor_iter_max_io_retry_times,
+                context.compactor_metrics.clone(),
             ));
         } else {
             let mut stats = StoreLocalStatistic::default();
@@ -381,6 +382,7 @@ pub async fn check_compaction_result(
                     context.sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
                     context.storage_opts.compactor_iter_max_io_retry_times,
+                    context.compactor_metrics.clone(),
                 ));
             }
         }
@@ -401,6 +403,7 @@ pub async fn check_compaction_result(
         context.sstable_store.clone(),
         Arc::new(TaskProgress::default()),
         context.storage_opts.compactor_iter_max_io_retry_times,
+        context.compactor_metrics.clone(),
     );
     let right_iter = UserIterator::new(
         SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
@@ -426,6 +429,7 @@ pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
         context.sstable_store.clone(),
         Arc::new(TaskProgress::default()),
         0,
+        context.compactor_metrics.clone(),
     );
     let right_iter = UserIterator::new(
         iter,

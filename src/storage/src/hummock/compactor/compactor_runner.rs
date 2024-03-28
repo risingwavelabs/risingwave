@@ -190,6 +190,7 @@ impl CompactorRunner {
                     self.sstable_store.clone(),
                     task_progress.clone(),
                     compactor_iter_max_io_retry_times,
+                    self.compactor.context.compactor_metrics.clone(),
                 ));
             } else if tables.len() > MAX_OVERLAPPING_SST {
                 let sst_groups = partition_overlapping_sstable_infos(tables);
@@ -207,6 +208,7 @@ impl CompactorRunner {
                         self.sstable_store.clone(),
                         task_progress.clone(),
                         compactor_iter_max_io_retry_times,
+                        self.compactor.context.compactor_metrics.clone(),
                     ));
                 }
             } else {
@@ -218,6 +220,7 @@ impl CompactorRunner {
                         self.sstable_store.clone(),
                         task_progress.clone(),
                         compactor_iter_max_io_retry_times,
+                        self.compactor.context.compactor_metrics.clone(),
                     ));
                 }
             }

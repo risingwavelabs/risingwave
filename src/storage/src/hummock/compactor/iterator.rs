@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use fail::fail_point;
+use prometheus::core::Collector;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -32,7 +33,7 @@ use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 const PROGRESS_KEY_INTERVAL: usize = 100;
 
@@ -283,6 +284,9 @@ pub struct ConcatSstableIterator {
     stats: StoreLocalStatistic,
     task_progress: Arc<TaskProgress>,
     max_io_retry_times: usize,
+
+    /// Statistics.
+    compactor_metrics: Arc<CompactorMetrics>,
 }
 
 impl ConcatSstableIterator {
@@ -296,7 +300,9 @@ impl ConcatSstableIterator {
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
         max_io_retry_times: usize,
+        compactor_metrics: Arc<CompactorMetrics>,
     ) -> Self {
+        compactor_metrics.compaction_reading_sst_counts.inc();
         Self {
             key_range,
             sstable_iter: None,
@@ -307,6 +313,7 @@ impl ConcatSstableIterator {
             task_progress,
             stats: StoreLocalStatistic::default(),
             max_io_retry_times,
+            compactor_metrics,
         }
     }
 
@@ -324,6 +331,7 @@ impl ConcatSstableIterator {
             sstable_store,
             Arc::new(TaskProgress::default()),
             0,
+            Arc::new(CompactorMetrics::unused()),
         )
     }
 
@@ -425,6 +433,12 @@ impl ConcatSstableIterator {
             }
         }
         Ok(())
+    }
+}
+
+impl Drop for ConcatSstableIterator {
+    fn drop(&mut self) {
+        self.compactor_metrics.compaction_reading_sst_counts.desc();
     }
 }
 

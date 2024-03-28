@@ -15,6 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+use prometheus::core::Collector;
 use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
@@ -221,6 +222,7 @@ impl Compactor {
                 .verbose_instrument_await("upload")
                 .await
                 .map_err(HummockError::sstable_upload_error);
+            metrics.compaction_uploading_sst_counts.desc();
             rets.push(ret);
             if let Some(tracker) = &task_progress {
                 tracker.inc_ssts_uploaded();

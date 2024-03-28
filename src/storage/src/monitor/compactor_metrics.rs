@@ -50,6 +50,9 @@ pub struct CompactorMetrics {
     pub sstable_distinct_epoch_count: Histogram,
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
+
+    pub compaction_uploading_sst_counts: GenericCounter<AtomicU64>,
+    pub compaction_reading_sst_counts: GenericCounter<AtomicU64>,
 }
 
 pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
@@ -251,6 +254,20 @@ impl CompactorMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let compaction_reading_sst_counts = register_int_counter_with_registry!(
+            "compaction_reading_sst_counts",
+            "Total counts of compaction reading sst from object store",
+            registry
+        )
+        .unwrap();
+
+        let compaction_uploading_sst_counts = register_int_counter_with_registry!(
+            "compaction_uploading_sst_count",
+            "Total counts of compaction uploading sst to object store",
+            registry
+        )
+        .unwrap();
+
         Self {
             compaction_upload_sst_counts,
             compact_fast_runner_bytes,
@@ -277,6 +294,8 @@ impl CompactorMetrics {
             sstable_distinct_epoch_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            compaction_uploading_sst_counts,
+            compaction_reading_sst_counts,
         }
     }
 

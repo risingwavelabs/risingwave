@@ -306,6 +306,7 @@ where
                 upload_join_handle: builder_output.writer_output,
                 sst_info: builder_output.sst_info,
             });
+            self.compactor_metrics.compaction_uploading_sst_counts.inc();
         }
         Ok(())
     }
