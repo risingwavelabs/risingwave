@@ -403,12 +403,6 @@ impl GlobalBarrierManager {
                     )
                     .await?;
 
-                    // let all_nodes = active_streaming_nodes
-                    //     .current()
-                    //     .values()
-                    //     .cloned()
-                    //     .collect_vec();
-
                     let background_streaming_jobs = self
                         .context
                         .metadata_manager
