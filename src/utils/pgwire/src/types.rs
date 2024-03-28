@@ -45,6 +45,10 @@ impl Row {
     pub fn values(&self) -> &[Option<Bytes>] {
         &self.0
     }
+
+    pub fn take(self) -> Vec<Option<Bytes>> {
+        self.0
+    }
 }
 
 impl Index<usize> for Row {

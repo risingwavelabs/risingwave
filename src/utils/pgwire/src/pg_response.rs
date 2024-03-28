@@ -42,6 +42,7 @@ pub enum StatementType {
     FETCH,
     COPY,
     EXPLAIN,
+    CLOSE_CURSOR,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_VIEW,
@@ -55,6 +56,7 @@ pub enum StatementType {
     CREATE_FUNCTION,
     CREATE_CONNECTION,
     COMMENT,
+    DECLARE_CURSOR,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -336,6 +338,7 @@ impl StatementType {
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
                 | StatementType::CANCEL_COMMAND
+                | StatementType::FETCH
         )
     }
 

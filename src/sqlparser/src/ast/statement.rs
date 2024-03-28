@@ -634,6 +634,103 @@ impl fmt::Display for CreateSubscriptionStatement {
     }
 }
 
+// sql_grammar!(DeclareCursorStatement {
+//     cursor_name: Ident,
+//     [Keyword::CURSOR],
+//     [Keyword::FOR],
+//     subscription: Ident,
+//     [Keyword::SINCE],
+//     rw_timestamp: Ident,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DeclareCursorStatement {
+    pub cursor_name: ObjectName,
+    pub cursor_from: ObjectName,
+    pub rw_timestamp: Since,
+}
+
+impl ParseTo for DeclareCursorStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(cursor_name: ObjectName, p);
+
+        let cursor_from = if p.parse_keyword(Keyword::CURSOR) && p.parse_keyword(Keyword::FOR) {
+            impl_parse_to!(cursor_from: ObjectName, p);
+            cursor_from
+        } else {
+            p.expected(
+                "CURSOR FOR after DECLARE CURSOR cursor_name",
+                p.peek_token(),
+            )?
+        };
+
+        impl_parse_to!(rw_timestamp: Since, p);
+
+        Ok(Self {
+            cursor_name,
+            cursor_from,
+            rw_timestamp,
+        })
+    }
+}
+impl fmt::Display for DeclareCursorStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(cursor_name, v, self);
+        v.push(format!("CURSOR FOR {}", self.cursor_name));
+        impl_fmt_display!(rw_timestamp, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+// sql_grammar!(FetchCursorStatement {
+//     cursor_name: Ident,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct FetchCursorStatement {
+    pub cursor_name: ObjectName,
+}
+
+impl ParseTo for FetchCursorStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(cursor_name: ObjectName, p);
+
+        Ok(Self { cursor_name })
+    }
+}
+impl fmt::Display for FetchCursorStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(cursor_name, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+// sql_grammar!(CloseCursorStatement {
+//     cursor_name: Ident,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CloseCursorStatement {
+    pub cursor_name: ObjectName,
+}
+
+impl ParseTo for CloseCursorStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(cursor_name: ObjectName, p);
+
+        Ok(Self { cursor_name })
+    }
+}
+impl fmt::Display for CloseCursorStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(cursor_name, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 // sql_grammar!(CreateConnectionStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     connection_name: Ident,
@@ -705,6 +802,33 @@ impl fmt::Display for WithProperties {
         } else {
             Ok(())
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Since {
+    TimestampMsNum(u64),
+    ProcessTime,
+    Begin,
+    WithSnapshot,
+}
+
+impl fmt::Display for Since {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Since::*;
+        match self {
+            TimestampMsNum(ts) => write!(f, " SINCE {}", ts),
+            ProcessTime => write!(f, " SINCE PROCTIME()"),
+            Begin => write!(f, " SINCE BEGIN()"),
+            WithSnapshot => write!(f, ""),
+        }
+    }
+}
+
+impl ParseTo for Since {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        p.parse_since()
     }
 }
 

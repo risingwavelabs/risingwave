@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
@@ -83,15 +82,9 @@ impl<LS: LocalStateStore> SubscriptionLogStoreWriter<LS> {
     pub async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
         truncate_offset: Option<ReaderTruncationOffsetType>,
     ) -> LogStoreResult<()> {
-        let epoch = self.state_store.epoch();
-        for vnode in self.serde.vnodes().iter_vnodes() {
-            let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
-            self.state_store.insert(key, value, None)?;
-        }
-
+        // Because barrier has no effect on subscription, barrier will not be inserted here
         let watermark = truncate_offset.map(|truncate_offset| {
             VnodeWatermark::new(
                 self.serde.vnodes().clone(),

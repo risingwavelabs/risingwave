@@ -137,6 +137,7 @@ impl StreamSubscription {
             created_at_epoch: None,
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
+            subscription_internal_table_name: None,
         };
         Ok((input, subscription_desc))
     }

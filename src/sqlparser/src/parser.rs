@@ -240,6 +240,9 @@ impl Parser {
                     self.prev_token();
                     Ok(Statement::Query(Box::new(self.parse_query()?)))
                 }
+                Keyword::DECLARE => Ok(self.parse_declare()?),
+                Keyword::FETCH => Ok(self.parse_fetch_cursor()?),
+                Keyword::CLOSE => Ok(self.parse_close_cursor()?),
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
@@ -2296,6 +2299,24 @@ impl Parser {
         })
     }
 
+    pub fn parse_declare(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::DeclareCursor {
+            stmt: DeclareCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_fetch_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::FetchCursor {
+            stmt: FetchCursorStatement::parse_to(self)?,
+        })
+    }
+
+    pub fn parse_close_cursor(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CloseCursor {
+            stmt: CloseCursorStatement::parse_to(self)?,
+        })
+    }
+
     fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
         Ok(TableColumnDef {
             name: self.parse_identifier_non_reserved()?,
@@ -2909,6 +2930,44 @@ impl Parser {
         Ok(SqlOption { name, value })
     }
 
+    pub fn parse_since(&mut self) -> Result<Since, ParserError> {
+        if self.parse_keyword(Keyword::SINCE) {
+            let token = self.next_token();
+            match token.token {
+                Token::Word(w) => {
+                    let ident = w.to_ident()?;
+                    // Backward compatibility for now.
+                    if ident.real_value() == "proctime" || ident.real_value() == "now" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Since::ProcessTime)
+                    } else if ident.real_value() == "begin" {
+                        self.expect_token(&Token::LParen)?;
+                        self.expect_token(&Token::RParen)?;
+                        Ok(Since::Begin)
+                    } else {
+                        parser_err!(format!(
+                            "Expected proctime() or snapshot(), found: {}",
+                            ident.real_value()
+                        ))
+                    }
+                }
+                Token::Number(s) => {
+                    let num = s.parse::<u64>().map_err(|e| {
+                        ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
+                    });
+                    Ok(Since::TimestampMsNum(num?))
+                }
+                unexpected => self.expected(
+                    "Proctime(), Number",
+                    unexpected.with_location(token.location),
+                ),
+            }
+        } else {
+            Ok(Since::WithSnapshot)
+        }
+    }
+
     pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
         if self.parse_keyword(Keyword::EMIT) {
             match self.parse_one_of_keywords(&[Keyword::IMMEDIATELY, Keyword::ON]) {
@@ -3315,7 +3374,6 @@ impl Parser {
                         self.peek_token(),
                     );
                 }
-
                 let value = self.parse_set_variable()?;
                 let deferred = self.parse_keyword(Keyword::DEFERRED);
 

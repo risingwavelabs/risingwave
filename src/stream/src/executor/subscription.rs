@@ -114,11 +114,7 @@ impl<LS: LocalStateStore> SubscriptionExecutor<LS> {
                         None
                     };
                     self.log_store
-                        .flush_current_epoch(
-                            barrier.epoch.curr,
-                            barrier.kind.is_checkpoint(),
-                            truncate_offset,
-                        )
+                        .flush_current_epoch(barrier.epoch.curr, truncate_offset)
                         .await?;
 
                     if let Some(vnode_bitmap) =
