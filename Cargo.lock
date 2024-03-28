@@ -4605,19 +4605,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generator"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc16584ff22b460a382b7feec54b23d2908d858152e5739a120b949293bd74e"
-dependencies = [
- "cc",
- "libc",
- "log",
- "rustversion",
- "windows 0.48.0",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5853,22 +5840,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 dependencies = [
  "value-bag",
-]
-
-[[package]]
-name = "loom"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff50ecb28bb86013e935fb6683ab1f6d3a20016f123c76fd4c27470076ac30f5"
-dependencies = [
- "cfg-if",
- "generator",
- "pin-utils",
- "scoped-tls",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -8847,7 +8818,6 @@ dependencies = [
  "rw_futures_util",
  "scopeguard",
  "serde_json",
- "task_stats_alloc",
  "tempfile",
  "thiserror",
  "thiserror-ext",
@@ -8915,7 +8885,6 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta_node",
  "risingwave_rt",
- "task_stats_alloc",
  "tikv-jemallocator",
  "workspace-config",
  "workspace-hack",
@@ -8946,7 +8915,6 @@ dependencies = [
  "shell-words",
  "strum 0.25.0",
  "strum_macros 0.26.1",
- "task_stats_alloc",
  "tempfile",
  "thiserror-ext",
  "tikv-jemallocator",
@@ -10369,7 +10337,6 @@ dependencies = [
  "static_assertions",
  "strum 0.26.1",
  "strum_macros 0.26.1",
- "task_stats_alloc",
  "thiserror",
  "thiserror-ext",
  "tokio-metrics",
@@ -10882,12 +10849,6 @@ dependencies = [
  "cfg-if",
  "hashbrown 0.13.2",
 ]
-
-[[package]]
-name = "scoped-tls"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
 
 [[package]]
 name = "scopeguard"
@@ -12281,14 +12242,6 @@ name = "target-lexicon"
 version = "0.12.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c39fd04924ca3a864207c66fc2cd7d22d7c016007f9ce846cbb9326331930a"
-
-[[package]]
-name = "task_stats_alloc"
-version = "0.1.11"
-dependencies = [
- "loom",
- "madsim-tokio",
-]
 
 [[package]]
 name = "tempfile"
