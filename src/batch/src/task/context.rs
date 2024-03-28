@@ -25,7 +25,7 @@ use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
 use crate::error::Result;
-use crate::monitor::{BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner};
+use crate::monitor::BatchMetricsWithTaskLabels;
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
@@ -164,7 +164,7 @@ impl ComputeNodeContext {
     }
 
     pub fn new(env: BatchEnvironment, _task_id: TaskId) -> Self {
-        let batch_mem_context = env.task_manager().memory_context_ref();
+        // let batch_mem_context = env.task_manager().memory_context_ref();
 
         // let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
         //     env.task_manager().metrics(),
