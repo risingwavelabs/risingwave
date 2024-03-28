@@ -1215,7 +1215,7 @@ impl HummockUploader {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::VecDeque;
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
@@ -1270,10 +1270,8 @@ mod tests {
     fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
         HummockVersion {
             id: epoch,
-            levels: Default::default(),
             max_committed_epoch: epoch,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
+            ..Default::default()
         }
     }
 

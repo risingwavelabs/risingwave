@@ -34,6 +34,7 @@ use risingwave_pb::hummock::{
     SstableInfo, TableStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tracing::warn;
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
@@ -303,6 +304,43 @@ impl HummockManager {
         commit_multi_var!(self.env.meta_store(), self.sql_meta_store(), version_stats)?;
         Ok(())
     }
+
+    #[named]
+    pub async fn may_fill_backward_snapshot_group(
+        &self,
+        existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
+    ) -> Result<()> {
+        use crate::model::{
+            BTreeMapEntryTransaction, BTreeMapEntryTransactionWrapper, ValTransaction,
+        };
+        let mut versioning = write_lock!(self, versioning).await;
+        if let Some(new_version_delta) = versioning
+            .current_version
+            .gen_fill_backward_compatibility_snapshot_group_delta(
+                existing_table_fragment_state_tables,
+            )
+        {
+            warn!(
+                ?new_version_delta,
+                "fill snapshot group for backward compatibility"
+            );
+            let new_version_delta = create_trx_wrapper!(
+                self.sql_meta_store(),
+                BTreeMapEntryTransactionWrapper,
+                BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    new_version_delta.id,
+                    new_version_delta,
+                )
+            );
+            commit_multi_var!(
+                self.env.meta_store(),
+                self.sql_meta_store(),
+                new_version_delta
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// Calculates write limits for `target_groups`.
@@ -352,6 +390,7 @@ pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
         table_watermarks: HashMap::new(),
+        snapshot_groups: HashMap::new(),
     };
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -570,10 +609,7 @@ mod tests {
 
         let mut version = HummockVersion {
             id: 123,
-            levels: Default::default(),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
+            ..Default::default()
         };
         for cg in 1..3 {
             version.levels.insert(

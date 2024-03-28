@@ -516,8 +516,6 @@ async fn test_hummock_manager_basic() {
     );
 
     let mut epoch = test_epoch(1);
-    let mut register_log_count = 0;
-    let mut commit_log_count = 0;
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef| async move {
         let original_tables =
             generate_test_tables(test_epoch(epoch), get_sst_ids(&hummock_manager, 2).await);
@@ -537,17 +535,13 @@ async fn test_hummock_manager_basic() {
     };
 
     commit_one(epoch, hummock_manager.clone()).await;
-    register_log_count += 1;
-    commit_log_count += 1;
     epoch.inc_epoch();
 
     let init_version_id = FIRST_VERSION_ID;
 
+    let version_id1 = hummock_manager.get_current_version().await.id;
     // increased version id
-    assert_eq!(
-        hummock_manager.get_current_version().await.id,
-        init_version_id + commit_log_count + register_log_count
-    );
+    assert!(version_id1 > init_version_id);
 
     // min pinned version id if no clients
     assert_eq!(
@@ -566,31 +560,25 @@ async fn test_hummock_manager_basic() {
 
         // should pin latest because u64::MAX
         let version = hummock_manager.pin_version(context_id_1).await.unwrap();
-        assert_eq!(
-            version.id,
-            init_version_id + commit_log_count + register_log_count
-        );
+        assert_eq!(version.id, version_id1);
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            init_version_id + commit_log_count + register_log_count
+            version_id1
         );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
-    commit_log_count += 1;
-    register_log_count += 1;
+
+    let version_id2 = hummock_manager.get_current_version().await.id;
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
         let version = hummock_manager.pin_version(context_id_2).await.unwrap();
-        assert_eq!(
-            version.id,
-            init_version_id + commit_log_count + register_log_count
-        );
+        assert_eq!(version.id, version_id2);
         // pinned by context_id_1
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            init_version_id + commit_log_count + register_log_count - 2,
+            version_id1,
         );
     }
     // objects_to_delete is always empty because no compaction is ever invoked.
@@ -604,7 +592,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
-        commit_log_count + register_log_count
+        version_id2 - init_version_id
     );
     assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
@@ -612,7 +600,7 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        ((commit_log_count + register_log_count) as usize, 0)
+        ((version_id2 - init_version_id) as usize, 0)
     );
     hummock_manager
         .unpin_version_before(context_id_1, u64::MAX)
@@ -620,7 +608,7 @@ async fn test_hummock_manager_basic() {
         .unwrap();
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
-        init_version_id + commit_log_count + register_log_count
+        version_id2
     );
     hummock_manager
         .unpin_version_before(context_id_2, u64::MAX)
@@ -1145,7 +1133,7 @@ async fn test_extend_objects_to_delete() {
     // Checkpoint
     assert_eq!(
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
-        6
+        8
     );
     assert_eq!(
         hummock_manager

@@ -43,6 +43,8 @@ pub enum Error {
     CompactorUnreachable(HummockContextId),
     #[error("compaction group error: {0}")]
     CompactionGroup(String),
+    #[error("snapshot group error: {0}")]
+    SnapshotGroup(String),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
     #[error(transparent)]

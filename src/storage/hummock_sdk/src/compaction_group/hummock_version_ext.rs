@@ -34,7 +34,7 @@ use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
 use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
-use crate::version::{HummockVersion, HummockVersionDelta};
+use crate::version::{HummockVersion, HummockVersionDelta, SnapshotGroup, SnapshotGroupDelta};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -619,6 +619,63 @@ impl HummockVersion {
                 });
             self.safe_epoch = version_delta.safe_epoch;
         }
+        for (table_fragments_id, group_delta) in &version_delta.snapshot_group_delta {
+            match group_delta {
+                SnapshotGroupDelta::NewSnapshotGroup {
+                    member_table_ids,
+                    committed_epoch,
+                    safe_epoch,
+                } => {
+                    if let Some(prev_group) = self.snapshot_groups.insert(
+                        *table_fragments_id,
+                        SnapshotGroup {
+                            table_fragments_id: *table_fragments_id,
+                            committed_epoch: *committed_epoch,
+                            safe_epoch: *safe_epoch,
+                            member_table_ids: member_table_ids.clone(),
+                        },
+                    ) {
+                        panic!(
+                            "add duplicate snapshot group: {:?} {:?} {} {} {:?}",
+                            table_fragments_id,
+                            member_table_ids,
+                            committed_epoch,
+                            safe_epoch,
+                            prev_group
+                        );
+                    }
+                }
+                SnapshotGroupDelta::NewCommittedEpoch(new_committed_epoch) => {
+                    if let Some(group) = self.snapshot_groups.get_mut(table_fragments_id) {
+                        assert!(
+                            *new_committed_epoch >= group.committed_epoch,
+                            "snapshot group {:?} has regressed committed epoch {}, prev is {}",
+                            table_fragments_id,
+                            new_committed_epoch,
+                            group.committed_epoch,
+                        );
+                        group.committed_epoch = *new_committed_epoch;
+                    }
+                }
+                SnapshotGroupDelta::NewSafeEpoch(new_safe_epoch) => {
+                    if let Some(group) = self.snapshot_groups.get_mut(table_fragments_id) {
+                        assert!(
+                            *new_safe_epoch >= group.safe_epoch,
+                            "snapshot group {:?} has regressed safe epoch {}, prev is {}",
+                            table_fragments_id,
+                            new_safe_epoch,
+                            group.safe_epoch
+                        );
+                        group.safe_epoch = *new_safe_epoch;
+                    }
+                }
+                SnapshotGroupDelta::Destroy => {
+                    if self.snapshot_groups.remove(table_fragments_id).is_none() {
+                        warn!(?table_fragments_id, "remove non-existing snapshot group");
+                    }
+                }
+            }
+        }
         sst_split_info
     }
 
@@ -1071,6 +1128,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         gc_object_ids: vec![],
         new_table_watermarks: HashMap::new(),
         removed_table_ids: vec![],
+        snapshot_group_delta: Default::default(),
     }
 }
 
@@ -1316,9 +1374,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
+            ..Default::default()
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1379,9 +1435,7 @@ mod tests {
                     ),
                 ),
             ]),
-            max_committed_epoch: 0,
-            safe_epoch: 0,
-            table_watermarks: HashMap::new(),
+            ..Default::default()
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1462,9 +1516,7 @@ mod tests {
                     ),
                     (1, cg1,),
                 ]),
-                max_committed_epoch: 0,
-                safe_epoch: 0,
-                table_watermarks: HashMap::new(),
+                ..Default::default()
             }
         );
     }

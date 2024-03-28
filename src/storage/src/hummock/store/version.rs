@@ -122,7 +122,7 @@ pub enum StagingData {
 pub enum VersionUpdate {
     /// a new staging data entry will be added.
     Staging(StagingData),
-    CommittedDelta(HummockVersionDelta),
+    CommittedDelta(Box<HummockVersionDelta>),
     CommittedSnapshot(CommittedVersion),
     NewTableWatermark {
         direction: WatermarkDirection,
