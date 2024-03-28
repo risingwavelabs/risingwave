@@ -538,7 +538,7 @@ impl CatalogController {
         streaming_job: &StreamingJob,
         ctx: &StreamContext,
         version: &PbTableVersion,
-        default_parallelism: &Option<NonZeroUsize>,
+        specified_parallelism: &Option<NonZeroUsize>,
     ) -> MetaResult<ObjectId> {
         let id = streaming_job.id();
         let inner = self.inner.write().await;
@@ -557,7 +557,7 @@ impl CatalogController {
             return Err(MetaError::permission_denied("table version is stale"));
         }
 
-        let parallelism = match default_parallelism {
+        let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
