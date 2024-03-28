@@ -116,7 +116,7 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-rumqttc = { version = "0.22.0", features = ["url"] }
+rumqttc = { version = "0.24.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs = "0.7"
 rustls-pemfile = "2"
@@ -143,7 +143,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
-tokio-rustls = "0.26"
+tokio-rustls = "0.25"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }

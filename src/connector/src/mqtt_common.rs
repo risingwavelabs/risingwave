@@ -146,21 +146,18 @@ impl MqttCommon {
         if let Some(ca) = &self.ca {
             let certificates = load_certs(ca)?;
             for cert in certificates {
-                root_cert_store.add(&cert).unwrap();
+                root_cert_store.add(cert).unwrap();
             }
         } else {
             for cert in
                 rustls_native_certs::load_native_certs().expect("could not load platform certs")
             {
-                root_cert_store
-                    .add(&tokio_rustls::rustls::Certificate(cert.to_vec()))
-                    .unwrap();
+                root_cert_store.add(cert).unwrap();
             }
         }
 
-        let builder = tokio_rustls::rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_cert_store);
+        let builder =
+            tokio_rustls::rustls::ClientConfig::builder().with_root_certificates(root_cert_store);
 
         let tls_config = if let (Some(client_cert), Some(client_key)) =
             (self.client_cert.as_ref(), self.client_key.as_ref())
