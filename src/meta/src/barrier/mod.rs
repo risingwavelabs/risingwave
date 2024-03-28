@@ -828,6 +828,9 @@ impl GlobalBarrierManagerContext {
         let duration_sec = enqueue_time.stop_and_record();
         self.report_complete_event(duration_sec, &command_ctx);
         wait_commit_timer.observe_duration();
+        self.metrics
+            .last_committed_barrier_time
+            .set(command_ctx.curr_epoch.value().as_unix_secs() as i64);
         Ok(BarrierCompleteOutput {
             command_ctx,
             require_next_checkpoint: has_remaining,
