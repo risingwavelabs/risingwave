@@ -41,7 +41,7 @@ cargo make dev ci-meta-etcd-for-migration
 
 echo "--- run migration"
 mkdir -p "${RW_PREFIX_DATA}/sqlite/"
-./target/debug/risectl \
+./target/debug/risingwave risectl \
 meta \
 migration \
 --etcd-endpoints localhost:2388 \
