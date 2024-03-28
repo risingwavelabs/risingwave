@@ -157,7 +157,7 @@
         │     │       │         └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], stream_scan_type: ArrangementBackfill, pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         │     │       └─StreamExchange { dist: HashShard($expr1) }
         │     │         └─StreamProject { exprs: [stock.s_i_id, stock.s_quantity, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, stock.s_w_id] }
-        │     │           └─StreamFilter { predicate: (stock.s_i_id = stock.s_i_id) }
+        │     │           └─StreamFilter { predicate: IsNotNull(stock.s_i_id) }
         │     │             └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
         │     └─StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all }
         │       ├─StreamExchange { dist: HashShard(item.i_id) }
@@ -233,7 +233,7 @@
 
     Fragment 9
     StreamProject { exprs: [stock.s_i_id, stock.s_quantity, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, stock.s_w_id] }
-    └── StreamFilter { predicate: (stock.s_i_id = stock.s_i_id) }
+    └── StreamFilter { predicate: IsNotNull(stock.s_i_id) }
         └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 25 ] }
             ├── Upstream
             └── BatchPlanNode
@@ -421,17 +421,17 @@
             │ └─StreamHashJoin { type: Inner, predicate: customer.c_d_id = new_order.no_d_id AND customer.c_w_id = new_order.no_w_id, output: all }
             │   ├─StreamExchange { dist: HashShard(customer.c_d_id, customer.c_w_id) }
             │   │ └─StreamProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id] }
-            │   │   └─StreamFilter { predicate: (customer.c_w_id = customer.c_w_id) AND (customer.c_d_id = customer.c_d_id) AND Like(customer.c_state, 'a%':Varchar) }
+            │   │   └─StreamFilter { predicate: IsNotNull(customer.c_w_id) AND IsNotNull(customer.c_d_id) AND Like(customer.c_state, 'a%':Varchar) }
             │   │     └─StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], stream_scan_type: ArrangementBackfill, pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
             │   └─StreamExchange { dist: HashShard(new_order.no_d_id, new_order.no_w_id) }
-            │     └─StreamFilter { predicate: (new_order.no_w_id = new_order.no_w_id) AND (new_order.no_d_id = new_order.no_d_id) AND (new_order.no_o_id = new_order.no_o_id) }
+            │     └─StreamFilter { predicate: IsNotNull(new_order.no_w_id) AND IsNotNull(new_order.no_d_id) AND IsNotNull(new_order.no_o_id) }
             │       └─StreamTableScan { table: new_order, columns: [new_order.no_o_id, new_order.no_d_id, new_order.no_w_id], stream_scan_type: ArrangementBackfill, pk: [new_order.no_w_id, new_order.no_d_id, new_order.no_o_id], dist: UpstreamHashShard(new_order.no_w_id, new_order.no_d_id, new_order.no_o_id) }
             └─StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: all }
               ├─StreamExchange { dist: HashShard(orders.o_id, orders.o_d_id, orders.o_w_id) }
-              │ └─StreamFilter { predicate: (orders.o_d_id = orders.o_d_id) AND (orders.o_w_id = orders.o_w_id) AND (orders.o_entry_d > '2007-01-02 00:00:00':Timestamp) }
+              │ └─StreamFilter { predicate: IsNotNull(orders.o_d_id) AND IsNotNull(orders.o_w_id) AND (orders.o_entry_d > '2007-01-02 00:00:00':Timestamp) }
               │   └─StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], stream_scan_type: ArrangementBackfill, pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
               └─StreamExchange { dist: HashShard(order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id) }
-                └─StreamFilter { predicate: (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_w_id = order_line.ol_w_id) }
+                └─StreamFilter { predicate: IsNotNull(order_line.ol_d_id) AND IsNotNull(order_line.ol_w_id) }
                   └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
   stream_dist_plan: |+
     Fragment 0
@@ -456,25 +456,25 @@
 
     Fragment 3
     StreamProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id] }
-    └── StreamFilter { predicate: (customer.c_w_id = customer.c_w_id) AND (customer.c_d_id = customer.c_d_id) AND Like(customer.c_state, 'a%':Varchar) }
+    └── StreamFilter { predicate: IsNotNull(customer.c_w_id) AND IsNotNull(customer.c_d_id) AND Like(customer.c_state, 'a%':Varchar) }
         └── StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state], stream_scan_type: ArrangementBackfill, pk: [customer.c_w_id, customer.c_d_id, customer.c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) } { tables: [ StreamScan: 9 ] }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 4
-    StreamFilter { predicate: (new_order.no_w_id = new_order.no_w_id) AND (new_order.no_d_id = new_order.no_d_id) AND (new_order.no_o_id = new_order.no_o_id) }
+    StreamFilter { predicate: IsNotNull(new_order.no_w_id) AND IsNotNull(new_order.no_d_id) AND IsNotNull(new_order.no_o_id) }
     └── StreamTableScan { table: new_order, columns: [new_order.no_o_id, new_order.no_d_id, new_order.no_w_id], stream_scan_type: ArrangementBackfill, pk: [new_order.no_w_id, new_order.no_d_id, new_order.no_o_id], dist: UpstreamHashShard(new_order.no_w_id, new_order.no_d_id, new_order.no_o_id) } { tables: [ StreamScan: 10 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 5
-    StreamFilter { predicate: (orders.o_d_id = orders.o_d_id) AND (orders.o_w_id = orders.o_w_id) AND (orders.o_entry_d > '2007-01-02 00:00:00':Timestamp) }
+    StreamFilter { predicate: IsNotNull(orders.o_d_id) AND IsNotNull(orders.o_w_id) AND (orders.o_entry_d > '2007-01-02 00:00:00':Timestamp) }
     └── StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], stream_scan_type: ArrangementBackfill, pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) } { tables: [ StreamScan: 15 ] }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 6
-    StreamFilter { predicate: (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_w_id = order_line.ol_w_id) }
+    StreamFilter { predicate: IsNotNull(order_line.ol_d_id) AND IsNotNull(order_line.ol_w_id) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 16 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -683,7 +683,7 @@
             │     └─StreamExchange { dist: HashShard(order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, stock.s_w_id) }
             │       └─StreamHashJoin { type: Inner, predicate: order_line.ol_w_id = stock.s_w_id AND order_line.ol_i_id = stock.s_i_id, output: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, stock.s_i_id, stock.s_w_id, order_line.ol_number, order_line.ol_i_id] }
             │         ├─StreamExchange { dist: HashShard(order_line.ol_w_id, order_line.ol_i_id) }
-            │         │ └─StreamFilter { predicate: (order_line.ol_d_id = order_line.ol_d_id) }
+            │         │ └─StreamFilter { predicate: IsNotNull(order_line.ol_d_id) }
             │         │   └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
             │         └─StreamExchange { dist: HashShard(stock.s_w_id, stock.s_i_id) }
             │           └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
@@ -744,7 +744,7 @@
     └── StreamExchange Hash([1, 0]) from 8
 
     Fragment 7
-    StreamFilter { predicate: (order_line.ol_d_id = order_line.ol_d_id) }
+    StreamFilter { predicate: IsNotNull(order_line.ol_d_id) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 19 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -989,7 +989,7 @@
                 │     │     │   │ └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
                 │     │     │   └─StreamExchange { dist: HashShard(order_line.ol_i_id, order_line.ol_supply_w_id) }
                 │     │     │     └─StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number] }
-                │     │     │       └─StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
+                │     │     │       └─StreamFilter { predicate: IsNotNull(order_line.ol_w_id) AND IsNotNull(order_line.ol_d_id) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
                 │     │     │         └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number, order_line.ol_delivery_d], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
                 │     │     └─StreamExchange { dist: HashShard(orders.o_id, orders.o_d_id, orders.o_w_id, customer.c_d_id, customer.c_w_id) }
                 │     │       └─StreamHashJoin { type: Inner, predicate: orders.o_c_id = customer.c_id AND orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id, output: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, customer.c_d_id, customer.c_w_id, customer.c_state, orders.o_c_id, customer.c_id] }
@@ -1046,7 +1046,7 @@
 
     Fragment 6
     StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number] }
-    └── StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
+    └── StreamFilter { predicate: IsNotNull(order_line.ol_w_id) AND IsNotNull(order_line.ol_d_id) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
         └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number, order_line.ol_delivery_d], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
             ├── tables: [ StreamScan: 18 ]
             ├── Upstream
@@ -1195,7 +1195,7 @@
           │ │   │ │   │ │ ├─LogicalJoin { type: Inner, on: (item.i_id = stock.s_i_id), output: all }
           │ │   │ │   │ │ │ ├─LogicalScan { table: item, columns: [item.i_id], predicate: (item.i_id < 1000:Int32) }
           │ │   │ │   │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], predicate: (stock.s_i_id < 1000:Int32) }
-          │ │   │ │   │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount], predicate: (order_line.ol_i_id = order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
+          │ │   │ │   │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount], predicate: IsNotNull(order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
           │ │   │ │   │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], predicate: (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) AND (orders.o_entry_d <= '2032-01-02 00:00:00':Timestamp) }
           │ │   │ │   └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state] }
           │ │   │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey] }
@@ -1232,7 +1232,7 @@
                                             │     └─BatchFilter { predicate: (stock.s_i_id < 1000:Int32) }
                                             │       └─BatchScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], distribution: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
                                             └─BatchExchange { order: [], dist: HashShard(order_line.ol_i_id, order_line.ol_supply_w_id) }
-                                              └─BatchFilter { predicate: (order_line.ol_i_id = order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
+                                              └─BatchFilter { predicate: IsNotNull(order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
                                                 └─BatchScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [l_year, mkt_share], stream_key: [l_year], pk_columns: [l_year], pk_conflict: NoCheck }
@@ -1265,7 +1265,7 @@
               │     │         │     └─StreamFilter { predicate: (stock.s_i_id < 1000:Int32) }
               │     │         │       └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
               │     │         └─StreamExchange { dist: HashShard(order_line.ol_i_id, order_line.ol_supply_w_id) }
-              │     │           └─StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_i_id = order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
+              │     │           └─StreamFilter { predicate: IsNotNull(order_line.ol_w_id) AND IsNotNull(order_line.ol_d_id) AND IsNotNull(order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
               │     │             └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
               │     └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
               │       └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_name, supplier.s_nationkey, nation.n_nationkey] }
@@ -1350,7 +1350,7 @@
         └── BatchPlanNode
 
     Fragment 11
-    StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) AND (order_line.ol_i_id = order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
+    StreamFilter { predicate: IsNotNull(order_line.ol_w_id) AND IsNotNull(order_line.ol_d_id) AND IsNotNull(order_line.ol_i_id) AND (order_line.ol_i_id < 1000:Int32) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) } { tables: [ StreamScan: 29 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -1558,7 +1558,7 @@
               │         ├─StreamExchange { dist: HashShard(orders.o_id, orders.o_d_id, orders.o_w_id) }
               │         │ └─StreamTableScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d], stream_scan_type: ArrangementBackfill, pk: [orders.o_w_id, orders.o_d_id, orders.o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
               │         └─StreamExchange { dist: HashShard(order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id) }
-              │           └─StreamFilter { predicate: (order_line.ol_i_id = order_line.ol_i_id) }
+              │           └─StreamFilter { predicate: IsNotNull(order_line.ol_i_id) }
               │             └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
               └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
                 └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, nation.n_name, supplier.s_nationkey, nation.n_nationkey] }
@@ -1617,7 +1617,7 @@
     └── BatchPlanNode
 
     Fragment 8
-    StreamFilter { predicate: (order_line.ol_i_id = order_line.ol_i_id) }
+    StreamFilter { predicate: IsNotNull(order_line.ol_i_id) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
         ├── tables: [ StreamScan: 20 ]
         ├── Upstream
@@ -1751,7 +1751,7 @@
             │   └─StreamFilter { predicate: (orders.o_entry_d <= order_line.ol_delivery_d) }
             │     └─StreamHashJoin { type: Inner, predicate: order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id AND order_line.ol_o_id = orders.o_id AND order_line.ol_d_id = customer.c_d_id AND order_line.ol_w_id = customer.c_w_id, output: all }
             │       ├─StreamExchange { dist: HashShard(order_line.ol_d_id, order_line.ol_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id) }
-            │       │ └─StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) }
+            │       │ └─StreamFilter { predicate: IsNotNull(order_line.ol_w_id) AND IsNotNull(order_line.ol_d_id) }
             │       │   └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
             │       └─StreamExchange { dist: HashShard(customer.c_d_id, customer.c_w_id, orders.o_id, orders.o_d_id, orders.o_w_id) }
             │         └─StreamHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last, customer.c_city, customer.c_state, customer.c_phone, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d] }
@@ -1785,7 +1785,7 @@
             └── StreamExchange Hash([1, 2, 7, 8, 9]) from 4
 
     Fragment 3
-    StreamFilter { predicate: (order_line.ol_w_id = order_line.ol_w_id) AND (order_line.ol_d_id = order_line.ol_d_id) }
+    StreamFilter { predicate: IsNotNull(order_line.ol_w_id) AND IsNotNull(order_line.ol_d_id) }
     └── StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, pk: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
         ├── tables: [ StreamScan: 9 ]
         ├── Upstream
@@ -3204,7 +3204,7 @@
           │   │ └─StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, stock.s_w_id, stock.s_i_id, order_line.ol_number] }
           │   │   └─StreamHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_w_id AND stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = orders.o_w_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_delivery_d, order_line.ol_number] }
           │   │     ├─StreamExchange { dist: HashShard(stock.s_w_id, stock.s_i_id, stock.s_w_id) }
-          │   │     │ └─StreamFilter { predicate: (stock.s_w_id = stock.s_w_id) }
+          │   │     │ └─StreamFilter { predicate: IsNotNull(stock.s_w_id) }
           │   │     │   └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
           │   │     └─StreamExchange { dist: HashShard(order_line.ol_w_id, order_line.ol_i_id, orders.o_w_id) }
           │   │       └─StreamProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_delivery_d, orders.o_w_id, order_line.ol_number, orders.o_d_id, orders.o_id] }
@@ -3250,7 +3250,7 @@
         └── StreamExchange Hash([2, 3, 5]) from 5
 
     Fragment 4
-    StreamFilter { predicate: (stock.s_w_id = stock.s_w_id) }
+    StreamFilter { predicate: IsNotNull(stock.s_w_id) }
     └── StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: ArrangementBackfill, pk: [stock.s_w_id, stock.s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) } { tables: [ StreamScan: 13 ] }
         ├── Upstream
         └── BatchPlanNode
