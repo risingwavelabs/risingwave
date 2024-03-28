@@ -28,7 +28,7 @@ use crate::array::{Op, RowRef, StreamChunk};
 use crate::row::{Project, RowExt};
 use crate::util::hash_util::Crc32FastBuilder;
 
-/// A helper to compact the stream chunks with just modify the `Ops` and visibility of the chunk.
+/// A helper to compact the stream chunks by modifying the `Ops` and visibility of the chunk.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
     key: Vec<usize>,
