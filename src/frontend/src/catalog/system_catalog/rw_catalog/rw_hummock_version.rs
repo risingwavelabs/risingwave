@@ -123,7 +123,7 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     object_id: sst.object_id as _,
                     compaction_group_id: cg.group_id as _,
                     level_id: level.level_idx as _,
-                    sub_level_id: (level.level_idx > 0).then_some(level.sub_level_id as _),
+                    sub_level_id: (level.level_idx == 0).then_some(level.sub_level_id as _),
                     level_type: level.level_type as _,
                     key_range_left: key_range.left,
                     key_range_right: key_range.right,
