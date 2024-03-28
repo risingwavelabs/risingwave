@@ -43,7 +43,7 @@ conn0 MOCK PRIVATELINK
 query TTTTT
 show functions;
 ----
-int_42 (empty) integer javascript (empty)
+int_42 (empty) integer javascript NULL
 
 statement ok
 insert into t1 select * from generate_series(1, 1000);
