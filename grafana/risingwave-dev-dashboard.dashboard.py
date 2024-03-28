@@ -519,6 +519,23 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Compaction In-Filght Request Count",
+                    "The counts of In-Filght request",
+                    [
+                        panels.target(
+                            f"sum({metric('compactor_reading_sst_counts')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "reading sst counts - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+
+                        panels.target(
+                            f"sum({metric('compactor_uploading_sst_counts')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "uploading sst counts - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
             ],
         )
     ]

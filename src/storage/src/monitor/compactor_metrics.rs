@@ -255,14 +255,14 @@ impl CompactorMetrics {
             register_histogram_with_registry!(opts, registry).unwrap();
 
         let compaction_reading_sst_counts = register_int_counter_with_registry!(
-            "compaction_reading_sst_counts",
+            "compactor_reading_sst_counts",
             "Total counts of compaction reading sst from object store",
             registry
         )
         .unwrap();
 
         let compaction_uploading_sst_counts = register_int_counter_with_registry!(
-            "compaction_uploading_sst_count",
+            "compactor_uploading_sst_counts",
             "Total counts of compaction uploading sst to object store",
             registry
         )
