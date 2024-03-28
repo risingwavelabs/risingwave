@@ -104,3 +104,18 @@
     where path_val = t1.id;
   expected_outputs:
     - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/15337
+  sql: |
+    CREATE TABLE t1 (c1 varchar, c2 bigint,c3 numeric, c4 timestamp) APPEND ONLY;
+    CREATE TABLE t2 (c5 timestamptz, c6 varchar, c7 numeric, c8 numeric, c1 varchar);
+    SELECT o.*, b.v1,b.v2
+    FROM t2 o
+    LEFT JOIN LATERAL (
+    SELECT
+      sum(t.c2 * t.c3) filter ( WHERE (o.c7) * t.c3 <= (o.c7) * o.c8 ) AS v1,
+      sum(t.c2) filter ( WHERE (o.c7) * t.c3 <= (o.c7) * o.c8) AS v2
+      FROM t1 t
+      WHERE t.c1 = o.c1 AND t.c4 >= o.c5 AND t.c4 :: date = o.c5 :: date
+    ) AS b ON TRUE;
+  expected_outputs:
+    - stream_plan
