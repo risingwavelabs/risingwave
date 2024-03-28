@@ -1084,4 +1084,70 @@ mod tests {
         assert_eq!(res.1.conjunctions, vec![right]);
         assert_eq!(res.2.conjunctions, vec![other]);
     }
+
+    #[test]
+    fn test_self_eq_eliminate() {
+        let left_col_num = 3;
+        let right_col_num = 2;
+
+        let ty = DataType::Int32;
+
+        let mut rng = rand::thread_rng();
+
+        let x: ExprImpl = InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into();
+
+        let left: ExprImpl = FunctionCall::new(
+            ExprType::Equal,
+            vec![
+                x.clone(),
+                x.clone(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let right: ExprImpl = FunctionCall::new(
+            ExprType::LessThan,
+            vec![
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty.clone(),
+                )
+                .into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty.clone(),
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let other: ExprImpl = FunctionCall::new(
+            ExprType::GreaterThan,
+            vec![
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty,
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let cond = Condition::with_expr(other.clone())
+            .and(Condition::with_expr(right.clone()))
+            .and(Condition::with_expr(left.clone()));
+
+        let res = cond.split(left_col_num, right_col_num);
+
+        let left_res = FunctionCall::new(ExprType::IsNotNull, vec![x]).unwrap().into();
+
+        assert_eq!(res.0.conjunctions, vec![left_res]);
+        assert_eq!(res.1.conjunctions, vec![right]);
+        assert_eq!(res.2.conjunctions, vec![other]);
+    }
 }
