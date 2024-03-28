@@ -57,6 +57,7 @@ impl ExecutorBuilder for SubscriptionExecutorBuilder {
                 },
                 is_replicated: false,
                 vnodes: serde.vnodes().clone(),
+                is_log_store: false,
             })
             .await;
 

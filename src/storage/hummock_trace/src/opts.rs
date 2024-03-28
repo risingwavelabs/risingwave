@@ -169,6 +169,7 @@ pub struct TracedNewLocalOptions {
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
     pub vnodes: TracedBitmap,
+    pub is_log_store: bool,
 }
 
 #[cfg(test)]
@@ -184,6 +185,7 @@ impl TracedNewLocalOptions {
             },
             is_replicated: false,
             vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
+            is_log_store: false,
         }
     }
 }

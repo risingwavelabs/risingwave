@@ -34,7 +34,9 @@ use super::{
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::iterator::ForwardMergeRangeIterator;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatch, SharedBufferItem, SharedBufferValue,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, DeleteRangeTombstone,
@@ -67,10 +69,10 @@ pub fn default_opts_for_test() -> StorageOpts {
     }
 }
 
-pub fn gen_dummy_batch(n: u64) -> Vec<(TableKey<Bytes>, StorageValue)> {
+pub fn gen_dummy_batch(n: u64) -> Vec<SharedBufferItem> {
     vec![(
         TableKey(Bytes::from(iterator_test_table_key_of(n as usize))),
-        StorageValue::new_put(b"value1".to_vec()),
+        SharedBufferValue::Insert(Bytes::copy_from_slice(&b"value1"[..])),
     )]
 }
 

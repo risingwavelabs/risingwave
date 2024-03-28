@@ -28,6 +28,7 @@ use risingwave_object_store::object::{
 };
 use risingwave_pb::hummock::SstableInfo;
 
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferValue;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
@@ -132,8 +133,8 @@ pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
 }
 
 pub fn transform_shared_buffer(
-    batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
-) -> Vec<(TableKey<Bytes>, HummockValue<Bytes>)> {
+    batches: Vec<(Vec<u8>, SharedBufferValue<Bytes>)>,
+) -> Vec<(TableKey<Bytes>, SharedBufferValue<Bytes>)> {
     batches
         .into_iter()
         .map(|(k, v)| (TableKey(k.into()), v))

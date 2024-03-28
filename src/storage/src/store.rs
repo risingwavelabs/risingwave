@@ -319,6 +319,8 @@ pub struct SyncResult {
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
     /// The collected table watermarks written by state tables.
     pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    /// Sstable that holds the uncommitted old value
+    pub old_value_ssts: Vec<LocalSstableInfo>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
@@ -617,6 +619,8 @@ pub struct NewLocalOptions {
 
     /// The vnode bitmap for the local state store instance
     pub vnodes: Arc<Bitmap>,
+
+    pub is_log_store: bool,
 }
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
@@ -632,6 +636,7 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
             vnodes: Arc::new(value.vnodes.into()),
+            is_log_store: value.is_log_store,
         }
     }
 }
@@ -649,6 +654,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
             table_option: value.table_option.into(),
             is_replicated: value.is_replicated,
             vnodes: value.vnodes.as_ref().clone().into(),
+            is_log_store: value.is_log_store,
         }
     }
 }
@@ -666,6 +672,7 @@ impl NewLocalOptions {
             table_option,
             is_replicated: false,
             vnodes,
+            is_log_store: false,
         }
     }
 
@@ -681,6 +688,7 @@ impl NewLocalOptions {
             table_option,
             is_replicated: true,
             vnodes,
+            is_log_store: false,
         }
     }
 
@@ -693,6 +701,7 @@ impl NewLocalOptions {
             },
             is_replicated: false,
             vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
+            is_log_store: false,
         }
     }
 }
