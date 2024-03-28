@@ -38,7 +38,7 @@ use super::*;
 use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{FlowControlExecutor, TroublemakerExecutor};
+use crate::executor::TroublemakerExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -246,12 +246,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .boxed()
                 }
             };
-            let mut info = params.info.clone();
-            info.identity = format!("{} (flow controlled)", info.identity);
-
-            let rate_limit = source.rate_limit.map(|x| x as _);
-            let exec =
-                FlowControlExecutor::new((info, exec).into(), params.actor_context, rate_limit);
 
             if crate::consistency::insane() {
                 let mut info = params.info.clone();
