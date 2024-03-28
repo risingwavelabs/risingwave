@@ -3,7 +3,7 @@ FROM
     bhv_mv WITH (
     primary_key = 'user_id',
     connector = 'redis',
-    redis.url= 'redis://redis:6379/',
+    redis.url= '["redis://127.0.0.1:6379/"]',
 )FORMAT PLAIN ENCODE JSON(force_append_only='true');
 
 CREATE SINK bhv_redis_sink_2
@@ -11,7 +11,7 @@ FROM
     bhv_mv WITH (
     primary_key = 'user_id',
     connector = 'redis',
-    redis.url= 'redis://redis:6379/',
+    redis.url= '["redis://redis:6379/"]',
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true', key_format = 'UserID:{user_id}', value_format = 'TargetID:{target_id},EventTimestamp{event_timestamp}');
 
 CREATE SINK redis_types_json_sink
@@ -19,7 +19,7 @@ FROM
     redis_types WITH (
     primary_key = 'types_id',
     connector = 'redis',
-    redis.url= 'redis://redis:6379/',
+    redis.url= '["redis://redis:6379/"]',
 )FORMAT PLAIN ENCODE JSON(force_append_only='true');
 
 CREATE SINK redis_types_template_sink
@@ -27,7 +27,7 @@ FROM
     redis_types WITH (
     primary_key = 'types_id',
     connector = 'redis',
-    redis.url= 'redis://redis:6379/',
+    redis.url= '["redis://redis:6379/"]',
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true',
 key_format = 'TYPESID:{types_id}',
 value_format = '

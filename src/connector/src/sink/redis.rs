@@ -16,12 +16,16 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use redis::aio::MultiplexedConnection;
+use redis::aio::{ConnectionLike, MultiplexedConnection};
+use redis::cluster::ClusterClient;
+use redis::cluster_async::ClusterConnection;
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
+use serde_json::Value;
 use serde_with::serde_as;
+use simd_json::prelude::ArrayTrait;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
@@ -44,13 +48,57 @@ pub const VALUE_FORMAT: &str = "value_format";
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
-    pub url: String,
+    pub url: Vec<String>,
+}
+pub enum RedisConn {
+    Cluster(ClusterConnection),
+    Single(MultiplexedConnection),
+}
+
+impl ConnectionLike for RedisConn {
+    fn req_packed_command<'a>(
+        &'a mut self,
+        cmd: &'a redis::Cmd,
+    ) -> redis::RedisFuture<'a, redis::Value> {
+        match self {
+            RedisConn::Cluster(conn) => conn.req_packed_command(cmd),
+            RedisConn::Single(conn) => conn.req_packed_command(cmd),
+        }
+    }
+
+    fn req_packed_commands<'a>(
+        &'a mut self,
+        cmd: &'a redis::Pipeline,
+        offset: usize,
+        count: usize,
+    ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
+        match self {
+            RedisConn::Cluster(conn) => conn.req_packed_commands(cmd, offset, count),
+            RedisConn::Single(conn) => conn.req_packed_commands(cmd, offset, count),
+        }
+    }
+
+    fn get_db(&self) -> i64 {
+        match self {
+            RedisConn::Cluster(conn) => conn.get_db(),
+            RedisConn::Single(conn) => conn.get_db(),
+        }
+    }
 }
 
 impl RedisCommon {
-    pub(crate) fn build_client(&self) -> ConnectorResult<RedisClient> {
-        let client = RedisClient::open(self.url.clone())?;
-        Ok(client)
+    pub async fn build_conn(&self) -> ConnectorResult<RedisConn> {
+        if self.url.is_empty() {
+            Err(SinkError::Redis("Missing redis.url".to_string()).into())
+        } else if self.url.len() == 1 {
+            let client = RedisClient::open(self.url.get(0).unwrap().clone())?;
+            Ok(RedisConn::Single(
+                client.get_multiplexed_async_connection().await?,
+            ))
+        } else {
+            let client = ClusterClient::new(self.url.clone())?;
+            Ok(RedisConn::Cluster(client.get_async_connection().await?))
+        }
     }
 }
 #[serde_as]
@@ -62,9 +110,13 @@ pub struct RedisConfig {
 
 impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        let mut json_map = serde_json::Map::new();
+        for (key, value) in properties {
+            let json_value = serde_json::from_str(&value).unwrap_or(Value::Null);
+            json_map.insert(key, json_value);
+        }
+        let config = serde_json::from_value::<RedisConfig>(Value::Object(json_map))
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }
@@ -123,8 +175,7 @@ impl Sink for RedisSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        let client = self.config.common.build_client()?;
-        client.get_connection()?;
+        let _conn = self.config.common.build_conn().await?;
         let all_set: HashSet<String> = self
             .schema
             .fields()
@@ -170,14 +221,14 @@ pub struct RedisSinkWriter {
 
 struct RedisSinkPayloadWriter {
     // connection to redis, one per executor
-    conn: Option<MultiplexedConnection>,
+    conn: Option<RedisConn>,
     // the command pipeline for write-commit
     pipe: Pipeline,
 }
 impl RedisSinkPayloadWriter {
     pub async fn new(config: RedisConfig) -> Result<Self> {
-        let client = config.common.build_client()?;
-        let conn = Some(client.get_multiplexed_async_connection().await?);
+        let conn = config.common.build_conn().await?;
+        let conn = Some(conn);
         let pipe = redis::pipe();
 
         Ok(Self { conn, pipe })
