@@ -356,7 +356,7 @@
                     │   └─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                     │     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], stream_scan_type: ArrangementBackfill, pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                     └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                      └─StreamFilter { predicate: (partsupp.ps_partkey = partsupp.ps_partkey) }
+                      └─StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
                         └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], stream_scan_type: ArrangementBackfill, pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   stream_dist_plan: |+
     Fragment 0
@@ -457,7 +457,7 @@
     └── BatchPlanNode
 
     Fragment 17
-    StreamFilter { predicate: (partsupp.ps_partkey = partsupp.ps_partkey) }
+    StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
     └── StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], stream_scan_type: ArrangementBackfill, pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { tables: [ StreamScan: 44 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -963,7 +963,7 @@
                       │   │   └─StreamFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
                       │   │     └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], stream_scan_type: ArrangementBackfill, pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
                       │   └─StreamExchange { dist: HashShard(nation.n_regionkey) }
-                      │     └─StreamFilter { predicate: (nation.n_nationkey = nation.n_nationkey) }
+                      │     └─StreamFilter { predicate: IsNotNull(nation.n_nationkey) }
                       │       └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], stream_scan_type: ArrangementBackfill, pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                       └─StreamExchange { dist: HashShard(customer.c_nationkey, supplier.s_nationkey) }
                         └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey AND customer.c_nationkey = supplier.s_nationkey, output: [customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey] }
@@ -1017,7 +1017,7 @@
             └── BatchPlanNode
 
     Fragment 5
-    StreamFilter { predicate: (nation.n_nationkey = nation.n_nationkey) }
+    StreamFilter { predicate: IsNotNull(nation.n_nationkey) }
     └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], stream_scan_type: ArrangementBackfill, pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { tables: [ StreamScan: 12 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -1907,7 +1907,7 @@
                       │   │   └─StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
                       │   │     └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], stream_scan_type: ArrangementBackfill, pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                       │   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                      │     └─StreamFilter { predicate: (partsupp.ps_suppkey = partsupp.ps_suppkey) }
+                      │     └─StreamFilter { predicate: IsNotNull(partsupp.ps_suppkey) }
                       │       └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], stream_scan_type: ArrangementBackfill, pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [nation.n_name, supplier.s_suppkey, orders.o_orderdate, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, nation.n_nationkey, orders.o_orderkey, lineitem.l_linenumber] }
                         ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
@@ -1921,7 +1921,7 @@
                             ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
                             │ └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], stream_scan_type: ArrangementBackfill, pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                             └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                              └─StreamFilter { predicate: (lineitem.l_partkey = lineitem.l_partkey) }
+                              └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
                                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], stream_scan_type: ArrangementBackfill, pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
@@ -1960,7 +1960,7 @@
             └── BatchPlanNode
 
     Fragment 5
-    StreamFilter { predicate: (partsupp.ps_suppkey = partsupp.ps_suppkey) }
+    StreamFilter { predicate: IsNotNull(partsupp.ps_suppkey) }
     └── StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], stream_scan_type: ArrangementBackfill, pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { tables: [ StreamScan: 12 ] }
         ├── Upstream
         └── BatchPlanNode
@@ -1991,7 +1991,7 @@
     └── BatchPlanNode
 
     Fragment 11
-    StreamFilter { predicate: (lineitem.l_partkey = lineitem.l_partkey) }
+    StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
     └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], stream_scan_type: ArrangementBackfill, pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { tables: [ StreamScan: 28 ] }
         ├── Upstream
         └── BatchPlanNode
