@@ -825,7 +825,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 None => None,
             };
             let etcd_backend = EtcdBackend {
-                endpoints: vec![etcd_endpoints],
+                endpoints: etcd_endpoints.split(',').map(|s| s.to_string()).collect(),
                 credentials,
             };
             cmd_impl::meta::migrate(etcd_backend, sql_endpoint, force_clean).await?
