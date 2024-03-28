@@ -161,6 +161,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::epoch::{test_epoch, EpochExt};
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -177,8 +178,11 @@ mod tests {
         let (tx, mut now_executor) = create_executor(&state_store).await;
 
         // Init barrier
-        tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1))
-            .unwrap();
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(1),
+            test_epoch(1).prev_epoch(),
+        ))
+        .unwrap();
 
         // Consume the barrier
         now_executor.next_unwrap_ready_barrier()?;
@@ -206,8 +210,11 @@ mod tests {
             )
         );
 
-        tx.send(Barrier::with_prev_epoch_for_test(2 << 16, 1 << 16))
-            .unwrap();
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(2),
+            test_epoch(2).prev_epoch(),
+        ))
+        .unwrap();
 
         // Consume the barrier
         now_executor.next_unwrap_ready_barrier()?;
@@ -242,8 +249,11 @@ mod tests {
         // Recovery
         drop((tx, now_executor));
         let (tx, mut now_executor) = create_executor(&state_store).await;
-        tx.send(Barrier::with_prev_epoch_for_test(3 << 16, 1 << 16))
-            .unwrap();
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(3),
+            test_epoch(1),
+        ))
+        .unwrap();
 
         // Consume the barrier
         now_executor.next_unwrap_ready_barrier()?;
@@ -274,7 +284,7 @@ mod tests {
         // Recovery with paused
         drop((tx, now_executor));
         let (tx, mut now_executor) = create_executor(&state_store).await;
-        tx.send(Barrier::new_test_barrier(4 << 16).with_mutation(Mutation::Pause))
+        tx.send(Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Pause))
             .unwrap();
 
         // Consume the barrier
@@ -285,7 +295,8 @@ mod tests {
 
         // Resume barrier
         tx.send(
-            Barrier::with_prev_epoch_for_test(5 << 16, 4 << 16).with_mutation(Mutation::Resume),
+            Barrier::with_prev_epoch_for_test(test_epoch(5), test_epoch(4))
+                .with_mutation(Mutation::Resume),
         )
         .unwrap();
 
@@ -324,8 +335,11 @@ mod tests {
         let (tx, mut now_executor) = create_executor(&state_store).await;
 
         // Init barrier
-        tx.send(Barrier::with_prev_epoch_for_test(1 << 16, 1).with_mutation(Mutation::Pause))
-            .unwrap();
+        tx.send(
+            Barrier::with_prev_epoch_for_test(test_epoch(1), test_epoch(1).prev_epoch())
+                .with_mutation(Mutation::Pause),
+        )
+        .unwrap();
 
         // Consume the barrier
         now_executor.next_unwrap_ready_barrier()?;
@@ -335,7 +349,8 @@ mod tests {
 
         // Resume barrier
         tx.send(
-            Barrier::with_prev_epoch_for_test(2 << 16, 1 << 16).with_mutation(Mutation::Resume),
+            Barrier::with_prev_epoch_for_test(test_epoch(2), test_epoch(1))
+                .with_mutation(Mutation::Resume),
         )
         .unwrap();
 
