@@ -376,7 +376,11 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Fragment::StreamNode).binary().not_null())
+                    .col(
+                        ColumnDef::new(Fragment::StreamNode)
+                            .blob(BlobSize::Long)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Fragment::VnodeMapping)
                             .json_binary()
@@ -927,25 +931,25 @@ impl MigrationTrait for Migration {
         drop_tables!(
             manager,
             Cluster,
-            Worker,
             WorkerProperty,
-            User,
+            Worker,
             UserPrivilege,
             Database,
             Schema,
             StreamingJob,
-            Fragment,
-            Actor,
             ActorDispatcher,
-            Table,
-            Source,
+            Actor,
             Sink,
+            Index,
+            Table,
+            Fragment,
+            Source,
             Connection,
             View,
-            Index,
             Function,
-            Object,
             ObjectDependency,
+            Object,
+            User,
             SystemParameter,
             CatalogVersion
         );

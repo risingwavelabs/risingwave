@@ -19,7 +19,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;
 
-use crate::common::{load_certs, load_private_key};
+use crate::connector_common::common::{load_certs, load_private_key};
 use crate::deserialize_bool_from_string;
 use crate::error::ConnectorResult;
 
@@ -153,7 +153,7 @@ impl MqttCommon {
                 rustls_native_certs::load_native_certs().expect("could not load platform certs")
             {
                 root_cert_store
-                    .add(&tokio_rustls::rustls::Certificate(cert.0))
+                    .add(&tokio_rustls::rustls::Certificate(cert.to_vec()))
                     .unwrap();
             }
         }

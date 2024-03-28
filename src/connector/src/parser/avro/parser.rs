@@ -194,7 +194,7 @@ mod test {
     use url::Url;
 
     use super::*;
-    use crate::common::AwsAuthProps;
+    use crate::connector_common::AwsAuthProps;
     use crate::error::ConnectorResult;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;

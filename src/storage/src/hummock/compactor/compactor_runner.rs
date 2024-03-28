@@ -157,13 +157,12 @@ impl CompactorRunner {
         &self,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
-        let mut table_iters = Vec::new();
-        let compact_io_retry_time = self
+        let compactor_iter_max_io_retry_times = self
             .compactor
             .context
             .storage_opts
-            .compact_iter_recreate_timeout_ms;
-
+            .compactor_iter_max_io_retry_times;
+        let mut table_iters = Vec::new();
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -192,7 +191,7 @@ impl CompactorRunner {
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                     task_progress.clone(),
-                    compact_io_retry_time,
+                    compactor_iter_max_io_retry_times,
                 ));
             } else if tables.len() > MAX_OVERLAPPING_SST {
                 let sst_groups = partition_overlapping_sstable_infos(tables);
@@ -202,39 +201,25 @@ impl CompactorRunner {
                     sst_groups.len()
                 );
                 for table_infos in sst_groups {
-                    let delete_range_ssts = table_infos
-                        .iter()
-                        .filter(|sst| sst.range_tombstone_count > 0)
-                        .cloned()
-                        .collect_vec();
-                    if !delete_range_ssts.is_empty() {
-                        del_iter.add_concat_iter(delete_range_ssts, self.sstable_store.clone());
-                    }
+                    assert!(can_concat(&table_infos));
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
                         table_infos,
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
-                        compact_io_retry_time,
+                        compactor_iter_max_io_retry_times,
                     ));
                 }
             } else {
                 for table_info in tables {
-                    if table_info.range_tombstone_count > 0 {
-                        let table = self
-                            .sstable_store
-                            .sstable(&table_info, &mut local_stats)
-                            .await?;
-                        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table));
-                    }
                     table_iters.push(ConcatSstableIterator::new(
                         self.compact_task.existing_table_ids.clone(),
                         vec![table_info],
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
-                        compact_io_retry_time,
+                        compactor_iter_max_io_retry_times,
                     ));
                 }
             }
@@ -267,12 +252,13 @@ pub fn partition_overlapping_sstable_infos(
     }
     impl PartialOrd for SstableGroup {
         fn partial_cmp(&self, other: &SstableGroup) -> Option<std::cmp::Ordering> {
-            Some(KeyComparator::compare_encoded_full_key(&other.max_right_bound, &self.max_right_bound))
+            Some(self.cmp(other))
         }
     }
     impl Eq for SstableGroup {}
     impl Ord for SstableGroup {
         fn cmp(&self, other: &SstableGroup) -> std::cmp::Ordering {
+            // Pick group with the smallest right bound for every new sstable.
             KeyComparator::compare_encoded_full_key(&other.max_right_bound, &self.max_right_bound)
         }
     }
@@ -283,9 +269,12 @@ pub fn partition_overlapping_sstable_infos(
         KeyComparator::compare_encoded_full_key(&x.left, &y.left)
     });
     for sst in origin_infos {
+        // Pick group with the smallest right bound for every new sstable. So do not check the larger one if the smallest one does not meet condition.
         if let Some(mut prev_group) = groups.peek_mut() {
-            if KeyComparator::encoded_full_key_less_than(&prev_group.max_right_bound,
-                    &sst.key_range.as_ref().unwrap().left) {
+            if KeyComparator::encoded_full_key_less_than(
+                &prev_group.max_right_bound,
+                &sst.key_range.as_ref().unwrap().left,
+            ) {
                 prev_group.max_right_bound = sst.key_range.as_ref().unwrap().right.clone();
                 prev_group.ssts.push(sst);
                 continue;
@@ -936,4 +925,41 @@ where
     compaction_statistics.delta_drop_stat = table_stats_drop;
 
     Ok(compaction_statistics)
+}
+
+#[cfg(test)]
+pub mod tests {
+    use risingwave_hummock_sdk::can_concat;
+
+    use crate::hummock::compactor::compactor_runner::partition_overlapping_sstable_infos;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
+    };
+    use crate::hummock::value::HummockValue;
+
+    #[tokio::test]
+    async fn test_partition_overlapping_level() {
+        const TEST_KEYS_COUNT: usize = 10;
+        let sstable_store = mock_sstable_store();
+        let mut table_infos = vec![];
+        for object_id in 0..10 {
+            let start_index = object_id * TEST_KEYS_COUNT;
+            let end_index = start_index + 2 * TEST_KEYS_COUNT;
+            let table_info = gen_test_sstable_info(
+                default_builder_opt_for_test(),
+                object_id as u64,
+                (start_index..end_index)
+                    .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+                sstable_store.clone(),
+            )
+            .await;
+            table_infos.push(table_info);
+        }
+        let table_infos = partition_overlapping_sstable_infos(table_infos);
+        assert_eq!(table_infos.len(), 2);
+        for ssts in table_infos {
+            assert!(can_concat(&ssts));
+        }
+    }
 }
