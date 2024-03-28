@@ -38,7 +38,7 @@ pub mod test_sink;
 pub mod trivial;
 pub mod utils;
 pub mod writer;
-pub mod pubsub;
+pub mod google_pubsub;
 
 use std::collections::HashMap;
 use std::future::Future;
