@@ -122,7 +122,14 @@ impl SplitReader for KinesisSplitReader {
 impl CommonSplitReader for KinesisSplitReader {
     #[try_stream(ok = Vec < SourceMessage >, error = crate::error::ConnectorError)]
     async fn into_data_stream(mut self) {
-        let loop_ms=env::var("RW_KINESIS_SPLIT_READER_LOOP_MS").unwrap_or("200").parse();
+        let retry_ms = std::env::var("RW_KINESIS_SPLIT_READER_RETRY")
+            .unwrap_or("200".into())
+            .parse()
+            .unwrap();
+        let tick_ms = std::env::var("RW_KINESIS_SPLIT_READER_TICK_MS")
+            .unwrap_or("100".into())
+            .parse()
+            .unwrap();
         self.new_shard_iter().await?;
         loop {
             if self.shard_iter.is_none() {
@@ -141,7 +148,7 @@ impl CommonSplitReader for KinesisSplitReader {
                         .map(|r| from_kinesis_record(r, self.split_id.clone()))
                         .collect::<Vec<SourceMessage>>();
                     if chunk.is_empty() {
-                        tokio::time::sleep(Duration::from_millis(loop_ms)).await;
+                        tokio::time::sleep(Duration::from_millis(retry_ms)).await;
                         continue;
                     }
                     self.latest_offset = Some(chunk.last().unwrap().offset.clone());
@@ -150,6 +157,7 @@ impl CommonSplitReader for KinesisSplitReader {
                         self.shard_id,
                         self.latest_offset
                     );
+                    tokio::time::sleep(Duration::from_millis(tick_ms)).await;
                     yield chunk;
                 }
                 Err(SdkError::ServiceError(e)) if e.err().is_resource_not_found_exception() => {
@@ -163,7 +171,7 @@ impl CommonSplitReader for KinesisSplitReader {
                         self.shard_id
                     );
                     self.new_shard_iter().await?;
-                    tokio::time::sleep(Duration::from_millis(loop_ms)).await;
+                    tokio::time::sleep(Duration::from_millis(retry_ms)).await;
                     continue;
                 }
                 Err(SdkError::ServiceError(e))
@@ -175,7 +183,7 @@ impl CommonSplitReader for KinesisSplitReader {
                         self.shard_id
                     );
                     self.new_shard_iter().await?;
-                    tokio::time::sleep(Duration::from_millis(loop_ms)).await;
+                    tokio::time::sleep(Duration::from_millis(retry_ms)).await;
                     continue;
                 }
                 Err(SdkError::DispatchFailure(e)) => {
@@ -195,7 +203,7 @@ impl CommonSplitReader for KinesisSplitReader {
                         self.shard_id
                     );
                     self.new_shard_iter().await?;
-                    tokio::time::sleep(Duration::from_millis(loop_ms)).await;
+                    tokio::time::sleep(Duration::from_millis(retry_ms)).await;
                     continue;
                 }
                 Err(e) => {
