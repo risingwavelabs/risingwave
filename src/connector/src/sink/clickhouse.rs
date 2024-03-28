@@ -26,7 +26,7 @@ use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::serde_as;
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -60,10 +60,6 @@ pub struct ClickHouseCommon {
     pub database: String,
     #[serde(rename = "clickhouse.table")]
     pub table: String,
-}
-
-fn default_max_batch_rows() -> usize {
-    1024
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -127,6 +123,7 @@ impl ClickHouseEngine {
                     .split(',')
                     .next()
                     .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .trim()
                     .to_string();
                 Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
             }
@@ -140,6 +137,7 @@ impl ClickHouseEngine {
                     .split(')')
                     .next()
                     .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .trim()
                     .to_string();
                 Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
             }
@@ -161,6 +159,7 @@ impl ClickHouseEngine {
                     .rev()
                     .nth(1)
                     .ok_or_else(|| SinkError::ClickHouse("must have index 1".to_string()))?
+                    .trim()
                     .to_string();
                 Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
             }
@@ -177,6 +176,7 @@ impl ClickHouseEngine {
                     .split(',')
                     .last()
                     .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .trim()
                     .to_string();
                 Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
             }
