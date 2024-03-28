@@ -50,7 +50,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, start_compactor, CompactionExecutor, CompactorContext,
 };
@@ -351,17 +351,15 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        config.server.metrics_level,
     );
 
     info!(
-        "connector param: {:?} {:?}",
-        opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
+        "connector param: payload_format={:?}",
+        opts.connector_rpc_sink_payload_format
     );
 
-    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
-
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_client,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
             None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
             Some("json") => SinkPayloadFormat::Json,

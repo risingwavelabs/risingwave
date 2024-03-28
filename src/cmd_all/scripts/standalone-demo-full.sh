@@ -17,7 +17,6 @@ start_standalone() {
                     --advertise-addr 127.0.0.1:5690 \
                     --dashboard-host 127.0.0.1:5691 \
                     --prometheus-host 127.0.0.1:1250 \
-                    --connector-rpc-endpoint 127.0.0.1:50051 \
                     --backend etcd \
                     --etcd-endpoints 127.0.0.1:2388 \
                     --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
@@ -29,7 +28,6 @@ start_standalone() {
                     --prometheus-listener-addr 127.0.0.1:1222 \
                     --advertise-addr 127.0.0.1:5688 \
                     --async-stack-trace verbose \
-                    --connector-rpc-endpoint 127.0.0.1:50051 \
                     --parallelism 4 \
                     --total-memory-bytes 8589934592 \
                     --role both \

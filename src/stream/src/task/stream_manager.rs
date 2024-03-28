@@ -661,30 +661,7 @@ impl LocalBarrierWorker {
                 let with_config =
                     crate::CONFIG.scope(self.actor_manager.env.config().clone(), instrumented);
 
-                // TODO: are the following lines still useful?
-                #[cfg(enable_task_local_alloc)]
-                {
-                    let metrics = streaming_metrics.clone();
-                    let actor_id_str = actor_id.to_string();
-                    let fragment_id_str = actor_context.fragment_id.to_string();
-                    let allocation_stated = task_stats_alloc::allocation_stat(
-                        with_config,
-                        Duration::from_millis(1000),
-                        move |bytes| {
-                            metrics
-                                .actor_memory_usage
-                                .with_label_values(&[&actor_id_str, &fragment_id_str])
-                                .set(bytes as i64);
-
-                            actor_context.store_mem_usage(bytes);
-                        },
-                    );
-                    self.actor_manager.runtime.spawn(allocation_stated)
-                }
-                #[cfg(not(enable_task_local_alloc))]
-                {
-                    self.actor_manager.runtime.spawn(with_config)
-                }
+                self.actor_manager.runtime.spawn(with_config)
             };
             self.actor_manager_state.handles.insert(actor_id, handle);
 
