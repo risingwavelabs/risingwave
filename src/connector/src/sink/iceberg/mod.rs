@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod jni_catalog;
+mod log_sink;
 mod mock_catalog;
 mod prometheus;
 
@@ -48,23 +49,27 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use serde::de;
 use serde_derive::Deserialize;
 use thiserror_ext::AsReport;
 use url::Url;
 use with_options::WithOptions;
 
+use self::log_sink::IcebergLogSinkerOf;
 use self::mock_catalog::MockCatalog;
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
 use self::prometheus::monitored_position_delete_writer::MonitoredPositionDeleteWriterBuilder;
+use super::catalog::desc::SinkDesc;
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::deserialize_bool_from_string;
 use crate::error::ConnectorResult;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
-use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, SinkCommitCoordinator, SinkDecouple, SinkParam};
+use crate::{
+    deserialize_bool_from_string, deserialize_optional_string_seq_from_string,
+    deserialize_optional_u64_from_string,
+};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -116,29 +121,17 @@ pub struct IcebergConfig {
     #[serde(
         rename = "primary_key",
         default,
-        deserialize_with = "deserialize_string_seq_from_string"
+        deserialize_with = "deserialize_optional_string_seq_from_string"
     )]
     pub primary_key: Option<Vec<String>>,
 
     // Props for java catalog props.
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
-}
 
-pub(crate) fn deserialize_string_seq_from_string<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Vec<String>>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
-    if let Some(s) = s {
-        let s = s.to_ascii_lowercase();
-        let s = s.split(',').map(|s| s.trim().to_owned()).collect();
-        Ok(Some(s))
-    } else {
-        Ok(None)
-    }
+    // Commit every n checkpoints, if n is not set, 0, 1, we will commit every checkpoint.
+    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
+    pub commit_checkpoint_interval: Option<u64>,
 }
 
 impl IcebergConfig {
@@ -517,9 +510,33 @@ impl IcebergSink {
 
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
+    type LogSinker = IcebergLogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
+
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        let config_decouple = if let Some(interval) =
+            desc.properties.get("commit_checkpoint_interval")
+            && interval.parse::<u64>().unwrap_or(0) > 1
+        {
+            true
+        } else {
+            false
+        };
+
+        match user_specified {
+            SinkDecouple::Default => Ok(config_decouple),
+            SinkDecouple::Disable => {
+                if config_decouple {
+                    return Err(SinkError::Config(anyhow!(
+                        "config conflict: Iceberg config `commit_checkpoint_interval` bigger than 1 which means that must enable sink decouple, but session config sink decouple is disabled"
+                    )));
+                }
+                Ok(false)
+            }
+            SinkDecouple::Enable => Ok(true),
+        }
+    }
 
     async fn validate(&self) -> Result<()> {
         let _ = self.create_and_validate_table().await?;
@@ -533,7 +550,7 @@ impl Sink for IcebergSink {
         } else {
             IcebergWriter::new_append_only(table, &writer_param).await?
         };
-        Ok(CoordinatedSinkWriter::new(
+        let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -547,8 +564,12 @@ impl Sink for IcebergSink {
             })?,
             inner,
         )
-        .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .await?;
+        Ok(IcebergLogSinkerOf::new(
+            writer,
+            writer_param.sink_metrics,
+            self.config.commit_checkpoint_interval.unwrap_or_default(),
+        ))
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
@@ -1103,6 +1124,7 @@ mod test {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            commit_checkpoint_interval: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
