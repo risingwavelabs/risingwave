@@ -153,7 +153,7 @@ impl MqttCommon {
                 rustls_native_certs::load_native_certs().expect("could not load platform certs")
             {
                 root_cert_store
-                    .add(&tokio_rustls::rustls::Certificate(cert.0))
+                    .add(&tokio_rustls::rustls::Certificate(cert.to_vec()))
                     .unwrap();
             }
         }
