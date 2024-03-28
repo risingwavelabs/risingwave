@@ -586,13 +586,18 @@ impl LocalHummockStorage {
     }
 }
 
-pub type StagingDataIterator = MergeIterator<
-    HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
+pub type StorageSubIteratorUnion<'a> = HummockIteratorUnion<
+    Forward,
+    SharedBufferBatchIterator<Forward>,
+    SstableIterator,
+    ConcatIteratorInner<SstableIterator>,
+    MemTableHummockIterator<'a>,
 >;
+
 pub type HummockStorageIteratorPayloadInner<'a> = MergeIterator<
     HummockIteratorUnion<
         Forward,
-        StagingDataIterator,
+        SharedBufferBatchIterator<Forward>,
         SstableIterator,
         ConcatIteratorInner<SstableIterator>,
         MemTableHummockIterator<'a>,

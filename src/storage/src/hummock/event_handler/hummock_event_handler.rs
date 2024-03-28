@@ -122,6 +122,11 @@ impl BufferTracker {
     pub fn need_more_flush(&self) -> bool {
         self.get_buffer_size() > self.flush_threshold + self.global_upload_task_size.get() as usize
     }
+
+    #[cfg(test)]
+    pub(crate) fn flush_threshold(&self) -> usize {
+        self.flush_threshold
+    }
 }
 
 #[derive(Clone)]
@@ -431,6 +436,7 @@ impl HummockEventHandler {
 
     /// This function will be performed under the protection of the `read_version_mapping` read
     /// lock, and add write lock on each `read_version` operation
+    /// TODO: it may cost a lot of CPU to update every local-version for every upload task. We can use instance id of upload task to optimize this operation
     fn for_each_read_version(&self, mut f: impl FnMut(&mut HummockReadVersion)) {
         self.local_read_version_mapping
             .values()
@@ -767,24 +773,9 @@ impl HummockEventHandler {
                 self.handle_data_spilled(staging_sstable_info);
             }
 
-            UploaderEvent::ImmMerged(merge_output) => {
+            UploaderEvent::ImmMerged(_merge_output) => {
                 // update read version for corresponding table shards
-                if let Some(read_version) = self
-                    .local_read_version_mapping
-                    .get(&merge_output.instance_id)
-                {
-                    read_version
-                        .write()
-                        .update(VersionUpdate::Staging(StagingData::MergedImmMem(
-                            merge_output.merged_imm,
-                            merge_output.imm_ids,
-                        )));
-                } else {
-                    warn!(
-                        "handle ImmMerged: table instance not found. table {:?}, instance {}",
-                        &merge_output.table_id, &merge_output.instance_id
-                    )
-                }
+                unreachable!("This feature has been removed");
             }
         }
     }
@@ -1001,206 +992,21 @@ fn to_sync_result(result: &HummockResult<SyncedData>) -> HummockResult<SyncResul
 #[cfg(test)]
 mod tests {
     use std::future::{poll_fn, Future};
-    use std::iter::once;
     use std::sync::Arc;
     use std::task::Poll;
 
-    use bytes::Bytes;
     use futures::FutureExt;
-    use itertools::Itertools;
-    use risingwave_common::buffer::Bitmap;
-    use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
-    use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_hummock_sdk::key::TableKey;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::PbHummockVersion;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
-    use tokio::task::yield_now;
 
-    use crate::hummock::event_handler::refiller::CacheRefiller;
     use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-    use crate::hummock::store::version::{StagingData, VersionUpdate};
     use crate::hummock::test_utils::default_opts_for_test;
-    use crate::hummock::value::HummockValue;
-    use crate::hummock::HummockError;
     use crate::monitor::HummockStateStoreMetrics;
-
-    #[tokio::test]
-    async fn test_event_handler_merging_task() {
-        let table_id = TableId::new(123);
-        let epoch0 = test_epoch(233);
-        let pinned_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
-                max_committed_epoch: epoch0,
-                ..Default::default()
-            }),
-            unbounded_channel().0,
-        );
-
-        let mut storage_opts = default_opts_for_test();
-        storage_opts.imm_merge_threshold = 5;
-
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-
-        let (spawn_upload_task_tx, mut spawn_upload_task_rx) = unbounded_channel();
-        let (spawn_merging_task_tx, mut spawn_merging_task_rx) = unbounded_channel();
-        let event_handler = HummockEventHandler::new_inner(
-            version_update_rx,
-            pinned_version,
-            None,
-            mock_sstable_store(),
-            Arc::new(HummockStateStoreMetrics::unused()),
-            &storage_opts,
-            Arc::new(move |_, _| {
-                let (tx, rx) = oneshot::channel::<()>();
-                spawn_upload_task_tx.send(tx).unwrap();
-                spawn(async move {
-                    // wait for main thread to notify returning error
-                    rx.await.unwrap();
-                    Err(HummockError::other("".to_string()))
-                })
-            }),
-            Arc::new(move |_, _, imms, _| {
-                let (tx, rx) = oneshot::channel::<()>();
-                let (finish_tx, finish_rx) = oneshot::channel::<()>();
-                spawn_merging_task_tx.send((tx, finish_rx)).unwrap();
-                spawn(async move {
-                    rx.await.unwrap();
-                    finish_tx.send(()).unwrap();
-                    imms[0].clone()
-                })
-            }),
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        let tx = event_handler.event_sender();
-
-        let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
-
-        let (read_version_tx, read_version_rx) = oneshot::channel();
-
-        tx.send(HummockEvent::RegisterReadVersion {
-            table_id,
-            new_read_version_sender: read_version_tx,
-            is_replicated: false,
-            vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT)),
-        })
-        .unwrap();
-        let (read_version, guard) = read_version_rx.await.unwrap();
-        let instance_id = guard.instance_id;
-
-        let build_batch = |epoch, spill_offset| {
-            SharedBufferBatch::build_shared_buffer_batch(
-                epoch,
-                spill_offset,
-                vec![(TableKey(Bytes::from("key")), HummockValue::Delete)],
-                10,
-                table_id,
-                instance_id,
-                None,
-            )
-        };
-
-        let epoch1 = epoch0.next_epoch();
-        let imm1 = build_batch(epoch1, 0);
-        read_version
-            .write()
-            .update(VersionUpdate::Staging(StagingData::ImmMem(imm1.clone())));
-        tx.send(HummockEvent::ImmToUploader(imm1.clone())).unwrap();
-        tx.send(HummockEvent::SealEpoch {
-            epoch: epoch1,
-            is_checkpoint: true,
-        })
-        .unwrap();
-        let (sync_tx, mut sync_rx) = oneshot::channel();
-        tx.send(HummockEvent::AwaitSyncEpoch {
-            new_sync_epoch: epoch1,
-            sync_result_sender: sync_tx,
-        })
-        .unwrap();
-
-        let upload_finish_tx = spawn_upload_task_rx.recv().await.unwrap();
-        assert!(poll_fn(|cx| Poll::Ready(sync_rx.poll_unpin(cx)))
-            .await
-            .is_pending());
-
-        let epoch2 = epoch1.next_epoch();
-        let mut imm_ids = Vec::new();
-        for i in 0..10 {
-            let imm = build_batch(epoch2, i);
-            imm_ids.push(imm.batch_id());
-            read_version
-                .write()
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
-            tx.send(HummockEvent::ImmToUploader(imm)).unwrap();
-        }
-
-        for (staging_imm, imm_id) in read_version
-            .read()
-            .staging()
-            .imm
-            .iter()
-            .zip_eq_debug(imm_ids.iter().copied().rev().chain(once(imm1.batch_id())))
-        {
-            assert_eq!(staging_imm.batch_id(), imm_id);
-        }
-
-        // should start merging task
-        tx.send(HummockEvent::SealEpoch {
-            epoch: epoch2,
-            is_checkpoint: false,
-        })
-        .unwrap();
-
-        println!("before wait spawn merging task");
-
-        let (merging_start_tx, merging_finish_rx) = spawn_merging_task_rx.recv().await.unwrap();
-        merging_start_tx.send(()).unwrap();
-
-        println!("after wait spawn merging task");
-
-        // yield to possibly poll the merging task, though it shouldn't poll it because there is unfinished syncing task
-        yield_now().await;
-
-        for (staging_imm, imm_id) in read_version
-            .read()
-            .staging()
-            .imm
-            .iter()
-            .zip_eq_debug(imm_ids.iter().copied().rev().chain(once(imm1.batch_id())))
-        {
-            assert_eq!(staging_imm.batch_id(), imm_id);
-        }
-
-        upload_finish_tx.send(()).unwrap();
-        assert!(sync_rx.await.unwrap().is_err());
-
-        merging_finish_rx.await.unwrap();
-
-        // yield to poll the merging task, and then it should have finished.
-        for _ in 0..10 {
-            yield_now().await;
-        }
-
-        assert_eq!(
-            read_version
-                .read()
-                .staging()
-                .imm
-                .iter()
-                .map(|imm| imm.batch_id())
-                .collect_vec(),
-            vec![*imm_ids.last().unwrap(), imm1.batch_id()]
-        );
-    }
 
     #[tokio::test]
     async fn test_clear_shared_buffer() {
