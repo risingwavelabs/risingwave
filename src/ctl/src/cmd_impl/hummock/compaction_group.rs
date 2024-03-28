@@ -63,6 +63,7 @@ pub fn build_compaction_config_vec(
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
     enable_emergency_picker: Option<bool>,
     tombstone_reclaim_ratio: Option<u32>,
+    partition_vnode_count: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -110,6 +111,9 @@ pub fn build_compaction_config_vec(
     if let Some(c) = tombstone_reclaim_ratio {
         configs.push(MutableConfig::TombstoneReclaimRatio(c))
     }
+    if let Some(c) = partition_vnode_count {
+        configs.push(MutableConfig::PartitionVnodeCount(c))
+    }
 
     configs
 }
@@ -118,14 +122,15 @@ pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
     table_ids_to_new_group: &[StateTableId],
+    partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let new_group_id = meta_client
-        .split_compaction_group(group_id, table_ids_to_new_group)
+        .split_compaction_group(group_id, table_ids_to_new_group, partition_vnode_count)
         .await?;
     println!(
-        "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
-        group_id, table_ids_to_new_group, new_group_id
+        "Succeed: split compaction group {}. tables {:#?} are moved to new group {} partition_vnode_count {}",
+        group_id, table_ids_to_new_group, new_group_id, partition_vnode_count
     );
     Ok(())
 }
