@@ -298,6 +298,7 @@ mod test {
                             backup_storage_directory: None,
                             heap_profiling_dir: None,
                             dangerous_max_idle_secs: None,
+                            connector_rpc_endpoint: None,
                         },
                     ),
                     compute_opts: Some(
@@ -320,6 +321,7 @@ mod test {
                             meta_file_cache_dir: None,
                             async_stack_trace: None,
                             heap_profiling_dir: None,
+                            connector_rpc_endpoint: None,
                         },
                     ),
                     frontend_opts: Some(
