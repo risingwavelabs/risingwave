@@ -795,6 +795,14 @@ pub async fn build_remote_object_store(
     match url {
         s3 if s3.starts_with("s3://") => {
             if config.s3.developer.use_opendal {
+                let bucket = s3.strip_prefix("s3://").unwrap();
+                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
+                ObjectStoreImpl::Opendal(
+                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
+                        .unwrap()
+                        .monitored(metrics, config),
+                )
+            } else {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
                         s3.strip_prefix("s3://").unwrap().to_string(),
@@ -803,14 +811,6 @@ pub async fn build_remote_object_store(
                     )
                     .await
                     .monitored(metrics, config),
-                )
-            } else {
-                let bucket = s3.strip_prefix("s3://").unwrap();
-                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
-                ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
                 )
             }
         }
