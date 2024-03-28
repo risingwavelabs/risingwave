@@ -166,6 +166,11 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+
+    /// Exit if idle for a certain period of time.
+    #[clap(long, hide = true, env = "RW_DANGEROUS_MAX_IDLE_SECS")]
+    #[override_opts(path = meta.dangerous_max_idle_secs)]
+    pub dangerous_max_idle_secs: Option<u64>,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {

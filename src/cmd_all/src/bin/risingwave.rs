@@ -20,7 +20,7 @@ use anyhow::Result;
 use clap::error::ErrorKind;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
-use risingwave_cmd_all::{PlaygroundOpts, SingleNodeOpts, StandaloneOpts};
+use risingwave_cmd_all::{SingleNodeOpts, StandaloneOpts};
 use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -123,7 +123,7 @@ impl Component {
             Self::Frontend => frontend(parse_opts(matches)),
             Self::Compactor => compactor(parse_opts(matches)),
             Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => playground(parse_opts(matches)),
+            Self::Playground => single_node(SingleNodeOpts::new_for_playground()),
             Self::Standalone => standalone(parse_opts(matches)),
             Self::SingleNode => single_node(parse_opts(matches)),
         }
@@ -151,7 +151,7 @@ impl Component {
             Component::Frontend => FrontendOpts::augment_args(cmd),
             Component::Compactor => CompactorOpts::augment_args(cmd),
             Component::Ctl => CtlOpts::augment_args(cmd),
-            Component::Playground => PlaygroundOpts::augment_args(cmd),
+            Component::Playground => cmd,
             Component::Standalone => StandaloneOpts::augment_args(cmd),
             Component::SingleNode => SingleNodeOpts::augment_args(cmd),
         }
@@ -161,8 +161,14 @@ impl Component {
     fn commands() -> Vec<Command> {
         Self::iter()
             .map(|c| {
+                let is_playground = matches!(c, Component::Playground);
                 let name: &'static str = c.into();
                 let command = Command::new(name).visible_aliases(c.aliases());
+                let command = if is_playground {
+                    command.hide(true)
+                } else {
+                    command
+                };
                 c.augment_args(command)
             })
             .collect()
@@ -192,7 +198,10 @@ fn main() -> Result<()> {
 
     let matches = match command.try_get_matches() {
         Ok(m) => m,
-        Err(e) if e.kind() == ErrorKind::MissingSubcommand => {
+        Err(e)
+            if e.kind() == ErrorKind::MissingSubcommand
+                || e.kind() == ErrorKind::UnknownArgument =>
+        {
             // `$ ./risingwave`
             // NOTE(kwannoel): This is a hack to make `risingwave`
             // work as an alias of `risingwave single-process`.
@@ -216,14 +225,6 @@ fn main() -> Result<()> {
     component.start(matches);
 
     Ok(())
-}
-
-fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::from_opts(&opts)
-        .with_target("risingwave_storage", Level::WARN)
-        .with_thread_name(true);
-    risingwave_rt::init_risingwave_logger(settings);
-    risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }
 
 fn standalone(opts: StandaloneOpts) {

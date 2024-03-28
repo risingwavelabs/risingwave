@@ -21,7 +21,6 @@ use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, TableId};
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;
@@ -169,16 +168,12 @@ pub struct StreamSink {
     pub base: PlanBase<Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
-    default_log_store_type: SinkLogStoreType,
+    log_store_type: SinkLogStoreType,
 }
 
 impl StreamSink {
     #[must_use]
-    pub fn new(
-        input: PlanRef,
-        sink_desc: SinkDesc,
-        default_log_store_type: SinkLogStoreType,
-    ) -> Self {
+    pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
         let base = input
             .plan_base()
             .into_stream()
@@ -188,7 +183,7 @@ impl StreamSink {
             base,
             input,
             sink_desc,
-            default_log_store_type,
+            log_store_type,
         }
     }
 
@@ -232,7 +227,7 @@ impl StreamSink {
             |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
 
         // check and ensure that the sink connector is specified and supported
-        let default_sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
+        let sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
             Some(connector) => {
                 match_sink_name_str!(
                     connector.to_lowercase().as_str(),
@@ -242,7 +237,10 @@ impl StreamSink {
                         if connector == TABLE_SINK && sink.target_table.is_none() {
                             unsupported_sink(TABLE_SINK)
                         } else {
-                            Ok(SinkType::default_sink_decouple(&sink))
+                            SinkType::is_sink_decouple(
+                                &sink,
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )
                         }
                     },
                     |other: &str| unsupported_sink(other)
@@ -255,13 +253,13 @@ impl StreamSink {
             }
         };
 
-        let default_log_store_type = if default_sink_decouple {
+        let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {
             SinkLogStoreType::InMemoryLogStore
         };
 
-        Ok(Self::new(input, sink, default_log_store_type))
+        Ok(Self::new(input, sink, log_store_type))
     }
 
     fn derive_iceberg_sink_distribution(
@@ -519,7 +517,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.sink_desc.clone(), self.default_log_store_type)
+        Self::new(input, self.sink_desc.clone(), self.log_store_type)
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -572,11 +570,7 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx().session_ctx().config().sink_decouple() {
-                SinkDecouple::Default => self.default_log_store_type as i32,
-                SinkDecouple::Enable => SinkLogStoreType::KvLogStore as i32,
-                SinkDecouple::Disable => SinkLogStoreType::InMemoryLogStore as i32,
-            },
+            log_store_type: self.log_store_type as i32,
         })
     }
 }

@@ -19,7 +19,7 @@ anyhow = "1"
 arc-swap = "1"
 arrow-schema = { workspace = true }
 arrow-udf-wasm = { workspace = true }
-async-recursion = "1.0.5"
+async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 auto_impl = "1"
@@ -78,6 +78,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.7"
 smallvec = { version = "1.13.1", features = ["serde"] }
+speedate = "0.14.0"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }

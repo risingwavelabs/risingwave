@@ -66,6 +66,11 @@ fi
 
 echo "--- Build risingwave release binary"
 export ENABLE_BUILD_DASHBOARD=1
+if [ ${ARCH} == "aarch64" ]; then
+  # enable large page size support for jemalloc
+  # see https://github.com/tikv/jemallocator/blob/802969384ae0c581255f3375ee2ba774c8d2a754/jemalloc-sys/build.rs#L218
+  export JEMALLOC_SYS_WITH_LG_PAGE=16
+fi
 cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
@@ -75,8 +80,8 @@ if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   tar -czvf risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz risingwave
   aws s3 cp risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
 elif [[ -n "${BINARY_NAME+x}" ]]; then
-    tar -czvf risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz risingwave
-    aws s3 cp risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
+  tar -czvf risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz risingwave
+  aws s3 cp risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
 fi
 
 echo "--- Build connector node"
