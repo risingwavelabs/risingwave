@@ -331,6 +331,7 @@ pub async fn compute_node_serve(
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
+        config.server.metrics_level,
     );
 
     info!(
