@@ -629,13 +629,15 @@ impl MetadataManager {
                     .catalog_controller
                     .get_running_actors_and_upstream_of_fragment(id as _)
                     .await?;
-                Ok(actor_ids.into_iter().map(|(id, actors)| {
-                    (
-                        id as ActorId,
-                        actors.into_iter().map(|id| id as ActorId).collect(),
-                    )
-                        .collect()
-                }))
+                Ok(actor_ids
+                    .into_iter()
+                    .map(|(id, actors)| {
+                        (
+                            id as ActorId,
+                            actors.into_iter().map(|id| id as ActorId).collect(),
+                        )
+                    })
+                    .collect())
             }
         }
     }
