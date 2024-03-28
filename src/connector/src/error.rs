@@ -61,6 +61,8 @@ def_anyhow_newtype! {
     tokio_rustls::rustls::Error => "TLS error",
     rumqttc::v5::ClientError => "MQTT error",
     rumqttc::v5::OptionError => "MQTT error",
+
+    openssl::error::ErrorStack => "OpenSSL error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;
