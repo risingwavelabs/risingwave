@@ -224,15 +224,8 @@ impl SourceDescBuilder {
 
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let source = FsSourceReader::new(
-            self.with_properties.clone(),
-            columns.clone(),
-            self.connector_params
-                .connector_client
-                .as_ref()
-                .map(|client| client.endpoint().clone()),
-            parser_config,
-        )?;
+        let source =
+            FsSourceReader::new(self.with_properties.clone(), columns.clone(), parser_config)?;
 
         Ok(FsSourceDesc {
             source,

@@ -294,7 +294,6 @@ mod test {
                             sql_endpoint: None,
                             prometheus_endpoint: None,
                             prometheus_selector: None,
-                            connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
                             vpc_id: None,
                             security_group_id: None,
@@ -325,7 +324,6 @@ mod test {
                                     http://127.0.0.1:5690/,
                                 ],
                             ),
-                            connector_rpc_endpoint: None,
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
@@ -342,7 +340,6 @@ mod test {
                         FrontendOpts {
                             listen_addr: "127.0.0.1:4566",
                             advertise_addr: None,
-                            port: None,
                             meta_addr: List(
                                 [
                                     http://127.0.0.1:5690/,

@@ -515,7 +515,6 @@ pub async fn start_service_as_election_leader(
 
     let source_manager = Arc::new(
         SourceManager::new(
-            env.clone(),
             barrier_scheduler.clone(),
             metadata_manager.clone(),
             meta_metrics.clone(),
