@@ -4,8 +4,8 @@ SET RW_IMPLICIT_FLUSH TO true;
 query T rowsort
 show databases;
 ----
-dev
 db1
+dev
 
 query T rowsort
 show schemas;
@@ -19,16 +19,16 @@ schema1
 query T rowsort
 select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
 ----
+ddl_subscription_table subscription
 idx1 index
+m_simple table
 mv1 materialized view
 mv2 materialized view
-sink sink
 s_simple_1 sink
+sink sink
 src source
 t1 table
 t_simple table
-m_simple table
-ddl_subscription_table subscription
 
 query T
 show views;
