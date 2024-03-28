@@ -3,7 +3,7 @@ SET RW_IMPLICIT_FLUSH TO true;
 
 query T rowsort
 show databases;
----
+----
 dev
 db1
 
@@ -18,7 +18,7 @@ schema1
 
 query T rowsort
 select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
----
+----
 idx1 index
 mv1 materialized view
 mv2 materialized view
@@ -32,17 +32,17 @@ ddl_subscription_table subscription
 
 query T
 show views;
----
+----
 v1
 
 query T
 select name, type_, provider from rw_connections;
----
+----
 conn0 MOCK PRIVATELINK
 
 query TTTTT
 show functions;
----
+----
 int_42 (empty) integer javascript (empty)
 
 statement ok
@@ -50,7 +50,7 @@ insert into t1 select * from generate_series(1, 1000);
 
 query I
 select count(*) from t1;
----
+----
 2000
 
 statement ok
@@ -97,4 +97,4 @@ drop database db1;
 
 query T
 select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
----
+----
