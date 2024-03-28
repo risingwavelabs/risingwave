@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use risingwave_common::array::{
-    ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
+    ArrayBuilder, ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
 };
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -49,7 +49,7 @@ impl StreamChunkConverter {
                         .fields()
                         .iter()
                         .position(|s| s.name == n)
-                        .ok_or_else(|| anyhow!("Don't find {}", ES_OPTION_INDEX_COLUMN))
+                        .ok_or_else(|| anyhow!("Cannot find {}", ES_OPTION_INDEX_COLUMN))
                 })
                 .transpose()?;
             Ok(StreamChunkConverter::Es(EsStreamChunkConverter::new(
@@ -140,27 +140,18 @@ impl EsStreamChunkConverter {
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         for (op, row) in chunk.rows() {
             ops.push(op);
-            risingwave_common::array::ArrayBuilder::append(
-                &mut id_string_builder,
-                Some(&self.build_id(row)?),
-            );
+            id_string_builder.append(Some(&self.build_id(row)?));
             if let Some(index) = self.index_column {
-                risingwave_common::array::ArrayBuilder::append(
-                    &mut index_builder,
-                    Some(
-                        row.datum_at(index)
-                            .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
-                            .into_utf8(),
-                    ),
-                );
+                index_builder.append(Some(
+                    row.datum_at(index)
+                        .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                        .into_utf8(),
+                ));
             } else {
-                risingwave_common::array::ArrayBuilder::append(&mut index_builder, None);
+                index_builder.append_null();
             }
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
-            risingwave_common::array::ArrayBuilder::append(
-                &mut json_builder,
-                Some(json.as_scalar_ref()),
-            );
+            json_builder.append(Some(json.as_scalar_ref()));
         }
         let json_array = risingwave_common::array::ArrayBuilder::finish(json_builder);
         let id_string_array = risingwave_common::array::ArrayBuilder::finish(id_string_builder);
