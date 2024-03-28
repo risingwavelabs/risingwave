@@ -245,7 +245,7 @@ where
 
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &upstream_table,
-                        backfill_state.clone(), // FIXME: Use mutable reference instead.
+                        backfill_state.clone(), // TODO: Use mutable reference instead.
                         paused,
                     )
                     .map(Either::Right));
@@ -445,7 +445,6 @@ where
                 // consume upstream buffer chunk
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
-                    // FIXME: Replace with `snapshot_is_processed`
                     // Flush downstream.
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
