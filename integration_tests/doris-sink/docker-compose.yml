@@ -5,6 +5,8 @@ services:
     image: apache/doris:doris-all-in-one-2.1.0
     ports:
       - "8030:8030"
+    volumes:
+      - "./doris_prepare.sql:/doris_prepare.sql"
   risingwave-standalone:
     extends:
       file: ../../docker/docker-compose.yml
