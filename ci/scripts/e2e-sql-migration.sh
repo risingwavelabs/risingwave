@@ -3,6 +3,9 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+export RW_PREFIX=$PWD/.risingwave
+export RW_PREFIX_DATA=$RW_PREFIX/data
+
 source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
@@ -37,12 +40,12 @@ echo "--- restart etcd"
 cargo make dev ci-meta-etcd-for-migration
 
 echo "--- run migration"
-mkdir -p "${PREFIX_DATA}/sqlite/"
+mkdir -p "${RW_PREFIX_DATA}/sqlite/"
 ./target/debug/risectl \
 meta \
 migration \
 --etcd-endpoints localhost:2388 \
---sql-endpoint sqlite://"${PREFIX_DATA}/sqlite/metadata.db"\?mode=rwc \
+--sql-endpoint sqlite://"${RW_PREFIX_DATA}/sqlite/metadata.db"\?mode=rwc \
 -f
 
 echo "--- kill etcd"
