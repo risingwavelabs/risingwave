@@ -115,8 +115,8 @@ impl StreamEnvironment {
         &self.server_addr
     }
 
-    pub fn config(&self) -> &StreamingConfig {
-        self.config.as_ref()
+    pub fn config(&self) -> &Arc<StreamingConfig> {
+        &self.config
     }
 
     pub fn worker_id(&self) -> WorkerNodeId {

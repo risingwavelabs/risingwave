@@ -16,20 +16,16 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o "awscliv2.zi
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Install lld"
-# The lld in the CentOS 7 repository is too old and contains a bug that causes a linker error.
-# So we install a newer version here. (17.0.6, latest version at the time of writing)
-# It is manually built in the same environent and uploaded to S3.
-aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_${ARCH}.tar.gz .
-tar -zxvf llvm-lld-manylinux2014_${ARCH}.tar.gz --directory=/usr/local
+dnf install -y lld
 ld.lld --version
 
 echo "--- Install dependencies for openssl"
-yum install -y perl-core
+dnf install -y perl-core
 
 echo "--- Install java and maven"
-yum install -y java-11-openjdk java-11-openjdk-devel wget python3 python3-devel cyrus-sasl-devel
+dnf install -y java-11-openjdk java-11-openjdk-devel wget python3 python3-devel cyrus-sasl-devel
 pip3 install toml-cli
-wget https://ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
+wget https://rw-ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
 mvn -v
 
@@ -51,6 +47,12 @@ unzip -o protoc-3.15.8-linux-${PROTOC_ARCH}.zip -d protoc
 mv ./protoc/bin/protoc /usr/local/bin/
 mv ./protoc/include/* /usr/local/include/
 
+echo "--- Install nodejs"
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+cd dashboard && nvm install && nvm use && cd ..
+
 echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
@@ -63,9 +65,12 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
-# TODO(bugen): It's really hard to get the dashboard built on such old distro.
-#              The assets will be proxied to GitHub during runtime.
-# export ENABLE_BUILD_DASHBOARD=1
+export ENABLE_BUILD_DASHBOARD=1
+if [ ${ARCH} == "aarch64" ]; then
+  # enable large page size support for jemalloc
+  # see https://github.com/tikv/jemallocator/blob/802969384ae0c581255f3375ee2ba774c8d2a754/jemalloc-sys/build.rs#L218
+  export JEMALLOC_SYS_WITH_LG_PAGE=16
+fi
 cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
@@ -73,10 +78,10 @@ cd target/release && chmod +x risingwave risectl
 echo "--- Upload nightly binary to s3"
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   tar -czvf risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz risingwave
-  aws s3 cp risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+  aws s3 cp risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
 elif [[ -n "${BINARY_NAME+x}" ]]; then
-    tar -czvf risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz risingwave
-    aws s3 cp risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+  tar -czvf risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz risingwave
+  aws s3 cp risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
 fi
 
 echo "--- Build connector node"
@@ -91,7 +96,6 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   ls -l
 
   echo "--- Install gh cli"
-  yum install -y dnf
   dnf install -y 'dnf-command(config-manager)'
   dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
   dnf install -y gh
@@ -123,7 +127,3 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   tar -czvf risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux-all-in-one.tar.gz risingwave libs
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-${ARCH}-unknown-linux-all-in-one.tar.gz
 fi
-
-
-
-

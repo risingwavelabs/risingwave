@@ -58,7 +58,7 @@ use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::state::BarrierManagerState;
-use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, HummockManagerRef, NewTableFragmentInfo};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -199,7 +199,7 @@ pub struct GlobalBarrierManager {
 /// Controls the concurrent execution of commands.
 struct CheckpointControl {
     /// Save the state and message of barrier in order.
-    /// Key is the prev_epoch.
+    /// Key is the `prev_epoch`.
     command_ctx_queue: BTreeMap<u64, EpochNode>,
 
     /// Command that has been collected but is still completing.
@@ -745,12 +745,19 @@ impl GlobalBarrierManager {
 
         send_latency_timer.observe_duration();
 
-        let node_to_collect = self
+        let node_to_collect = match self
             .control_stream_manager
             .inject_barrier(command_ctx.clone())
-            .inspect_err(|_| {
+        {
+            Ok(node_to_collect) => node_to_collect,
+            Err(err) => {
+                for notifier in notifiers {
+                    notifier.notify_failed(err.clone());
+                }
                 fail_point!("inject_barrier_err_success");
-            })?;
+                return Err(err);
+            }
+        };
 
         // Notify about the injection.
         let prev_paused_reason = self.state.paused_reason();
@@ -812,7 +819,7 @@ impl GlobalBarrierManagerContext {
         assert!(state.node_to_collect.is_empty());
         let resps = state.resps;
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
-        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps);
+        let (commit_info, create_mview_progress) = collect_commit_epoch_info(resps, &command_ctx);
         if let Err(e) = self.update_snapshot(&command_ctx, commit_info).await {
             for notifier in notifiers {
                 notifier.notify_collection_failed(e.clone());
@@ -1099,6 +1106,7 @@ pub type BarrierManagerRef = GlobalBarrierManagerContext;
 
 fn collect_commit_epoch_info(
     resps: Vec<BarrierCompleteResponse>,
+    command_ctx: &CommandContext,
 ) -> (CommitEpochInfo, Vec<CreateMviewProgress>) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
@@ -1118,6 +1126,23 @@ fn collect_commit_epoch_info(
         table_watermarks.push(resp.table_watermarks);
         progresses.extend(resp.create_mview_progress);
     }
+    let new_table_fragment_info = if let Command::CreateStreamingJob {
+        table_fragments, ..
+    } = &command_ctx.command
+    {
+        Some(NewTableFragmentInfo {
+            table_id: table_fragments.table_id(),
+            mv_table_id: table_fragments.mv_table_id().map(TableId::new),
+            internal_table_ids: table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .map(TableId::new)
+                .collect(),
+        })
+    } else {
+        None
+    };
+
     let info = CommitEpochInfo::new(
         synced_ssts,
         merge_multiple_new_table_watermarks(
@@ -1137,6 +1162,7 @@ fn collect_commit_epoch_info(
                 .collect_vec(),
         ),
         sst_to_worker,
+        new_table_fragment_info,
     );
     (info, progresses)
 }

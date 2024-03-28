@@ -83,6 +83,7 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
+    pub(crate) streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
     pub(crate) state_table_ids: Vec<TableId>,
     /// Dropped source list, need to unregister from source manager.
@@ -274,7 +275,7 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs).await?;
+        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, streaming_jobs.clone()).await?;
 
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
@@ -299,6 +300,7 @@ impl CatalogController {
             .await;
         Ok((
             ReleaseContext {
+                streaming_job_ids: streaming_jobs,
                 state_table_ids,
                 source_ids,
                 connections,
@@ -1688,6 +1690,10 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
                 check_relation_name_duplicate(&subscription.name, database_id, new_schema, &txn)
                     .await?;
+
+                let mut obj = obj.into_active_model();
+                obj.schema_id = Set(Some(new_schema));
+                let obj = obj.update(&txn).await?;
                 relations.push(PbRelationInfo::Subscription(
                     ObjectModel(subscription, obj).into(),
                 ));
@@ -2047,7 +2053,8 @@ impl CatalogController {
 
         let (source_fragments, removed_actors) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
-        let fragment_mappings = get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs).await?;
+        let fragment_mappings =
+            get_fragment_mappings_by_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -2151,6 +2158,7 @@ impl CatalogController {
 
         Ok((
             ReleaseContext {
+                streaming_job_ids: to_drop_streaming_jobs,
                 state_table_ids: to_drop_state_table_ids,
                 source_ids: to_drop_source_ids,
                 connections: vec![],

@@ -22,6 +22,7 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
@@ -169,8 +170,12 @@ impl Sink for PulsarSink {
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {

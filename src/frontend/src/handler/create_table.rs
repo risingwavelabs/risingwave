@@ -45,7 +45,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
-    ObjectName, SourceWatermark, TableConstraint,
+    ObjectName, OnConflict, SourceWatermark, TableConstraint,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 
@@ -465,6 +465,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
@@ -552,6 +553,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         definition,
         watermark_descs,
         append_only,
+        on_conflict,
         Some(col_id_gen.into_version()),
     )
 }
@@ -566,6 +568,7 @@ pub(crate) fn gen_create_table_plan(
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
@@ -583,6 +586,7 @@ pub(crate) fn gen_create_table_plan(
         definition,
         source_watermarks,
         append_only,
+        on_conflict,
         Some(col_id_gen.into_version()),
     )
 }
@@ -598,6 +602,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
@@ -630,6 +635,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         definition,
         watermark_descs,
         append_only,
+        on_conflict,
         version,
     )
 }
@@ -646,6 +652,7 @@ fn gen_table_plan_inner(
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
@@ -697,6 +704,7 @@ fn gen_table_plan_inner(
         row_id_index,
         SourceNodeKind::CreateTable,
         context.clone(),
+        None,
     )?
     .into();
 
@@ -740,6 +748,7 @@ fn gen_table_plan_inner(
         pk_column_ids,
         row_id_index,
         append_only,
+        on_conflict,
         watermark_descs,
         version,
         is_external_source,
@@ -761,6 +770,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
+    on_conflict: Option<OnConflict>,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
     let db_name = session.database();
@@ -862,6 +872,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         pk_column_ids,
         None,
         append_only,
+        on_conflict,
         vec![],
         Some(col_id_gen.into_version()),
         true,
@@ -928,6 +939,7 @@ pub(super) async fn handle_create_table_plan(
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
     include_column_options: IncludeOption,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let source_schema = check_create_table_with_source(
@@ -949,6 +961,7 @@ pub(super) async fn handle_create_table_plan(
                     source_watermarks,
                     col_id_gen,
                     append_only,
+                    on_conflict,
                     include_column_options,
                 )
                 .await?,
@@ -963,6 +976,7 @@ pub(super) async fn handle_create_table_plan(
                     col_id_gen,
                     source_watermarks,
                     append_only,
+                    on_conflict,
                 )?,
                 TableJobType::General,
             ),
@@ -976,6 +990,7 @@ pub(super) async fn handle_create_table_plan(
                     column_defs,
                     constraints,
                     col_id_gen,
+                    on_conflict,
                 )?;
 
                 ((plan, None, table), TableJobType::SharedCdcSource)
@@ -1001,6 +1016,7 @@ pub async fn handle_create_table(
     source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
 ) -> Result<RwPgResponse> {
@@ -1032,6 +1048,7 @@ pub async fn handle_create_table(
             constraints,
             source_watermarks,
             append_only,
+            on_conflict,
             include_column_options,
         )
         .await?;
@@ -1094,6 +1111,7 @@ pub async fn generate_stream_graph_for_table(
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    on_conflict: Option<OnConflict>,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1110,6 +1128,7 @@ pub async fn generate_stream_graph_for_table(
                 source_watermarks,
                 col_id_gen,
                 append_only,
+                on_conflict,
                 vec![],
             )
             .await?
@@ -1122,6 +1141,7 @@ pub async fn generate_stream_graph_for_table(
             col_id_gen,
             source_watermarks,
             append_only,
+            on_conflict,
         )?,
     };
 

@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::config::MetaBackend;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -123,27 +124,33 @@ pub fn parse_standalone_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts 
 
     if let Some(config_path) = opts.config_path.as_ref() {
         if let Some(meta_opts) = meta_opts.as_mut() {
-            meta_opts.config_path = config_path.clone();
+            meta_opts.config_path.clone_from(config_path);
         }
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.config_path = config_path.clone();
+            compute_opts.config_path.clone_from(config_path);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.config_path = config_path.clone();
+            frontend_opts.config_path.clone_from(config_path);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.config_path = config_path.clone();
+            compactor_opts.config_path.clone_from(config_path);
         }
     }
     if let Some(prometheus_listener_addr) = opts.prometheus_listener_addr.as_ref() {
         if let Some(compute_opts) = compute_opts.as_mut() {
-            compute_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compute_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(frontend_opts) = frontend_opts.as_mut() {
-            frontend_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            frontend_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(compactor_opts) = compactor_opts.as_mut() {
-            compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
+            compactor_opts
+                .prometheus_listener_addr
+                .clone_from(prometheus_listener_addr);
         }
         if let Some(meta_opts) = meta_opts.as_mut() {
             meta_opts.prometheus_listener_addr = Some(prometheus_listener_addr.clone());
@@ -179,7 +186,9 @@ pub async fn standalone(
 ) -> Result<()> {
     tracing::info!("launching Risingwave in standalone mode");
 
+    let mut is_in_memory = false;
     if let Some(opts) = meta_opts {
+        is_in_memory = matches!(opts.backend, Some(MetaBackend::Mem));
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
         let _meta_handle = tokio::spawn(async move {
@@ -204,9 +213,20 @@ pub async fn standalone(
     }
 
     // wait for log messages to be flushed
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
     eprintln!("-------------------------------");
     eprintln!("RisingWave standalone mode is ready.");
+    if is_in_memory {
+        eprintln!(
+            "{}",
+            console::style(
+                "WARNING: You are using RisingWave's in-memory mode.
+It SHOULD NEVER be used in benchmarks and production environment!!!"
+            )
+            .red()
+            .bold()
+        );
+    }
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
@@ -292,6 +312,7 @@ mod test {
                             backup_storage_url: None,
                             backup_storage_directory: None,
                             heap_profiling_dir: None,
+                            dangerous_max_idle_secs: None,
                         },
                     ),
                     compute_opts: Some(

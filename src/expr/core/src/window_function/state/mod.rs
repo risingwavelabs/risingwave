@@ -15,10 +15,10 @@
 use std::collections::BTreeSet;
 
 use itertools::Itertools;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
+use risingwave_common_estimate_size::EstimateSize;
 use smallvec::SmallVec;
 
 use super::{WindowFuncCall, WindowFuncKind};

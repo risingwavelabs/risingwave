@@ -156,12 +156,6 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
-        let compact_io_retry_time = self
-            .compactor
-            .context
-            .storage_opts
-            .compact_iter_recreate_timeout_ms;
-
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -190,7 +184,10 @@ impl CompactorRunner {
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                     task_progress.clone(),
-                    compact_io_retry_time,
+                    self.compactor
+                        .context
+                        .storage_opts
+                        .compactor_iter_max_io_retry_times,
                 ));
             } else if tables.len() > MAX_OVERLAPPING_SST {
                 let sst_groups = partition_overlapping_sstable_infos(tables);
@@ -218,7 +215,10 @@ impl CompactorRunner {
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                         task_progress.clone(),
-                        compact_io_retry_time,
+                        self.compactor
+                            .context
+                            .storage_opts
+                            .compactor_iter_max_io_retry_times,
                     ));
                 }
             }

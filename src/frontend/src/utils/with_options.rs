@@ -21,8 +21,8 @@ use risingwave_connector::source::kafka::{
 };
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
-    Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    CreateSubscriptionStatement, SqlOption, Statement, Value,
 };
 
 use crate::catalog::connection_catalog::resolve_private_link_connection;
@@ -212,6 +212,13 @@ impl TryFrom<&Statement> for WithOptions {
             Statement::CreateSource {
                 stmt:
                     CreateSourceStatement {
+                        with_properties, ..
+                    },
+                ..
+            } => Self::try_from(with_properties.0.as_slice()),
+            Statement::CreateSubscription {
+                stmt:
+                    CreateSubscriptionStatement {
                         with_properties, ..
                     },
                 ..

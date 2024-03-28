@@ -41,7 +41,7 @@ struct Inner {
 
     /// Expressions of the current projection.
     exprs: Vec<NonStrictExpression>,
-    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// All the watermark derivations, (`input_column_index`, `output_column_index`). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
     /// Indices of nondecreasing expressions in the expression list.

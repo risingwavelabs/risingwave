@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::config::{
-    extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+    extract_storage_memory_config, EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
 use risingwave_common::system_param::system_params_for_test;
@@ -48,13 +48,15 @@ pub struct StorageOpts {
     /// Capacity of sstable block cache.
     pub block_cache_capacity_mb: usize,
     /// the number of block-cache shard. Less shard means that more concurrent-conflict.
-    pub block_shard_num: usize,
+    pub block_cache_shard_num: usize,
+    /// Eviction config for block cache.
+    pub block_cache_eviction_config: EvictionConfig,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
     /// the number of meta-cache shard. Less shard means that more concurrent-conflict.
-    pub meta_shard_num: usize,
-    /// Percent of the ratio of high priority data in block-cache
-    pub high_priority_ratio: usize,
+    pub meta_cache_shard_num: usize,
+    /// Eviction config for meta cache.
+    pub meta_cache_eviction_config: EvictionConfig,
     /// max memory usage for large query.
     pub prefetch_buffer_capacity_mb: usize,
 
@@ -66,6 +68,7 @@ pub struct StorageOpts {
     /// Capacity of sstable meta cache.
     pub compactor_memory_limit_mb: usize,
     /// compactor streaming iterator recreate timeout.
+    /// deprecated
     pub compact_iter_recreate_timeout_ms: u64,
     /// Number of SST ids fetched from meta per RPC
     pub sstable_id_remote_fetch_number: u32,
@@ -75,6 +78,7 @@ pub struct StorageOpts {
     pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
+    pub compactor_iter_max_io_retry_times: usize,
 
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
@@ -132,7 +136,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
-    /// enable FastCompactorRunner.
+    /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
     pub check_compaction_result: bool,
     pub max_preload_io_retry_times: usize,
@@ -169,13 +173,14 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
-            high_priority_ratio: s.high_priority_ratio_in_percent,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
+            block_cache_shard_num: s.block_cache_shard_num,
+            block_cache_eviction_config: s.block_cache_eviction_config.clone(),
+            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
+            meta_cache_shard_num: s.meta_cache_shard_num,
+            meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
             prefetch_buffer_capacity_mb: s.prefetch_buffer_capacity_mb,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
-            meta_cache_capacity_mb: s.meta_cache_capacity_mb,
-            block_shard_num: s.block_shard_num,
-            meta_shard_num: s.meta_shard_num,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,
@@ -266,6 +271,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
+            compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
         }
     }
 }

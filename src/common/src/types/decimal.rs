@@ -21,6 +21,7 @@ use num_traits::{
     CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
 use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use risingwave_common_estimate_size::ZeroHeapSize;
 use rust_decimal::prelude::FromStr;
 use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
@@ -28,7 +29,6 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::estimate_size::ZeroHeapSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
@@ -795,9 +795,9 @@ impl From<RustDecimal> for Decimal {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools as _;
+    use risingwave_common_estimate_size::EstimateSize;
 
     use super::*;
-    use crate::estimate_size::EstimateSize;
     use crate::util::iter_util::ZipEqFast;
 
     fn check(lhs: f32, rhs: f32) -> bool {

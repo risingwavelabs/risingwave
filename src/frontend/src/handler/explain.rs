@@ -21,6 +21,7 @@ use thiserror_ext::AsReport;
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::{gen_sink_plan, get_partition_compute_info};
+use super::create_subscription::gen_subscription_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
@@ -59,6 +60,7 @@ async fn do_handle_explain(
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
                 cdc_table_info,
                 include_column_options,
                 wildcard_idx,
@@ -79,6 +81,7 @@ async fn do_handle_explain(
                     constraints,
                     source_watermarks,
                     append_only,
+                    on_conflict,
                     include_column_options,
                 )
                 .await?;
@@ -125,6 +128,11 @@ async fn do_handle_explain(
                             "EXPLAIN CREATE VIEW".into(),
                             "A created VIEW is just an alias. Instead, use EXPLAIN on the queries which reference the view.".into()
                         ).into());
+                    }
+
+                    Statement::CreateSubscription { stmt } => {
+                        gen_subscription_plan(&session, context.clone(), stmt)
+                            .map(|plan| plan.subscription_plan)
                     }
                     Statement::CreateIndex {
                         name,
