@@ -35,7 +35,6 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PausedReason;
@@ -600,6 +599,7 @@ impl GlobalBarrierManager {
                 changed_worker = self.active_streaming_nodes.changed() => {
                     #[cfg(debug_assertions)]
                     {
+                        use risingwave_pb::common::WorkerNode;
                         match self
                             .context
                             .metadata_manager
@@ -1036,18 +1036,18 @@ impl GlobalBarrierManagerContext {
     /// will create or drop before this barrier flow through them.
     async fn resolve_actor_info(
         &self,
-        all_nodes: Vec<WorkerNode>,
+        active_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<InflightActorInfo> {
         let info = match &self.metadata_manager {
             MetadataManager::V1(mgr) => {
                 let all_actor_infos = mgr.fragment_manager.load_all_actors().await;
 
-                InflightActorInfo::resolve(all_nodes, all_actor_infos)
+                InflightActorInfo::resolve(active_nodes, all_actor_infos)
             }
             MetadataManager::V2(mgr) => {
                 let all_actor_infos = mgr.catalog_controller.load_all_actors().await?;
 
-                InflightActorInfo::resolve(all_nodes, all_actor_infos)
+                InflightActorInfo::resolve(active_nodes, all_actor_infos)
             }
         };
 
