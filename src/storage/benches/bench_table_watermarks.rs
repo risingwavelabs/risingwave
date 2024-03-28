@@ -93,7 +93,7 @@ fn gen_committed_table_watermarks(
     vnode_part_count: usize,
 ) -> TableWatermarks {
     assert!(old_epoch_idx <= new_epoch_idx);
-    let watermark = TableWatermarks {
+    TableWatermarks {
         watermarks: (old_epoch_idx..=new_epoch_idx)
             .map(|epoch_idx| {
                 let (epoch, watermarks) = gen_epoch_watermarks(epoch_idx, vnode_part_count);
@@ -101,8 +101,7 @@ fn gen_committed_table_watermarks(
             })
             .collect(),
         direction: WatermarkDirection::Ascending,
-    };
-    watermark
+    }
 }
 
 fn gen_version(
@@ -118,7 +117,7 @@ fn gen_version(
     ));
     // let table_watermarks =
     //     gen_committed_table_watermarks(old_epoch_idx, new_epoch_idx, vnode_part_count);
-    let version = HummockVersion {
+    HummockVersion {
         id: new_epoch_idx as _,
         max_committed_epoch: test_epoch(new_epoch_idx as _),
         safe_epoch: test_epoch(old_epoch_idx as _),
@@ -126,8 +125,7 @@ fn gen_version(
             .map(|table_id| (TableId::new(table_id as _), table_watermarks.clone()))
             .collect(),
         ..Default::default()
-    };
-    version
+    }
 }
 
 fn bench_table_watermarks(c: &mut Criterion) {
