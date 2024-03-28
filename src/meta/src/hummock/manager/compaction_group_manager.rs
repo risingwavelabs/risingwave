@@ -56,7 +56,6 @@ use crate::model::{
     BTreeMapTransactionWrapper, MetadataModel, MetadataModelError, ValTransaction,
 };
 use crate::storage::MetaStore;
-use crate::stream::CreateStreamingJobOption;
 
 impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
@@ -102,12 +101,12 @@ impl HummockManager {
             .clone()
     }
 
+    #[cfg(test)]
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
         mv_table: Option<u32>,
         mut internal_tables: Vec<u32>,
-        create_stream_job_option: CreateStreamingJobOption,
     ) -> Result<Vec<StateTableId>> {
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
@@ -117,22 +116,14 @@ impl HummockManager {
             // materialized_view
             pairs.push((
                 mv_table,
-                if create_stream_job_option.new_independent_compaction_group {
-                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
-                } else {
-                    CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
-                },
+                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
             ));
         }
         // internal states
         for table_id in internal_tables {
             pairs.push((
                 table_id,
-                if create_stream_job_option.new_independent_compaction_group {
-                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
-                } else {
-                    CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
-                },
+                CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
             ));
         }
         self.register_table_ids(&pairs).await?;
@@ -158,7 +149,7 @@ impl HummockManager {
     /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
     /// Currently `purge` is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, valid_ids: &[u32]) {
+    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -167,7 +158,7 @@ impl HummockManager {
             .collect_vec();
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids_fail_fast(&to_unregister).await;
+        self.unregister_table_ids(&to_unregister).await
     }
 
     /// The implementation acquires `versioning` lock.
@@ -271,7 +262,7 @@ impl HummockManager {
     }
 
     #[named]
-    async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         if table_ids.is_empty() {
             return Ok(());
         }
@@ -993,7 +984,6 @@ mod tests {
     use crate::hummock::test_utils::setup_compute_env;
     use crate::hummock::HummockManager;
     use crate::model::TableFragments;
-    use crate::stream::CreateStreamingJobOption;
 
     #[tokio::test]
     async fn test_inner() {
@@ -1095,9 +1085,6 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                CreateStreamingJobOption {
-                    new_independent_compaction_group: false,
-                },
             )
             .await
             .unwrap();
@@ -1106,9 +1093,6 @@ mod tests {
             .register_table_fragments(
                 Some(table_fragment_2.table_id().table_id),
                 table_fragment_2.internal_table_ids(),
-                CreateStreamingJobOption {
-                    new_independent_compaction_group: false,
-                },
             )
             .await
             .unwrap();
@@ -1123,28 +1107,24 @@ mod tests {
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge(&table_fragment_2.all_table_ids().collect_vec())
-            .await;
+            .await
+            .unwrap();
         assert_eq!(registered_number().await, 4);
-        compaction_group_manager.purge(&[]).await;
+        compaction_group_manager.purge(&[]).await.unwrap();
         assert_eq!(registered_number().await, 0);
 
-        // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
         assert_eq!(group_number().await, 2);
 
         compaction_group_manager
             .register_table_fragments(
                 Some(table_fragment_1.table_id().table_id),
                 table_fragment_1.internal_table_ids(),
-                CreateStreamingJobOption {
-                    new_independent_compaction_group: true,
-                },
             )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        assert_eq!(group_number().await, 3);
+        assert_eq!(group_number().await, 2);
 
-        // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
             .unregister_table_fragments_vec(&[table_fragment_1])
             .await;
