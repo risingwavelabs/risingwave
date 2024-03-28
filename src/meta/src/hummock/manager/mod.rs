@@ -879,8 +879,9 @@ impl HummockManager {
     pub async fn get_compact_tasks_impl(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
+        max_select_count: usize,
         selector: &mut Box<dyn CompactionSelector>,
-    ) -> crate::hummock::error::Result<(Vec<CompactTask>, Vec<CompactTask>)> {
+    ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
@@ -921,7 +922,7 @@ impl HummockManager {
         let mut hummock_version_deltas = create_trx_wrapper!(
             self.sql_meta_store(),
             BTreeMapTransactionWrapper,
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas,)
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas)
         );
         let mut branched_ssts = create_trx_wrapper!(
             self.sql_meta_store(),
@@ -929,18 +930,21 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut versioning.branched_ssts)
         );
 
+        let mut unschedule_groups = vec![];
         let mut trivial_tasks = vec![];
         let mut pick_tasks = vec![];
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
         const MAX_TRIVIAL_MOVE_TASK_COUNT: usize = 256;
-        for compaction_group_id in compaction_groups {
+        'outside: for compaction_group_id in compaction_groups {
+            if pick_tasks.len() >= max_select_count {
+                break;
+            }
+
             if current_version.levels.get(&compaction_group_id).is_none() {
                 continue;
             }
-            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
-            let task_id = next_compaction_task_id(&self.env).await?;
 
             // When the last table of a compaction group is deleted, the compaction group (and its
             // config) is destroyed as well. Then a compaction task for this group may come later and
@@ -954,7 +958,11 @@ impl HummockManager {
                 Some(config) => config,
                 None => continue,
             };
+            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
+            let task_id = next_compaction_task_id(&self.env).await?;
+
             if !compaction_statuses.contains_key(&compaction_group_id) {
+                // lazy initialize.
                 compaction_statuses.insert(
                     compaction_group_id,
                     CompactStatus::new(
@@ -982,7 +990,6 @@ impl HummockManager {
                 }
             }
 
-            let mut trivial_move_count = 0;
             while let Some(compact_task) = compact_status.get_compact_task(
                 current_version.get_compaction_group_levels(compaction_group_id),
                 task_id as HummockCompactionTaskId,
@@ -1079,9 +1086,8 @@ impl HummockManager {
                     );
                     current_version.apply_version_delta(&version_delta);
                     trivial_tasks.push(compact_task);
-                    trivial_move_count += 1;
-                    if trivial_move_count >= MAX_TRIVIAL_MOVE_TASK_COUNT {
-                        break;
+                    if trivial_tasks.len() >= MAX_TRIVIAL_MOVE_TASK_COUNT {
+                        break 'outside;
                     }
                 } else {
                     let mut table_to_vnode_partition = match self
@@ -1106,6 +1112,7 @@ impl HummockManager {
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
 
                     if self.env.opts.enable_dropped_column_reclaim {
+                        // TODO: get all table schemas for all tables in once call to avoid acquiring lock and await.
                         compact_task.table_schemas = match self.metadata_manager() {
                             MetadataManager::V1(mgr) => mgr
                                 .catalog_manager
@@ -1135,7 +1142,15 @@ impl HummockManager {
                     break;
                 }
 
+                stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
                 stats = LocalSelectorStatistic::default();
+            }
+            if pick_tasks
+                .last()
+                .map(|task| task.compaction_group_id != compaction_group_id)
+                .unwrap_or(true)
+            {
+                unschedule_groups.push(compaction_group_id);
             }
 
             stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
@@ -1160,9 +1175,11 @@ impl HummockManager {
                 .compact_task_batch_count
                 .with_label_values(&["batch_trivial_move"])
                 .observe(trivial_tasks.len() as f64);
+            drop(versioning_guard);
         } else {
             // We are using a single transaction to ensure that each task has progress when it is
             // created.
+            drop(versioning_guard);
             commit_multi_var!(
                 self.env.meta_store(),
                 self.sql_meta_store(),
@@ -1170,6 +1187,7 @@ impl HummockManager {
                 compact_task_assignment
             )?;
         }
+        drop(compaction_guard);
         if !pick_tasks.is_empty() {
             self.metrics
                 .compact_task_batch_count
@@ -1186,13 +1204,6 @@ impl HummockManager {
 
             // this task has been finished.
             compact_task.set_task_status(TaskStatus::Pending);
-
-            trigger_sst_stat(
-                &self.metrics,
-                compaction.compaction_statuses.get(&compaction_group_id),
-                &versioning.current_version,
-                compaction_group_id,
-            );
             let compact_task_statistics = statistics_compact_task(compact_task);
 
             let level_type_label = build_compact_task_level_type_metrics_label(
@@ -1240,11 +1251,10 @@ impl HummockManager {
 
         #[cfg(test)]
         {
-            drop(versioning_guard);
-            drop(compaction_guard);
             self.check_state_consistency().await;
         }
-        Ok((pick_tasks, trivial_tasks))
+        pick_tasks.extend(trivial_tasks);
+        Ok((pick_tasks, unschedule_groups))
     }
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
@@ -1279,13 +1289,27 @@ impl HummockManager {
     pub async fn get_compact_tasks(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
+        max_select_count: usize,
         selector: &mut Box<dyn CompactionSelector>,
-    ) -> Result<(Vec<CompactTask>, Vec<CompactTask>)> {
+    ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
-        self.get_compact_tasks_impl(compaction_groups, selector)
-            .await
+        let (mut tasks, groups) = self
+            .get_compact_tasks_impl(compaction_groups, max_select_count, selector)
+            .await?;
+        tasks.retain(|task| {
+            if task.task_status() == TaskStatus::Success {
+                debug_assert!(
+                    CompactStatus::is_trivial_reclaim(task)
+                        || CompactStatus::is_trivial_move_task(task)
+                );
+                false
+            } else {
+                true
+            }
+        });
+        Ok((tasks, groups))
     }
 
     pub async fn get_compact_task(
@@ -1297,10 +1321,19 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        let (mut normal_tasks, _) = self
-            .get_compact_tasks_impl(vec![compaction_group_id], selector)
+        let (normal_tasks, _) = self
+            .get_compact_tasks_impl(vec![compaction_group_id], 1, selector)
             .await?;
-        Ok(normal_tasks.pop())
+        for task in normal_tasks {
+            if task.task_status() != TaskStatus::Success {
+                return Ok(Some(task));
+            }
+            debug_assert!(
+                CompactStatus::is_trivial_reclaim(&task)
+                    || CompactStatus::is_trivial_move_task(&task)
+            );
+        }
+        Ok(None)
     }
 
     pub async fn manual_get_compact_task(
@@ -3058,17 +3091,20 @@ impl HummockManager {
         None
     }
 
+    /// This method will return all compaction group id in a random order and task type. If there are any group block by `write_limit`, it will return a single array with `TaskType::Emergency`.
+    /// If these groups get different task-type, it will return all group id with `TaskType::Dynamic` if the first group get `TaskType::Dynamic`, otherwise it will return the single group with other task type.
     #[named]
     pub async fn auto_pick_compaction_groups_and_type(
         &self,
     ) -> (Vec<CompactionGroupId>, compact_task::TaskType) {
         use rand::prelude::SliceRandom;
         use rand::thread_rng;
-        let mut compaction_group_ids = self.compaction_group_ids().await;
-        compaction_group_ids.shuffle(&mut thread_rng());
 
         let versioning_guard = read_lock!(self, versioning).await;
         let versioning = versioning_guard.deref();
+        let mut compaction_group_ids =
+            get_compaction_group_ids(&versioning.current_version).collect_vec();
+        compaction_group_ids.shuffle(&mut thread_rng());
 
         let mut normal_groups = vec![];
         for cg_id in compaction_group_ids {
@@ -3096,7 +3132,7 @@ impl HummockManager {
             if let Some(pick_type) = self.compaction_state.auto_pick_type(cg_id) {
                 if pick_type == TaskType::Dynamic {
                     normal_groups.push(cg_id);
-                } else {
+                } else if normal_groups.is_empty() {
                     return (vec![cg_id], pick_type);
                 }
             }

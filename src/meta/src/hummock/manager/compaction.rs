@@ -133,27 +133,26 @@ impl HummockManager {
                 let mut generated_task_count = 0;
                 let mut existed_groups = groups.clone();
                 let mut meet_error = false;
-                let mut wait_compact_groups: HashSet<CompactionGroupId> = HashSet::default();
+                let mut no_task_groups: HashSet<CompactionGroupId> = HashSet::default();
 
                 while generated_task_count < pull_task_count && !meet_error {
                     let compact_ret = self
-                        .get_compact_tasks(std::mem::take(&mut existed_groups), selector)
+                        .get_compact_tasks(
+                            existed_groups.clone(),
+                            pull_task_count - generated_task_count,
+                            selector,
+                        )
                         .await;
 
                     match compact_ret {
-                        Ok((compact_tasks, trivial_tasks)) => {
+                        Ok((compact_tasks, unschedule_groups)) => {
                             if compact_tasks.is_empty() {
                                 break;
                             }
                             generated_task_count += compact_tasks.len();
-                            for task in trivial_tasks {
-                                existed_groups.push(task.compaction_group_id);
-                                wait_compact_groups.insert(task.compaction_group_id);
-                            }
+                            no_task_groups.extend(unschedule_groups);
                             for task in compact_tasks {
                                 let task_id = task.task_id;
-                                existed_groups.push(task.compaction_group_id);
-                                wait_compact_groups.insert(task.compaction_group_id);
                                 if let Err(e) =
                                     compactor.send_event(ResponseEvent::CompactTask(task))
                                 {
@@ -168,8 +167,7 @@ impl HummockManager {
                                     break;
                                 }
                             }
-                            existed_groups.sort();
-                            existed_groups.dedup();
+                            existed_groups.retain(|group_id| !no_task_groups.contains(group_id));
                         }
                         Err(err) => {
                             tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
@@ -177,18 +175,8 @@ impl HummockManager {
                         }
                     };
                 }
-                if generated_task_count < pull_task_count && !meet_error {
-                    // no compact_task to be picked
-                    for group in groups {
-                        self.compaction_state.unschedule(group, task_type);
-                    }
-                } else if !meet_error {
-                    for group in groups {
-                        if wait_compact_groups.contains(&group) {
-                            continue;
-                        }
-                        self.compaction_state.unschedule(group, task_type);
-                    }
+                for group in no_task_groups {
+                    self.compaction_state.unschedule(group, task_type);
                 }
             }
 
