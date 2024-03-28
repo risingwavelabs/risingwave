@@ -10,6 +10,7 @@ CASES_MAP = {
     'livestream': ['json', 'protobuf'],
     'prometheus': ['json'],
     'schema-registry': ['json'],
+    'avro-schema-registry': ['json'],
     'mysql-cdc': ['json'],
     'postgres-cdc': ['json'],
     'mongodb-cdc': ['json'],
@@ -45,6 +46,7 @@ CASES_MAP = {
     'client-library': ['none'],
 }
 
+
 def gen_pipeline_steps():
     pipeline_steps = ""
     for test_case, test_formats in CASES_MAP.items():
@@ -66,8 +68,9 @@ def gen_pipeline_steps():
 """
     return pipeline_steps
 
+
 def format_pipeline_yaml_cmd(pipeline_steps):
-    pipeline_yaml=f"""
+    pipeline_yaml = f"""
 cat <<- YAML | buildkite-agent pipeline upload
 auto-retry: &auto-retry
   automatic:
@@ -80,12 +83,14 @@ YAML
 """
     return pipeline_yaml
 
+
 def main():
     pipeline_steps = gen_pipeline_steps()
     cmd = format_pipeline_yaml_cmd(pipeline_steps)
     print(cmd)
     subprocess.run(cmd, shell=True)
     print("upload pipeline yaml")
+
 
 if __name__ == "__main__":
     main()
