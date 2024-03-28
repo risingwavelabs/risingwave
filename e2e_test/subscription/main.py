@@ -108,7 +108,7 @@ def test_cursor_since_begin():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch cur",conn)
-    check_rows_data([4,5],row,1)
+    check_rows_data([4,4],row,1)
     row = execute_query("fetch cur",conn)
     check_rows_data([5,5],row,1)
     row = execute_query("fetch cur",conn)
