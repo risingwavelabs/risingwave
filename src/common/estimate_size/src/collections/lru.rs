@@ -19,7 +19,7 @@ use std::hash::{BuildHasher, Hash};
 use lru::{DefaultHasher, LruCache};
 
 use super::{AtomicMutGuard, MutGuard};
-use crate::estimate_size::{EstimateSize, KvSize};
+use crate::{EstimateSize, KvSize};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `MemoryManager`.
@@ -40,7 +40,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     /// Evict epochs lower than the watermark
     pub fn evict_by_epoch(&mut self, epoch: u64) {
-        while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
+        while let Some((key, value, _)) = self.inner.pop_lru_by_epoch(epoch) {
             self.kv_heap_size.sub(&key, &value);
         }
     }

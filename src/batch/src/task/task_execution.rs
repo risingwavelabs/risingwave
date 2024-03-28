@@ -681,7 +681,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
 
         let error = error.map(Arc::new);
-        *self.failure.lock() = error.clone();
+        self.failure.lock().clone_from(&error);
         let err_str = error.as_ref().map(|e| e.to_report_string());
         if let Err(e) = sender.close(error).await {
             match e {

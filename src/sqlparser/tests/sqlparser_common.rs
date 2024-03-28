@@ -2179,17 +2179,13 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table {
-            name,
-            alias,
-            for_system_time_as_of_proctime,
-        } => {
+        TableFactor::Table { name, alias, as_of } => {
             assert_eq!(vec![Ident::with_quote_unchecked('"', "a table")], name.0);
             assert_eq!(
                 Ident::with_quote_unchecked('"', "alias"),
                 alias.unwrap().name
             );
-            assert!(!for_system_time_as_of_proctime);
+            assert!(as_of.is_none());
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2318,7 +2314,7 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
-                    for_system_time_as_of_proctime: false,
+                    as_of: None,
                 },
                 joins: vec![],
             },
@@ -2326,7 +2322,7 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    for_system_time_as_of_proctime: false,
+                    as_of: None,
                 },
                 joins: vec![],
             }
@@ -2342,13 +2338,13 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
-                    for_system_time_as_of_proctime: false,
+                    as_of: None,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
-                        for_system_time_as_of_proctime: false,
+                        as_of: None,
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2357,13 +2353,13 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
-                    for_system_time_as_of_proctime: false,
+                    as_of: None,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
-                        for_system_time_as_of_proctime: false,
+                        as_of: None,
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2382,7 +2378,7 @@ fn parse_cross_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
-                for_system_time_as_of_proctime: false,
+                as_of: None,
             },
             join_operator: JoinOperator::CrossJoin
         },
@@ -2399,7 +2395,7 @@ fn parse_temporal_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
-                for_system_time_as_of_proctime: true,
+                as_of: Some(AsOf::ProcessTime),
             },
             join_operator: Inner(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2422,7 +2418,7 @@ fn parse_joins_on() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
-                for_system_time_as_of_proctime: false,
+                as_of: None,
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2474,7 +2470,7 @@ fn parse_joins_using() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
-                for_system_time_as_of_proctime: false,
+                as_of: None,
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2518,7 +2514,7 @@ fn parse_natural_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
-                for_system_time_as_of_proctime: false,
+                as_of: None,
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2745,7 +2741,7 @@ fn parse_derived_tables() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
-                    for_system_time_as_of_proctime: false,
+                    as_of: None,
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],
@@ -3124,6 +3120,54 @@ fn parse_create_materialized_view_emit_immediately() {
             assert_eq!(with_options, vec![]);
             assert!(!or_replace);
             assert_eq!(emit_mode, Some(EmitMode::Immediately));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_create_table_on_conflict() {
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT OVERWRITE AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateTable {
+            name,
+            query,
+            on_conflict,
+            ..
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
+            assert_eq!(on_conflict, Some(OnConflict::OverWrite));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "CREATE TABLE myschema.myview ON CONFLICT IGNORE AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateTable {
+            name,
+            query,
+            on_conflict,
+            ..
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
+            assert_eq!(on_conflict, Some(OnConflict::Ignore));
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "CREATE TABLE myschema.myview AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateTable {
+            name,
+            query,
+            on_conflict,
+            ..
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(query, Some(Box::new(verified_query("SELECT foo FROM bar"))));
+            assert_eq!(on_conflict, None);
         }
         _ => unreachable!(),
     }

@@ -126,10 +126,10 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
-use crate::manager::catalog::utils::{
-    alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
-    refcnt_inc_connection, ReplaceTableExprRewriter,
+use crate::controller::rename::{
+    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
 };
+use crate::manager::catalog::utils::{refcnt_dec_connection, refcnt_inc_connection};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 
@@ -1902,7 +1902,7 @@ impl CatalogManager {
         if let Some(source) = &to_update_source {
             sources.insert(source.id, source.clone());
         }
-        commit_meta!(self, tables, views, sinks, sources)?;
+        commit_meta!(self, tables, views, sinks, sources, subscriptions)?;
 
         // 5. notify frontend.
         assert!(
@@ -3915,9 +3915,9 @@ impl CatalogManager {
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::AuthInfo => user.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => {
-                user.name = update_user.name.clone();
+                user.name.clone_from(&update_user.name);
             }
         });
 

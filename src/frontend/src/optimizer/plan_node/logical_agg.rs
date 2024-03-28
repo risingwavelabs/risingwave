@@ -87,28 +87,12 @@ impl LogicalAgg {
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
-        // Generate vnode via project
-        let input_fields = stream_input.schema().fields();
-        let input_col_num = input_fields.len();
+        let input_col_num = stream_input.schema().len();
 
-        let mut exprs: Vec<_> = input_fields
-            .iter()
-            .enumerate()
-            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
-            .collect();
-        exprs.push(
-            FunctionCall::new(
-                ExprType::Vnode,
-                dist_key
-                    .iter()
-                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
-                    .collect(),
-            )?
-            .into(),
-        );
-        let vnode_col_idx = exprs.len() - 1;
+        // Generate vnode via project
         // TODO(kwannoel): We should apply Project optimization rules here.
-        let project = StreamProject::new(generic::Project::new(exprs, stream_input));
+        let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
+        let vnode_col_idx = project.base.schema().len() - 1;
 
         // Generate local agg step
         let mut local_group_key = self.group_key().clone();

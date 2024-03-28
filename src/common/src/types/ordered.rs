@@ -14,11 +14,12 @@
 
 //! `ScalarImpl` and `Datum` wrappers that implement `PartialOrd` and `Ord` with default order type.
 
-use std::cmp::{Ord, Ordering, Reverse};
+use std::cmp::{Ord, Ordering};
 use std::ops::Deref;
 
+use risingwave_common_estimate_size::EstimateSize;
+
 use crate::dispatch_scalar_ref_variants;
-use crate::estimate_size::EstimateSize;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
 use crate::util::sort_util::{cmp_datum, partial_cmp_datum, OrderType};
 
@@ -99,12 +100,6 @@ impl DefaultOrd for DatumRef<'_> {
 pub struct DefaultOrdered<T: DefaultOrd>(pub T);
 
 impl<T: DefaultOrd + EstimateSize> EstimateSize for DefaultOrdered<T> {
-    fn estimated_heap_size(&self) -> usize {
-        self.0.estimated_heap_size()
-    }
-}
-
-impl<T: EstimateSize> EstimateSize for Reverse<T> {
     fn estimated_heap_size(&self) -> usize {
         self.0.estimated_heap_size()
     }

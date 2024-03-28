@@ -22,6 +22,7 @@ use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::GenericPlanNode;
 use crate::catalog::table_catalog::TableType;
@@ -32,10 +33,10 @@ use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 use crate::TableCatalog;
 
-/// [`Scan`] returns contents of a table or other equivalent object
+/// [`TableScan`] returns contents of a RisingWave Table.
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
-pub struct Scan {
+pub struct TableScan {
     pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
@@ -54,7 +55,10 @@ pub struct Scan {
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-    pub for_system_time_as_of_proctime: bool,
+    /// syntax `FOR SYSTEM_TIME AS OF '1986-10-26 01:21:00'` is used for iceberg.
+    /// syntax `FOR SYSTEM_TIME AS OF 499162860` is used for iceberg.
+    /// syntax `FOR SYSTEM_VERSION AS OF 10963874102873;` is used for iceberg.
+    pub as_of: Option<AsOf>,
     /// The cardinality of the table **without** applying the predicate.
     pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
@@ -62,7 +66,7 @@ pub struct Scan {
     pub ctx: OptimizerContextRef,
 }
 
-impl Scan {
+impl TableScan {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
     }
@@ -235,7 +239,7 @@ impl Scan {
             vec![],
             self.ctx.clone(),
             new_predicate,
-            self.for_system_time_as_of_proctime,
+            self.as_of.clone(),
             self.table_cardinality,
         )
     }
@@ -249,7 +253,7 @@ impl Scan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
         table_cardinality: Cardinality,
     ) -> Self {
         Self::new_inner(
@@ -259,7 +263,7 @@ impl Scan {
             indexes,
             ctx,
             predicate,
-            for_system_time_as_of_proctime,
+            as_of,
             table_cardinality,
         )
     }
@@ -272,7 +276,7 @@ impl Scan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
         table_cardinality: Cardinality,
     ) -> Self {
         // here we have 3 concepts
@@ -301,7 +305,7 @@ impl Scan {
             table_desc,
             indexes,
             predicate,
-            for_system_time_as_of_proctime,
+            as_of,
             table_cardinality,
             ctx,
         }
@@ -330,7 +334,7 @@ impl Scan {
     }
 }
 
-impl GenericPlanNode for Scan {
+impl GenericPlanNode for TableScan {
     fn schema(&self) -> Schema {
         let fields = self
             .output_col_idx
@@ -373,7 +377,7 @@ impl GenericPlanNode for Scan {
     }
 }
 
-impl Scan {
+impl TableScan {
     pub fn get_table_columns(&self) -> &[ColumnDesc] {
         &self.table_desc.columns
     }

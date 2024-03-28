@@ -67,6 +67,7 @@ use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
 use crate::common::cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
+use crate::consistency::insane;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -77,6 +78,17 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 300;
 const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 type DefaultWatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;
+
+/// This macro is used to mark a point where we want to randomly discard the operation and early
+/// return, only in insane mode.
+macro_rules! insane_mode_discard_point {
+    () => {{
+        use rand::Rng;
+        if crate::consistency::insane() && rand::thread_rng().gen_bool(0.3) {
+            return;
+        }
+    }};
+}
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -121,7 +133,7 @@ pub struct StateTableInner<
 
     prefix_hint_len: usize,
 
-    /// Used for catalog table_properties
+    /// Used for catalog `table_properties`
     table_option: TableOption,
 
     value_indices: Option<Vec<usize>>,
@@ -141,7 +153,7 @@ pub struct StateTableInner<
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
 
-    /// "i" here refers to the base state_table's actual schema.
+    /// "i" here refers to the base `state_table`'s actual schema.
     /// "o" here refers to the replicated state table's output schema.
     /// This mapping is used to reconstruct a row being written from replicated state table.
     /// Such that the schema of this row will match the full schema of the base state table.
@@ -150,7 +162,7 @@ pub struct StateTableInner<
 
     /// Output indices
     /// Used for:
-    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
     output_indices: Vec<usize>,
 
@@ -351,6 +363,13 @@ where
             )
         };
 
+        let is_consistent_op = if insane() {
+            // In insane mode, we will have inconsistent operations applied on the table, even if
+            // our executor code do not expect that.
+            false
+        } else {
+            is_consistent_op
+        };
         let op_consistency_level = if is_consistent_op {
             let row_serde = make_row_serde();
             consistent_old_value_op(row_serde)
@@ -870,12 +889,14 @@ where
     }
 
     fn insert_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+        insane_mode_discard_point!();
         self.local_store
             .insert(key, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     fn delete_inner(&mut self, key: TableKey<Bytes>, value_bytes: Bytes) {
+        insane_mode_discard_point!();
         self.local_store
             .delete(key, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -887,6 +908,7 @@ where
         old_value_bytes: Option<Bytes>,
         new_value_bytes: Bytes,
     ) {
+        insane_mode_discard_point!();
         self.local_store
             .insert(key_bytes, new_value_bytes, old_value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));

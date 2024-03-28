@@ -32,6 +32,7 @@ struct RwFunction {
     language: String,
     link: Option<String>,
     acl: String,
+    always_retry_on_network_error: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_functions")]
@@ -60,6 +61,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
                     &users,
                     username_map,
                 ),
+                always_retry_on_network_error: function.always_retry_on_network_error,
             })
         })
         .collect())

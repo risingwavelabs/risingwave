@@ -19,7 +19,8 @@ use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_sqlparser::ast::{
-    Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
+    AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
+    TableFactor,
 };
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -242,6 +243,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "sink name")
     }
 
+    /// return the `subscription_name`
+    pub fn resolve_subscription_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "subscription name")
+    }
+
     /// return the `table_name`
     pub fn resolve_table_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "table name")
@@ -284,7 +290,7 @@ impl Binder {
                     .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
-            field.name = name.clone();
+            field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(
                 table_name.clone(),
                 begin + index,
@@ -328,7 +334,7 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
-        for_system_time_as_of_proctime: bool,
+        as_of: Option<AsOf>,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none()
@@ -371,12 +377,7 @@ impl Binder {
             }));
             Ok(share_relation)
         } else {
-            self.bind_relation_by_name_inner(
-                schema_name.as_deref(),
-                &table_name,
-                alias,
-                for_system_time_as_of_proctime,
-            )
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, as_of)
         }
     }
 
@@ -396,7 +397,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None, false)?,
+            self.bind_relation_by_name(table_name.clone(), None, None)?,
             table_name,
         ))
     }
@@ -446,16 +447,14 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table {
-                name,
-                alias,
-                for_system_time_as_of_proctime,
-            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
+            TableFactor::Table { name, alias, as_of } => {
+                self.bind_relation_by_name(name, alias, as_of)
+            }
             TableFactor::TableFunction {
                 name,
                 alias,

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ops::Deref;
 
 use super::{AtomicMutGuard, MutGuard};
-use crate::estimate_size::{EstimateSize, KvSize};
+use crate::{EstimateSize, KvSize};
 
 pub struct EstimatedHashMap<K, V> {
     inner: HashMap<K, V>,

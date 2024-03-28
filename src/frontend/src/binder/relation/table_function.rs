@@ -72,7 +72,7 @@ impl Binder {
                     Some(PG_CATALOG_SCHEMA_NAME),
                     PG_KEYWORDS_TABLE_NAME,
                     alias,
-                    false,
+                    None,
                 );
             }
         }

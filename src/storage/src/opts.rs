@@ -68,6 +68,7 @@ pub struct StorageOpts {
     /// Capacity of sstable meta cache.
     pub compactor_memory_limit_mb: usize,
     /// compactor streaming iterator recreate timeout.
+    /// deprecated
     pub compact_iter_recreate_timeout_ms: u64,
     /// Number of SST ids fetched from meta per RPC
     pub sstable_id_remote_fetch_number: u32,
@@ -78,6 +79,7 @@ pub struct StorageOpts {
     pub max_concurrent_compaction_task_number: u64,
     pub max_version_pinning_duration_sec: u64,
     pub memory_limit_for_behind_barrier_ratio: u64,
+    pub compactor_iter_max_io_retry_times: usize,
 
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
@@ -135,7 +137,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
-    /// enable FastCompactorRunner.
+    /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
     pub check_compaction_result: bool,
     pub max_preload_io_retry_times: usize,
@@ -271,6 +273,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             memory_limit_for_behind_barrier_ratio: c.storage.memory_limit_for_behind_barrier_ratio,
+            compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
         }
     }
 }

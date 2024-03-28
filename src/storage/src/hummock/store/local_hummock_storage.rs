@@ -75,7 +75,7 @@ pub struct LocalHummockStorage {
     /// This also handles a corner case where an executor doing replication
     /// is scheduled to the same CN as its Upstream executor.
     /// In that case, we use this flag to avoid reading the same data twice,
-    /// by ignoring the replicated ReadVersion.
+    /// by ignoring the replicated `ReadVersion`.
     is_replicated: bool,
 
     /// Event sender.
