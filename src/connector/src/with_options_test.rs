@@ -35,11 +35,11 @@ fn sink_mod_path() -> PathBuf {
 }
 
 fn common_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("common.rs")
+    connector_crate_path().join("src").join("connector_common").join("common.rs")
 }
 
 fn mqtt_common_mod_path() -> PathBuf {
-    connector_crate_path().join("src").join("mqtt_common.rs")
+    connector_crate_path().join("src").join("connector_common").join("mqtt_common.rs")
 }
 
 pub fn generate_with_options_yaml_source() -> String {
