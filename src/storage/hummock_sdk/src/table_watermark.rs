@@ -207,9 +207,9 @@ impl TableWatermarksIndex {
         assert!(epoch > self.latest_epoch);
         assert_eq!(self.watermark_direction, direction);
         self.latest_epoch = epoch;
-        let mut vnode_is_set = BitmapBuilder::zeroed(VirtualNode::COUNT);
         #[cfg(debug_assertions)]
         {
+            let mut vnode_is_set = BitmapBuilder::zeroed(VirtualNode::COUNT);
             for vnode_watermark in vnode_watermark_list.as_ref() {
                 for vnode in vnode_watermark.vnode_bitmap.iter_ones() {
                     assert!(!vnode_is_set.is_set(vnode));
