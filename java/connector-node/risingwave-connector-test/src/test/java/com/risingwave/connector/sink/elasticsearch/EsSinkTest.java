@@ -62,7 +62,8 @@ public class EsSinkTest {
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, null, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
+                        new ArraySinkRow(
+                                Op.INSERT, null, "1$Alice", "{\"id\":1,\"name\":\"Alice\"}"),
                         new ArraySinkRow(Op.INSERT, null, "2$Bob", "{\"id\":2,\"name\":\"Bob\"}")));
         sink.sync();
         // container is slow here, but our default flush time is 5s,
