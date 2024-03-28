@@ -1096,15 +1096,9 @@ mod tests {
 
         let x: ExprImpl = InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into();
 
-        let left: ExprImpl = FunctionCall::new(
-            ExprType::Equal,
-            vec![
-                x.clone(),
-                x.clone(),
-            ],
-        )
-        .unwrap()
-        .into();
+        let left: ExprImpl = FunctionCall::new(ExprType::Equal, vec![x.clone(), x.clone()])
+            .unwrap()
+            .into();
 
         let right: ExprImpl = FunctionCall::new(
             ExprType::LessThan,
@@ -1144,7 +1138,9 @@ mod tests {
 
         let res = cond.split(left_col_num, right_col_num);
 
-        let left_res = FunctionCall::new(ExprType::IsNotNull, vec![x]).unwrap().into();
+        let left_res = FunctionCall::new(ExprType::IsNotNull, vec![x])
+            .unwrap()
+            .into();
 
         assert_eq!(res.0.conjunctions, vec![left_res]);
         assert_eq!(res.1.conjunctions, vec![right]);
