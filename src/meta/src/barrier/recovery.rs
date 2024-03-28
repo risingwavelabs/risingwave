@@ -625,6 +625,11 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             }
+
+            if to_migrate_parallel_units.is_empty() {
+                break;
+            }
+
             // wait to get newly joined CN
             let changed = active_nodes
                 .wait_changed(Duration::from_millis(5000), |active_nodes| {
@@ -1026,6 +1031,11 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             }
+
+            if to_migrate_parallel_units.is_empty() {
+                break;
+            }
+
             // wait to get newly joined CN
             let changed = active_nodes
                 .wait_changed(Duration::from_millis(5000), |active_nodes| {
