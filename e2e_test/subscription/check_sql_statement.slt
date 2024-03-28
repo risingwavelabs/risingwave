@@ -1,0 +1,50 @@
+statement ok
+create table t1 (v1 int, v2 int, v3 int);
+
+statement ok
+insert into t1 values (1,2), (2,3);
+
+statement ok
+create subscription sub from t1 with(retention = '1D');
+
+statement ok
+declare cur cursor for sub;
+
+statement ok
+declare cur1 cursor for sub since now();
+
+statement ok
+declare cur2 cursor for sub since proctime();
+
+statement ok
+declare cur3 cursor for sub since begin();
+
+statement error
+declare cur4 cursor for sub since 1;
+
+statement error
+declare cur5 cursor for sub since asd;
+
+statement error
+declare cur6 cursor for sub since 18446744073709551615;
+
+statement error
+declare cur cursor for sub;
+
+statement ok
+close cur;
+
+statement ok
+close cur1;
+
+statement ok
+close cur2;
+
+statement ok
+close cur3;
+
+statement ok
+drop subscription sub;
+
+statement ok
+drop table t1;
