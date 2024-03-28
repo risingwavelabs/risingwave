@@ -305,7 +305,7 @@ mod tests {
     use futures::{pin_mut, StreamExt};
 
     use super::*;
-    use crate::common::KinesisCommon;
+    use crate::connector_common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]
