@@ -526,6 +526,10 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
+    /// Control the strictness of stream consistency.
+    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
+    pub unsafe_enable_strict_consistency: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
@@ -684,6 +688,7 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
+    // DEPRECATED: This config will be deprecated in the future version, use `storage.compactor_iter_max_io_retry_times` instead.
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
@@ -694,12 +699,12 @@ pub struct StorageConfig {
     pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
     pub compactor_fast_max_compact_delete_ratio: u32,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
     pub compactor_fast_max_compact_task_size: u64,
+    #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
+    pub compactor_iter_max_io_retry_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1034,6 +1039,9 @@ pub struct S3ObjectStoreDeveloperConfig {
         default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
     )]
     pub object_store_retryable_service_error_codes: Vec<String>,
+
+    #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
+    pub use_opendal: bool,
 }
 
 impl SystemConfig {
@@ -1334,6 +1342,10 @@ pub mod default {
             10 * 60 * 1000
         }
 
+        pub fn compactor_iter_max_io_retry_times() -> usize {
+            8
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1381,6 +1393,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn unsafe_enable_strict_consistency() -> bool {
+            true
         }
     }
 
@@ -1729,12 +1745,23 @@ pub mod default {
             }
 
             pub mod developer {
+                use crate::util::env_var::env_var_is_false_or;
+                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
+
                 pub fn object_store_retry_unknown_service_error() -> bool {
                     false
                 }
 
                 pub fn object_store_retryable_service_error_codes() -> Vec<String> {
                     vec!["SlowDown".into(), "TooManyRequests".into()]
+                }
+
+                pub fn use_opendal() -> bool {
+                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
+                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
+                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
+                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
+                    !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false)
                 }
             }
         }

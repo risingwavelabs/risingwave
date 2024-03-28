@@ -308,6 +308,7 @@ pub async fn handle(
             source_schema,
             source_watermarks,
             append_only,
+            on_conflict,
             cdc_table_info,
             include_column_options,
         } => {
@@ -325,6 +326,7 @@ pub async fn handle(
                     query,
                     columns,
                     append_only,
+                    on_conflict,
                 )
                 .await;
             }
@@ -339,6 +341,7 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
                 cdc_table_info,
                 include_column_options,
             )

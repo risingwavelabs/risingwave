@@ -206,6 +206,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.state_table.try_flush().await?;
                             Message::Chunk(chunk)
                         }
+                        ConflictBehavior::DoUpdateIfNotNull => unimplemented!(),
                     }
                 }
                 Message::Barrier(b) => {
