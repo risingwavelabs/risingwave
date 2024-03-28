@@ -114,19 +114,6 @@ impl JsonEncoder {
         }
     }
 
-    pub fn new_with_bigquery(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
-        Self {
-            schema,
-            col_indices,
-            time_handling_mode: TimeHandlingMode::Milli,
-            date_handling_mode: DateHandlingMode::String,
-            timestamp_handling_mode: TimestampHandlingMode::String,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::BigQuery,
-            kafka_connect: None,
-        }
-    }
-
     pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
@@ -204,14 +191,7 @@ fn datum_to_json_object(
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => {
-            if let CustomJsonType::BigQuery = custom_json_type
-                && matches!(field.data_type(), DataType::List(_))
-            {
-                // Bigquery need to convert null of array to empty array https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types
-                return Ok(Value::Array(vec![]));
-            } else {
-                return Ok(Value::Null);
-            }
+            return Ok(Value::Null);
         }
         Some(datum) => datum,
     };
@@ -259,7 +239,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
+            CustomJsonType::Es | CustomJsonType::None => {
                 json!(v.to_text())
             }
         },
@@ -311,7 +291,7 @@ fn datum_to_json_object(
         }
         (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match custom_json_type {
             CustomJsonType::Es | CustomJsonType::StarRocks(_) => JsonbVal::from(jsonb_ref).take(),
-            CustomJsonType::Doris(_) | CustomJsonType::None | CustomJsonType::BigQuery => {
+            CustomJsonType::Doris(_) | CustomJsonType::None => {
                 json!(jsonb_ref.to_string())
             }
         },
@@ -362,7 +342,7 @@ fn datum_to_json_object(
                         "starrocks can't support struct".to_string(),
                     ));
                 }
-                CustomJsonType::Es | CustomJsonType::None | CustomJsonType::BigQuery => {
+                CustomJsonType::Es | CustomJsonType::None => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()

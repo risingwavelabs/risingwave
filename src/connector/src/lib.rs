@@ -33,6 +33,7 @@
 #![feature(try_blocks)]
 #![feature(error_generic_member_access)]
 #![feature(register_tool)]
+#![feature(assert_matches)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
