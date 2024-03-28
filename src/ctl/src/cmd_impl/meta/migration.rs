@@ -428,7 +428,6 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             table.database_id = *db_rewrite.get(&table.database_id).unwrap();
             table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
         });
-        // Question: Do we need to rewrite the function ids?
         let mut fragment = fragment.into_active_model();
         fragment.stream_node = Set(StreamNode::from_protobuf(&stream_node));
         Fragment::insert(fragment)
@@ -457,9 +456,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         let source_models: Vec<source::ActiveModel> = sources
             .into_iter()
             .map(|mut src| {
-                src.connection_id.as_mut().map(|id| {
-                    *id = *connection_rewrite.get(&id).unwrap();
-                });
+                if let Some(id) = src.connection_id.as_mut() {
+                    *id = *connection_rewrite.get(id).unwrap();
+                }
                 src.into()
             })
             .collect();
@@ -513,9 +512,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                         used_by: Set(s.id as _),
                     }
                 }));
-                s.connection_id.as_mut().map(|id| {
-                    *id = *connection_rewrite.get(&id).unwrap();
-                });
+                if let Some(id) = s.connection_id.as_mut() {
+                    *id = *connection_rewrite.get(id).unwrap();
+                }
                 s.into()
             })
             .collect();
@@ -588,7 +587,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 | GrantObject::SinkId(id)
                 | GrantObject::ViewId(id)
                 | GrantObject::SubscriptionId(id) => *id,
-                ty @ _ => unreachable!("invalid object type: {:?}", ty),
+                ty => unreachable!("invalid object type: {:?}", ty),
             };
             for action_with_opt in &gp.action_with_opts {
                 privileges.push(user_privilege::ActiveModel {

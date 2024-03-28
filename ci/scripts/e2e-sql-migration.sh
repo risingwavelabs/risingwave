@@ -28,7 +28,7 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-1cn-1fe-with-recovery
 
 echo "--- init cluster with some data & DDL"
-sqllogictest -h localhost -p 4565 -d dev './e2e_test/sql_migration/prepare.slt'
+sqllogictest -d dev -h localhost -p 4566 './e2e_test/sql_migration/prepare.slt'
 
 echo "--- kill cluster"
 cargo make ci-kill
@@ -52,7 +52,7 @@ echo "--- starting risingwave cluster, meta-1cn-1fe-sqlite"
 cargo make dev meta-1cn-1fe-sqlite
 
 echo "--- run check"
-sqllogictest -h localhost -p 4565 -d dev './e2e_test/sql_migration/check.slt'
+sqllogictest -d dev -h localhost -p 4566 './e2e_test/sql_migration/check.slt'
 
 echo "--- kill cluster"
 cargo make kill
