@@ -962,8 +962,6 @@ impl HummockManager {
             }
             Some(task) => task,
         };
-        let compact_task_size =
-            compact_task.input.select_input_size + compact_task.input.target_input_size;
 
         let target_level_id = compact_task.input.target_level as u32;
 
@@ -1062,63 +1060,67 @@ impl HummockManager {
             );
         } else {
             if group_config.compaction_config.split_weight_by_vnode > 0 {
-                table_to_vnode_partition.clear();
+                compact_task.table_vnode_partition.clear();
                 for table_id in &compact_task.existing_table_ids {
-                    table_to_vnode_partition.insert(*table_id, vnode_partition_count);
+                    compact_task
+                        .table_vnode_partition
+                        .insert(*table_id, vnode_partition_count);
                 }
             } else {
-                let existing_table_ids = HashSet::<u32>::from_iter(
-                    compact_task
-                        .input_ssts
-                        .iter()
-                        .flat_map(|level| level.table_infos.iter())
-                        .flat_map(|sst| sst.table_ids.iter())
-                        .cloned(),
-                )
-                .into_iter()
-                .collect_vec();
-
-                let mut is_large_task = false;
+                let mut table_size: HashMap<u32, u64> = HashMap::default();
+                let mut existing_table_ids: HashSet<u32> = HashSet::default();
+                for input_ssts in &compact_task.input_ssts {
+                    for sst in &input_ssts.table_infos {
+                        existing_table_ids.extend(sst.table_ids.iter());
+                        if sst.table_ids.len() == 1 {
+                            *table_size.entry(sst.table_ids[0]).or_default() += sst.file_size;
+                        }
+                    }
+                }
 
                 let hybrid_vnode_count = self.env.opts.hybird_partition_vnode_count;
-                if existing_table_ids.len() == 1 {
+                for (table_id, compact_table_size) in table_size {
                     let default_partition_count = self.env.opts.partition_vnode_count;
-                    if compact_task_size > group_config.compaction_config.max_compaction_bytes / 2 {
+                    if compact_table_size > group_config.compaction_config.max_compaction_bytes / 2
+                    {
                         compact_task
                             .table_vnode_partition
-                            .insert(existing_table_ids[0], default_partition_count);
-                        is_large_task = true;
-                    } else if compact_task_size
+                            .insert(table_id, default_partition_count);
+                    } else if compact_table_size
                         > group_config.compaction_config.max_bytes_for_level_base / 2
                     {
                         compact_task
                             .table_vnode_partition
-                            .insert(existing_table_ids[0], hybrid_vnode_count);
-                        is_large_task = true;
+                            .insert(table_id, hybrid_vnode_count);
+                    } else if compact_table_size
+                        > group_config.compaction_config.target_file_size_base
+                    {
+                        compact_task.table_vnode_partition.insert(table_id, 1);
                     }
                 }
-                if !is_large_task {
-                    let params = self.env.system_params_reader().await;
-                    let barrier_interval_ms = params.barrier_interval_ms() as u64;
-                    let checkpoint_secs = std::cmp::max(
-                        1,
-                        params.checkpoint_frequency() * barrier_interval_ms / 1000,
-                    );
-                    let history_table_throughput = self.history_table_throughput.read();
-                    for table_id in &existing_table_ids {
-                        let write_throughput = history_table_throughput
-                            .get(table_id)
-                            .map(|que| que.back().cloned().unwrap_or(0))
-                            .unwrap_or(0)
-                            / checkpoint_secs;
-                        if write_throughput > self.env.opts.table_write_throughput_threshold {
-                            compact_task
-                                .table_vnode_partition
-                                .insert(*table_id, hybrid_vnode_count);
-                        } else if write_throughput > self.env.opts.min_table_split_write_throughput
-                        {
-                            compact_task.table_vnode_partition.insert(*table_id, 1);
-                        }
+                let params = self.env.system_params_reader().await;
+                let barrier_interval_ms = params.barrier_interval_ms() as u64;
+                let checkpoint_secs = std::cmp::max(
+                    1,
+                    params.checkpoint_frequency() * barrier_interval_ms / 1000,
+                );
+                let history_table_throughput = self.history_table_throughput.read();
+                for table_id in &existing_table_ids {
+                    let write_throughput = history_table_throughput
+                        .get(table_id)
+                        .map(|que| que.back().cloned().unwrap_or(0))
+                        .unwrap_or(0)
+                        / checkpoint_secs;
+                    if write_throughput > self.env.opts.table_write_throughput_threshold {
+                        compact_task
+                            .table_vnode_partition
+                            .entry(*table_id)
+                            .or_insert(hybrid_vnode_count);
+                    } else if write_throughput > self.env.opts.min_table_split_write_throughput {
+                        compact_task
+                            .table_vnode_partition
+                            .entry(*table_id)
+                            .or_insert(1);
                     }
                 }
             }

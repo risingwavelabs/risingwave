@@ -27,9 +27,7 @@ use risingwave_hummock_sdk::compact::{
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{
-    can_concat, EpochWithGap, HummockEpoch, HummockSstableObjectId, KeyComparator,
-};
+use risingwave_hummock_sdk::{can_concat, HummockSstableObjectId, KeyComparator};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use thiserror_ext::AsReport;
