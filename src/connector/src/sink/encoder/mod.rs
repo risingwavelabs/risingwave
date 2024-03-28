@@ -139,11 +139,11 @@ pub enum CustomJsonType {
     // Doris's json need date is string.
     // The internal order of the struct should follow the insertion order.
     // The decimal needs verification and calibration.
-    Doris(HashMap<String, (u8, u8)>),
+    Doris(HashMap<String, u8>),
     // Es's json need jsonb is struct
     Es,
     // starrocks' need jsonb is struct
-    StarRocks(HashMap<String, (u8, u8)>),
+    StarRocks,
     // bigquery need null array -> []
     BigQuery,
     None,
