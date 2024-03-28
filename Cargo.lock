@@ -8506,13 +8506,12 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.14.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce87f66ba6c6acef277a729f989a0eca946cb9ce6a15bcc036bda0f72d4b9fd"
+version = "0.14.9"
+source = "git+https://github.com/wcy-fdu/reqsign.git?rev=e6cb304#e6cb3048581033275f4525431b757c8c612d37db"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.21.7",
+ "base64 0.22.0",
  "chrono",
  "form_urlencoded",
  "getrandom",
