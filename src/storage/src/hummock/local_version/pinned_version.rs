@@ -101,7 +101,7 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
-    pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
