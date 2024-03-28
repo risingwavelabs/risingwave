@@ -34,6 +34,7 @@ pub async fn handle_begin(
     modes: Vec<TransactionMode>,
 ) -> Result<RwPgResponse> {
     let HandlerArgs { session, .. } = handler_args;
+    let mut notices = vec![];
 
     let access_mode = {
         let mut access_mode = None;
@@ -42,7 +43,14 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
+                TransactionMode::IsolationLevel(_) => {
+                    // Note: This is for compatibility with some external drivers (like postgres_fdw) that
+                    // always start a transaction with an Isolation Level.
+                    const MESSAGE: &str = "\
+                    Transaction with given Isolation Level is not supported yet.\n\
+                    For compatibility, this statement will still proceed with RepeatableRead.";
+                    notices.push(MESSAGE);
+                }
             }
         }
 
@@ -50,21 +58,27 @@ pub async fn handle_begin(
             Some(TransactionAccessMode::ReadOnly) => AccessMode::ReadOnly,
             Some(TransactionAccessMode::ReadWrite) | None => {
                 // Note: This is for compatibility with some external drivers (like psycopg2) that
-                // issue `BEGIN` implicitly for users. Not actually starting a transaction is okay
-                // since `COMMIT` and `ROLLBACK` are no-ops (except for warnings) when there is no
-                // active transaction.
+                // issue `BEGIN` implicitly for users.
                 const MESSAGE: &str = "\
                     Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
-                    For compatibility, this statement will still succeed but no transaction is actually started.";
-
-                return Ok(RwPgResponse::builder(stmt_type).notice(MESSAGE).into());
+                    For compatibility, this statement will still succeed and be executed as Read-only transactions.\n\
+                    The write operations in this transaction will be rejected.";
+                notices.push(MESSAGE);
+                AccessMode::ReadOnly
             }
         }
     };
 
     session.txn_begin_explicit(access_mode);
-
-    Ok(RwPgResponse::empty_result(stmt_type))
+    if notices.is_empty() {
+        Ok(RwPgResponse::empty_result(stmt_type))
+    } else {
+        let mut builder = RwPgResponse::builder(stmt_type);
+        for notice in notices {
+            builder = builder.notice(notice);
+        }
+        Ok(builder.into())
+    }
 }
 
 #[expect(clippy::unused_async)]
