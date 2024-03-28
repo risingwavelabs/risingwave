@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -588,25 +589,34 @@ impl HummockVersion {
         for table_id in &version_delta.removed_table_ids {
             let _ = self.table_watermarks.remove(table_id);
         }
+
+        let mut modified_table_watermarks: HashMap<TableId, TableWatermarks> = HashMap::new();
+
         for (table_id, table_watermarks) in &version_delta.new_table_watermarks {
-            match self.table_watermarks.entry(*table_id) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().apply_new_table_watermarks(table_watermarks);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(table_watermarks.clone());
-                }
+            if let Some(current_table_watermarks) = self.table_watermarks.get(table_id) {
+                let mut current_table_watermarks = (**current_table_watermarks).clone();
+                current_table_watermarks.apply_new_table_watermarks(table_watermarks);
+                modified_table_watermarks.insert(*table_id, current_table_watermarks);
+            } else {
+                modified_table_watermarks.insert(*table_id, table_watermarks.clone());
             }
         }
         if version_delta.safe_epoch != self.safe_epoch {
             assert!(version_delta.safe_epoch > self.safe_epoch);
-            self.table_watermarks
-                .values_mut()
-                .for_each(|table_watermarks| {
-                    table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch)
-                });
+            for (table_id, table_watermarks) in &self.table_watermarks {
+                let table_watermarks = modified_table_watermarks
+                    .entry(*table_id)
+                    .or_insert_with(|| (**table_watermarks).clone());
+                table_watermarks.clear_stale_epoch_watermark(version_delta.safe_epoch);
+            }
             self.safe_epoch = version_delta.safe_epoch;
         }
+
+        for (table_id, table_watermarks) in modified_table_watermarks {
+            self.table_watermarks
+                .insert(table_id, Arc::new(table_watermarks));
+        }
+
         sst_split_info
     }
 

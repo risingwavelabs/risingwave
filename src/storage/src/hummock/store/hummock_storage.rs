@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
 use std::future::Future;
 use std::ops::{Bound, Deref};
 use std::sync::atomic::{AtomicU64, Ordering as MemOrdering};
@@ -29,7 +28,7 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::key::{
     is_empty_key_range, vnode, vnode_range, TableKey, TableKeyRange,
 };
-use risingwave_hummock_sdk::table_watermark::rewrite_range_with_table_watermark;
+use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -126,13 +125,8 @@ pub fn get_committed_read_version_tuple(
     epoch: HummockEpoch,
 ) -> (TableKeyRange, ReadVersionTuple) {
     if let Some(table_watermarks) = version.version().table_watermarks.get(&table_id) {
-        rewrite_range_with_table_watermark(
-            epoch,
-            table_watermarks.direction,
-            &mut key_range,
-            &VecDeque::new(),
-            Some(table_watermarks),
-        )
+        TableWatermarksIndex::new_committed(table_watermarks.clone(), version.max_committed_epoch())
+            .rewrite_range_with_table_watermark(epoch, &mut key_range)
     }
     (key_range, (vec![], vec![], version))
 }
