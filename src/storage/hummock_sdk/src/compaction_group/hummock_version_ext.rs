@@ -33,7 +33,7 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
+use crate::table_watermark::{TableWatermarks, VnodeWatermark};
 use crate::version::{HummockVersion, HummockVersionDelta};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -193,18 +193,6 @@ impl HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
-    }
-
-    pub fn build_table_watermarks_index(&self) -> HashMap<TableId, TableWatermarksIndex> {
-        self.table_watermarks
-            .iter()
-            .map(|(table_id, table_watermarks)| {
-                (
-                    *table_id,
-                    table_watermarks.build_index(self.max_committed_epoch),
-                )
-            })
-            .collect()
     }
 
     pub fn safe_epoch_table_watermarks(
