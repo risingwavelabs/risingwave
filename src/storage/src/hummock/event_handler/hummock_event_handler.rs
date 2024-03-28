@@ -76,24 +76,34 @@ impl BufferTracker {
     ) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = (capacity as f32 * config.shared_buffer_flush_ratio) as usize;
+        let blocking_threshold = config.memory_limit_for_behind_barrier_ratio;
         assert!(
             flush_threshold < capacity,
             "flush_threshold {} should be less or equal to capacity {}",
             flush_threshold,
             capacity
         );
-        Self::new(capacity, flush_threshold, global_upload_task_size)
+        Self::new(
+            capacity,
+            flush_threshold,
+            blocking_threshold,
+            global_upload_task_size,
+        )
     }
 
     pub fn new(
         capacity: usize,
         flush_threshold: usize,
+        blocking_threshold: u64,
         global_upload_task_size: GenericGauge<AtomicU64>,
     ) -> Self {
         assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
-            global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
+            global_buffer: Arc::new(MemoryLimiter::new_with_blocking_ratio(
+                capacity as u64,
+                blocking_threshold,
+            )),
             global_upload_task_size,
         }
     }
