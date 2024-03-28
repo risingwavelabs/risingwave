@@ -517,6 +517,11 @@ pub struct NatsCommon {
     pub server_url: String,
     #[serde(rename = "subject")]
     pub subject: String,
+    #[serde(rename = "filter_subject")]
+    pub filter_subject: Option<String>,
+    #[serde(rename = "durable")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub durable: Option<bool>,
     #[serde(rename = "connect_mode")]
     pub connect_mode: String,
     #[serde(rename = "username")]
@@ -604,13 +609,31 @@ impl NatsCommon {
     > {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone(), stream).await?;
-        let subject_name = self
-            .subject
-            .replace(',', "-")
-            .replace(['.', '>', '*', ' ', '\t'], "_");
+        let subject_name: String = match self.filter_subject {
+            Some(ref v) => v.replace(',', "-").replace(['.', '>', '*', ' ', '\t'], "_"),
+            None => String::new(),
+        };
         let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
+
+        let filter_subjects: Vec<String> = match self.filter_subject {
+            Some(ref v) => v.split(',').map(|s| s.to_string()).collect::<Vec<String>>(),
+            None => Vec::new(),
+        };
+        let durable_name = match self.durable {
+            Some(v) => {
+                if v {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
         let mut config = jetstream::consumer::pull::Config {
             ack_policy: jetstream::consumer::AckPolicy::None,
+            name: Some(name.clone()),
+            durable_name,
+            filter_subjects,
             ..Default::default()
         };
 
