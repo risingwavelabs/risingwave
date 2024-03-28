@@ -83,8 +83,10 @@ mysql_common = { version = "0.32", default-features = false, features = [
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = "0.45"
+openssl = "0.10"
 parking_lot = "0.12"
 paste = "1"
+postgres-openssl = "0.5.0"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.13"
@@ -116,7 +118,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.22.0", features = ["url"] }
 rust_decimal = "1"
-rustls-native-certs = "0.6"
+rustls-native-certs = "0.7"
 rustls-pemfile = "2"
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }

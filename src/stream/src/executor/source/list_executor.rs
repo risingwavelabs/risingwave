@@ -23,7 +23,6 @@ use risingwave_common::array::Op;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::SourceCtrlOpts;
-use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -53,9 +52,6 @@ pub struct FsListExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
-
-    // config for the connector node
-    connector_params: ConnectorParams,
 }
 
 impl<S: StateStore> FsListExecutor<S> {
@@ -67,7 +63,6 @@ impl<S: StateStore> FsListExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
@@ -76,7 +71,6 @@ impl<S: StateStore> FsListExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
-            connector_params,
         }
     }
 

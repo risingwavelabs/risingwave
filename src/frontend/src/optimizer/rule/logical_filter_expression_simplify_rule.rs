@@ -42,6 +42,8 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
         // i.e., the specific optimization that will apply to the entire condition
         // e.g., `e and not(e)`
         let predicate = ConditionRewriter::rewrite(filter.predicate().clone());
+
+        // construct the new filter after predicate rewriting
         let filter = LogicalFilter::create(filter.input(), predicate);
 
         // then rewrite single expression via `rewrite_exprs`
