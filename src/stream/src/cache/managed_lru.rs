@@ -230,8 +230,11 @@ impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     fn drop(&mut self) {
         let new_value_size = self.inner.estimated_size();
         if new_value_size != self.old_value_size {
-            self.reporter.dec(self.old_value_size);
-            self.reporter.inc(new_value_size);
+            self.reporter.apply(|size| {
+                *size = size
+                    .saturating_sub(self.old_value_size)
+                    .saturating_add(new_value_size)
+            })
         }
     }
 }
@@ -257,7 +260,7 @@ struct HeapSizeReporter {
 }
 
 impl HeapSizeReporter {
-    pub fn new(
+    fn new(
         heap_size_metrics: LabelGuardedIntGauge<3>,
         heap_size: usize,
         last_reported: usize,
@@ -269,17 +272,25 @@ impl HeapSizeReporter {
         }
     }
 
-    pub fn inc(&mut self, size: usize) {
+    fn inc(&mut self, size: usize) {
         self.heap_size = self.heap_size.saturating_add(size);
         self.try_report();
     }
 
-    pub fn dec(&mut self, size: usize) {
+    fn dec(&mut self, size: usize) {
         self.heap_size = self.heap_size.saturating_sub(size);
         self.try_report();
     }
 
-    pub fn try_report(&mut self) -> bool {
+    fn apply<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut usize),
+    {
+        f(&mut self.heap_size);
+        self.try_report();
+    }
+
+    fn try_report(&mut self) -> bool {
         if self.heap_size.abs_diff(self.last_reported) >= REPORT_SIZE_EVERY_N_KB_CHANGE << 10 {
             self.metrics.set(self.heap_size as _);
             self.last_reported = self.heap_size;
