@@ -19,7 +19,7 @@ echo "--- Install lld"
 # The lld in the CentOS 7 repository is too old and contains a bug that causes a linker error.
 # So we install a newer version here. (17.0.6, latest version at the time of writing)
 # It is manually built in the same environent and uploaded to S3.
-aws s3 cp s3://ci-deps-dist/llvm-lld-manylinux2014_${ARCH}.tar.gz .
+aws s3 cp s3://rw-ci-deps-dist/llvm-lld-manylinux2014_${ARCH}.tar.gz .
 tar -zxvf llvm-lld-manylinux2014_${ARCH}.tar.gz --directory=/usr/local
 ld.lld --version
 
@@ -29,7 +29,7 @@ yum install -y perl-core
 echo "--- Install java and maven"
 yum install -y java-11-openjdk java-11-openjdk-devel wget python3 python3-devel cyrus-sasl-devel
 pip3 install toml-cli
-wget https://ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
+wget https://rw-ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
 mvn -v
 
@@ -70,10 +70,10 @@ cd target/release && chmod +x risingwave risectl
 echo "--- Upload nightly binary to s3"
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   tar -czvf risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz risingwave
-  aws s3 cp risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+  aws s3 cp risingwave-"$(date '+%Y%m%d')"-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
 elif [[ -n "${BINARY_NAME+x}" ]]; then
     tar -czvf risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz risingwave
-    aws s3 cp risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+    aws s3 cp risingwave-${BINARY_NAME}-${ARCH}-unknown-linux.tar.gz s3://rw-nightly-pre-built-binary
 fi
 
 echo "--- Build connector node"
