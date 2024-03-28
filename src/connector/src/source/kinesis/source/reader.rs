@@ -16,8 +16,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError, ProvideErrorMetadata};
-use aws_sdk_kinesis::error::SdkError;
+use aws_sdk_kinesis::error::{DisplayErrorContext, ProvideErrorMetadata, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
 use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
