@@ -8,6 +8,27 @@ export RW_PREFIX_DATA=$RW_PREFIX/data
 
 source ci/scripts/common.sh
 
+wait_for_recovery() {
+  set +e
+  timeout 20s bash -c '
+    while true; do
+      echo "Polling every 1s to check if the recovery is complete for 20s"
+      if psql -h localhost -p 4566 -d dev -U root -c "FLUSH;" </dev/null
+      then exit 0;
+      else sleep 1;
+      fi
+    done
+  '
+  STATUS=$?
+  set -e
+  if [[ $STATUS -ne 0 ]]; then
+    echo "Cluster failed to get recovered: $STATUS"
+    exit 1
+  else
+    echo "Cluster is recovered"
+  fi
+}
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -53,6 +74,9 @@ cargo make ci-kill
 
 echo "--- starting risingwave cluster, meta-1cn-1fe-sqlite"
 cargo make dev meta-1cn-1fe-sqlite
+
+echo "--- wait for recovery"
+wait_for_recovery
 
 echo "--- run check"
 sqllogictest -d dev -h localhost -p 4566 './e2e_test/sql_migration/check.slt'
