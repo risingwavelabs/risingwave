@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 // Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,7 +28,9 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{
+    visible_watermark, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -2184,15 +2187,19 @@ async fn test_table_watermark() {
     let (local1, local2) = test_after_epoch2(local1, local2).await;
 
     let check_version_table_watermark = |version: PinnedVersion| {
-        let table_watermarks = version.table_watermark_index().get(&TEST_TABLE_ID).unwrap();
-        assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
+        let table_watermarks = version
+            .version()
+            .table_watermarks
+            .get(&TEST_TABLE_ID)
+            .unwrap();
+        assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction);
         assert_eq!(
             gen_inner_key(watermark1),
-            table_watermarks.read_watermark(vnode1, epoch1).unwrap()
+            visible_watermark(vnode1, epoch1, &VecDeque::new(), Some(table_watermarks)).unwrap()
         );
         assert_eq!(
             gen_inner_key(watermark1),
-            table_watermarks.read_watermark(vnode2, epoch1).unwrap()
+            visible_watermark(vnode2, epoch1, &VecDeque::new(), Some(table_watermarks)).unwrap()
         );
     };
 

@@ -233,9 +233,15 @@ impl HummockReadVersion {
         Self {
             table_id,
             table_watermarks: committed_version
-                .table_watermark_index()
+                .version()
+                .table_watermarks
                 .get(&table_id)
-                .cloned(),
+                .map(|table_watermarks| {
+                    TableWatermarksIndex::new(
+                        table_watermarks.direction,
+                        committed_version.version().max_committed_epoch,
+                    )
+                }),
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 sst: VecDeque::default(),
@@ -392,9 +398,10 @@ impl HummockReadVersion {
                             self.committed.max_committed_epoch(),
                         );
                     } else {
-                        self.table_watermarks = Some(
-                            committed_watermarks.build_index(self.committed.max_committed_epoch()),
-                        );
+                        self.table_watermarks = Some(TableWatermarksIndex::new(
+                            committed_watermarks.direction,
+                            self.committed.max_committed_epoch(),
+                        ));
                     }
                 }
             }
@@ -407,7 +414,15 @@ impl HummockReadVersion {
                 .get_or_insert_with(|| {
                     TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
                 })
-                .add_epoch_watermark(epoch, Arc::from(vnode_watermarks), direction),
+                .add_epoch_watermark(
+                    epoch,
+                    Arc::from(vnode_watermarks),
+                    direction,
+                    self.committed
+                        .version()
+                        .table_watermarks
+                        .get(&self.table_id),
+                ),
         }
     }
 
@@ -425,7 +440,13 @@ impl HummockReadVersion {
     /// regressed watermark
     pub fn filter_regress_watermarks(&self, watermarks: &mut Vec<VnodeWatermark>) {
         if let Some(watermark_index) = &self.table_watermarks {
-            watermark_index.filter_regress_watermarks(watermarks)
+            watermark_index.filter_regress_watermarks(
+                watermarks,
+                self.committed
+                    .version()
+                    .table_watermarks
+                    .get(&self.table_id),
+            )
         }
     }
 
@@ -543,7 +564,15 @@ pub fn read_filter_for_version(
     let committed_version = read_version_guard.committed().clone();
 
     if let Some(watermark) = read_version_guard.table_watermarks.as_ref() {
-        watermark.rewrite_range_with_table_watermark(epoch, &mut table_key_range)
+        watermark.rewrite_range_with_table_watermark(
+            epoch,
+            &mut table_key_range,
+            read_version_guard
+                .committed
+                .version()
+                .table_watermarks
+                .get(&read_version_guard.table_id),
+        )
     }
 
     let (imm_iter, sst_iter) =
