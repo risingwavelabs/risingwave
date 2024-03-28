@@ -1075,7 +1075,7 @@ mod tests {
             },
         );
         index.apply_committed_watermarks(
-            &version.table_watermarks.get(&test_table_id).unwrap(),
+            version.table_watermarks.get(&test_table_id).unwrap(),
             EPOCH1,
         );
         assert_eq!(EPOCH1, index.committed_epoch);
