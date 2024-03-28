@@ -23,6 +23,7 @@ use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -226,6 +227,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -391,6 +394,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             actual_output_data_types,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
+                    latest_sequence.clone(),
+                    evict_sequence.clone(),
                     watermark_epoch.clone(),
                     join_key_data_types_l,
                     state_join_key_indices_l.clone(),
@@ -421,6 +426,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
+                    latest_sequence,
+                    evict_sequence,
                     watermark_epoch,
                     join_key_data_types_r,
                     state_join_key_indices_r.clone(),
@@ -1202,6 +1209,8 @@ mod tests {
             state_r,
             degree_state_r,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             false,
             Arc::new(StreamingMetrics::unused()),
             1024,
@@ -1294,6 +1303,8 @@ mod tests {
             state_r,
             degree_state_r,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,

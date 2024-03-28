@@ -27,6 +27,7 @@ use lru::DefaultHasher;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -43,7 +44,7 @@ use super::{
     Barrier, Execute, ExecutorInfo, Message, MessageStream, StreamExecutorError,
     StreamExecutorResult,
 };
-use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
+use crate::cache::{cache_may_stale, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
@@ -489,6 +490,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         table_output_indices: Vec<usize>,
         table_stream_key_indices: Vec<usize>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
@@ -502,9 +505,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             "temporal join",
         );
 
-        let cache = new_with_hasher_in(
+        let cache = ManagedLruCache::unbounded_with_hasher_in(
             watermark_epoch,
             metrics_info,
+            latest_sequence,
+            evict_sequence,
             DefaultHasher::default(),
             alloc,
         );
@@ -696,7 +701,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                             self.right_table.cache.clear();
                         }
                     }
-                    self.right_table.cache.update_epoch(barrier.epoch.curr);
+                    // self.right_table.cache.update_epoch(barrier.epoch.curr);
                     self.right_table.update(
                         updates,
                         &self.right_join_keys,

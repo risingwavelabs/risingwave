@@ -58,6 +58,8 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     params.vnode_bitmap.map(Arc::new),
                     table,
                     params.watermark_epoch,
+                    params.latest_sequence,
+                    params.evict_sequence,
                     conflict_behavior,
                     params.executor_stats.clone(),
                 )
@@ -111,6 +113,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             params.watermark_epoch,
+            params.latest_sequence,
+            params.evict_sequence,
             conflict_behavior,
             params.executor_stats.clone(),
         )

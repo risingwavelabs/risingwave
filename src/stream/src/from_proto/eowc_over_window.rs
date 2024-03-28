@@ -65,6 +65,8 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             order_key_index,
             state_table,
             watermark_epoch: params.watermark_epoch,
+            latest_sequence: params.latest_sequence,
+            evict_sequence: params.evict_sequence,
         });
         Ok((params.info, exec).into())
     }

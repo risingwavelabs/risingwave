@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::GroupTopNNode;
@@ -69,6 +70,8 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             group_by,
             state_table,
             watermark_epoch: params.watermark_epoch,
+            latest_sequence: params.latest_sequence,
+            evict_sequence: params.evict_sequence,
             group_key_types,
 
             with_ties: node.with_ties,
@@ -88,6 +91,8 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     group_by: Vec<usize>,
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
     group_key_types: Vec<DataType>,
 
     with_ties: bool,
@@ -110,6 +115,8 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                     self.group_by,
                     self.state_table,
                     self.watermark_epoch,
+                    self.latest_sequence,
+                    self.evict_sequence,
                 )?
                 .boxed())
             };

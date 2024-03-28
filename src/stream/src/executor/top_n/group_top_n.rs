@@ -19,6 +19,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -28,7 +29,7 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -51,6 +52,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
     ) -> StreamResult<Self> {
         Ok(TopNExecutorWrapper {
             input,
@@ -63,6 +66,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 group_by,
                 state_table,
                 watermark_epoch,
+                latest_sequence,
+                evict_sequence,
                 ctx,
             )?,
         })
@@ -105,6 +110,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
         ctx: ActorContextRef,
     ) -> StreamResult<Self> {
         let metrics_info = MetricsInfo::new(
@@ -124,7 +131,12 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(watermark_epoch, metrics_info),
+            caches: GroupTopNCache::new(
+                watermark_epoch,
+                metrics_info,
+                latest_sequence,
+                evict_sequence,
+            ),
             cache_key_serde,
             ctx,
         })
@@ -136,8 +148,18 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
-        let cache = new_unbounded(watermark_epoch, metrics_info);
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics_info: MetricsInfo,
+        latest_sequence: Arc<AtomicSequence>,
+        evict_sequence: Arc<AtomicSequence>,
+    ) -> Self {
+        let cache = ManagedLruCache::unbounded(
+            watermark_epoch,
+            metrics_info,
+            latest_sequence,
+            evict_sequence,
+        );
         Self { data: cache }
     }
 }
@@ -195,7 +217,7 @@ where
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
-                self.caches.push(group_cache_key.clone(), topn_cache);
+                self.caches.put(group_cache_key.clone(), topn_cache);
             }
 
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
@@ -238,8 +260,8 @@ where
         self.managed_state.try_flush().await
     }
 
-    fn update_epoch(&mut self, epoch: u64) {
-        self.caches.update_epoch(epoch);
+    fn update_epoch(&mut self, _epoch: u64) {
+        // self.caches.update_epoch(epoch);
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
@@ -393,6 +415,8 @@ mod tests {
             vec![1],
             state_table,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
         )
         .unwrap();
         let mut top_n_executor = top_n_executor.boxed().execute();
@@ -489,6 +513,8 @@ mod tests {
             vec![1],
             state_table,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
         )
         .unwrap();
         let mut top_n_executor = top_n_executor.boxed().execute();
@@ -578,6 +604,8 @@ mod tests {
             vec![1, 2],
             state_table,
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicSequence::new(0)),
+            Arc::new(AtomicSequence::new(0)),
         )
         .unwrap();
         let mut top_n_executor = top_n_executor.boxed().execute();

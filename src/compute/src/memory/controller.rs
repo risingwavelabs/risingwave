@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use risingwave_common::lru::{AtomicSequence, Sequence};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -75,8 +77,15 @@ pub struct LruWatermarkController {
     threshold_graceful: usize,
     threshold_aggressive: usize,
 
+    eviction_factor_stable: f64,
+    eviction_factor_graceful: f64,
+    eviction_factor_aggressive: f64,
+
     /// The state from previous tick
     state: State,
+
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Sequence,
 }
 
 impl LruWatermarkController {
@@ -91,7 +100,12 @@ impl LruWatermarkController {
             threshold_stable,
             threshold_graceful,
             threshold_aggressive,
+            eviction_factor_stable: config.eviction_factor_stable,
+            eviction_factor_graceful: config.eviction_factor_graceful,
+            eviction_factor_aggressive: config.eviction_factor_aggressive,
             state: State::default(),
+            latest_sequence: config.latest_sequence.clone(),
+            evict_sequence: 0,
         }
     }
 }
@@ -131,7 +145,7 @@ fn jemalloc_memory_stats() -> MemoryStats {
 }
 
 impl LruWatermarkController {
-    pub fn tick(&mut self, interval_ms: u32) -> Epoch {
+    pub fn tick(&mut self, interval_ms: u32) -> (Epoch, Sequence) {
         // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
         let MemoryStats {
             allocated: jemalloc_allocated_bytes,
@@ -145,6 +159,25 @@ impl LruWatermarkController {
 
         let last_step = self.state.lru_watermark_step;
         let last_used_memory_bytes = self.state.used_memory_bytes;
+
+        // * aggressive ~ inf        : evict factor aggressive
+        // *   graceful ~ aggressive : evict factor graceful
+        // *     stable ~ graceful   : evict factor stable
+        // *          0 ~ stable     : no eviction
+        let to_evict_bytes = cur_used_memory_bytes.saturating_sub(self.threshold_aggressive) as f64
+            * self.eviction_factor_aggressive
+            + cur_used_memory_bytes
+                .saturating_sub(self.threshold_graceful)
+                .min(self.threshold_aggressive - self.threshold_graceful) as f64
+                * self.eviction_factor_graceful
+            + cur_used_memory_bytes
+                .saturating_sub(self.threshold_stable)
+                .min(self.threshold_graceful - self.threshold_stable) as f64
+                * self.eviction_factor_stable;
+        let ratio = to_evict_bytes / cur_used_memory_bytes as f64;
+        let latest_sequence = self.latest_sequence.load(Ordering::Relaxed);
+        let sequence_diff = ((latest_sequence - self.evict_sequence) as f64 * ratio) as Sequence;
+        self.evict_sequence = latest_sequence.min(self.evict_sequence + sequence_diff);
 
         // The watermark calculation works in the following way:
         //
@@ -224,6 +257,9 @@ impl LruWatermarkController {
             .set(jvm_allocated_bytes as i64);
         self.metrics.jvm_active_bytes.set(jvm_active_bytes as i64);
 
-        Epoch::from_physical_time(watermark_time_ms)
+        (
+            Epoch::from_physical_time(watermark_time_ms),
+            self.evict_sequence,
+        )
     }
 }

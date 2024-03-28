@@ -16,6 +16,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
@@ -88,6 +89,9 @@ struct ExecutorInner<S: StateStore> {
     /// Watermark epoch.
     watermark_epoch: AtomicU64Ref,
 
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
+
     /// Extreme state cache size
     extreme_cache_size: usize,
 }
@@ -135,6 +139,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
+                latest_sequence: args.latest_sequence,
+                evict_sequence: args.evict_sequence,
                 extreme_cache_size: args.extreme_cache_size,
             },
         })
@@ -239,15 +245,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
-        let mut distinct_dedup = DistinctDeduplicater::new(
+        let distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
             this.watermark_epoch.clone(),
+            this.latest_sequence.clone(),
+            this.evict_sequence.clone(),
             &this.distinct_dedup_tables,
             this.actor_ctx.clone(),
         );
-        distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
+        // distinct_dedup.dedup_caches_mut().for_each(|cache| {
+        //     cache.update_epoch(barrier.epoch.curr);
+        // });
 
         yield Message::Barrier(barrier);
 
@@ -285,9 +293,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     {
                         yield Message::Chunk(chunk);
                     }
-                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-                        cache.update_epoch(barrier.epoch.curr);
-                    });
+                    // vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+                    //     cache.update_epoch(barrier.epoch.curr);
+                    // });
                     yield Message::Barrier(barrier);
                 }
             }

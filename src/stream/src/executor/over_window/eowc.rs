@@ -14,6 +14,7 @@
 
 use std::marker::PhantomData;
 use std::ops::Bound;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -21,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -35,7 +37,7 @@ use risingwave_expr::window_function::{
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
@@ -110,6 +112,8 @@ struct ExecutorInner<S: StateStore> {
     state_table: StateTable<S>,
     state_table_schema_len: usize,
     watermark_epoch: AtomicU64Ref,
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -134,6 +138,8 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub order_key_index: usize,
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
+    pub latest_sequence: Arc<AtomicSequence>,
+    pub evict_sequence: Arc<AtomicSequence>,
 }
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
@@ -152,6 +158,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 state_table: args.state_table,
                 state_table_schema_len: input_info.schema.len(),
                 watermark_epoch: args.watermark_epoch,
+                latest_sequence: args.latest_sequence,
+                evict_sequence: args.evict_sequence,
             },
         }
     }
@@ -350,14 +358,19 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         );
 
         let mut vars = ExecutionVars {
-            partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
+            partitions: ManagedLruCache::unbounded(
+                this.watermark_epoch.clone(),
+                metrics_info,
+                this.latest_sequence.clone(),
+                this.evict_sequence.clone(),
+            ),
             _phantom: PhantomData::<S>,
         };
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         this.state_table.init_epoch(barrier.epoch);
-        vars.partitions.update_epoch(barrier.epoch.curr);
+        // vars.partitions.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);
 
@@ -387,7 +400,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         }
                     }
 
-                    vars.partitions.update_epoch(barrier.epoch.curr);
+                    // vars.partitions.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }

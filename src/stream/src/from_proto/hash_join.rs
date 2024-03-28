@@ -16,6 +16,7 @@ use std::cmp::min;
 use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::lru::AtomicSequence;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
     build_func_non_strict, build_non_strict_from_prost, InputRefExpression, NonStrictExpression,
@@ -150,6 +151,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             state_table_r,
             degree_state_table_r,
             lru_manager: params.watermark_epoch,
+            latest_sequence: params.latest_sequence,
+            evict_sequence: params.evict_sequence,
             is_append_only,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
@@ -178,6 +181,8 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
     lru_manager: AtomicU64Ref,
+    latest_sequence: Arc<AtomicSequence>,
+    evict_sequence: Arc<AtomicSequence>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
@@ -208,6 +213,8 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                     self.state_table_r,
                     self.degree_state_table_r,
                     self.lru_manager,
+                    self.latest_sequence,
+                    self.evict_sequence,
                     self.is_append_only,
                     self.metrics,
                     self.chunk_size,
