@@ -1027,7 +1027,8 @@ impl FragmentManager {
         bail!("fragment not found: {}", fragment_id)
     }
 
-    pub async fn get_running_actors_and_upstream_fragment_of_fragment(
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
         &self,
         fragment_id: FragmentId,
     ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {

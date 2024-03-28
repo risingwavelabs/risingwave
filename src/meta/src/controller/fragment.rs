@@ -1089,6 +1089,24 @@ impl CatalogController {
         Ok(actors)
     }
 
+    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_and_upstream_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<Vec<(ActorId, Vec<ActorId>)>> {
+        let inner = self.inner.read().await;
+        let actors: Vec<(ActorId, Vec<ActorId>)> = Actor::find()
+            .select_only()
+            .column(actor::Column::ActorId)
+            .column(actor::Column::UpstreamActorIds)
+            .filter(actor::Column::FragmentId.eq(fragment_id))
+            .filter(actor::Column::Status.eq(ActorStatus::Running))
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        Ok(actors)
+    }
+
     pub async fn get_actors_by_job_ids(&self, job_ids: Vec<ObjectId>) -> MetaResult<Vec<ActorId>> {
         let inner = self.inner.read().await;
         let actors: Vec<ActorId> = Actor::find()

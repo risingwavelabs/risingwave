@@ -621,11 +621,21 @@ impl MetadataManager {
         match self {
             MetadataManager::V1(mgr) => {
                 mgr.fragment_manager
-                    .get_running_actors_and_upstream_fragment_of_fragment(id)
+                    .get_running_actors_and_upstream_of_fragment(id)
                     .await
             }
-            MetadataManager::V2(_mgr) => {
-                todo!()
+            MetadataManager::V2(mgr) => {
+                let actor_ids = mgr
+                    .catalog_controller
+                    .get_running_actors_and_upstream_of_fragment(id as _)
+                    .await?;
+                Ok(actor_ids.into_iter().map(|(id, actors)| {
+                    (
+                        id as ActorId,
+                        actors.into_iter().map(|id| id as ActorId).collect(),
+                    )
+                        .collect()
+                }))
             }
         }
     }

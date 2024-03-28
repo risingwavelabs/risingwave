@@ -151,7 +151,6 @@ impl StreamSourceScan {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            // XXX: what's the usage of this?
             row_id_index: self.core.row_id_index.map(|index| index as _),
             columns: self
                 .core
