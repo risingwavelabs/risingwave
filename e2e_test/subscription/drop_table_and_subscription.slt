@@ -1,0 +1,5 @@
+statement ok
+drop subscription sub;
+
+statement ok
+drop table t1;
