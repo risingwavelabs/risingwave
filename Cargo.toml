@@ -305,7 +305,7 @@ futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = 
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
 # todo(wcy-fdu): remove this patch fork after opendal release a new version to apply azure workload identity change.
-reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "a3ff35c" }
+reqsign = { git = "https://github.com/wcy-fdu/reqsign.git", rev = "e6cb304" }
 
 [workspace.metadata.dylint]
 libraries = [{ path = "./lints" }]
