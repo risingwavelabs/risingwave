@@ -71,6 +71,7 @@ icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = "0.12"
 jni = { version = "0.21.1", features = ["invocation"] }
+jsonwebtoken = "9.2.0"
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.12", features = ["future"] }
