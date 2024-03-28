@@ -33,6 +33,7 @@ memcomparable = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
+rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_connector = { workspace = true }

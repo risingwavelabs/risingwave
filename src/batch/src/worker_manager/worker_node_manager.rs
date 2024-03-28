@@ -23,8 +23,9 @@ use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
-use crate::catalog::FragmentId;
-use crate::scheduler::{SchedulerError, SchedulerResult};
+use crate::error::{BatchError, Result};
+
+pub(crate) type FragmentId = u32;
 
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
@@ -160,9 +161,9 @@ impl WorkerNodeManager {
     pub fn get_workers_by_parallel_unit_ids(
         &self,
         parallel_unit_ids: &[ParallelUnitId],
-    ) -> SchedulerResult<Vec<WorkerNode>> {
+    ) -> Result<Vec<WorkerNode>> {
         if parallel_unit_ids.is_empty() {
-            return Err(SchedulerError::EmptyWorkerNodes);
+            return Err(BatchError::EmptyWorkerNodes);
         }
 
         let guard = self.inner.read().unwrap();
@@ -183,14 +184,14 @@ impl WorkerNodeManager {
     pub fn get_streaming_fragment_mapping(
         &self,
         fragment_id: &FragmentId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    ) -> Result<ParallelUnitMapping> {
         self.inner
             .read()
             .unwrap()
             .streaming_fragment_vnode_mapping
             .get(fragment_id)
             .cloned()
-            .ok_or_else(|| SchedulerError::StreamingVnodeMappingNotFound(*fragment_id))
+            .ok_or_else(|| BatchError::StreamingVnodeMappingNotFound(*fragment_id))
     }
 
     pub fn insert_streaming_fragment_mapping(
@@ -227,15 +228,12 @@ impl WorkerNodeManager {
     }
 
     /// Returns fragment's vnode mapping for serving.
-    fn serving_fragment_mapping(
-        &self,
-        fragment_id: FragmentId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    fn serving_fragment_mapping(&self, fragment_id: FragmentId) -> Result<ParallelUnitMapping> {
         self.inner
             .read()
             .unwrap()
             .get_serving_fragment_mapping(fragment_id)
-            .ok_or_else(|| SchedulerError::ServingVnodeMappingNotFound(fragment_id))
+            .ok_or_else(|| BatchError::ServingVnodeMappingNotFound(fragment_id))
     }
 
     pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, ParallelUnitMapping>) {
@@ -339,10 +337,7 @@ impl WorkerNodeSelector {
             .sum()
     }
 
-    pub fn fragment_mapping(
-        &self,
-        fragment_id: FragmentId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<ParallelUnitMapping> {
         if self.enable_barrier_read {
             self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
@@ -357,7 +352,7 @@ impl WorkerNodeSelector {
                     (Some(o), max_parallelism)
                 }
                 Err(e) => {
-                    if !matches!(e, SchedulerError::ServingVnodeMappingNotFound(_)) {
+                    if !matches!(e, BatchError::ServingVnodeMappingNotFound(_)) {
                         return Err(e);
                     }
                     // We cannot tell whether it's a singleton, set max_parallelism=1 for place_vnode as if it's a singleton.
@@ -375,11 +370,11 @@ impl WorkerNodeSelector {
             // 2. Temporary mapping that filters out unavailable workers.
             let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
             let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
-            masked_mapping.ok_or_else(|| SchedulerError::EmptyWorkerNodes)
+            masked_mapping.ok_or_else(|| BatchError::EmptyWorkerNodes)
         }
     }
 
-    pub fn next_random_worker(&self) -> SchedulerResult<WorkerNode> {
+    pub fn next_random_worker(&self) -> Result<WorkerNode> {
         let worker_nodes = if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes()
         } else {
@@ -387,7 +382,7 @@ impl WorkerNodeSelector {
         };
         worker_nodes
             .choose(&mut rand::thread_rng())
-            .ok_or_else(|| SchedulerError::EmptyWorkerNodes)
+            .ok_or_else(|| BatchError::EmptyWorkerNodes)
             .map(|w| (*w).clone())
     }
 

@@ -22,6 +22,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use postgres_types::FromSql;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::Schema;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
@@ -43,7 +44,6 @@ use crate::optimizer::{
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
     LocalQueryExecution, LocalQueryStream,

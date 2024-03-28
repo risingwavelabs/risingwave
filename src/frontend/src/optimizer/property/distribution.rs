@@ -49,6 +49,7 @@ use std::fmt::Debug;
 use fixedbitset::FixedBitSet;
 use generic::PhysicalPlanRef;
 use itertools::Itertools;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::batch_plan::exchange_info::{
@@ -62,7 +63,6 @@ use crate::catalog::FragmentId;
 use crate::error::Result;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

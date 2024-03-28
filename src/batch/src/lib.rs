@@ -33,6 +33,7 @@
 #![feature(lazy_cell)]
 #![feature(array_methods)]
 #![feature(error_generic_member_access)]
+#![feature(map_try_insert)]
 
 pub mod error;
 pub mod exchange_source;
@@ -41,6 +42,7 @@ pub mod executor;
 pub mod monitor;
 pub mod rpc;
 pub mod task;
+pub mod worker_manager;
 
 #[macro_use]
 extern crate tracing;
