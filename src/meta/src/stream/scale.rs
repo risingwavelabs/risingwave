@@ -194,10 +194,8 @@ pub struct RescheduleContext {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
-    /// Fragments with `StreamSource`
+    /// Fragments with stream source
     stream_source_fragment_ids: HashSet<FragmentId>,
-    /// Fragments with `StreamSourceBackfill`
-    stream_source_backfill_fragment_ids: HashSet<FragmentId>,
     /// Target fragments in `NoShuffle` relation
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
     /// Source fragments in `NoShuffle` relation
@@ -665,7 +663,6 @@ impl ScaleController {
         }
 
         let mut stream_source_fragment_ids = HashSet::new();
-        let mut stream_source_backfill_fragment_ids = HashSet::new();
         let mut no_shuffle_reschedule = HashMap::new();
         for (
             fragment_id,
@@ -737,12 +734,6 @@ impl ScaleController {
                 let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
                 if stream_node.find_stream_source().is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
-                }
-            }
-            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
-                let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                if stream_node.find_source_backfill().is_some() {
-                    stream_source_backfill_fragment_ids.insert(*fragment_id);
                 }
             }
 
@@ -820,7 +811,6 @@ impl ScaleController {
             worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
-            stream_source_backfill_fragment_ids,
             no_shuffle_target_fragment_ids,
             no_shuffle_source_fragment_ids,
             fragment_dispatcher_map,
@@ -1218,9 +1208,9 @@ impl ScaleController {
             .await?;
         }
 
-        // For stream source & source backfill fragments, we need to reallocate the splits.
+        // For stream source fragments, we need to reallocate the splits.
         // Because we are in the Pause state, so it's no problem to reallocate
-        let mut fragment_actor_splits = HashMap::new();
+        let mut fragment_stream_source_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_after_reschedule =
                 fragment_actors_after_reschedule.get(fragment_id).unwrap();
@@ -1238,39 +1228,11 @@ impl ScaleController {
 
                 let actor_splits = self
                     .source_manager
-                    .migrate_splits_for_source_actors(
-                        *fragment_id,
-                        &prev_actor_ids,
-                        &curr_actor_ids,
-                    )
+                    .migrate_splits(*fragment_id, &prev_actor_ids, &curr_actor_ids)
                     .await?;
 
-                fragment_actor_splits.insert(*fragment_id, actor_splits);
-            }
-        }
-        // Loop another round to make sure source actors are migrated first, and then align backfill actors
-        if !ctx.stream_source_backfill_fragment_ids.is_empty() {
-            for fragment_id in reschedules.keys() {
-                let actors_after_reschedule =
-                    fragment_actors_after_reschedule.get(fragment_id).unwrap();
-
-                if ctx
-                    .stream_source_backfill_fragment_ids
-                    .contains(fragment_id)
-                {
-                    let fragment = ctx.fragment_map.get(fragment_id).unwrap();
-
-                    let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
-
-                    let actor_splits = self.source_manager.migrate_splits_for_backfill_actors(
-                        *fragment_id,
-                        &fragment.upstream_fragment_ids,
-                        &curr_actor_ids,
-                        &fragment_actor_splits,
-                        &no_shuffle_upstream_actor_map,
-                    )?;
-                    fragment_actor_splits.insert(*fragment_id, actor_splits);
-                }
+                fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
+                todo!("migrate_splits_backfill");
             }
         }
 
@@ -1424,7 +1386,7 @@ impl ScaleController {
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
 
-            let actor_splits = fragment_actor_splits
+            let actor_splits = fragment_stream_source_actor_splits
                 .get(&fragment_id)
                 .cloned()
                 .unwrap_or_default();
