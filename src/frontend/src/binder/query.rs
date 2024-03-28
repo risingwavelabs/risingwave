@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{
+    Cte, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+};
 use thiserror_ext::AsReport;
 
+use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
 use crate::binder::{Binder, BoundSetExpr};
@@ -279,20 +282,104 @@ impl Binder {
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {
-        if with.recursive {
-            bail_not_implemented!("recursive cte");
-        } else {
-            for cte_table in with.cte_tables {
-                let Cte { alias, query, .. } = cte_table;
-                let table_name = alias.name.real_value();
-                let bound_query = self.bind_query(query)?;
-                let share_id = self.next_share_id();
-                self.context
+        for cte_table in with.cte_tables {
+            let share_id = self.next_share_id();
+            let Cte { alias, query, .. } = cte_table;
+            let table_name = alias.name.real_value();
+            if with.recursive {
+                let Query {
+                    with,
+                    body,
+                    order_by,
+                    limit,
+                    offset,
+                    fetch,
+                } = query;
+                fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
+                    if !v.is_none() {
+                        return Err(ErrorCode::BindError(format!(
+                            "`{clause}` is not supported in recursive CTE"
+                        ))
+                        .into());
+                    }
+                    Ok(())
+                }
+                should_be_empty(order_by.first(), "ORDER BY")?;
+                should_be_empty(limit, "LIMIT")?;
+                should_be_empty(offset, "OFFSET")?;
+                should_be_empty(fetch, "FETCH")?;
+
+                let SetExpr::SetOperation {
+                    op: SetOperator::Union,
+                    all,
+                    left,
+                    right,
+                } = body
+                else {
+                    return Err(ErrorCode::BindError(format!(
+                        "`UNION` is required in recursive CTE"
+                    ))
+                    .into());
+                };
+
+                if !all {
+                    return Err(ErrorCode::BindError(format!(
+                        "only `UNION ALL` is supported in recursive CTE now"
+                    ))
+                    .into());
+                }
+
+                let entry = self
+                    .context
                     .cte_to_relation
-                    .insert(table_name, Rc::new((share_id, bound_query, alias)));
+                    .entry(table_name)
+                    .insert_entry(Rc::new(RefCell::new((
+                        share_id,
+                        BindingCteState::Init,
+                        alias,
+                    ))))
+                    .get()
+                    .clone();
+
+                if let Some(with) = with {
+                    self.bind_with(with)?;
+                }
+
+                // We assume `left` is base term, otherwise the implementation may be very hard.
+                let bound_base = self.bind_set_expr(*left)?;
+
+                entry.borrow_mut().1 = BindingCteState::BaseResolved {
+                    schema: bound_base.schema().clone(),
+                };
+
+                let bound_recursive = self.bind_set_expr(*right)?;
+
+                let bound_query = BoundQuery {
+                    body: BoundSetExpr::RecursiveUnion {
+                        base: Box::new(bound_base),
+                        recursive: Box::new(bound_recursive),
+                    },
+                    order: vec![],
+                    limit: None,
+                    offset: None,
+                    with_ties: false,
+                    extra_order_exprs: vec![],
+                };
+
+                entry.borrow_mut().1 = BindingCteState::Bound { query: bound_query };
+            } else {
+                let bound_query = self.bind_query(query)?;
+                self.context.cte_to_relation.insert(
+                    table_name,
+                    Rc::new(RefCell::new((
+                        share_id,
+                        BindingCteState::Bound { query: bound_query },
+                        alias,
+                    ))),
+                );
             }
-            Ok(())
         }
+        Ok(())
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::binder::BoundSetExpr;
@@ -37,6 +38,9 @@ impl Planner {
                 left,
                 right,
             } => self.plan_set_operation(op, all, *left, *right),
+            BoundSetExpr::RecursiveUnion { .. } => {
+                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
+            }
         }
     }
 }
