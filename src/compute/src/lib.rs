@@ -127,6 +127,11 @@ pub struct ComputeNodeOpts {
     #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
     pub heap_profiling_dir: Option<String>,
+
+    /// Endpoint of the connector node.
+    #[deprecated = "connector node has been deprecated."]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for ComputeNodeOpts {

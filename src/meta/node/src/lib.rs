@@ -165,6 +165,11 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_DANGEROUS_MAX_IDLE_SECS")]
     #[override_opts(path = meta.dangerous_max_idle_secs)]
     pub dangerous_max_idle_secs: Option<u64>,
+
+    /// Endpoint of the connector node.
+    #[deprecated = "connector node has been deprecated."]
+    #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
