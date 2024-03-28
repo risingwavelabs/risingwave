@@ -71,41 +71,6 @@ where
     S: BuildHasher + Send + Sync + 'static,
     A: Clone + Allocator,
 {
-    // pub fn new_inner(
-    //     inner: LruCache<K, V, S, A>,
-    //     watermark_epoch: Arc<AtomicU64>,
-    //     metrics_info: MetricsInfo,
-    // ) -> Self {
-    //     let memory_usage_metrics = metrics_info
-    //         .metrics
-    //         .stream_memory_usage
-    //         .with_guarded_label_values(&[
-    //             &metrics_info.table_id,
-    //             &metrics_info.actor_id,
-    //             &metrics_info.desc,
-    //         ]);
-    //     memory_usage_metrics.set(0.into());
-
-    //     let lru_evicted_watermark_time_ms = metrics_info
-    //         .metrics
-    //         .lru_evicted_watermark_time_ms
-    //         .with_guarded_label_values(&[
-    //             &metrics_info.table_id,
-    //             &metrics_info.actor_id,
-    //             &metrics_info.desc,
-    //         ]);
-
-    //     Self {
-    //         inner,
-    //         watermark_epoch,
-    //         kv_heap_size: 0,
-    //         memory_usage_metrics,
-    //         lru_evicted_watermark_time_ms,
-    //         _metrics_info: metrics_info,
-    //         last_reported_size_bytes: 0,
-    //     }
-    // }
-
     pub fn unbounded_with_hasher_in(
         watermark_epoch: Arc<AtomicU64>,
         metrics_info: MetricsInfo,
@@ -154,38 +119,7 @@ where
             let charge = key.estimated_size() + value.estimated_size();
             self.kv_heap_size_dec(charge);
         }
-        // self.report_evicted_watermark_time(epoch);
     }
-
-    // /// Evict epochs lower than the watermark, except those entry which touched in this epoch
-    // pub fn evict_except_cur_epoch(&mut self) {
-    //     let epoch = min(self.load_cur_epoch(), self.inner.current_epoch());
-    //     self.evict_by_epoch(epoch);
-    // }
-
-    // /// Evict epochs lower than the watermark
-    // fn evict_by_epoch(&mut self, epoch: u64) {
-    //     while let Some((key, value, _)) = self.inner.pop_lru_by_epoch(epoch) {
-    //         let charge = key.estimated_size() + value.estimated_size();
-    //         self.kv_heap_size_dec(charge);
-    //     }
-    //     self.report_evicted_watermark_time(epoch);
-    // }
-
-    // pub fn update_epoch(&mut self, epoch: u64) {
-    //     self.inner.update_epoch(epoch);
-    // }
-
-    // pub fn current_epoch(&mut self) -> u64 {
-    //     self.inner.current_epoch()
-    // }
-
-    // TODO(MrCroxx): remove me?
-    // /// An iterator visiting all values in most-recently used order. The iterator element type is
-    // /// &V.
-    // pub fn values(&self) -> impl Iterator<Item = &V> {
-    //     self.inner.iter().map(|(_k, v)| v)
-    // }
 
     pub fn put(&mut self, k: K, v: V) -> Option<V> {
         let key_size = k.estimated_size();
@@ -237,17 +171,6 @@ where
         })
     }
 
-    // pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-    //     self.kv_heap_size_inc(k.estimated_size() + v.estimated_size());
-
-    //     let old_kv = self.inner.push(k, v);
-
-    //     if let Some((old_key, old_val)) = &old_kv {
-    //         self.kv_heap_size_dec(old_key.estimated_size() + old_val.estimated_size());
-    //     }
-    //     old_kv
-    // }
-
     pub fn contains<Q>(&self, k: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -289,15 +212,6 @@ where
             false
         }
     }
-
-    // fn report_evicted_watermark_time(&self, epoch: u64) {
-    //     self._lru_evicted_watermark_time_ms
-    //         .set(Epoch(epoch).physical_time() as _);
-    // }
-
-    // fn load_cur_epoch(&self) -> u64 {
-    //     self._watermark_epoch.load(Ordering::Relaxed)
-    // }
 }
 
 impl<K, V> ManagedLruCache<K, V>
