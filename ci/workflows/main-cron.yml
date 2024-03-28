@@ -997,6 +997,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
+            - BINARY_NAME
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
@@ -1015,6 +1016,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
+            - BINARY_NAME
             - GITHUB_TOKEN
             - BUILDKITE_TAG
             - BUILDKITE_SOURCE
