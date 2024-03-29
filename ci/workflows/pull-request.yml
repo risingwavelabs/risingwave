@@ -314,7 +314,6 @@ steps:
     depends_on:
       - "build"
       - "build-other"
-      - "set-vm_max_map_count"
     plugins:
       - docker-compose#v5.1.0:
           run: sink-test-env
