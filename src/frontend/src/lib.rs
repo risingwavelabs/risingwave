@@ -99,11 +99,6 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
-    // TODO(eric): Remove me
-    // TODO: This is currently unused.
-    #[clap(long, env = "RW_PORT")]
-    pub port: Option<u16>,
-
     /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: MetaAddressStrategy,

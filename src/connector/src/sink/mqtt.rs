@@ -31,7 +31,7 @@ use super::catalog::SinkFormatDesc;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::mqtt_common::MqttCommon;
+use crate::connector_common::MqttCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{

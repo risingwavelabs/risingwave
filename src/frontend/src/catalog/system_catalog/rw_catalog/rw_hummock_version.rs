@@ -169,14 +169,14 @@ async fn read_hummock_table_watermarks(
             for (vnode, epoch, watermark) in
                 table_watermarks
                     .watermarks
-                    .into_iter()
+                    .iter()
                     .flat_map(move |(epoch, watermarks)| {
-                        watermarks.into_iter().flat_map(move |vnode_watermark| {
+                        watermarks.iter().flat_map(move |vnode_watermark| {
                             let watermark = vnode_watermark.watermark().clone();
                             let vnodes = vnode_watermark.vnode_bitmap().iter_ones().collect_vec();
                             vnodes
                                 .into_iter()
-                                .map(move |vnode| (vnode, epoch, Vec::from(watermark.as_ref())))
+                                .map(move |vnode| (vnode, *epoch, Vec::from(watermark.as_ref())))
                         })
                     })
             {

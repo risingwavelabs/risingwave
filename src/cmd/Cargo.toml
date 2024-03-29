@@ -46,9 +46,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
 
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
-
 [lib]
 test = false
 
