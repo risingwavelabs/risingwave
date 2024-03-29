@@ -1625,9 +1625,16 @@ impl Parser {
     }
 
     /// parse the ESCAPE CHAR portion of LIKE, ILIKE, and SIMILAR TO
-    pub fn parse_escape_char(&mut self) -> Result<Option<char>, ParserError> {
+    pub fn parse_escape_char(&mut self) -> Result<Option<EscapeChar>, ParserError> {
         if self.parse_keyword(Keyword::ESCAPE) {
-            Ok(Some(self.parse_literal_char()?))
+            let s = self.parse_literal_string()?;
+            if s.len() == 0 {
+                Ok(Some(EscapeChar::empty()))
+            } else if s.len() == 1 {
+                Ok(Some(EscapeChar::escape(s.chars().next().unwrap())))
+            } else {
+                parser_err!(format!("Expect a char or an empty string, found {s:?}"))
+            }
         } else {
             Ok(None)
         }
@@ -3501,14 +3508,6 @@ impl Parser {
             columns,
             values,
         })
-    }
-
-    fn parse_literal_char(&mut self) -> Result<char, ParserError> {
-        let s = self.parse_literal_string()?;
-        if s.len() != 1 {
-            return parser_err!(format!("Expect a char, found {s:?}"));
-        }
-        Ok(s.chars().next().unwrap())
     }
 
     /// Parse a tab separated values in

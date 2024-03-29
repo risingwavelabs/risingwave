@@ -19,8 +19,8 @@ use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
-    Query, StructField, TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
+    ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
@@ -461,7 +461,7 @@ impl Binder {
         expr: Expr,
         negated: bool,
         pattern: Expr,
-        escape_char: Option<char>,
+        escape_char: Option<EscapeChar>,
     ) -> Result<ExprImpl> {
         if matches!(pattern, Expr::AllOp(_) | Expr::SomeOp(_)) {
             if escape_char.is_some() {
@@ -511,13 +511,16 @@ impl Binder {
         expr: Expr,
         negated: bool,
         pattern: Expr,
-        escape_char: Option<char>,
+        escape_char: Option<EscapeChar>,
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
         let pattern = self.bind_expr_inner(pattern)?;
 
         let esc_inputs = if let Some(escape_char) = escape_char {
-            let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
+            let escape_char = ExprImpl::literal_varchar(match escape_char.as_char() {
+                Some(c) => c.to_string(),
+                None => "".to_string(),
+            });
             vec![pattern, escape_char]
         } else {
             vec![pattern]

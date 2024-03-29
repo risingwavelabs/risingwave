@@ -667,7 +667,7 @@ fn parse_like() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: Some('\\')
+                escape_char: Some(EscapeChar::escape('\\'))
             },
             select.selection.unwrap()
         );
