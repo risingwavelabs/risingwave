@@ -26,13 +26,13 @@ pub(crate) mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{
-        next_key, prefix_slice_with_vnode, prefixed_range_with_vnode, FullKey, TableKey,
-        TABLE_PREFIX_LEN,
+        next_key, prefixed_range_with_vnode, FullKey, TableKey, TABLE_PREFIX_LEN,
     };
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;

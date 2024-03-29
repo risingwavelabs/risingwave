@@ -506,9 +506,11 @@ impl SealedData {
         for (table_id, (direction, watermarks, _)) in unseal_epoch_data.table_watermarks {
             match self.table_watermarks.entry(table_id) {
                 Entry::Occupied(mut entry) => {
-                    entry
-                        .get_mut()
-                        .add_new_epoch_watermarks(epoch, watermarks, direction);
+                    entry.get_mut().add_new_epoch_watermarks(
+                        epoch,
+                        Arc::from(watermarks),
+                        direction,
+                    );
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(TableWatermarks::single_epoch(epoch, watermarks, direction));
