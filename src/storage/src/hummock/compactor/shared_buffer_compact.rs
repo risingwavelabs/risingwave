@@ -653,7 +653,7 @@ mod tests {
             splits.len(),
             storage_opts.share_buffers_sync_parallelism as usize
         );
-        for (_, vnode) in &vnodes {
+        for vnode in vnodes.values() {
             assert_eq!(*vnode, 0);
         }
         for i in 1..splits.len() {
