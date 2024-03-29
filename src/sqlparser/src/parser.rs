@@ -517,12 +517,12 @@ impl Parser {
 
     /// Parse tokens until the precedence changes
     pub fn parse_subexpr(&mut self, precedence: Precedence) -> Result<Expr, ParserError> {
-        debug!("parsing expr");
+        debug!("parsing expr, current token: {:?}", self.peek_token().token);
         let mut expr = self.parse_prefix()?;
         debug!("prefix: {:?}", expr);
         loop {
             let next_precedence = self.get_next_precedence()?;
-            debug!("next precedence: {:?}", next_precedence);
+            debug!("precedence: {precedence:?}, next precedence: {next_precedence:?}");
 
             if precedence >= next_precedence {
                 break;
@@ -611,6 +611,25 @@ impl Parser {
                     Ok(Expr::UnaryOp {
                         op,
                         expr: Box::new(self.parse_subexpr(Precedence::Other)?),
+                    })
+                }
+                keyword @ (Keyword::ALL | Keyword::ANY | Keyword::SOME) => {
+                    self.expect_token(&Token::LParen)?;
+                    // In upstream's PR of parser-rs, there is `self.parser_subexpr(precedence)` here.
+                    // But it will fail to parse `select 1 = any(null and true);`.
+                    let sub = self.parse_expr()?;
+                    self.expect_token(&Token::RParen)?;
+
+                    // TODO: support `all/any/some(subquery)`.
+                    if let Expr::Subquery(_) = &sub {
+                        parser_err!("ANY/SOME/ALL(Subquery) is not implemented")?;
+                    }
+
+                    Ok(match keyword {
+                        Keyword::ALL => Expr::AllOp(Box::new(sub)),
+                        // `SOME` is a synonym for `ANY`.
+                        Keyword::ANY | Keyword::SOME => Expr::SomeOp(Box::new(sub)),
+                        _ => unreachable!(),
                     })
                 }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
@@ -1384,6 +1403,7 @@ impl Parser {
     /// Parse an operator following an expression
     pub fn parse_infix(&mut self, expr: Expr, precedence: Precedence) -> Result<Expr, ParserError> {
         let tok = self.next_token();
+        debug!("parsing infix {:?}", tok.token);
         let regular_binary_operator = match &tok.token {
             Token::Spaceship => Some(BinaryOperator::Spaceship),
             Token::DoubleEq => Some(BinaryOperator::Eq),
@@ -1439,40 +1459,40 @@ impl Parser {
         };
 
         if let Some(op) = regular_binary_operator {
-            // `all/any/some` only appears to the right of the binary op.
-            if let Some(keyword) =
-                self.parse_one_of_keywords(&[Keyword::ANY, Keyword::ALL, Keyword::SOME])
-            {
-                self.expect_token(&Token::LParen)?;
-                // In upstream's PR of parser-rs, there is `self.parser_subexpr(precedence)` here.
-                // But it will fail to parse `select 1 = any(null and true);`.
-                let right = self.parse_expr()?;
-                self.expect_token(&Token::RParen)?;
+            // // `all/any/some` only appears to the right of the binary op.
+            // if let Some(keyword) =
+            //     self.parse_one_of_keywords(&[Keyword::ANY, Keyword::ALL, Keyword::SOME])
+            // {
+            //     self.expect_token(&Token::LParen)?;
+            //     // In upstream's PR of parser-rs, there is `self.parser_subexpr(precedence)` here.
+            //     // But it will fail to parse `select 1 = any(null and true);`.
+            //     let right = self.parse_expr()?;
+            //     self.expect_token(&Token::RParen)?;
 
-                // TODO: support `all/any/some(subquery)`.
-                if let Expr::Subquery(_) = &right {
-                    parser_err!("ANY/SOME/ALL(Subquery) is not implemented")?;
-                }
+            //     // TODO: support `all/any/some(subquery)`.
+            //     if let Expr::Subquery(_) = &right {
+            //         parser_err!("ANY/SOME/ALL(Subquery) is not implemented")?;
+            //     }
 
-                let right = match keyword {
-                    Keyword::ALL => Box::new(Expr::AllOp(Box::new(right))),
-                    // `SOME` is a synonym for `ANY`.
-                    Keyword::ANY | Keyword::SOME => Box::new(Expr::SomeOp(Box::new(right))),
-                    _ => unreachable!(),
-                };
+            //     let right = match keyword {
+            //         Keyword::ALL => Box::new(Expr::AllOp(Box::new(right))),
+            //         // `SOME` is a synonym for `ANY`.
+            //         Keyword::ANY | Keyword::SOME => Box::new(Expr::SomeOp(Box::new(right))),
+            //         _ => unreachable!(),
+            //     };
 
-                Ok(Expr::BinaryOp {
-                    left: Box::new(expr),
-                    op,
-                    right,
-                })
-            } else {
-                Ok(Expr::BinaryOp {
-                    left: Box::new(expr),
-                    op,
-                    right: Box::new(self.parse_subexpr(precedence)?),
-                })
-            }
+            //     Ok(Expr::BinaryOp {
+            //         left: Box::new(expr),
+            //         op,
+            //         right,
+            //     })
+            // } else {
+            Ok(Expr::BinaryOp {
+                left: Box::new(expr),
+                op,
+                right: Box::new(self.parse_subexpr(precedence)?),
+            })
+            // }
         } else if let Token::Word(w) = &tok.token {
             match w.keyword {
                 Keyword::IS => {
@@ -1528,6 +1548,25 @@ impl Parser {
                     } else {
                         self.expected("Expected Token::Word after AT", tok)
                     }
+                }
+                keyword @ (Keyword::ALL | Keyword::ANY | Keyword::SOME) => {
+                    self.expect_token(&Token::LParen)?;
+                    // In upstream's PR of parser-rs, there is `self.parser_subexpr(precedence)` here.
+                    // But it will fail to parse `select 1 = any(null and true);`.
+                    let sub = self.parse_expr()?;
+                    self.expect_token(&Token::RParen)?;
+
+                    // TODO: support `all/any/some(subquery)`.
+                    if let Expr::Subquery(_) = &sub {
+                        parser_err!("ANY/SOME/ALL(Subquery) is not implemented")?;
+                    }
+
+                    Ok(match keyword {
+                        Keyword::ALL => Expr::AllOp(Box::new(sub)),
+                        // `SOME` is a synonym for `ANY`.
+                        Keyword::ANY | Keyword::SOME => Expr::SomeOp(Box::new(sub)),
+                        _ => unreachable!(),
+                    })
                 }
                 Keyword::NOT
                 | Keyword::IN
@@ -1787,6 +1826,9 @@ impl Parser {
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Like),
             Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Like),
             Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Like),
+            Token::Word(w) if w.keyword == Keyword::ALL => Ok(P::Other),
+            Token::Word(w) if w.keyword == Keyword::ANY => Ok(P::Other),
+            Token::Word(w) if w.keyword == Keyword::SOME => Ok(P::Other),
             Token::Tilde
             | Token::TildeAsterisk
             | Token::ExclamationMarkTilde

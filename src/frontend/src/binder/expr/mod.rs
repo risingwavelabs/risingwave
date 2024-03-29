@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
-use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
@@ -152,13 +152,13 @@ impl Binder {
                 expr,
                 pattern,
                 escape_char,
-            } => self.bind_like::<false>(*expr, negated, *pattern, escape_char),
+            } => self.bind_like(ExprType::Like, *expr, negated, *pattern, escape_char),
             Expr::ILike {
                 negated,
                 expr,
                 pattern,
                 escape_char,
-            } => self.bind_like::<true>(*expr, negated, *pattern, escape_char),
+            } => self.bind_like(ExprType::ILike, *expr, negated, *pattern, escape_char),
             Expr::SimilarTo {
                 expr,
                 negated,
@@ -455,23 +455,46 @@ impl Binder {
         Ok(func_call.into())
     }
 
-    fn bind_like<const CASE_INSENSITIVE: bool>(
+    fn bind_like(
         &mut self,
+        expr_type: ExprType,
         expr: Expr,
         negated: bool,
         pattern: Expr,
         escape_char: Option<char>,
     ) -> Result<ExprImpl> {
-        let expr = self.bind_expr_inner(expr)?;
-        let pattern = self.bind_expr_inner(pattern)?;
+        if matches!(pattern, Expr::AllOp(_) | Expr::SomeOp(_)) {
+            if escape_char.is_some() {
+                // PostgreSQL also don't support the pattern due to the complexity of implementation.
+                // The SQL will failed on PostgreSQL 16.1:
+                // ```sql
+                // select 'a' like any(array[null]) escape '';
+                // ```
+                bail_not_implemented!(
+                    "LIKE with both ALL|ANY pattern and escape character is not supported"
+                )
+            }
+            // Use the `bind_binary_op` path to handle the ALL|ANY pattern.
+            let op = match (expr_type, negated) {
+                (ExprType::Like, false) => BinaryOperator::PGLikeMatch,
+                (ExprType::Like, true) => BinaryOperator::PGNotLikeMatch,
+                (ExprType::ILike, false) => BinaryOperator::PGILikeMatch,
+                (ExprType::ILike, true) => BinaryOperator::PGNotILikeMatch,
+                _ => unreachable!(),
+            };
+            return self.bind_binary_op(expr, op, pattern);
+        }
         if escape_char.is_some() {
             bail_not_implemented!(issue = 15701, "LIKE with escape character is not supported");
         }
-        let expr_type = if CASE_INSENSITIVE {
-            ExprType::ILike
-        } else {
-            ExprType::Like
-        };
+        let expr = self.bind_expr_inner(expr)?;
+        let pattern = self.bind_expr_inner(pattern)?;
+        match (expr.return_type(), pattern.return_type()) {
+            (DataType::Varchar, DataType::Varchar) => {}
+            (string_ty, pattern_ty) => {
+                bail_no_function!("LIKE({}, {})", string_ty, pattern_ty);
+            }
+        }
         let func_call =
             FunctionCall::new_unchecked(expr_type, vec![expr, pattern], DataType::Boolean);
         let func_call = if negated {

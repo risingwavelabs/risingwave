@@ -162,3 +162,12 @@
 - input: select '123' IS NOT JSON SCALAR WITHOUT UNIQUE;
   formatted_sql: SELECT '123' IS NOT JSON SCALAR
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Scalar, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'a' like 'a';
+  formatted_sql: SELECT 'a' LIKE 'a'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Like { negated: false, expr: Value(SingleQuotedString("a")), pattern: Value(SingleQuotedString("a")), escape_char: None })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'a' like 'a' escape '\';
+  formatted_sql: SELECT 'a' LIKE 'a' ESCAPE '\'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Like { negated: false, expr: Value(SingleQuotedString("a")), pattern: Value(SingleQuotedString("a")), escape_char: Some(''\\'') })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'a' not like ANY(array['a', null]);
+  formatted_sql: SELECT 'a' NOT LIKE SOME(ARRAY['a', NULL])
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Like { negated: true, expr: Value(SingleQuotedString("a")), pattern: SomeOp(Array(Array { elem: [Value(SingleQuotedString("a")), Value(Null)], named: true })), escape_char: None })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'

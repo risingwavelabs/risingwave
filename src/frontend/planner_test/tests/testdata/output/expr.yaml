@@ -165,7 +165,7 @@
     Failed to bind expression: 1 NOT LIKE 1.23
 
     Caused by:
-      function like(integer, numeric) does not exist
+      function LIKE(integer, numeric) does not exist
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: 'BatchValues { rows: [[4:Int32]] }'
