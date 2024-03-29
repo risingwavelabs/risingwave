@@ -16,11 +16,11 @@ use std::ops::Deref;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common_estimate_size::EstimateSize;
 use serde::{Deserialize, Serialize};
 
 use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::{ArrayImpl, DataChunk};
-use crate::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, Row};
 use crate::types::{
     DataType, Date, Datum, Int256, ScalarImpl, Serial, Time, Timestamp, Timestamptz, ToDatumRef,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_not_implemented, not_implemented};
@@ -935,10 +935,23 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
-        AstDataType::Custom(qualified_type_name) if qualified_type_name.0.len() == 1 => {
-            // In PostgreSQL, these are not keywords but pre-defined names that could be extended by
-            // `CREATE TYPE`.
-            match qualified_type_name.0[0].real_value().as_str() {
+        AstDataType::Custom(qualified_type_name) => {
+            let idents = qualified_type_name
+                .0
+                .iter()
+                .map(|n| n.real_value())
+                .collect_vec();
+            let name = if idents.len() == 1 {
+                idents[0].as_str() // `int2`
+            } else if idents.len() == 2 && idents[0] == PG_CATALOG_SCHEMA_NAME {
+                idents[1].as_str() // `pg_catalog.text`
+            } else {
+                return Err(new_err().into());
+            };
+
+            // In PostgreSQL, these are non-keywords or non-reserved keywords but pre-defined
+            // names that could be extended by `CREATE TYPE`.
+            match name {
                 "int2" => DataType::Int16,
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
@@ -946,6 +959,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
+                "text" => DataType::Varchar,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -961,7 +975,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid
-        | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)
         | AstDataType::Time(true) => return Err(new_err().into()),
     };

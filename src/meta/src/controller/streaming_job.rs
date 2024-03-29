@@ -395,7 +395,7 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<(bool, Vec<TableId>)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -405,7 +405,7 @@ impl CatalogController {
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok(true);
+            return Ok((true, Vec::new()));
         }
 
         if !is_cancelled {
@@ -420,7 +420,7 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok(false);
+                    return Ok((false, Vec::new()));
                 }
             }
         }
@@ -431,6 +431,13 @@ impl CatalogController {
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
             .all(&txn)
+            .await?;
+
+        let mv_table_id: Option<TableId> = Table::find_by_id(job_id)
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .one(&txn)
             .await?;
 
         let associated_source_id: Option<SourceId> = Table::find_by_id(job_id)
@@ -444,7 +451,7 @@ impl CatalogController {
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
-                .filter(object::Column::Oid.is_in(internal_table_ids))
+                .filter(object::Column::Oid.is_in(internal_table_ids.iter().cloned()))
                 .exec(&txn)
                 .await?;
         }
@@ -453,7 +460,11 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        Ok(true)
+        let mut state_table_ids = internal_table_ids;
+
+        state_table_ids.extend(mv_table_id.into_iter());
+
+        Ok((true, state_table_ids))
     }
 
     pub async fn post_collect_table_fragments(

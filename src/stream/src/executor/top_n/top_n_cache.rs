@@ -18,9 +18,9 @@ use std::future::Future;
 
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
 
 use super::topn_cache_state::TopNCacheState;

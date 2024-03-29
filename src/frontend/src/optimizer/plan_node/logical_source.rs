@@ -19,6 +19,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
@@ -26,6 +27,7 @@ use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::{DataType, UPSTREAM_SOURCE_KEY};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
 use super::stream_watermark_filter::StreamWatermarkFilter;
@@ -71,6 +73,7 @@ impl LogicalSource {
         row_id_index: Option<usize>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
         let core = generic::Source {
@@ -80,7 +83,12 @@ impl LogicalSource {
             kind,
             ctx,
             kafka_timestamp_range,
+            as_of,
         };
+
+        if core.as_of.is_some() && !core.support_time_travel() {
+            bail!("Time travel is not supported for the source")
+        }
 
         let base = PlanBase::new_logical_with_core(&core);
 
@@ -99,6 +107,7 @@ impl LogicalSource {
         source_catalog: Rc<SourceCatalog>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
@@ -112,6 +121,7 @@ impl LogicalSource {
             row_id_index,
             kind,
             ctx,
+            as_of,
         )
     }
 
@@ -257,11 +267,15 @@ impl Distill for LogicalSource {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
             let time = Pretty::debug(&self.core.kafka_timestamp_range);
-            vec![
+            let mut fields = vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
                 ("time_range", time),
-            ]
+            ];
+            if let Some(as_of) = &self.core.as_of {
+                fields.push(("as_of", Pretty::debug(as_of)));
+            }
+            fields
         } else {
             vec![]
         };

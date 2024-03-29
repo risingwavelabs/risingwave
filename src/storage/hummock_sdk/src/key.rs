@@ -22,8 +22,8 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::{EpochWithGap, HummockEpoch};
 

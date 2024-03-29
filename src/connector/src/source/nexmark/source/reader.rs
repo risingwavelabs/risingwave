@@ -22,9 +22,9 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common_estimate_size::EstimateSize;
 use tokio::time::Instant;
 
 use crate::error::ConnectorResult;

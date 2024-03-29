@@ -14,7 +14,7 @@
 
 use std::hash::Hash;
 
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;

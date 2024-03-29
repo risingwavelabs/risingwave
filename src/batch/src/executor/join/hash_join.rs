@@ -28,6 +28,7 @@ use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -36,7 +37,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::task::{BatchTaskContext, ShutdownToken};
 
@@ -477,7 +477,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types.clone(), chunk_size);
+        let mut remaining_chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let mut non_equi_state = LeftNonEquiJoinState {
             probe_column_count: probe_data_types.len(),
             ..Default::default()
@@ -496,10 +497,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     continue;
                 }
                 non_equi_state.found_matched = false;
-                non_equi_state
-                    .first_output_row_id
-                    .push(chunk_builder.buffered_count());
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
+                    non_equi_state
+                        .first_output_row_id
+                        .push(chunk_builder.buffered_count());
+
                     let mut build_row_id_iter = next_build_row_with_same_key
                         .row_id_iter(Some(*first_matched_build_row_id))
                         .peekable();
@@ -527,11 +529,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     shutdown_rx.check()?;
                     let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
                     if let Some(spilled) = Self::append_one_row_with_null_build_side(
-                        &mut chunk_builder,
+                        &mut remaining_chunk_builder,
                         probe_row,
                         build_data_types.len(),
                     ) {
-                        non_equi_state.first_output_row_id.clear();
                         yield spilled
                     }
                 }
@@ -545,6 +546,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 &mut non_equi_state,
             )
             .await?
+        }
+
+        if let Some(spilled) = remaining_chunk_builder.consume_all() {
+            yield spilled
         }
     }
 
@@ -637,11 +642,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 if !visible {
                     continue;
                 }
-                non_equi_state
-                    .first_output_row_id
-                    .push(chunk_builder.buffered_count());
                 non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
+                    non_equi_state
+                        .first_output_row_id
+                        .push(chunk_builder.buffered_count());
+
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
@@ -2408,13 +2414,13 @@ mod tests {
 
         let expected_chunk = DataChunk::from_pretty(
             "i   f   i   F
-             1   6.1 .   .
              2   .   .   .
-             .   8.4 .   .
              3   3.9 .   .
-             .   .   .   .
              4   6.6 4   7.5
              3   .   .   .
+             1   6.1 .   .
+             .   8.4 .   .
+             .   .   .   .
              .   0.7 .   .
              5   .   .   .
              .   5.5 .   .",

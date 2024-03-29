@@ -25,6 +25,7 @@ use core::fmt;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 
+use self::ddl::AlterSubscriptionOperation;
 use crate::ast::ddl::{
     AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
     AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
@@ -2087,6 +2088,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_create_subscription(or_replace)
         } else if self.parse_keyword(Keyword::CONNECTION) {
             self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
@@ -2186,6 +2189,22 @@ impl Parser {
     pub fn parse_create_sink(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSink {
             stmt: CreateSinkStatement::parse_to(self)?,
+        })
+    }
+
+    // CREATE
+    // SUBSCRIPTION
+    // [IF NOT EXISTS]?
+    // <subscription_name: Ident>
+    // FROM
+    // <materialized_view: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_subscription(
+        &mut self,
+        _or_replace: bool,
+    ) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSubscription {
+            stmt: CreateSubscriptionStatement::parse_to(self)?,
         })
     }
 
@@ -2466,6 +2485,14 @@ impl Parser {
         })
     }
 
+    pub fn parse_on_conflict(&mut self) -> Result<Option<OnConflict>, ParserError> {
+        if self.parse_keywords(&[Keyword::ON, Keyword::CONFLICT]) {
+            self.parse_handle_conflict_behavior()
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_create_table(
         &mut self,
         or_replace: bool,
@@ -2483,6 +2510,9 @@ impl Parser {
         } else {
             false
         };
+
+        let on_conflict = self.parse_on_conflict()?;
+
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
@@ -2498,7 +2528,6 @@ impl Parser {
         } else {
             None // Table is NOT created with an external connector.
         };
-
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             if !source_watermarks.is_empty() {
@@ -2535,6 +2564,7 @@ impl Parser {
             source_schema,
             source_watermarks,
             append_only,
+            on_conflict,
             query,
             cdc_table_info,
             include_column_options: include_options,
@@ -2711,6 +2741,24 @@ impl Parser {
             Ok(Some(ColumnOption::Check(expr)))
         } else if self.parse_keyword(Keyword::AS) {
             Ok(Some(ColumnOption::GeneratedColumns(self.parse_expr()?)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn parse_handle_conflict_behavior(&mut self) -> Result<Option<OnConflict>, ParserError> {
+        if self.parse_keyword(Keyword::OVERWRITE) {
+            Ok(Some(OnConflict::OverWrite))
+        } else if self.parse_keyword(Keyword::IGNORE) {
+            Ok(Some(OnConflict::Ignore))
+        } else if self.parse_keywords(&[
+            Keyword::DO,
+            Keyword::UPDATE,
+            Keyword::IF,
+            Keyword::NOT,
+            Keyword::NULL,
+        ]) {
+            return parser_err!("On conflict behavior do update if not null is not supported yet.");
         } else {
             Ok(None)
         }
@@ -2905,9 +2953,11 @@ impl Parser {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
+        } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
+            self.parse_alter_subscription()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
@@ -3232,6 +3282,59 @@ impl Parser {
 
         Ok(Statement::AlterSink {
             name: sink_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_subscription(&mut self) -> Result<Statement, ParserError> {
+        let subscription_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let subscription_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::RenameSubscription { subscription_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSubscriptionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterSubscriptionOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected(
+                        "TO or = after ALTER TABLE SET PARALLELISM",
+                        self.peek_token(),
+                    );
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSubscriptionOperation::SetParallelism {
+                    parallelism: value,
+                    deferred,
+                }
+            } else {
+                return self.expected("SCHEMA/PARALLELISM after SET", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                "RENAME or OWNER TO or SET after ALTER SUBSCRIPTION",
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterSubscription {
+            name: subscription_name,
             operation,
         })
     }
@@ -3705,21 +3808,61 @@ impl Parser {
     }
 
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-    pub fn parse_for_system_time_as_of_proctime(&mut self) -> Result<bool, ParserError> {
+    pub fn parse_as_of(&mut self) -> Result<Option<AsOf>, ParserError> {
         let after_for = self.parse_keyword(Keyword::FOR);
         if after_for {
-            self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
-            let ident = self.parse_identifier()?;
-            // Backward compatibility for now.
-            if ident.real_value() != "proctime" && ident.real_value() != "now" {
-                return parser_err!(format!("Expected proctime, found: {}", ident.real_value()));
+            if self.peek_nth_any_of_keywords(0, &[Keyword::SYSTEM_TIME]) {
+                self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
+                let token = self.next_token();
+                match token.token {
+                    Token::Word(w) => {
+                        let ident = w.to_ident()?;
+                        // Backward compatibility for now.
+                        if ident.real_value() == "proctime" || ident.real_value() == "now" {
+                            self.expect_token(&Token::LParen)?;
+                            self.expect_token(&Token::RParen)?;
+                            Ok(Some(AsOf::ProcessTime))
+                        } else {
+                            parser_err!(format!("Expected proctime, found: {}", ident.real_value()))
+                        }
+                    }
+                    Token::Number(s) => {
+                        let num = s.parse::<i64>().map_err(|e| {
+                            ParserError::ParserError(format!(
+                                "Could not parse '{}' as i64: {}",
+                                s, e
+                            ))
+                        });
+                        Ok(Some(AsOf::TimestampNum(num?)))
+                    }
+                    Token::SingleQuotedString(s) => Ok(Some(AsOf::TimestampString(s))),
+                    unexpected => self.expected(
+                        "Proctime(), Number or SingleQuotedString",
+                        unexpected.with_location(token.location),
+                    ),
+                }
+            } else {
+                self.expect_keywords(&[Keyword::SYSTEM_VERSION, Keyword::AS, Keyword::OF])?;
+                let token = self.next_token();
+                match token.token {
+                    Token::Number(s) => {
+                        let num = s.parse::<i64>().map_err(|e| {
+                            ParserError::ParserError(format!(
+                                "Could not parse '{}' as i64: {}",
+                                s, e
+                            ))
+                        });
+                        Ok(Some(AsOf::VersionNum(num?)))
+                    }
+                    Token::SingleQuotedString(s) => Ok(Some(AsOf::VersionString(s))),
+                    unexpected => self.expected(
+                        "Number or SingleQuotedString",
+                        unexpected.with_location(token.location),
+                    ),
+                }
             }
-
-            self.expect_token(&Token::LParen)?;
-            self.expect_token(&Token::RParen)?;
-            Ok(true)
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 
@@ -4300,6 +4443,14 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::SUBSCRIPTIONS => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::Subscription {
+                            schema: self.parse_from_and_identifier()?,
+                        },
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects {
                         object: ShowObject::Database,
@@ -4453,13 +4604,12 @@ impl Parser {
                 Keyword::INDEX => ShowCreateType::Index,
                 Keyword::SOURCE => ShowCreateType::Source,
                 Keyword::SINK => ShowCreateType::Sink,
+                Keyword::SUBSCRIPTION => ShowCreateType::Subscription,
                 Keyword::FUNCTION => ShowCreateType::Function,
-                _ => {
-                    return self.expected(
-                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
-                        self.peek_token(),
-                    )
-                }
+                _ => return self.expected(
+                    "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
+                    self.peek_token(),
+                ),
             };
             return Ok(Statement::ShowCreateObject {
                 create_type: show_type,
@@ -4467,7 +4617,7 @@ impl Parser {
             });
         }
         self.expected(
-            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
+            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE, SUBSCRIPTION or SINK",
             self.peek_token(),
         )
     }
@@ -4647,13 +4797,9 @@ impl Parser {
                     with_ordinality,
                 })
             } else {
-                let for_system_time_as_of_proctime = self.parse_for_system_time_as_of_proctime()?;
+                let as_of = self.parse_as_of()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::Table {
-                    name,
-                    alias,
-                    for_system_time_as_of_proctime,
-                })
+                Ok(TableFactor::Table { name, alias, as_of })
             }
         }
     }

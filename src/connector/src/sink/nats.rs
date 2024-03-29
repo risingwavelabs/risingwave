@@ -18,6 +18,7 @@ use anyhow::{anyhow, Context as _};
 use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -27,7 +28,7 @@ use with_options::WithOptions;
 use super::encoder::{DateHandlingMode, TimeHandlingMode, TimestamptzHandlingMode};
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::NatsCommon;
+use crate::connector_common::NatsCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -97,8 +98,12 @@ impl Sink for NatsSink {
 
     const SINK_NAME: &'static str = NATS_SINK;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        desc.sink_type.is_append_only()
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
+            SinkDecouple::Disable => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()> {

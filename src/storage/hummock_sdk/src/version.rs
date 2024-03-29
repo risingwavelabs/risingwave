@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem::size_of;
+use std::sync::Arc;
 
 use prost::Message;
 use risingwave_common::catalog::TableId;
@@ -31,7 +32,7 @@ pub struct HummockVersion {
     pub levels: HashMap<CompactionGroupId, PbLevels>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
-    pub table_watermarks: HashMap<TableId, TableWatermarks>,
+    pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
     pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
@@ -70,7 +71,7 @@ impl HummockVersion {
                 .map(|(table_id, table_watermark)| {
                     (
                         TableId::new(*table_id),
-                        TableWatermarks::from_protobuf(table_watermark),
+                        Arc::new(TableWatermarks::from_protobuf(table_watermark)),
                     )
                 })
                 .collect(),

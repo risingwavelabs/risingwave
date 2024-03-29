@@ -332,7 +332,7 @@ fn assemble_materialize(
         // Index table has no indexes.
         vec![],
         context,
-        false,
+        None,
         cardinality,
     );
 

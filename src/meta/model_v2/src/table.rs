@@ -69,6 +69,8 @@ pub enum HandleConflictBehavior {
     Ignore,
     #[sea_orm(string_value = "NO_CHECK")]
     NoCheck,
+    #[sea_orm(string_value = "DO_UPDATE_IF_NOT_NULL")]
+    DoUpdateIfNotNull,
 }
 
 impl From<HandleConflictBehavior> for PbHandleConflictBehavior {
@@ -77,6 +79,7 @@ impl From<HandleConflictBehavior> for PbHandleConflictBehavior {
             HandleConflictBehavior::Overwrite => Self::Overwrite,
             HandleConflictBehavior::Ignore => Self::Ignore,
             HandleConflictBehavior::NoCheck => Self::NoCheck,
+            HandleConflictBehavior::DoUpdateIfNotNull => Self::DoUpdateIfNotNull,
         }
     }
 }
@@ -87,6 +90,7 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
             PbHandleConflictBehavior::Overwrite => Self::Overwrite,
             PbHandleConflictBehavior::Ignore => Self::Ignore,
             PbHandleConflictBehavior::NoCheck => Self::NoCheck,
+            PbHandleConflictBehavior::DoUpdateIfNotNull => Self::DoUpdateIfNotNull,
             PbHandleConflictBehavior::Unspecified => {
                 unreachable!("Unspecified handle conflict behavior")
             }

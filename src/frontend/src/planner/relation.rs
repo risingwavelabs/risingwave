@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
+use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -68,7 +69,16 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
-        let for_system_time_as_of_proctime = base_table.for_system_time_as_of_proctime;
+        let as_of = base_table.as_of.clone();
+        match as_of {
+            None | Some(AsOf::ProcessTime) => {}
+            Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
+                bail_not_implemented!("As Of Timestamp is not supported yet.")
+            }
+            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                bail_not_implemented!("As Of Version is not supported yet.")
+            }
+        }
         let table_cardinality = base_table.table_catalog.cardinality;
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
@@ -79,7 +89,7 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            for_system_time_as_of_proctime,
+            as_of,
             table_cardinality,
         )
         .into())
@@ -92,10 +102,24 @@ impl Planner {
             )
             .into())
         } else {
+            let as_of = source.as_of.clone();
+            match as_of {
+                None
+                | Some(AsOf::VersionNum(_))
+                | Some(AsOf::TimestampString(_))
+                | Some(AsOf::TimestampNum(_)) => {}
+                Some(AsOf::ProcessTime) => {
+                    bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                }
+                Some(AsOf::VersionString(_)) => {
+                    bail_not_implemented!("As Of Version is not supported yet.")
+                }
+            }
             Ok(LogicalSource::with_catalog(
                 Rc::new(source.catalog),
                 SourceNodeKind::CreateMViewOrBatch,
                 self.ctx(),
+                as_of,
             )?
             .into())
         }

@@ -88,7 +88,9 @@ def check_risingwave_iceberg_source(docker):
     config = read_config(f"{docker.case_dir()}/config.ini")
 
     sqls = [
-        "select count(*) from iceberg_source"
+        "select count(*) from iceberg_source",
+        "select count(*) from iceberg_source for system_time as of '2100-01-01 00:00:00+00:00'",
+        "select count(*) from iceberg_source for system_time as of 4102444800"
     ]
 
     rw_config = config['risingwave']
