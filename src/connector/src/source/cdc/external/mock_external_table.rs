@@ -111,6 +111,7 @@ impl ExternalTableReader for MockExternalTableReader {
         _table_name: SchemaTableName,
         _start_pk: Option<OwnedRow>,
         _primary_keys: Vec<String>,
+        _limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner()
     }

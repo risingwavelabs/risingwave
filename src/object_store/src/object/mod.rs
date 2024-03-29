@@ -37,6 +37,8 @@ pub use s3::*;
 pub mod error;
 pub mod object_metrics;
 
+mod prefix;
+
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 use thiserror_ext::AsReport;
@@ -792,9 +794,9 @@ pub async fn build_remote_object_store(
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => {
-            if std::env::var("RW_USE_OPENDAL_FOR_S3").is_ok() {
+            if config.s3.developer.use_opendal {
                 let bucket = s3.strip_prefix("s3://").unwrap();
-
+                tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
                 ObjectStoreImpl::Opendal(
                     OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
                         .unwrap()
@@ -817,9 +819,13 @@ pub async fn build_remote_object_store(
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
             let (namenode, root) = hdfs.split_once('@').unwrap_or((hdfs, ""));
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics, config),
+                OpendalObjectStore::new_hdfs_engine(
+                    namenode.to_string(),
+                    root.to_string(),
+                    config.clone(),
+                )
+                .unwrap()
+                .monitored(metrics, config),
             )
         }
         gcs if gcs.starts_with("gcs://") => {
@@ -871,7 +877,7 @@ pub async fn build_remote_object_store(
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string())
+                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone())
                     .unwrap()
                     .monitored(metrics, config),
             )

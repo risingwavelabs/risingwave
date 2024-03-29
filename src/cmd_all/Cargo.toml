@@ -67,9 +67,6 @@ vergen = { version = "8", default-features = false, features = [
     "gitcl",
 ] }
 
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
-
 [[bin]]
 name = "risingwave"
 path = "src/bin/risingwave.rs"

@@ -116,7 +116,6 @@ reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rustc-hash = { version = "1" }
-rustix = { version = "0.38", features = ["fs", "net"] }
 scopeguard = { version = "1" }
 sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -138,12 +137,11 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-trai
 target-lexicon = { version = "0.12", features = ["std"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
-tokio = { version = "1", features = ["full", "stats", "tracing"] }
+tokio = { version = "1", features = ["full", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88", features = ["with-chrono-0_4", "with-uuid-1"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
-toml_edit = { version = "0.19", features = ["serde"] }
 tonic = { version = "0.10", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
@@ -155,9 +153,6 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 whoami = { version = "1" }
 zeroize = { version = "1" }
-zstd = { version = "0.13" }
-zstd-safe = { version = "7", default-features = false, features = ["arrays", "legacy", "std", "zdict_builder"] }
-zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -202,7 +197,6 @@ regex = { version = "1" }
 regex-automata = { version = "0.4", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8" }
 rustc-hash = { version = "1" }
-rustix = { version = "0.38", features = ["fs", "net"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
@@ -214,7 +208,6 @@ target-lexicon = { version = "0.12", features = ["std"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
-toml_edit = { version = "0.19", features = ["serde"] }
 zeroize = { version = "1" }
 
 ### END HAKARI SECTION

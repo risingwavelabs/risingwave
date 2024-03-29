@@ -22,8 +22,8 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::{EpochWithGap, HummockEpoch};
 
@@ -486,6 +486,10 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 
     pub fn key_part(&self) -> &[u8] {
         self.split_vnode().1
+    }
+
+    pub fn to_ref(&self) -> TableKey<&[u8]> {
+        TableKey(self.0.as_ref())
     }
 }
 

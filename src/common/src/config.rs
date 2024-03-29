@@ -17,7 +17,6 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -25,6 +24,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
+use foyer::memory::{LfuConfig, LruConfig};
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -212,9 +212,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
-    /// If enabled, SSTable object file and version delta will be retained.
+    /// If enabled, `SSTable` object file and version delta will be retained.
     ///
-    /// SSTable object file need to be deleted via full GC.
+    /// `SSTable` object file need to be deleted via full GC.
     ///
     /// version delta need to be manually deleted.
     #[serde(default = "default::meta::enable_hummock_data_archive")]
@@ -279,11 +279,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::backend")]
     pub backend: MetaBackend,
 
-    /// Schedule space_reclaim compaction for all compaction groups with this interval.
+    /// Schedule `space_reclaim` compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    /// Schedule `ttl_reclaim` compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
@@ -526,44 +526,59 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
+    /// Control the strictness of stream consistency.
+    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
+    pub unsafe_enable_strict_consistency: bool,
+
     #[serde(default, flatten)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
-pub enum MetricLevel {
-    #[default]
-    Disabled = 0,
-    Critical = 1,
-    Info = 2,
-    Debug = 3,
+pub use risingwave_common_metrics::MetricLevel;
+
+/// the section `[storage.cache]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
+pub struct CacheConfig {
+    #[serde(default)]
+    pub block_cache_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub block_cache_shard_num: Option<usize>,
+
+    #[serde(default)]
+    pub block_cache_eviction: CacheEvictionConfig,
+
+    #[serde(default)]
+    pub meta_cache_capacity_mb: Option<usize>,
+
+    #[serde(default)]
+    pub meta_cache_shard_num: Option<usize>,
+
+    #[serde(default)]
+    pub meta_cache_eviction: CacheEvictionConfig,
 }
 
-impl clap::ValueEnum for MetricLevel {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
-    }
+/// the section `[storage.cache.eviction]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "algorithm")]
+pub enum CacheEvictionConfig {
+    Lru {
+        high_priority_ratio_in_percent: Option<usize>,
+    },
+    Lfu {
+        window_capacity_ratio_in_percent: Option<usize>,
+        protected_capacity_ratio_in_percent: Option<usize>,
+        cmsketch_eps: Option<f64>,
+        cmsketch_confidence: Option<f64>,
+    },
+}
 
-    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
-            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
-            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
-            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
+impl Default for CacheEvictionConfig {
+    fn default() -> Self {
+        Self::Lru {
+            high_priority_ratio_in_percent: None,
         }
-    }
-}
-
-impl PartialEq<Self> for MetricLevel {
-    fn eq(&self, other: &Self) -> bool {
-        (*self as u8).eq(&(*other as u8))
-    }
-}
-
-impl PartialOrd for MetricLevel {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        (*self as u8).partial_cmp(&(*other as u8))
     }
 }
 
@@ -597,16 +612,20 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
 
-    /// Capacity of sstable block cache.
+    #[serde(default)]
+    pub cache: CacheConfig,
+
+    /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_capacity_mb` instead.
     #[serde(default)]
     pub block_cache_capacity_mb: Option<usize>,
 
-    #[serde(default)]
-    pub high_priority_ratio_in_percent: Option<usize>,
-
-    /// Capacity of sstable meta cache.
+    /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.meta_cache_capacity_mb` instead.
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
+
+    /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_eviction.high_priority_ratio_in_percent` with `storage.cache.block_cache_eviction.algorithm = "Lru"` instead.
+    #[serde(default)]
+    pub high_priority_ratio_in_percent: Option<usize>,
 
     /// max memory usage for large query
     #[serde(default)]
@@ -627,13 +646,13 @@ pub struct StorageConfig {
     pub compactor_memory_limit_mb: Option<usize>,
 
     /// Compactor calculates the maximum number of tasks that can be executed on the node based on
-    /// worker_num and compactor_max_task_multiplier.
-    /// max_pull_task_count = worker_num * compactor_max_task_multiplier
+    /// `worker_num` and `compactor_max_task_multiplier`.
+    /// `max_pull_task_count` = `worker_num` * `compactor_max_task_multiplier`
     #[serde(default = "default::storage::compactor_max_task_multiplier")]
     pub compactor_max_task_multiplier: f32,
 
     /// The percentage of memory available when compactor is deployed separately.
-    /// non_reserved_memory_bytes = system_memory_available_bytes * compactor_memory_available_proportion
+    /// `non_reserved_memory_bytes` = `system_memory_available_bytes` * `compactor_memory_available_proportion`
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
     pub compactor_memory_available_proportion: f64,
 
@@ -669,6 +688,7 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
+    // DEPRECATED: This config will be deprecated in the future version, use `storage.compactor_iter_max_io_retry_times` instead.
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
@@ -679,12 +699,12 @@ pub struct StorageConfig {
     pub check_compaction_result: bool,
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
     pub compactor_fast_max_compact_delete_ratio: u32,
-
     #[serde(default = "default::storage::compactor_fast_max_compact_task_size")]
     pub compactor_fast_max_compact_task_size: u64,
+    #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
+    pub compactor_iter_max_io_retry_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -700,7 +720,7 @@ pub struct StorageConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
-    /// SSTable levels to refill.
+    /// `SSTable` levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
 
@@ -888,6 +908,21 @@ pub struct StreamingDeveloperConfig {
     /// The max heap size of dirty groups of `HashAggExecutor`.
     #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
     pub hash_agg_max_dirty_groups_heap_size: usize,
+
+    #[serde(default = "default::developer::memory_controller_threshold_aggressive")]
+    pub memory_controller_threshold_aggressive: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_graceful")]
+    pub memory_controller_threshold_graceful: f64,
+
+    #[serde(default = "default::developer::memory_controller_threshold_stable")]
+    pub memory_controller_threshold_stable: f64,
+
+    #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
+    /// Enable arrangement backfill
+    /// If true, the arrangement backfill will be disabled,
+    /// even if session variable set.
+    pub enable_arrangement_backfill: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -940,9 +975,17 @@ pub struct ObjectStoreConfig {
     pub object_store_upload_timeout_ms: u64,
     #[serde(default = "default::object_store_config::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
+    #[serde(default = "default::object_store_config::object_store_set_atomic_write_dir")]
+    pub object_store_set_atomic_write_dir: bool,
 
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
+}
+
+impl ObjectStoreConfig {
+    pub fn set_atomic_write_dir(&mut self) {
+        self.object_store_set_atomic_write_dir = true;
+    }
 }
 
 /// The subsections `[storage.object_store.s3]`.
@@ -967,6 +1010,8 @@ pub struct S3ObjectStoreConfig {
         default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
     )]
     pub retry_unknown_service_error: bool,
+    #[serde(default = "default::object_store_config::s3::identity_resolution_timeout_s")]
+    pub identity_resolution_timeout_s: u64,
     #[serde(default)]
     pub developer: S3ObjectStoreDeveloperConfig,
 }
@@ -985,6 +1030,9 @@ pub struct S3ObjectStoreDeveloperConfig {
         default = "default::object_store_config::s3::developer::object_store_retryable_service_error_codes"
     )]
     pub object_store_retryable_service_error_codes: Vec<String>,
+
+    #[serde(default = "default::object_store_config::s3::developer::use_opendal")]
+    pub use_opendal: bool,
 }
 
 impl SystemConfig {
@@ -1215,6 +1263,19 @@ pub mod default {
             70
         }
 
+        pub fn window_capacity_ratio_in_percent() -> usize {
+            10
+        }
+        pub fn protected_capacity_ratio_in_percent() -> usize {
+            80
+        }
+        pub fn cmsketch_eps() -> f64 {
+            0.002
+        }
+        pub fn cmsketch_confidence() -> f64 {
+            0.95
+        }
+
         pub fn meta_cache_capacity_mb() -> usize {
             128
         }
@@ -1272,6 +1333,10 @@ pub mod default {
             10 * 60 * 1000
         }
 
+        pub fn compactor_iter_max_io_retry_times() -> usize {
+            8
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1319,6 +1384,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn unsafe_enable_strict_consistency() -> bool {
+            true
         }
     }
 
@@ -1489,6 +1558,19 @@ pub mod default {
         pub fn enable_check_task_level_overlap() -> bool {
             false
         }
+
+        pub fn memory_controller_threshold_aggressive() -> f64 {
+            0.9
+        }
+        pub fn memory_controller_threshold_graceful() -> f64 {
+            0.8
+        }
+        pub fn memory_controller_threshold_stable() -> f64 {
+            0.7
+        }
+        pub fn stream_enable_arrangement_backfill() -> bool {
+            true
+        }
     }
 
     pub use crate::system_param::default as system;
@@ -1593,11 +1675,16 @@ pub mod default {
             8 * 60 * 1000
         }
 
+        pub fn object_store_set_atomic_write_dir() -> bool {
+            false
+        }
+
         pub mod s3 {
             /// Retry config for compute node http timeout error.
             const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
             const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
             const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
+            const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
             const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
 
@@ -1629,7 +1716,14 @@ pub mod default {
                 DEFAULT_RETRY_MAX_ATTEMPTS
             }
 
+            pub fn identity_resolution_timeout_s() -> u64 {
+                DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S
+            }
+
             pub mod developer {
+                use crate::util::env_var::env_var_is_false_or;
+                const RW_USE_OPENDAL_FOR_S3: &str = "RW_USE_OPENDAL_FOR_S3";
+
                 pub fn object_store_retry_unknown_service_error() -> bool {
                     false
                 }
@@ -1637,59 +1731,149 @@ pub mod default {
                 pub fn object_store_retryable_service_error_codes() -> Vec<String> {
                     vec!["SlowDown".into(), "TooManyRequests".into()]
                 }
+
+                pub fn use_opendal() -> bool {
+                    // TODO: deprecate this config when we are completely switch from aws sdk to opendal.
+                    // The reason why we use !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false) here is
+                    // 1. Maintain compatibility so that there is no behavior change in cluster with RW_USE_OPENDAL_FOR_S3 set.
+                    // 2. Change the default behavior to use opendal for s3 if RW_USE_OPENDAL_FOR_S3 is not set.
+                    !env_var_is_false_or(RW_USE_OPENDAL_FOR_S3, false)
+                }
             }
         }
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum EvictionConfig {
+    Lru(LruConfig),
+    Lfu(LfuConfig),
+}
+
+impl EvictionConfig {
+    pub fn for_test() -> Self {
+        Self::Lru(LruConfig {
+            high_priority_pool_ratio: 0.0,
+        })
+    }
+}
+
 pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
+    pub block_cache_shard_num: usize,
     pub meta_cache_capacity_mb: usize,
+    pub meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
     pub data_file_cache_ring_buffer_capacity_mb: usize,
     pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
-    pub high_priority_ratio_in_percent: usize,
+    pub block_cache_eviction_config: EvictionConfig,
+    pub meta_cache_eviction_config: EvictionConfig,
 }
 
+pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
+pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
+pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
+
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
-    let block_cache_capacity_mb = s
-        .storage
-        .block_cache_capacity_mb
-        .unwrap_or(default::storage::block_cache_capacity_mb());
-    let meta_cache_capacity_mb = s
-        .storage
-        .meta_cache_capacity_mb
-        .unwrap_or(default::storage::meta_cache_capacity_mb());
+    let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
+        // adapt to old version
+        s.storage
+            .block_cache_capacity_mb
+            .unwrap_or(default::storage::block_cache_capacity_mb()),
+    );
+    let meta_cache_capacity_mb = s.storage.cache.meta_cache_capacity_mb.unwrap_or(
+        // adapt to old version
+        s.storage
+            .block_cache_capacity_mb
+            .unwrap_or(default::storage::meta_cache_capacity_mb()),
+    );
     let shared_buffer_capacity_mb = s
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
+    let meta_cache_shard_num = s.storage.cache.meta_cache_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
+        while (meta_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
+            shard_bits -= 1;
+        }
+        shard_bits
+    });
+    let block_cache_shard_num = s.storage.cache.block_cache_shard_num.unwrap_or_else(|| {
+        let mut shard_bits = MAX_BLOCK_CACHE_SHARD_BITS;
+        while (block_cache_capacity_mb >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0
+        {
+            shard_bits -= 1;
+        }
+        shard_bits
+    });
     let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
     let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
         .unwrap_or(default::storage::compactor_memory_limit_mb());
-    let high_priority_ratio_in_percent = s
-        .storage
-        .high_priority_ratio_in_percent
-        .unwrap_or(default::storage::high_priority_ratio_in_percent());
-    let prefetch_buffer_capacity_mb = s
-        .storage
-        .shared_buffer_capacity_mb
-        .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
+
+    let get_eviction_config = |c: &CacheEvictionConfig| match c {
+        CacheEvictionConfig::Lru {
+            high_priority_ratio_in_percent,
+        } => EvictionConfig::Lru(LruConfig {
+            high_priority_pool_ratio: high_priority_ratio_in_percent.unwrap_or(
+                // adapt to old version
+                s.storage
+                    .high_priority_ratio_in_percent
+                    .unwrap_or(default::storage::high_priority_ratio_in_percent()),
+            ) as f64
+                / 100.0,
+        }),
+        CacheEvictionConfig::Lfu {
+            window_capacity_ratio_in_percent,
+            protected_capacity_ratio_in_percent,
+            cmsketch_eps,
+            cmsketch_confidence,
+        } => EvictionConfig::Lfu(LfuConfig {
+            window_capacity_ratio: window_capacity_ratio_in_percent
+                .unwrap_or(default::storage::window_capacity_ratio_in_percent())
+                as f64
+                / 100.0,
+            protected_capacity_ratio: protected_capacity_ratio_in_percent
+                .unwrap_or(default::storage::protected_capacity_ratio_in_percent())
+                as f64
+                / 100.0,
+            cmsketch_eps: cmsketch_eps.unwrap_or(default::storage::cmsketch_eps()),
+            cmsketch_confidence: cmsketch_confidence
+                .unwrap_or(default::storage::cmsketch_confidence()),
+        }),
+    };
+
+    let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
+    let meta_cache_eviction_config = get_eviction_config(&s.storage.cache.meta_cache_eviction);
+
+    let prefetch_buffer_capacity_mb =
+        s.storage
+            .shared_buffer_capacity_mb
+            .unwrap_or(match &block_cache_eviction_config {
+                EvictionConfig::Lru(lru) => {
+                    ((1.0 - lru.high_priority_pool_ratio) * block_cache_capacity_mb as f64) as usize
+                }
+                EvictionConfig::Lfu(lfu) => {
+                    ((1.0 - lfu.protected_capacity_ratio) * block_cache_capacity_mb as f64) as usize
+                }
+            });
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
+        block_cache_shard_num,
         meta_cache_capacity_mb,
+        meta_cache_shard_num,
         shared_buffer_capacity_mb,
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
-        high_priority_ratio_in_percent,
+        block_cache_eviction_config,
+        meta_cache_eviction_config,
     }
 }
 

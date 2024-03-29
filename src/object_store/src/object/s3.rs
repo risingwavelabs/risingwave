@@ -53,8 +53,8 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
-    ObjectStore, StreamingUploader,
+    prefix, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{try_update_failure_metric, ObjectDataStream, ObjectMetadataIter};
 
@@ -69,8 +69,6 @@ const MIN_PART_ID: PartId = 1;
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
-/// The number of S3/MinIO bucket prefixes
-const NUM_BUCKET_PREFIXES: u32 = 256;
 /// Stop multipart uploads that don't complete within a specified number of days after being
 /// initiated. (Day is the smallest granularity)
 const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
@@ -318,7 +316,7 @@ pub struct S3ObjectStore {
 impl ObjectStore for S3ObjectStore {
     fn get_object_prefix(&self, obj_id: u64) -> String {
         // Delegate to static method to avoid creating an `S3ObjectStore` in unit test.
-        Self::get_object_prefix(obj_id)
+        prefix::s3::get_object_prefix(obj_id)
     }
 
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -597,6 +595,13 @@ impl S3ObjectStore {
                     aws_sdk_s3::config::Builder::from(&sdk_config)
                         .endpoint_url(endpoint)
                         .force_path_style(is_force_path_style)
+                        .identity_cache(
+                            aws_sdk_s3::config::IdentityCache::lazy()
+                                .load_timeout(Duration::from_secs(
+                                    config.s3.identity_resolution_timeout_s,
+                                ))
+                                .build(),
+                        )
                         .build(),
                 );
                 client
@@ -655,6 +660,13 @@ impl S3ObjectStore {
                 .await,
         )
         .force_path_style(true)
+        .identity_cache(
+            aws_sdk_s3::config::IdentityCache::lazy()
+                .load_timeout(Duration::from_secs(
+                    s3_object_store_config.s3.identity_resolution_timeout_s,
+                ))
+                .build(),
+        )
         .http_client(Self::new_http_client(&s3_object_store_config))
         .behavior_version_latest();
         let config = builder
@@ -670,13 +682,6 @@ impl S3ObjectStore {
             metrics,
             config: s3_object_store_config,
         }
-    }
-
-    fn get_object_prefix(obj_id: u64) -> String {
-        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % NUM_BUCKET_PREFIXES;
-        let mut obj_prefix = prefix.to_string();
-        obj_prefix.push('/');
-        obj_prefix
     }
 
     /// Generates an HTTP GET request to download the object specified in `path`. If given,
@@ -987,8 +992,7 @@ impl tokio_retry::Condition<RetryError> for RetryCondition {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
-    use crate::object::s3::NUM_BUCKET_PREFIXES;
-    use crate::object::S3ObjectStore;
+    use crate::object::prefix::s3::{get_object_prefix, NUM_BUCKET_PREFIXES};
 
     fn get_hash_of_object(obj_id: u64) -> u32 {
         let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
@@ -999,7 +1003,7 @@ mod tests {
     async fn test_get_object_prefix() {
         for obj_id in 0..99999 {
             let hash = get_hash_of_object(obj_id);
-            let prefix = S3ObjectStore::get_object_prefix(obj_id);
+            let prefix = get_object_prefix(obj_id);
             assert_eq!(format!("{}/", hash), prefix);
         }
 

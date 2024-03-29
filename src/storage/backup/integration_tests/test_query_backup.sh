@@ -73,7 +73,7 @@ echo "QUERY_EPOCH=safe_epoch. It should fail because it's not covered by any bac
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${safe_epoch};
 select * from t1;" \
-"Read backup error backup include epoch ${safe_epoch} not found"
+"backup include epoch ${safe_epoch} not found"
 
 echo "QUERY_EPOCH=0 aka disabling query backup"
 execute_sql_and_expect \
@@ -81,24 +81,25 @@ execute_sql_and_expect \
 select * from t1;" \
 "1 row"
 
-echo "QUERY_EPOCH=backup_safe_epoch + 1, it's < safe_epoch but covered by backup"
-[ $((backup_safe_epoch + 1)) -eq 1 ]
+echo "QUERY_EPOCH=backup_safe_epoch + 1<<16 + 1, it's < safe_epoch but covered by backup"
+epoch=$((backup_safe_epoch + (1<<16) + 1))
+[ ${epoch} -eq 65537 ]
 execute_sql_and_expect \
-"SET QUERY_EPOCH TO $((backup_safe_epoch + 1));
+"SET QUERY_EPOCH TO ${epoch};
 select * from t1;" \
 "0 row"
 
-echo "QUERY_EPOCH=backup_mce < safe_epoch, it's < safe_epoch but covered by backup"
+echo "QUERY_EPOCH=backup_mce, it's < safe_epoch but covered by backup"
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${backup_mce};
 select * from t1;" \
 "3 row"
 
 echo "QUERY_EPOCH=future epoch. It should fail because it's not covered by any backup"
-future_epoch=18446744073709551615
+future_epoch=18446744073709486080
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO ${future_epoch};
 select * from t1;" \
-"Read backup error backup include epoch ${future_epoch} not found"
+"backup include epoch ${future_epoch} not found"
 
 echo "test succeeded"

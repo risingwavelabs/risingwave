@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use enum_as_inner::EnumAsInner;
-
-use crate::estimate_size::EstimateSize;
+use risingwave_common_estimate_size::EstimateSize;
 
 /// [`Sentinelled<T>`] wraps type `T` to provide smallest (smaller than any normal `T` value) and largest
 /// (larger than ant normal `T` value) sentinel value for `T`.

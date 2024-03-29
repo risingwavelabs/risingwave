@@ -18,7 +18,11 @@
 //!
 //! The corresponding version of arrow is currently used by `udf` and `iceberg` sink.
 
-pub use arrow_impl::to_record_batch_with_schema;
+#![allow(unused_imports)]
+pub use arrow_impl::{
+    to_record_batch_with_schema, ToArrowArrayConvert, ToArrowArrayWithTypeConvert,
+    ToArrowTypeConvert,
+};
 use {arrow_array, arrow_buffer, arrow_cast, arrow_schema};
 
 #[expect(clippy::duplicate_mod)]

@@ -41,9 +41,7 @@ use sync_point::sync_point;
 
 use super::StagingDataIterator;
 use crate::error::StorageResult;
-use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, MergeIterator, UserIterator,
-};
+use crate::hummock::iterator::{ConcatIterator, HummockIteratorUnion, MergeIterator, UserIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -54,7 +52,7 @@ use crate::hummock::utils::{
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockStorageIterator,
     HummockStorageIteratorInner, LocalHummockStorageIterator, ReadVersionTuple, Sstable,
-    SstableDeleteRangeIterator, SstableIterator,
+    SstableIterator,
 };
 use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
 use crate::monitor::{
@@ -118,7 +116,7 @@ impl StagingSstableInfo {
 pub enum StagingData {
     ImmMem(ImmutableMemtable),
     MergedImmMem(ImmutableMemtable, Vec<ImmId>),
-    Sst(StagingSstableInfo),
+    Sst(Arc<StagingSstableInfo>),
 }
 
 pub enum VersionUpdate {
@@ -141,7 +139,7 @@ pub struct StagingVersion {
     pub imm: VecDeque<ImmutableMemtable>,
 
     // newer data comes first
-    pub sst: VecDeque<StagingSstableInfo>,
+    pub sst: VecDeque<Arc<StagingSstableInfo>>,
 }
 
 impl StagingVersion {
@@ -211,7 +209,7 @@ pub struct HummockReadVersion {
     /// Indicate if this is replicated. If it is, we should ignore it during
     /// global state store read, to avoid duplicated results.
     /// Otherwise for local state store, it is fine, see we will see the
-    /// ReadVersion just for that local state store.
+    /// `ReadVersion` just for that local state store.
     is_replicated: bool,
 
     table_watermarks: Option<TableWatermarksIndex>,
@@ -235,9 +233,15 @@ impl HummockReadVersion {
         Self {
             table_id,
             table_watermarks: committed_version
-                .table_watermark_index()
+                .version()
+                .table_watermarks
                 .get(&table_id)
-                .cloned(),
+                .map(|table_watermarks| {
+                    TableWatermarksIndex::new_committed(
+                        table_watermarks.clone(),
+                        committed_version.max_committed_epoch(),
+                    )
+                }),
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 sst: VecDeque::default(),
@@ -287,7 +291,7 @@ impl HummockReadVersion {
                 StagingData::MergedImmMem(merged_imm, imm_ids) => {
                     self.add_merged_imm(merged_imm, imm_ids);
                 }
-                StagingData::Sst(staging_sst) => {
+                StagingData::Sst(staging_sst_ref) => {
                     // The following properties must be ensured:
                     // 1) self.staging.imm is sorted by imm id descendingly
                     // 2) staging_sst.imm_ids preserves the imm id partial
@@ -310,7 +314,7 @@ impl HummockReadVersion {
                         self.staging.imm.iter().map(|imm| imm.batch_id()).collect();
 
                     // intersected batch_id order from oldest to newest
-                    let intersect_imm_ids = staging_sst
+                    let intersect_imm_ids = staging_sst_ref
                         .imm_ids
                         .iter()
                         .rev()
@@ -345,15 +349,15 @@ impl HummockReadVersion {
                                     staging_sst.epochs {:?},
                                     local_imm_ids {:?},
                                     intersect_imm_ids {:?}",
-                                    staging_sst.imm_size,
-                                    staging_sst.imm_ids,
-                                    staging_sst.epochs,
+                                    staging_sst_ref.imm_size,
+                                    staging_sst_ref.imm_ids,
+                                    staging_sst_ref.epochs,
                                     local_imm_ids,
                                     intersect_imm_ids,
                                 );
                             }
                         }
-                        self.staging.sst.push_front(staging_sst);
+                        self.staging.sst.push_front(staging_sst_ref);
                     }
                 }
             },
@@ -382,13 +386,22 @@ impl HummockReadVersion {
                     }));
                 }
 
-                if let Some(committed_watermarks) =
-                    self.committed.table_watermark_index().get(&self.table_id)
+                if let Some(committed_watermarks) = self
+                    .committed
+                    .version()
+                    .table_watermarks
+                    .get(&self.table_id)
                 {
                     if let Some(watermark_index) = &mut self.table_watermarks {
-                        watermark_index.apply_committed_watermarks(committed_watermarks);
+                        watermark_index.apply_committed_watermarks(
+                            committed_watermarks.clone(),
+                            self.committed.max_committed_epoch(),
+                        );
                     } else {
-                        self.table_watermarks = Some(committed_watermarks.clone());
+                        self.table_watermarks = Some(TableWatermarksIndex::new_committed(
+                            committed_watermarks.clone(),
+                            self.committed.max_committed_epoch(),
+                        ));
                     }
                 }
             }
@@ -401,7 +414,7 @@ impl HummockReadVersion {
                 .get_or_insert_with(|| {
                     TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
                 })
-                .add_epoch_watermark(epoch, &vnode_watermarks, direction),
+                .add_epoch_watermark(epoch, Arc::from(vnode_watermarks), direction),
         }
     }
 
@@ -780,7 +793,6 @@ impl HummockVersionReader {
 
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
-        let mut delete_range_iter = ForwardMergeRangeIterator::new(epoch);
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
@@ -813,12 +825,6 @@ impl HummockVersionReader {
                 .sstable(sstable_info, &mut local_stats)
                 .await?;
 
-            if !table_holder.meta.monotonic_tombstone_events.is_empty()
-                && !read_options.ignore_range_tombstone
-            {
-                delete_range_iter
-                    .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
-            }
             if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
                 if !hit_sstable_bloom_filter(
                     &table_holder,
@@ -864,17 +870,6 @@ impl HummockVersionReader {
                     continue;
                 }
                 if sstables.len() > 1 {
-                    let ssts_which_have_delete_range = sstables
-                        .iter()
-                        .filter(|sst| sst.get_range_tombstone_count() > 0)
-                        .cloned()
-                        .collect_vec();
-                    if !ssts_which_have_delete_range.is_empty() {
-                        delete_range_iter.add_concat_iter(
-                            ssts_which_have_delete_range,
-                            self.sstable_store.clone(),
-                        );
-                    }
                     non_overlapping_iters.push(ConcatIterator::new(
                         sstables,
                         self.sstable_store.clone(),
@@ -886,12 +881,7 @@ impl HummockVersionReader {
                         .sstable_store
                         .sstable(&sstables[0], &mut local_stats)
                         .await?;
-                    if !sstable.meta.monotonic_tombstone_events.is_empty()
-                        && !read_options.ignore_range_tombstone
-                    {
-                        delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
-                    }
+
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
                             &sstable,
@@ -931,12 +921,6 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .await?;
                     assert_eq!(sstable_info.get_object_id(), sstable.id);
-                    if !sstable.meta.monotonic_tombstone_events.is_empty()
-                        && !read_options.ignore_range_tombstone
-                    {
-                        delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
-                    }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(
                             &sstable,
@@ -995,7 +979,6 @@ impl HummockVersionReader {
             epoch,
             min_epoch,
             Some(committed),
-            delete_range_iter,
         );
         user_iter.rewind().await?;
         local_stats.found_key = user_iter.is_valid();

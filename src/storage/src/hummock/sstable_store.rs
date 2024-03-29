@@ -23,12 +23,12 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::memory::{
-    Cache, CacheContext, CacheEntry, CacheEventListener, EntryState, Key, LruCacheConfig,
-    LruConfig, Value,
+    Cache, CacheContext, CacheEntry, CacheEventListener, EntryState, Key, LfuCacheConfig,
+    LruCacheConfig, LruConfig, Value,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::config::StorageMemoryConfig;
+use risingwave_common::config::{EvictionConfig, StorageMemoryConfig};
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
@@ -42,8 +42,8 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, CachedSstable, FileCache,
-    RecentFilter, Sstable, SstableBlockIndex, SstableMeta, SstableWriter,
+    Block, BlockCache, BlockCacheConfig, BlockMeta, BlockResponse, CachedBlock, CachedSstable,
+    FileCache, RecentFilter, Sstable, SstableBlockIndex, SstableMeta, SstableWriter,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -52,10 +52,6 @@ use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{BlockHolder, HummockError, HummockResult, MemoryLimiter};
 use crate::monitor::{HummockStateStoreMetrics, MemoryCollector, StoreLocalStatistic};
-
-const MAX_META_CACHE_SHARD_BITS: usize = 2;
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CacheEntry<HummockSstableObjectId, Box<Sstable>, MetaCacheEventListener>;
 
@@ -100,6 +96,7 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
+#[derive(Debug)]
 pub struct BlockCacheEventListener {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     metrics: Arc<HummockStateStoreMetrics>,
@@ -194,8 +191,11 @@ pub struct SstableStoreConfig {
     pub store: ObjectStoreRef,
     pub path: String,
     pub block_cache_capacity: usize,
+    pub block_cache_shard_num: usize,
+    pub block_cache_eviction: EvictionConfig,
     pub meta_cache_capacity: usize,
-    pub high_priority_ratio: usize,
+    pub meta_cache_shard_num: usize,
+    pub meta_cache_eviction: EvictionConfig,
     pub prefetch_buffer_capacity: usize,
     pub max_prefetch_block_number: usize,
     pub data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
@@ -226,33 +226,45 @@ impl SstableStore {
     pub fn new(config: SstableStoreConfig) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
-        let mut meta_cache_shard_bits = MAX_META_CACHE_SHARD_BITS;
-        while (config.meta_cache_capacity >> meta_cache_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD
-            && meta_cache_shard_bits > 0
-        {
-            meta_cache_shard_bits -= 1;
-        }
 
-        let block_cache = BlockCache::new(
-            config.block_cache_capacity,
-            MAX_CACHE_SHARD_BITS,
-            config.high_priority_ratio,
-            BlockCacheEventListener::new(
+        let block_cache = BlockCache::new(BlockCacheConfig {
+            capacity: config.block_cache_capacity,
+            shard_num: config.block_cache_shard_num,
+            eviction: config.block_cache_eviction,
+            listener: BlockCacheEventListener::new(
                 config.data_file_cache.clone(),
                 config.state_store_metrics.clone(),
             ),
-        );
-        // TODO(MrCroxx): support other cache algorithm
-        let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
-            capacity: config.meta_cache_capacity,
-            shards: 1 << meta_cache_shard_bits,
-            eviction_config: LruConfig {
-                high_priority_pool_ratio: 0.0,
-            },
-            object_pool_capacity: (1 << meta_cache_shard_bits) * 1024,
-            hash_builder: RandomState::default(),
-            event_listener: MetaCacheEventListener::from(config.meta_file_cache.clone()),
-        }));
+        });
+
+        // TODO(MrCroxx): reuse BlockCacheConfig here?
+        let meta_cache = {
+            let capacity = config.meta_cache_capacity;
+            let shards = config.meta_cache_shard_num;
+            let object_pool_capacity = config.meta_cache_shard_num * 1024;
+            let hash_builder = RandomState::default();
+            let event_listener = MetaCacheEventListener::from(config.meta_file_cache.clone());
+            match config.meta_cache_eviction {
+                EvictionConfig::Lru(eviction_config) => Cache::lru(LruCacheConfig {
+                    capacity,
+                    shards,
+                    eviction_config,
+                    object_pool_capacity,
+                    hash_builder,
+                    event_listener,
+                }),
+                EvictionConfig::Lfu(eviction_config) => Cache::lfu(LfuCacheConfig {
+                    capacity,
+                    shards,
+                    eviction_config,
+                    object_pool_capacity,
+                    hash_builder,
+                    event_listener,
+                }),
+            }
+        };
+        let meta_cache = Arc::new(meta_cache);
+
         Self {
             path: config.path,
             store: config.store,
@@ -277,7 +289,6 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        // TODO(MrCroxx): support other cache algorithm
         let meta_cache = Arc::new(Cache::lru(LruCacheConfig {
             capacity: meta_cache_capacity,
             shards: 1,
@@ -291,15 +302,17 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(
-                block_cache_capacity,
-                0,
-                0,
-                BlockCacheEventListener::new(
+            block_cache: BlockCache::new(BlockCacheConfig {
+                capacity: block_cache_capacity,
+                shard_num: 1,
+                eviction: EvictionConfig::Lru(LruConfig {
+                    high_priority_pool_ratio: 0.0,
+                }),
+                listener: BlockCacheEventListener::new(
                     FileCache::none(),
                     Arc::new(HummockStateStoreMetrics::unused()),
                 ),
-            ),
+            }),
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),

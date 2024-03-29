@@ -878,7 +878,7 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
-                use risingwave_common::estimate_size::EstimateSize;
+                use risingwave_common_estimate_size::EstimateSize;
 
                 use risingwave_expr::expr::Context;
                 use risingwave_expr::Result;

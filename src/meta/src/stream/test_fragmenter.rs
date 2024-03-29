@@ -479,8 +479,8 @@ async fn test_graph_builder() -> MetaResult<()> {
     let mview_actor_ids = table_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![5, 6, 7, 8]);
-    assert_eq!(mview_actor_ids, vec![0]);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
@@ -489,31 +489,31 @@ async fn test_graph_builder() -> MetaResult<()> {
         .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
         .collect();
 
-    assert_eq!(fragment_upstreams.get(&0).unwrap(), &vec![1]);
     assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
-    assert!(fragment_upstreams.get(&2).unwrap().is_empty());
+    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
+    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(0, vec![]);
-    expected_downstream.insert(1, vec![0]);
-    expected_downstream.insert(2, vec![0]);
-    expected_downstream.insert(3, vec![0]);
-    expected_downstream.insert(4, vec![0]);
-    expected_downstream.insert(5, vec![1, 2, 3, 4]);
-    expected_downstream.insert(6, vec![1, 2, 3, 4]);
-    expected_downstream.insert(7, vec![1, 2, 3, 4]);
-    expected_downstream.insert(8, vec![1, 2, 3, 4]);
+    expected_downstream.insert(1, vec![]);
+    expected_downstream.insert(2, vec![1]);
+    expected_downstream.insert(3, vec![1]);
+    expected_downstream.insert(4, vec![1]);
+    expected_downstream.insert(5, vec![1]);
+    expected_downstream.insert(6, vec![2, 3, 4, 5]);
+    expected_downstream.insert(7, vec![2, 3, 4, 5]);
+    expected_downstream.insert(8, vec![2, 3, 4, 5]);
+    expected_downstream.insert(9, vec![2, 3, 4, 5]);
 
     let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(0, vec![1, 2, 3, 4]);
-    expected_upstream.insert(1, vec![5, 6, 7, 8]);
-    expected_upstream.insert(2, vec![5, 6, 7, 8]);
-    expected_upstream.insert(3, vec![5, 6, 7, 8]);
-    expected_upstream.insert(4, vec![5, 6, 7, 8]);
-    expected_upstream.insert(5, vec![]);
+    expected_upstream.insert(1, vec![2, 3, 4, 5]);
+    expected_upstream.insert(2, vec![6, 7, 8, 9]);
+    expected_upstream.insert(3, vec![6, 7, 8, 9]);
+    expected_upstream.insert(4, vec![6, 7, 8, 9]);
+    expected_upstream.insert(5, vec![6, 7, 8, 9]);
     expected_upstream.insert(6, vec![]);
     expected_upstream.insert(7, vec![]);
     expected_upstream.insert(8, vec![]);
+    expected_upstream.insert(9, vec![]);
 
     for actor in actors {
         assert_eq!(

@@ -101,7 +101,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
-            None,
             source_desc.source.config.clone(),
             self.stream_source_core.source_name.clone(),
         );
@@ -297,7 +296,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     ..
                 }) => {
                     if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state = splits.clone();
+                        boot_state.clone_from(splits);
                     }
                 }
                 _ => {}
