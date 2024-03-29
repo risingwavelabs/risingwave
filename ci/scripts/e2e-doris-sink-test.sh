@@ -43,7 +43,7 @@ sleep 2
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/doris_sink.slt'
 sleep 1
-mysql -uroot -P 9030 -h doris-fe-server -e "select * from demo.demo_bhv_table" > ./query_result.csv
+mysql -uroot -P 9030 -h doris-server -e "select * from demo.demo_bhv_table" > ./query_result.csv
 
 
 if cat ./query_result.csv | sed '1d; s/\t/,/g' | awk -F "," '{
