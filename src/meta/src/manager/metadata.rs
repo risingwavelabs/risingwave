@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::pin::pin;
+use std::time::Duration;
 
+use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::catalog::{PbSource, PbTable};
@@ -23,6 +26,7 @@ use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, PbStreamActor, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::time::sleep;
 use tracing::warn;
 
 use crate::barrier::Reschedule;
@@ -89,6 +93,21 @@ impl ActiveStreamingWorkerNodes {
 
     pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
         &self.worker_nodes
+    }
+
+    pub(crate) async fn wait_changed(
+        &mut self,
+        verbose_internal: Duration,
+        verbose_fn: impl Fn(&Self),
+    ) -> ActiveStreamingWorkerChange {
+        loop {
+            if let Either::Left((change, _)) =
+                select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
+            {
+                break change;
+            }
+            verbose_fn(self)
+        }
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {

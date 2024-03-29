@@ -466,7 +466,7 @@ impl PlanRef {
 
                 for c in merge_predicate.conjunctions {
                     let c = Condition::with_expr(expr_rewriter.rewrite_cond(c));
-
+                    // rebuild the conjunctions
                     new_predicate = new_predicate.and(c);
                 }
 
