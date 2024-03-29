@@ -29,9 +29,9 @@
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
           ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: Backfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: ArrangementBackfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
           └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: ArrangementBackfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
@@ -43,13 +43,13 @@
                 └── StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
-    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: Backfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], stream_scan_type: ArrangementBackfill, pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
     ├── tables: [ StreamScan: 5 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 2
-    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: Backfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: ArrangementBackfill, pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
     ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode
@@ -124,9 +124,9 @@
         └─StreamExchange { dist: HashShard(t1.a) }
           └─StreamHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
             ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-            │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: Backfill, pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+            │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: ArrangementBackfill, pk: [t1.a], dist: UpstreamHashShard(t1.a) }
             └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-              └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: Backfill, pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+              └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: ArrangementBackfill, pk: [t2.a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
@@ -143,13 +143,13 @@
     └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
-    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: Backfill, pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], stream_scan_type: ArrangementBackfill, pk: [t1.a], dist: UpstreamHashShard(t1.a) }
     ├── tables: [ StreamScan: 5 ]
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: Backfill, pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], stream_scan_type: ArrangementBackfill, pk: [t2.a], dist: UpstreamHashShard(t2.a) }
     ├── tables: [ StreamScan: 6 ]
     ├── Upstream
     └── BatchPlanNode

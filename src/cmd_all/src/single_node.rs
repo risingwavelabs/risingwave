@@ -193,6 +193,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     // Set listen addresses (force to override)
     meta_opts.listen_addr = "0.0.0.0:5690".to_string();
     meta_opts.advertise_addr = "127.0.0.1:5690".to_string();
+    meta_opts.dashboard_host = Some("0.0.0.0:5691".to_string());
     compute_opts.listen_addr = "0.0.0.0:5688".to_string();
     compactor_opts.listen_addr = "0.0.0.0:6660".to_string();
     if let Some(frontend_addr) = &opts.node_opts.listen_addr {

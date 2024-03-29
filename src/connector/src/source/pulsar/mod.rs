@@ -26,7 +26,7 @@ pub use split::*;
 use with_options::WithOptions;
 
 use self::source::reader::PulsarSplitReader;
-use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
+use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
