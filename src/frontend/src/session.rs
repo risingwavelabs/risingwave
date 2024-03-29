@@ -279,7 +279,7 @@ impl FrontendEnv {
             Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
-            compute_client_pool,
+            compute_client_pool.clone(),
             catalog_reader.clone(),
             Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
@@ -378,6 +378,44 @@ impl FrontendEnv {
                 sessions.read().values().for_each(|session| {
                     let _ = session.check_idle_in_transaction_timeout();
                 })
+            }
+        });
+        join_handles.push(join_handle);
+
+        // Heartbeat
+        let heartbeat_worker_node_manager = worker_node_manager.clone();
+        let join_handle = tokio::spawn(async move {
+
+            let duration = std::cmp::max(
+                Duration::from_secs(
+                        meta_config
+                        .max_heartbeat_interval_secs as _,
+                ) / 10,
+                Duration::from_secs(1),
+            );
+
+            let mut check_heartbeat_interval =
+                tokio::time::interval(core::time::Duration::from_secs(2));
+            check_heartbeat_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            check_heartbeat_interval.reset();
+            loop {
+                check_heartbeat_interval.tick().await;
+                for worker in heartbeat_worker_node_manager
+                    .list_worker_nodes()
+                    .into_iter()
+                    .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+                {
+                    if let Ok(client) = compute_client_pool.get(&worker).await {
+                        if let Err(_) = client.heartbeat().await {
+                            info!("Worker node {} is not reachable, mask it", worker.id);
+                            heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
+                        }
+                    } else {
+                        info!("Worker node {} is not reachable, mask it", worker.id);
+                        heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
+                    }
+                }
             }
         });
         join_handles.push(join_handle);

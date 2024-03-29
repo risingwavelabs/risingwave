@@ -68,11 +68,20 @@ message ExecuteRequest {
   plan_common.ExprContext expr_context = 5;
 }
 
+message HeartbeatRequest {
+
+}
+
+message HeartbeatResponse {
+
+}
+
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
   // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
 message GetDataRequest {
