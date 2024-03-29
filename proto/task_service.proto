@@ -68,13 +68,9 @@ message ExecuteRequest {
   plan_common.ExprContext expr_context = 5;
 }
 
-message HeartbeatRequest {
+message HeartbeatRequest {}
 
-}
-
-message HeartbeatResponse {
-
-}
+message HeartbeatResponse {}
 
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
