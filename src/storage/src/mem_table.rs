@@ -30,6 +30,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{prefixed_range_with_vnode, FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::table_watermark::WatermarkDirection;
+use risingwave_hummock_sdk::HummockEpoch;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tracing::error;
@@ -661,6 +662,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         std::mem::replace(&mut self.vnodes, vnodes)
+    }
+
+    async fn wait_epoch(&self, _epoch: HummockEpoch) -> StorageResult<()> {
+        Ok(())
     }
 }
 

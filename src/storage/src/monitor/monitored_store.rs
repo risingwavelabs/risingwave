@@ -20,7 +20,7 @@ use futures::{Future, TryFutureExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{error, Instrument};
@@ -270,6 +270,13 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.inner.update_vnode_bitmap(vnodes)
+    }
+
+    async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
+        self.inner
+            .wait_epoch(epoch)
+            .verbose_instrument_await("store_wait_epoch_committed")
+            .await
     }
 }
 

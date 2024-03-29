@@ -334,6 +334,17 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    pub async fn wait_epoch_committed(&self, epoch: u64) -> StreamExecutorResult<()> {
+        self.stream_source_core
+            .as_ref()
+            .unwrap()
+            .split_state_store
+            .state_store
+            .wait_epoch(epoch)
+            .await
+            .map_err(Into::into)
+    }
+
     /// A source executor with a stream source receives:
     /// 1. Barrier messages
     /// 2. Data from external source
@@ -487,9 +498,17 @@ impl<S: StateStore> SourceExecutor<S> {
                         }
                     }
 
+                    let is_checkpoint = barrier.kind.is_checkpoint();
+                    let epoch_to_wait = epoch.prev;
                     self.persist_state_and_clear_cache(epoch).await?;
 
                     yield Message::Barrier(barrier);
+
+                    // wait for previous epoch commit
+                    if is_checkpoint {
+                        self.wait_epoch_committed(epoch_to_wait).await?;
+                        // todo: send request to split reader to commit source offset
+                    }
                 }
                 Either::Left(_) => {
                     // For the source executor, the message we receive from this arm

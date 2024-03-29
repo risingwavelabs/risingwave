@@ -212,7 +212,7 @@ pub mod verify {
     use bytes::Bytes;
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
     use tracing::log::warn;
 
     use crate::error::StorageResult;
@@ -499,6 +499,14 @@ pub mod verify {
             }
             ret
         }
+
+        async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
+            self.actual.wait_epoch(epoch).await?;
+            if let Some(expected) = &self.expected {
+                expected.wait_epoch(epoch).await?;
+            }
+            Ok(())
+        }
     }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
@@ -735,7 +743,7 @@ pub mod boxed_state_store {
     use dyn_clone::{clone_trait_object, DynClone};
     use risingwave_common::buffer::Bitmap;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
@@ -869,6 +877,8 @@ pub mod boxed_state_store {
         fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
+
+        async fn wait_epoch_committed(&self, epoch: HummockEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -936,6 +946,10 @@ pub mod boxed_state_store {
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
             self.update_vnode_bitmap(vnodes)
+        }
+
+        async fn wait_epoch_committed(&self, epoch: HummockEpoch) -> StorageResult<()> {
+            self.wait_epoch(epoch).await
         }
     }
 
@@ -1010,6 +1024,10 @@ pub mod boxed_state_store {
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
             self.deref_mut().update_vnode_bitmap(vnodes)
+        }
+
+        async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
+            self.deref().wait_epoch_committed(epoch).await
         }
     }
 

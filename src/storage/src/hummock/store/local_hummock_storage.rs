@@ -20,9 +20,9 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::MAX_SPILL_TIMES;
+use risingwave_common::util::epoch::{is_max_epoch, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{is_empty_key_range, vnode_range, TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockReadEpoch};
 use tracing::{warn, Instrument};
 
 use super::version::{StagingData, VersionUpdate};
@@ -452,6 +452,11 @@ impl LocalStateStore for LocalHummockStorage {
             self.table_id(), self.instance_id()
         );
         read_version.update_vnode_bitmap(vnodes)
+    }
+
+    async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
+        assert!(!is_max_epoch(epoch), "epoch should not be MAX EPOCH");
+        wait_for_epoch(&self.version_update_notifier_tx, epoch).await
     }
 }
 

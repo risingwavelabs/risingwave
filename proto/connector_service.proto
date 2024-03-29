@@ -208,12 +208,21 @@ message ValidateSourceResponse {
   ValidationError error = 1;
 }
 
+message CommitSourceOffsetRequest {
+
+}
+
+message CommitSourceOffsetResponse {
+
+}
+
 service ConnectorService {
   rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
   rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+  rpc CommitSourceOffset(CommitSourceOffsetRequest) returns (CommitSourceOffsetResponse);
 }
 
 message CoordinateRequest {

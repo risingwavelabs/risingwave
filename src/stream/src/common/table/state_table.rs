@@ -213,6 +213,11 @@ where
             .expect("non-replicated state store should start immediately.")
             .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
     }
+
+    /// Wait until the epoch is committed and its data is ready to read.
+    pub async fn wait_epoch(&self, epoch: u64) -> StorageResult<()> {
+        self.local_store.wait_epoch(epoch).await
+    }
 }
 
 fn consistent_old_value_op(row_serde: impl ValueRowSerde) -> OpConsistencyLevel {
