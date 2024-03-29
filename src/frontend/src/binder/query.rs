@@ -27,6 +27,7 @@ use thiserror_ext::AsReport;
 use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
+use crate::binder::bind_context::BindingCte;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
@@ -333,11 +334,11 @@ impl Binder {
                     .context
                     .cte_to_relation
                     .entry(table_name)
-                    .insert_entry(Rc::new(RefCell::new((
+                    .insert_entry(Rc::new(RefCell::new(BindingCte {
                         share_id,
-                        BindingCteState::Init,
+                        state: BindingCteState::Init,
                         alias,
-                    ))))
+                    })))
                     .get()
                     .clone();
 
@@ -346,9 +347,11 @@ impl Binder {
                 }
 
                 // We assume `left` is base term, otherwise the implementation may be very hard.
+                // The behavior is same as PostgreSQL.
+                // https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION
                 let bound_base = self.bind_set_expr(*left)?;
 
-                entry.borrow_mut().1 = BindingCteState::BaseResolved {
+                entry.borrow_mut().state = BindingCteState::BaseResolved {
                     schema: bound_base.schema().clone(),
                 };
 
@@ -366,16 +369,16 @@ impl Binder {
                     extra_order_exprs: vec![],
                 };
 
-                entry.borrow_mut().1 = BindingCteState::Bound { query: bound_query };
+                entry.borrow_mut().state = BindingCteState::Bound { query: bound_query };
             } else {
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(
                     table_name,
-                    Rc::new(RefCell::new((
+                    Rc::new(RefCell::new(BindingCte {
                         share_id,
-                        BindingCteState::Bound { query: bound_query },
+                        state: BindingCteState::Bound { query: bound_query },
                         alias,
-                    ))),
+                    })),
                 );
             }
         }

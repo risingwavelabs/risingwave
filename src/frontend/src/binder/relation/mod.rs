@@ -28,7 +28,7 @@ use thiserror_ext::AsReport;
 use self::cte_ref::BoundBackCteRef;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
-use crate::binder::bind_context::BindingCteState;
+use crate::binder::bind_context::{BindingCte, BindingCteState};
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
@@ -347,7 +347,11 @@ impl Binder {
         {
             // Handles CTE
 
-            let (share_id, cte_state, mut original_alias) = item.deref().borrow().clone();
+            let BindingCte {
+                share_id,
+                state: cte_state,
+                alias: mut original_alias,
+            } = item.deref().borrow().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {

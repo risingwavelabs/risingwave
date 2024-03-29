@@ -92,6 +92,13 @@ pub enum BindingCteState {
     Bound { query: BoundQuery },
 }
 
+#[derive(Clone, Debug)]
+pub struct BindingCte {
+    pub share_id: ShareId,
+    pub state: BindingCteState,
+    pub alias: TableAlias,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct BindContext {
     // Columns of all tables.
@@ -106,7 +113,7 @@ pub struct BindContext {
     pub column_group_context: ColumnGroupContext,
     /// Map the cte's name to its binding state.
     /// The `ShareId` of the value is used to help the planner identify the share plan.
-    pub cte_to_relation: HashMap<String, Rc<RefCell<(ShareId, BindingCteState, TableAlias)>>>,
+    pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
 }
