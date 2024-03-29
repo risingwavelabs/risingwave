@@ -88,6 +88,7 @@ INTEGRATION_TEST_MAP = {
     "vector-json": ["wutao"],
     "nats-json": ["wutao"],
     "nats-protobuf": ["wutao"],
+    "mqtt-json": ["bohan"],
     "doris-sink-json": ["xinhao"],
     "starrocks-sink-json": ["xinhao"],
     "deltalake-sink-json": ["xinhao"],
