@@ -104,7 +104,7 @@ pub struct BindContext {
     pub clause: Option<Clause>,
     // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
-    /// Map the cte's name to its `Relation::Subquery`.
+    /// Map the cte's name to its binding state.
     /// The `ShareId` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<RefCell<(ShareId, BindingCteState, TableAlias)>>>,
     /// Current lambda functions's arguments

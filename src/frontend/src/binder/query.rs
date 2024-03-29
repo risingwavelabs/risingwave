@@ -296,7 +296,7 @@ impl Binder {
                     fetch,
                 } = query;
                 fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
-                    if !v.is_none() {
+                    if v.is_some() {
                         return Err(ErrorCode::BindError(format!(
                             "`{clause}` is not supported in recursive CTE"
                         ))
@@ -316,16 +316,16 @@ impl Binder {
                     right,
                 } = body
                 else {
-                    return Err(ErrorCode::BindError(format!(
-                        "`UNION` is required in recursive CTE"
-                    ))
+                    return Err(ErrorCode::BindError(
+                        "`UNION` is required in recursive CTE".to_string(),
+                    )
                     .into());
                 };
 
                 if !all {
-                    return Err(ErrorCode::BindError(format!(
-                        "only `UNION ALL` is supported in recursive CTE now"
-                    ))
+                    return Err(ErrorCode::BindError(
+                        "only `UNION ALL` is supported in recursive CTE now".to_string(),
+                    )
                     .into());
                 }
 

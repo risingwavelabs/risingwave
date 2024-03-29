@@ -362,7 +362,7 @@ impl Binder {
 
             match cte_state {
                 BindingCteState::Init => {
-                    Err(ErrorCode::BindError(format!("Base term of recursive CTE not found, consider write it to left side of the `UNION` operator")).into())
+                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider write it to left side of the `UNION` operator".to_string()).into())
                 }
                 BindingCteState::BaseResolved { schema } => {
                     self.bind_table_to_context(
