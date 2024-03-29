@@ -29,7 +29,7 @@ use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::SinkParam;
-use crate::common::KinesisCommon;
+use crate::connector_common::KinesisCommon;
 use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;

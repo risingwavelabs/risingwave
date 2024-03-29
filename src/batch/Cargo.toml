@@ -62,9 +62,6 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 
-[target.'cfg(enable_task_local_alloc)'.dependencies]
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 

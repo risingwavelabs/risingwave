@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::SysCatalogReaderRef;
-use risingwave_common::config::BatchConfig;
+use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
@@ -164,24 +164,33 @@ impl ComputeNodeContext {
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        let batch_mem_context = env.task_manager().memory_context_ref();
-
-        let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
-            env.task_manager().metrics(),
-            env.task_metrics(),
-            env.executor_metrics(),
-            task_id,
-        ));
-        let mem_context = MemoryContext::new(
-            Some(batch_mem_context),
-            batch_metrics.task_mem_usage.clone(),
-        );
-        Self {
-            env,
-            batch_metrics: Some(batch_metrics),
-            cur_mem_val: Arc::new(0.into()),
-            last_mem_val: Arc::new(0.into()),
-            mem_context,
+        if env.metric_level() >= MetricLevel::Debug {
+            let batch_mem_context = env.task_manager().memory_context_ref();
+            let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
+                env.task_manager().metrics(),
+                env.task_metrics(),
+                env.executor_metrics(),
+                task_id,
+            ));
+            let mem_context = MemoryContext::new(
+                Some(batch_mem_context),
+                batch_metrics.task_mem_usage.clone(),
+            );
+            Self {
+                env,
+                batch_metrics: Some(batch_metrics),
+                cur_mem_val: Arc::new(0.into()),
+                last_mem_val: Arc::new(0.into()),
+                mem_context,
+            }
+        } else {
+            Self {
+                env,
+                batch_metrics: None,
+                cur_mem_val: Arc::new(0.into()),
+                last_mem_val: Arc::new(0.into()),
+                mem_context: MemoryContext::none(),
+            }
         }
     }
 
