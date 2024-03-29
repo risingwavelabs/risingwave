@@ -14,7 +14,7 @@
 
 use std::ops::Range;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::{stream, StreamExt, TryStreamExt};
 use opendal::services::Memory;
@@ -215,15 +215,37 @@ impl ObjectStore for OpendalObjectStore {
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpendalStreamingUploader {
     writer: Writer,
+    /// Buffer for data. It will store at least `part_size` bytes of data before wrapping itself
+    /// into a stream and upload to object store as a part.
+    buf: Vec<Bytes>,
+    /// Length of the data that have not been uploaded to S3.
+    not_uploaded_len: usize,
 }
 impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op
-            .writer_with(&path)
-            .concurrent(8)
-            .buffer(OPENDAL_BUFFER_SIZE)
-            .await?;
-        Ok(Self { writer })
+        let writer = op.writer_with(&path).concurrent(8).await?;
+        Ok(Self {
+            writer,
+            buf: Default::default(),
+            not_uploaded_len: 0,
+        })
+    }
+
+    // Flush the buffer to object store. This method will be called when the buffer size exceeds `OPENDAL_BUFFER_SIZE`.
+    // The reason why we don't use built-in buffer mechanism in OpenDal Wrtier is because we have
+    // observed its buffered writer may reserve more memory if the written bytes are small.
+    async fn flush(&mut self) -> ObjectResult<()> {
+        let mut payload = BytesMut::with_capacity(self.not_uploaded_len);
+        self.buf.drain(..).for_each(|b| payload.put(b));
+        self.not_uploaded_len = 0;
+        match self.writer.write(payload).await {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                // Try to abort. If abort fail, return the original error.
+                let _ = self.writer.abort().await;
+                return Err(err.into());
+            }
+        }
     }
 }
 
@@ -232,15 +254,25 @@ const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 #[async_trait::async_trait]
 impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.writer.write(data).await?;
+        self.not_uploaded_len += data.len();
+        self.buf.push(data);
+        if self.not_uploaded_len >= OPENDAL_BUFFER_SIZE {
+            self.flush().await?;
+        }
         Ok(())
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+        if self.not_uploaded_len > 0 {
+            self.flush().await?;
+        }
+        assert_eq!(self.not_uploaded_len, 0);
+        assert!(self.buf.is_empty());
         match self.writer.close().await {
             Ok(_) => (),
             Err(err) => {
-                self.writer.abort().await?;
+                // Try to abort. If abort fail, return the original error.
+                let _ = self.writer.abort().await;
                 return Err(err.into());
             }
         };
