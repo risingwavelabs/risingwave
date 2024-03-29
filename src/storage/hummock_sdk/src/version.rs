@@ -178,7 +178,7 @@ impl HummockVersion {
         existing_table_fragment_state_tables: &HashMap<u32, HashSet<u32>>,
     ) -> Option<HummockVersionDelta> {
         if existing_table_fragment_state_tables.is_empty()
-            || self.need_fill_backward_compatibility_snapshot_group()
+            || !self.need_fill_backward_compatibility_snapshot_group()
         {
             return None;
         }

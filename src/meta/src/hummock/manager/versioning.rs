@@ -324,6 +324,7 @@ impl HummockManager {
                 ?new_version_delta,
                 "fill snapshot group for backward compatibility"
             );
+            let mut new_version: HummockVersion = versioning.current_version.clone();
             let new_version_delta = create_trx_wrapper!(
                 self.sql_meta_store(),
                 BTreeMapEntryTransactionWrapper,
@@ -333,11 +334,13 @@ impl HummockManager {
                     new_version_delta,
                 )
             );
+            new_version.apply_version_delta(&new_version_delta);
             commit_multi_var!(
                 self.env.meta_store(),
                 self.sql_meta_store(),
                 new_version_delta
             )?;
+            versioning.current_version = new_version;
         }
         Ok(())
     }

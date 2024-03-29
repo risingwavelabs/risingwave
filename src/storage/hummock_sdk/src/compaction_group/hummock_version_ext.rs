@@ -34,7 +34,7 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
-use crate::table_watermark::{TableWatermarks, TableWatermarksIndex, VnodeWatermark};
+use crate::table_watermark::{TableWatermarks, VnodeWatermark};
 use crate::version::{HummockVersion, HummockVersionDelta, SnapshotGroup, SnapshotGroupDelta};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
