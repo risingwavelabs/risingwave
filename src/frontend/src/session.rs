@@ -385,12 +385,8 @@ impl FrontendEnv {
         // Heartbeat
         let heartbeat_worker_node_manager = worker_node_manager.clone();
         let join_handle = tokio::spawn(async move {
-
             let duration = std::cmp::max(
-                Duration::from_secs(
-                        meta_config
-                        .max_heartbeat_interval_secs as _,
-                ) / 10,
+                Duration::from_secs(meta_config.max_heartbeat_interval_secs as _) / 10,
                 Duration::from_secs(1),
             );
 
@@ -407,7 +403,7 @@ impl FrontendEnv {
                     .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
                 {
                     if let Ok(client) = compute_client_pool.get(&worker).await {
-                        if let Err(_) = client.heartbeat().await {
+                        if client.heartbeat().await.is_err() {
                             info!("Worker node {} is not reachable, mask it", worker.id);
                             heartbeat_worker_node_manager.mask_worker_node(worker.id, duration);
                         }
