@@ -1195,6 +1195,8 @@ pub enum Statement {
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
         append_only: bool,
+        /// On conflict behavior
+        on_conflict: Option<OnConflict>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1696,6 +1698,7 @@ impl fmt::Display for Statement {
                 source_schema,
                 source_watermarks,
                 append_only,
+                on_conflict,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -1723,6 +1726,11 @@ impl fmt::Display for Statement {
                 }
                 if *append_only {
                     write!(f, " APPEND ONLY")?;
+                }
+
+
+                if let Some(on_conflict_behavior) = on_conflict {
+                    write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
                 }
                 if !include_column_options.is_empty() { // (Ident, Option<Ident>)
                     write!(f, "{}", display_comma_separated(
@@ -2500,6 +2508,24 @@ impl fmt::Display for EmitMode {
         f.write_str(match self {
             EmitMode::Immediately => "IMMEDIATELY",
             EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum OnConflict {
+    OverWrite,
+    Ignore,
+    DoUpdateIfNotNull,
+}
+
+impl fmt::Display for OnConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            OnConflict::OverWrite => "OVERWRITE",
+            OnConflict::Ignore => "IGNORE",
+            OnConflict::DoUpdateIfNotNull => "DO UPDATE IF NOT NULL",
         })
     }
 }

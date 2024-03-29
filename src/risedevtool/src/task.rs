@@ -272,11 +272,11 @@ where
 
     pub fn tmux_run(&self, user_cmd: Command) -> anyhow::Result<Command> {
         let prefix_path = env::var("PREFIX_BIN")?;
-        let mut cmd = Command::new("tmux");
+        let mut cmd = new_tmux_command();
         cmd.arg("new-window")
             // Set target name
             .arg("-t")
-            .arg(RISEDEV_SESSION_NAME)
+            .arg(RISEDEV_NAME)
             // Switch to background window
             .arg("-d")
             // Set session name for this window

@@ -28,6 +28,7 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
@@ -145,8 +146,12 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    fn default_sink_decouple(desc: &SinkDesc) -> bool {
-        R::default_sink_decouple(desc)
+    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Default => Ok(R::default_sink_decouple(desc)),
+            SinkDecouple::Enable => Ok(true),
+            SinkDecouple::Disable => Ok(false),
+        }
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -262,7 +267,8 @@ impl RemoteLogSinker {
         let payload_schema = if sink_name == ElasticSearchSink::SINK_NAME {
             let columns = vec![
                 ColumnDesc::unnamed(ColumnId::from(0), DataType::Varchar).to_protobuf(),
-                ColumnDesc::unnamed(ColumnId::from(1), DataType::Jsonb).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar).to_protobuf(),
+                ColumnDesc::unnamed(ColumnId::from(2), DataType::Jsonb).to_protobuf(),
             ];
             Some(TableSchema {
                 columns,

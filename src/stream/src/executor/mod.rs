@@ -93,6 +93,7 @@ mod subscription;
 pub mod subtask;
 mod temporal_join;
 mod top_n;
+mod troublemaker;
 mod union;
 mod values;
 mod watermark;
@@ -145,6 +146,7 @@ pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
+pub use troublemaker::TroublemakerExecutor;
 pub use union::UnionExecutor;
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;

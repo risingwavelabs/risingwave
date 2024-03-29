@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use risingwave_common::array::{
-    ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
+    ArrayBuilder, ArrayImpl, JsonbArrayBuilder, RowRef, StreamChunk, Utf8ArrayBuilder,
 };
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -27,6 +27,7 @@ use super::encoder::{JsonEncoder, RowEncoder};
 use super::remote::ElasticSearchSink;
 use crate::sink::{Result, Sink};
 pub const ES_OPTION_DELIMITER: &str = "delimiter";
+pub const ES_OPTION_INDEX_COLUMN: &str = "index_column";
 
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
@@ -40,10 +41,22 @@ impl StreamChunkConverter {
         properties: &HashMap<String, String>,
     ) -> Result<Self> {
         if sink_name == ElasticSearchSink::SINK_NAME {
+            let index_column = properties
+                .get(ES_OPTION_INDEX_COLUMN)
+                .cloned()
+                .map(|n| {
+                    schema
+                        .fields()
+                        .iter()
+                        .position(|s| s.name == n)
+                        .ok_or_else(|| anyhow!("Cannot find {}", ES_OPTION_INDEX_COLUMN))
+                })
+                .transpose()?;
             Ok(StreamChunkConverter::Es(EsStreamChunkConverter::new(
                 schema,
                 pk_indices.clone(),
                 properties.get(ES_OPTION_DELIMITER).cloned(),
+                index_column,
             )?))
         } else {
             Ok(StreamChunkConverter::Other)
@@ -60,9 +73,15 @@ impl StreamChunkConverter {
 pub struct EsStreamChunkConverter {
     json_encoder: JsonEncoder,
     fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send>,
+    index_column: Option<usize>,
 }
 impl EsStreamChunkConverter {
-    fn new(schema: Schema, pk_indices: Vec<usize>, delimiter: Option<String>) -> Result<Self> {
+    fn new(
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        delimiter: Option<String>,
+        index_column: Option<usize>,
+    ) -> Result<Self> {
         let fn_build_id: Box<dyn Fn(RowRef<'_>) -> Result<String> + Send> = if pk_indices.is_empty()
         {
             Box::new(|row: RowRef<'_>| {
@@ -96,10 +115,18 @@ impl EsStreamChunkConverter {
                 Ok(keys.join(&delimiter))
             })
         };
-        let json_encoder = JsonEncoder::new_with_es(schema, None);
+        let col_indices = if let Some(index) = index_column {
+            let mut col_indices: Vec<usize> = (0..schema.len()).collect();
+            col_indices.remove(index);
+            Some(col_indices)
+        } else {
+            None
+        };
+        let json_encoder = JsonEncoder::new_with_es(schema, col_indices);
         Ok(Self {
             json_encoder,
             fn_build_id,
+            index_column,
         })
     }
 
@@ -109,23 +136,30 @@ impl EsStreamChunkConverter {
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut json_builder =
             <JsonbArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
+        let mut index_builder =
+            <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         for (op, row) in chunk.rows() {
             ops.push(op);
+            id_string_builder.append(Some(&self.build_id(row)?));
+            if let Some(index) = self.index_column {
+                index_builder.append(Some(
+                    row.datum_at(index)
+                        .ok_or_else(|| anyhow!("No value find in row, index is {}", index))?
+                        .into_utf8(),
+                ));
+            } else {
+                index_builder.append_null();
+            }
             let json = JsonbVal::from(Value::Object(self.json_encoder.encode(row)?));
-            risingwave_common::array::ArrayBuilder::append(
-                &mut id_string_builder,
-                Some(&self.build_id(row)?),
-            );
-            risingwave_common::array::ArrayBuilder::append(
-                &mut json_builder,
-                Some(json.as_scalar_ref()),
-            );
+            json_builder.append(Some(json.as_scalar_ref()));
         }
         let json_array = risingwave_common::array::ArrayBuilder::finish(json_builder);
         let id_string_array = risingwave_common::array::ArrayBuilder::finish(id_string_builder);
+        let index_string_array = risingwave_common::array::ArrayBuilder::finish(index_builder);
         Ok(StreamChunk::new(
             ops,
             vec![
+                std::sync::Arc::new(ArrayImpl::Utf8(index_string_array)),
                 std::sync::Arc::new(ArrayImpl::Utf8(id_string_array)),
                 std::sync::Arc::new(ArrayImpl::Jsonb(json_array)),
             ],
