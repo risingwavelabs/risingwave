@@ -492,6 +492,7 @@ impl HummockVersion {
         &mut self,
         version_delta: &HummockVersionDelta,
     ) -> Vec<SstSplitInfo> {
+        assert_eq!(self.id, version_delta.prev_id);
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
