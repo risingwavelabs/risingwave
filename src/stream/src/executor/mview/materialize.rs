@@ -17,12 +17,11 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
-
 use bytes::Bytes;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::{array::{Op, StreamChunk}, row::Row, types::data_types, util::row_serde};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
@@ -94,6 +93,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
         };
 
+        let data_types = state_table.get_data_types().to_vec();
+        let row_serde = state_table.get_row_serde();
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
 
@@ -103,7 +104,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             state_table,
             arrange_key_indices,
             actor_context,
-            materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info, data_types, row_serde),
             conflict_behavior,
         }
     }
@@ -290,14 +291,15 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             arrange_columns.clone(),
         )
         .await;
-
+        let data_types = state_table.get_data_types().to_vec();
+        let row_serde = state_table.get_row_serde();
         Self {
             input,
             schema,
             state_table,
             arrange_key_indices: arrange_columns.clone(),
             actor_context: ActorContext::for_test(0),
-            materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
+            materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test(),data_types , row_serde.clone()),
             conflict_behavior,
         }
     }
@@ -443,18 +445,22 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
     metrics_info: MetricsInfo,
+    data_types: Vec<DataType>,
+    row_serde: BasicSerde,
     _serde: PhantomData<SD>,
 }
 
 type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo, data_types: Vec<DataType>, row_serde: BasicSerde) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
             new_unbounded(watermark_epoch, metrics_info.clone());
         Self {
             data: cache,
             metrics_info,
+            data_types,
+            row_serde,
             _serde: PhantomData,
         }
     }
@@ -501,6 +507,21 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 None => {
                                     fixed_changes().insert(key.clone(), value.clone());
                                 }
+                            };
+                        }
+
+                        ConflictBehavior::DoUpdateIfNotNull => {
+                             match self.force_get(&key) {
+                                Some(old_row) => {
+                                    let row_serde = &self.row_serde.clone();
+                                    let old_row_deserialized = row_serde.deserialize(&old_row.row)?;
+                                    let new_row_deserialized = row_serde.deserialize(&value)?;
+                                    fixed_changes().update(
+                                    key.clone(),
+                                    old_row.row.clone(),
+                                    value.clone(),
+                                )},
+                                None => fixed_changes().insert(key.clone(), value.clone()),
                             };
                         }
                         _ => unreachable!(),
@@ -582,7 +603,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
             match conflict_behavior {
-                ConflictBehavior::Overwrite => self.data.push(key, value?),
+                ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull=> self.data.push(key, value?),
                 ConflictBehavior::IgnoreConflict => self.data.push(key, value?),
                 _ => unreachable!(),
             };

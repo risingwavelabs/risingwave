@@ -650,6 +650,10 @@ where
         &self.data_types
     }
 
+    pub fn get_row_serde(&self) -> BasicSerde {
+        self.row_serde
+    }
+
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
     }
