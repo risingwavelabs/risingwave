@@ -3,7 +3,7 @@ FROM
     bhv_mv WITH (
     connector = 'doris',
     type = 'append-only',
-    doris.url = 'http://doris:8030',
+    doris.url = 'http://fe:8030',
     doris.user = 'users',
     doris.password = '123456',
     doris.database = 'demo',
@@ -16,7 +16,7 @@ FROM
     upsert_bhv_mv WITH (
     connector = 'doris',
     type = 'upsert',
-    doris.url = 'http://doris:8030',
+    doris.url = 'http://fe:8030',
     doris.user = 'users',
     doris.password = '123456',
     doris.database = 'demo',

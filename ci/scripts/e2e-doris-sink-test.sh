@@ -30,7 +30,7 @@ sleep 1
 echo "--- create doris table"
 apt-get update -y && apt-get install -y mysql-client
 sleep 2
-mysql -uroot -P 9030 -h doris-fe-server -e "CREATE database demo;use demo;
+mysql -uroot -P 9030 -h doris-server -e "CREATE database demo;use demo;
 CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 datev2,v8 datetime,v9 boolean) UNIQUE KEY(\`v1\`)
 DISTRIBUTED BY HASH(\`v1\`) BUCKETS 1
 PROPERTIES (

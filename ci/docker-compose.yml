@@ -188,6 +188,18 @@ services:
     environment:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
 
+  doris-server:
+    container_name: doris-server
+    image: apache/doris:doris-all-in-one-2.1.0
+    ports:
+      - 8030:8030
+      - 8040:8040
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   starrocks-fe-server:
     container_name: starrocks-fe-server
     image: starrocks/fe-ubuntu:3.1.7

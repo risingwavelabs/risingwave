@@ -10,7 +10,7 @@ FROM
     mv6 WITH (
     connector = 'doris',
     type = 'append-only',
-    doris.url = 'http://doris-fe-server:8030',
+    doris.url = 'http://doris-server:8030',
     doris.user = 'users',
     doris.password = '123456',
     doris.database = 'demo',
