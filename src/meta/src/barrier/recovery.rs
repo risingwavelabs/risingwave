@@ -722,7 +722,7 @@ impl GlobalBarrierManagerContext {
             for (object_id, streaming_parallelism) in streaming_parallelisms {
                 let actual_fragment_parallelism = mgr
                     .catalog_controller
-                    .get_actual_fragment_parallelism(object_id)
+                    .get_actual_job_fragment_parallelism(object_id)
                     .await?;
 
                 let table_parallelism = match streaming_parallelism {
@@ -737,6 +737,15 @@ impl GlobalBarrierManagerContext {
                     actual_fragment_parallelism,
                     self.env.opts.default_parallelism,
                 );
+
+                if target_parallelism != table_parallelism {
+                    tracing::info!(
+                        "resetting table {} parallelism from {:?} to {:?}",
+                        object_id,
+                        table_parallelism,
+                        target_parallelism
+                    );
+                }
 
                 result.insert(object_id as u32, target_parallelism);
             }

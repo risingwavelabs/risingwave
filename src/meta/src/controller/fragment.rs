@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::mem::swap;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
@@ -1287,7 +1287,7 @@ impl CatalogController {
     }
 
     /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
-    pub async fn get_actual_fragment_parallelism(
+    pub async fn get_actual_job_fragment_parallelism(
         &self,
         job_id: ObjectId,
     ) -> MetaResult<Option<usize>> {
