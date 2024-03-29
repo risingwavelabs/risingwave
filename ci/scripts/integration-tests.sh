@@ -71,6 +71,10 @@ if [ "${format}" == "protobuf" ]; then
   python3 gen_pb_compose.py ${case} ${format}
 fi
 
+echo "--- set vm.max_map_count=2000000 for doris"
+max_map_count_original_value=$(sysctl -n vm.max_map_count)
+sudo sysctl -w vm.max_map_count=2000000
+
 echo "--- run Demos"
 python3 run_demos.py --case ${case} --format ${format}
 
@@ -84,3 +88,6 @@ python3 check_data.py ${case} ${upstream}
 
 echo "--- clean Demos"
 python3 clean_demos.py --case ${case}
+
+echo "--- reset vm.max_map_count={$max_map_count_original_value}"
+sudo sysctl -w vm.max_map_count=$max_map_count_original_value
