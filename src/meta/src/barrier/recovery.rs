@@ -325,9 +325,8 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             };
-            // TODO: register the snapshot group
             self.hummock_manager
-                .unregister_table_ids(HashSet::from_iter(cancelled))
+                .unregister_table_fragments_ids(HashSet::from_iter(cancelled))
                 .await?;
         }
         Ok(applied)

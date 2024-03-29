@@ -135,7 +135,7 @@ impl HummockManager {
         &self,
         table_fragments: &[crate::model::TableFragments],
     ) {
-        self.unregister_table_ids(HashSet::from_iter(
+        self.unregister_table_fragments_ids(HashSet::from_iter(
             table_fragments.iter().map(|tf| tf.table_id()),
         ))
         .await
@@ -158,7 +158,7 @@ impl HummockManager {
             &registered_table_fragments_ids - &existing_table_fragment_ids;
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
-        self.unregister_table_ids(to_unregister).await
+        self.unregister_table_fragments_ids(to_unregister).await
     }
 
     pub async fn register_single_table_fragments(
@@ -313,7 +313,10 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn unregister_table_ids(&self, table_fragments_ids: HashSet<TableId>) -> Result<()> {
+    pub async fn unregister_table_fragments_ids(
+        &self,
+        table_fragments_ids: HashSet<TableId>,
+    ) -> Result<()> {
         if table_fragments_ids.is_empty() {
             return Ok(());
         }

@@ -808,7 +808,7 @@ impl CommandContext {
 
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_ids(unregistered_table_fragment_ids.clone())
+                    .unregister_table_fragments_ids(unregistered_table_fragment_ids.clone())
                     .await?;
             }
 
@@ -828,7 +828,9 @@ impl CommandContext {
                 let table_id = table_fragments.table_id().table_id;
                 self.barrier_manager_context
                     .hummock_manager
-                    .unregister_table_ids(HashSet::from_iter(once(table_fragments.table_id())))
+                    .unregister_table_fragments_ids(HashSet::from_iter(once(
+                        table_fragments.table_id(),
+                    )))
                     .await?;
 
                 match &self.barrier_manager_context.metadata_manager {

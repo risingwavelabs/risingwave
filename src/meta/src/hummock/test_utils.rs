@@ -250,7 +250,7 @@ pub async fn unregister_table_ids_from_compaction_group(
     fragment_tables_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids(
+        .unregister_table_fragments_ids(
             fragment_tables_ids
                 .iter()
                 .map(|table_id| TableId::new(*table_id))
