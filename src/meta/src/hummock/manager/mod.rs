@@ -3052,70 +3052,73 @@ impl HummockManager {
         }
 
         let state_table_size = *table_size;
-        let result = {
+        {
             // When in a hybrid compaction group, data from multiple state tables may exist in a single sst, and in order to make the data in the sub level more aligned, a proactive cut is made for the data.
             // https://github.com/risingwavelabs/risingwave/issues/13037
             // 1. In some scenario (like backfill), the creating state_table / mv may have high write throughput (creating table ). Therefore, we relax the limit of `is_low_write_throughput` and partition the table with high write throughput by vnode to improve the parallel efficiency of compaction.
             // Add: creating table is not allowed to be split
             // 2. For table with low throughput, partition by table_id to minimize amplification.
             // 3. When the write mode is changed (the above conditions are not met), the default behavior is restored
-            if !is_low_write_throughput {
+            if is_high_write_throughput {
+                TableAlignRule::SplitByVnode((*table_id, partition_vnode_count))
+            } else if !is_low_write_throughput {
                 TableAlignRule::SplitByVnode((*table_id, hybrid_vnode_count))
             } else if state_table_size > self.env.opts.cut_table_size_limit {
                 TableAlignRule::SplitByTable(*table_id)
             } else {
                 TableAlignRule::NoOptimization
             }
-        };
+        }
 
         // 1. Avoid splitting a creating table
         // 2. Avoid splitting a is_low_write_throughput creating table
         // 3. Avoid splitting a non-high throughput medium-sized table
-        if is_creating_table
-            || (is_low_write_throughput)
-            || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
-        {
-            return result;
-        }
-
+        // if is_creating_table
+        // || (is_low_write_throughput)
+        // || (state_table_size < self.env.opts.min_table_split_size && !is_high_write_throughput)
+        // {
+        // return result;
+        // }
+        //
         // do not split a large table and a small table because it would increase IOPS
         // of small table.
-        if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-            let rest_group_size = group_size - state_table_size;
-            if rest_group_size < state_table_size
-                && rest_group_size < self.env.opts.min_table_split_size
-            {
-                return result;
-            }
-        }
-
-        let ret = self
-            .move_state_table_to_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                None,
-                partition_vnode_count,
-            )
-            .await;
-        match ret {
-            Ok((new_group_id, table_vnode_partition_count)) => {
-                tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
-                return TableAlignRule::SplitToDedicatedCg((
-                    new_group_id,
-                    table_vnode_partition_count,
-                ));
-            }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to move state table [{}] from group-{}",
-                    table_id,
-                    parent_group_id,
-                )
-            }
-        }
-
-        TableAlignRule::NoOptimization
+        // if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+        // let rest_group_size = group_size - state_table_size;
+        // if rest_group_size < state_table_size
+        // && rest_group_size < self.env.opts.min_table_split_size
+        // {
+        // return result;
+        // }
+        // }
+        //
+        // let ret = self
+        // .move_state_table_to_compaction_group(
+        // parent_group_id,
+        // &[*table_id],
+        // None,
+        // partition_vnode_count,
+        // )
+        // .await;
+        // match ret {
+        // Ok((new_group_id, table_vnode_partition_count)) => {
+        // tracing::info!("move state table [{}] from group-{} to group-{} success table_vnode_partition_count {:?}", table_id, parent_group_id, new_group_id, table_vnode_partition_count);
+        // return TableAlignRule::SplitToDedicatedCg((
+        // new_group_id,
+        // table_vnode_partition_count,
+        // ));
+        // }
+        // Err(e) => {
+        // tracing::info!(
+        // error = %e.as_report(),
+        // "failed to move state table [{}] from group-{}",
+        // table_id,
+        // parent_group_id,
+        // )
+        // }
+        // }
+        //
+        // TableAlignRule::NoOptimization
+        //
     }
 
     async fn initial_compaction_group_config_after_load(
