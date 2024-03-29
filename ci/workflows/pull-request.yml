@@ -317,7 +317,7 @@ steps:
       - "set-vm_max_map_count"
     plugins:
       - docker-compose#v5.1.0:
-          run: sink-doris-env
+          run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
