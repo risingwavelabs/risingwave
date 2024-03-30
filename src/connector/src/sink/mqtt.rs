@@ -20,8 +20,8 @@ use anyhow::{anyhow, Context as _};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::types::{DataType, ScalarRefImpl};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
 use serde_derive::Deserialize;
@@ -36,8 +36,8 @@ use super::encoder::{
 };
 use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::deserialize_bool_from_string;
 use crate::connector_common::MqttCommon;
+use crate::deserialize_bool_from_string;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
@@ -180,24 +180,7 @@ impl Sink for MqttSink {
         }
 
         if let Some(field) = &self.config.topic_field {
-            let (_, dt) = get_topic_field_index_path(&self.schema, field.as_str());
-
-            match dt {
-                Some(DataType::Varchar) => (),
-                Some(dt) => {
-                    return Err(SinkError::Config(anyhow!(
-                        "topic field `{}` must be of type string but got {:?}",
-                        field,
-                        dt
-                    )))
-                }
-                None => {
-                    return Err(SinkError::Config(anyhow!(
-                        "topic field `{}`  not found",
-                        field
-                    )))
-                }
-            }
+            let _ = get_topic_field_index_path(&self.schema, field.as_str())?;
         } else if self.config.topic.is_none() {
             return Err(SinkError::Config(anyhow!(
                 "either topic or topic.field must be set"
@@ -234,14 +217,7 @@ impl MqttSinkWriter {
     ) -> Result<Self> {
         let mut topic_index_path = vec![];
         if let Some(field) = &config.topic_field {
-            let (path, dt) = get_topic_field_index_path(&schema, field.as_str());
-            if !matches!(dt, Some(DataType::Varchar)) {
-                return Err(SinkError::Config(anyhow!(
-                    "topic field must be of type string but got {:?}",
-                    dt
-                )));
-            }
-            topic_index_path = path;
+            topic_index_path = get_topic_field_index_path(&schema, field.as_str())?;
         }
 
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
@@ -363,8 +339,6 @@ struct MqttSinkPayloadWriter {
     topic_index_path: Vec<usize>,
 }
 
-impl MqttSinkPayloadWriter {}
-
 impl MqttSinkPayloadWriter {
     async fn write_chunk(&mut self, chunk: StreamChunk, encoder: &RowEncoderWrapper) -> Result<()> {
         for (op, row) in chunk.rows() {
@@ -432,10 +406,7 @@ fn get_topic_from_index_path<'s>(
     }
 }
 
-fn get_topic_field_index_path<'s>(
-    schema: &'s Schema,
-    topic_field: &str,
-) -> (Vec<usize>, Option<&'s DataType>) {
+fn get_topic_field_index_path(schema: &Schema, topic_field: &str) -> Result<Vec<usize>> {
     let mut iter = topic_field.split('.');
     let mut path = vec![];
     let dt =
@@ -465,7 +436,18 @@ fn get_topic_field_index_path<'s>(
                 })
             });
 
-    (path, dt)
+    match dt {
+        Some(DataType::Varchar) => Ok(path),
+        Some(dt) => Err(SinkError::Config(anyhow!(
+            "topic field `{}` must be of type string but got {:?}",
+            topic_field,
+            dt
+        ))),
+        None => Err(SinkError::Config(anyhow!(
+            "topic field `{}`  not found",
+            topic_field
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -479,9 +461,8 @@ mod test {
     #[test]
     fn test_single_field_extraction() {
         let schema = Schema::new(vec![Field::with_name(DataType::Varchar, "topic")]);
-        let (path, dt) = get_topic_field_index_path(&schema, "topic");
+        let path = get_topic_field_index_path(&schema, "topic").unwrap();
         assert_eq!(path, vec![0]);
-        assert_eq!(dt, Some(&DataType::Varchar));
 
         let chunk = DataChunk::from_pretty(
             "T
@@ -492,9 +473,8 @@ mod test {
 
         assert_eq!(get_topic_from_index_path(&path, None, &row), Some("test"));
 
-        let (path, dt) = get_topic_field_index_path(&schema, "other_field");
-        assert!(path.is_empty());
-        assert_eq!(dt, None);
+        let result = get_topic_field_index_path(&schema, "other_field");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -506,9 +486,8 @@ mod test {
             ])),
             "topic",
         )]);
-        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic");
+        let path = get_topic_field_index_path(&schema, "topic.subtopic").unwrap();
         assert_eq!(path, vec![0, 1]);
-        assert_eq!(dt, Some(&DataType::Varchar));
 
         let chunk = DataChunk::from_pretty(
             "<i,T>
@@ -519,8 +498,8 @@ mod test {
 
         assert_eq!(get_topic_from_index_path(&path, None, &row), Some("test"));
 
-        let (_, dt) = get_topic_field_index_path(&schema, "topic.other_field");
-        assert_eq!(dt, None);
+        let result = get_topic_field_index_path(&schema, "topic.other_field");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -570,25 +549,17 @@ mod test {
             Field::with_name(DataType::Varchar, "other_field"),
         ]);
 
-        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic.string_field");
+        let path = get_topic_field_index_path(&schema, "topic.subtopic.string_field").unwrap();
         assert_eq!(path, vec![0, 1, 2]);
-        assert_eq!(dt, Some(&DataType::Varchar));
 
-        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic.boolean_field");
-        assert_eq!(path, vec![0, 1, 1]);
-        assert_eq!(dt, Some(&DataType::Boolean));
+        assert!(get_topic_field_index_path(&schema, "topic.subtopic.boolean_field").is_err());
 
-        let (path, dt) = get_topic_field_index_path(&schema, "topic.subtopic.int_field");
-        assert_eq!(path, vec![0, 1, 0]);
-        assert_eq!(dt, Some(&DataType::Int32));
+        assert!(get_topic_field_index_path(&schema, "topic.subtopic.int_field").is_err());
 
-        let (path, dt) = get_topic_field_index_path(&schema, "topic.field");
-        assert_eq!(path, vec![0, 0]);
-        assert_eq!(dt, Some(&DataType::Int32));
+        assert!(get_topic_field_index_path(&schema, "topic.field").is_err());
 
-        let (path, dt) = get_topic_field_index_path(&schema, "other_field");
+        let path = get_topic_field_index_path(&schema, "other_field").unwrap();
         assert_eq!(path, vec![1]);
-        assert_eq!(dt, Some(&DataType::Varchar));
 
         let chunk = DataChunk::from_pretty(
             "<i,<T>> T
