@@ -36,11 +36,6 @@ pub enum BoundSetExpr {
         left: Box<BoundSetExpr>,
         right: Box<BoundSetExpr>,
     },
-    /// UNION in recursive CTE definition
-    RecursiveUnion {
-        base: Box<BoundSetExpr>,
-        recursive: Box<BoundSetExpr>,
-    },
 }
 
 impl RewriteExprsRecursive for BoundSetExpr {
@@ -52,10 +47,6 @@ impl RewriteExprsRecursive for BoundSetExpr {
             BoundSetExpr::SetOperation { left, right, .. } => {
                 left.rewrite_exprs_recursive(rewriter);
                 right.rewrite_exprs_recursive(rewriter);
-            }
-            BoundSetExpr::RecursiveUnion { base, recursive } => {
-                base.rewrite_exprs_recursive(rewriter);
-                recursive.rewrite_exprs_recursive(rewriter);
             }
         }
     }
@@ -87,7 +78,6 @@ impl BoundSetExpr {
             BoundSetExpr::Values(v) => v.schema(),
             BoundSetExpr::Query(q) => q.schema(),
             BoundSetExpr::SetOperation { left, .. } => left.schema(),
-            BoundSetExpr::RecursiveUnion { base, .. } => base.schema(),
         }
     }
 
@@ -98,9 +88,6 @@ impl BoundSetExpr {
             BoundSetExpr::Query(q) => q.is_correlated(depth),
             BoundSetExpr::SetOperation { left, right, .. } => {
                 left.is_correlated(depth) || right.is_correlated(depth)
-            }
-            BoundSetExpr::RecursiveUnion { base, recursive } => {
-                base.is_correlated(depth) || recursive.is_correlated(depth)
             }
         }
     }
@@ -127,17 +114,6 @@ impl BoundSetExpr {
                 );
                 correlated_indices.extend(
                     right.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices
-            }
-            BoundSetExpr::RecursiveUnion { base, recursive } => {
-                let mut correlated_indices = vec![];
-                correlated_indices.extend(
-                    base.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                );
-                correlated_indices.extend(
-                    recursive
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices
             }

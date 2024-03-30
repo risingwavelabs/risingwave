@@ -17,6 +17,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use parse_display::Display;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -93,7 +94,16 @@ pub enum BindingCteState {
     /// We know the schema form after the base term resolved.
     BaseResolved { schema: Schema },
     /// We get the whole bound result of the (recursive) CTE.
-    Bound { query: BoundQuery },
+    Bound { query: Either<BoundQuery, RecursiveUnion> },
+}
+
+/// the entire `RecursiveUnion` represents a *bound* recursive cte.
+/// reference: <https://github.com/risingwavelabs/risingwave/pull/15522/files#r1524367781>
+#[derive(Debug, Clone)]
+pub struct RecursiveUnion {
+    pub all: bool,
+    pub base: Box<BoundQuery>,
+    pub recursive: Box<BoundQuery>,
 }
 
 #[derive(Clone, Debug)]
