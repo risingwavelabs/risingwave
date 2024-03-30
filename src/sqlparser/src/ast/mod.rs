@@ -269,17 +269,13 @@ impl EscapeChar {
     pub fn empty() -> Self {
         Self(None)
     }
-
-    pub fn as_char(&self) -> Option<char> {
-        self.0
-    }
 }
 
 impl fmt::Display for EscapeChar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            Some(ch) => write!(f, "'{}'", ch),
-            None => f.write_str("''"),
+            Some(ch) => write!(f, "{}", ch),
+            None => f.write_str(""),
         }
     }
 }

@@ -517,10 +517,7 @@ impl Binder {
         let pattern = self.bind_expr_inner(pattern)?;
 
         let esc_inputs = if let Some(escape_char) = escape_char {
-            let escape_char = ExprImpl::literal_varchar(match escape_char.as_char() {
-                Some(c) => c.to_string(),
-                None => "".to_string(),
-            });
+            let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
             vec![pattern, escape_char]
         } else {
             vec![pattern]

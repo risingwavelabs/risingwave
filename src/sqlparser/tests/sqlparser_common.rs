@@ -618,7 +618,7 @@ fn parse_not_precedence() {
                 expr: Box::new(Expr::Value(Value::SingleQuotedString("a".into()))),
                 negated: true,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("b".into()))),
-                escape_char: None
+                escape_char: None,
             }),
         },
     );
@@ -651,7 +651,7 @@ fn parse_like() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: None
+                escape_char: None,
             },
             select.selection.unwrap()
         );
@@ -667,7 +667,7 @@ fn parse_like() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: Some(EscapeChar::escape('\\'))
+                escape_char: Some(EscapeChar::escape('\\')),
             },
             select.selection.unwrap()
         );
@@ -684,7 +684,7 @@ fn parse_like() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: None
+                escape_char: None,
             })),
             select.selection.unwrap()
         );
@@ -722,7 +722,7 @@ fn parse_ilike() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: Some('^'),
+                escape_char: Some(EscapeChar::escape('^')),
             },
             select.selection.unwrap()
         );
@@ -761,7 +761,7 @@ fn parse_similar_to() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: None
+                escape_char: None,
             },
             select.selection.unwrap()
         );
@@ -777,7 +777,7 @@ fn parse_similar_to() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: Some('\\')
+                escape_char: Some(EscapeChar::escape('\\')),
             },
             select.selection.unwrap()
         );
@@ -793,7 +793,7 @@ fn parse_similar_to() {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
                 pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
-                escape_char: Some('\\')
+                escape_char: Some(EscapeChar::escape('\\')),
             })),
             select.selection.unwrap()
         );
