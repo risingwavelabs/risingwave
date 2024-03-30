@@ -384,14 +384,18 @@ impl Binder {
                     recursive: Box::new(recursive),
                 };
 
-                entry.borrow_mut().state = BindingCteState::Bound { query: either::Either::Right(recursive_union) };
+                entry.borrow_mut().state = BindingCteState::Bound {
+                    query: either::Either::Right(recursive_union),
+                };
             } else {
                 let bound_query = self.bind_query(query)?;
                 self.context.cte_to_relation.insert(
                     table_name,
                     Rc::new(RefCell::new(BindingCte {
                         share_id,
-                        state: BindingCteState::Bound { query: either::Either::Left(bound_query) },
+                        state: BindingCteState::Bound {
+                            query: either::Either::Left(bound_query),
+                        },
                         alias,
                     })),
                 );
