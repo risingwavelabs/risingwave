@@ -68,27 +68,31 @@ pub struct LateralBindContext {
     pub context: BindContext,
 }
 
-/// If the CTE a recursive one, we may need store it in `cte_to_relation` first, and bind it step by step.
+/// For recursive CTE, we may need to store it in `cte_to_relation` first,
+/// and then bind it *step by step*.
+///
+/// note: the below sql example is to illustrate when we get the
+/// corresponding binding state when handling a recursive CTE like this.
 ///
 /// ```sql
 /// WITH RECURSIVE t(n) AS (
-/// # -------------^ Init
+/// # -------------^ => Init
 ///     VALUES (1)
 ///   UNION ALL
 ///     SELECT n+1 FROM t WHERE n < 100
-/// # ------------------^BaseResolved
+/// # ------------------^ => BaseResolved
 /// )
 /// SELECT sum(n) FROM t;
-/// # -----------------^Bound
+/// # -----------------^ => Bound
 /// ```
 #[derive(Default, Debug, Clone)]
 pub enum BindingCteState {
-    /// We know nothing about the CTE before resolve the body.
+    /// We know nothing about the CTE before resolving the body.
     #[default]
     Init,
-    /// We know the schema from after the base term resolved.
+    /// We know the schema form after the base term resolved.
     BaseResolved { schema: Schema },
-    /// We get the whole bound result.
+    /// We get the whole bound result of the (recursive) CTE.
     Bound { query: BoundQuery },
 }
 
