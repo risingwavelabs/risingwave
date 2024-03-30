@@ -1628,7 +1628,7 @@ impl Parser {
     pub fn parse_escape_char(&mut self) -> Result<Option<EscapeChar>, ParserError> {
         if self.parse_keyword(Keyword::ESCAPE) {
             let s = self.parse_literal_string()?;
-            if s.len() == 0 {
+            if s.is_empty() {
                 Ok(Some(EscapeChar::empty()))
             } else if s.len() == 1 {
                 Ok(Some(EscapeChar::escape(s.chars().next().unwrap())))
