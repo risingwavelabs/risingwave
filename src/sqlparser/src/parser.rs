@@ -1633,7 +1633,9 @@ impl Parser {
             } else if s.len() == 1 {
                 Ok(Some(EscapeChar::escape(s.chars().next().unwrap())))
             } else {
-                parser_err!(format!("Expect a char or an empty string, found {s:?}"))
+                parser_err!(format!(
+                    "Escape string must be empty or one character, found {s:?}"
+                ))
             }
         } else {
             Ok(None)
