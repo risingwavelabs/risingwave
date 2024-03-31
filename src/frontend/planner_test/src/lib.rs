@@ -430,6 +430,7 @@ impl TestCase {
                     source_schema,
                     source_watermarks,
                     append_only,
+                    on_conflict,
                     cdc_table_info,
                     include_column_options,
                     wildcard_idx,
@@ -447,6 +448,7 @@ impl TestCase {
                         source_schema,
                         source_watermarks,
                         append_only,
+                        on_conflict,
                         cdc_table_info,
                         include_column_options,
                     )

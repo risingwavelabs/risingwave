@@ -101,28 +101,28 @@ impl Planner {
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
             .into());
+        } else {
+            let as_of = source.as_of.clone();
+            match as_of {
+                None
+                | Some(AsOf::VersionNum(_))
+                | Some(AsOf::TimestampString(_))
+                | Some(AsOf::TimestampNum(_)) => {}
+                Some(AsOf::ProcessTime) => {
+                    bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                }
+                Some(AsOf::VersionString(_)) => {
+                    bail_not_implemented!("As Of Version is not supported yet.")
+                }
+            }
+            Ok(LogicalSource::with_catalog(
+                Rc::new(source.catalog),
+                SourceNodeKind::CreateMViewOrBatch,
+                self.ctx(),
+                as_of,
+            )?
+            .into())
         }
-
-        let as_of = source.as_of.clone();
-        match as_of {
-            None => {}
-            Some(AsOf::ProcessTime) => {
-                bail_not_implemented!("As Of ProcessTime() is not supported yet.")
-            }
-            Some(AsOf::TimestampString(_)) | Some(AsOf::TimestampNum(_)) => {
-                bail_not_implemented!("As Of Timestamp is not supported yet.")
-            }
-            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
-                bail_not_implemented!("As Of Version is not supported yet.")
-            }
-        }
-        Ok(LogicalSource::with_catalog(
-            Rc::new(source.catalog),
-            SourceNodeKind::CreateMViewOrBatch,
-            self.ctx(),
-            as_of,
-        )?
-        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

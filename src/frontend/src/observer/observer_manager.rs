@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
@@ -30,7 +31,6 @@ use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::FragmentId;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;

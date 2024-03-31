@@ -18,6 +18,8 @@ use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
+
+const AZBLOB_ENDPOINT: &str = "AZBLOB_ENDPOINT";
 impl OpendalObjectStore {
     /// create opendal azblob engine.
     pub fn new_azblob_engine(container_name: String, root: String) -> ObjectResult<Self> {
@@ -26,16 +28,10 @@ impl OpendalObjectStore {
         builder.root(&root);
         builder.container(&container_name);
 
-        let endpoint = std::env::var("AZBLOB_ENDPOINT")
+        let endpoint = std::env::var(AZBLOB_ENDPOINT)
             .unwrap_or_else(|_| panic!("AZBLOB_ENDPOINT not found from environment variables"));
-        let account_name = std::env::var("AZBLOB_ACCOUNT_NAME")
-            .unwrap_or_else(|_| panic!("AZBLOB_ACCOUNT_NAME not found from environment variables"));
-        let account_key = std::env::var("AZBLOB_ACCOUNT_KEY")
-            .unwrap_or_else(|_| panic!("AZBLOB_ACCOUNT_KEY not found from environment variables"));
 
         builder.endpoint(&endpoint);
-        builder.account_name(&account_name);
-        builder.account_key(&account_key);
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())

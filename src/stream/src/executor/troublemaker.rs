@@ -25,6 +25,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use smallvec::SmallVec;
 
 use super::{BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
+use crate::consistency::insane;
 
 /// [`TroublemakerExecutor`] is used to make some trouble in the stream graph. Specifically,
 /// it is attached to `StreamScan` and `Source` executors in **insane mode**. It randomly
@@ -47,10 +48,7 @@ struct Vars {
 
 impl TroublemakerExecutor {
     pub fn new(input: Executor, chunk_size: usize) -> Self {
-        assert!(
-            crate::consistency::insane(),
-            "we should only make trouble in insane mode"
-        );
+        assert!(insane(), "we should only make trouble in insane mode");
         tracing::info!("we got a troublemaker");
         Self {
             input,

@@ -19,6 +19,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
@@ -85,6 +86,10 @@ impl LogicalSource {
             kafka_timestamp_range,
             as_of,
         };
+
+        if core.as_of.is_some() && !core.support_time_travel() {
+            bail!("Time travel is not supported for the source")
+        }
 
         let base = PlanBase::new_logical_with_core(&core);
 
@@ -263,11 +268,15 @@ impl Distill for LogicalSource {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
             let time = Pretty::debug(&self.core.kafka_timestamp_range);
-            vec![
+            let mut fields = vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
                 ("time_range", time),
-            ]
+            ];
+            if let Some(as_of) = &self.core.as_of {
+                fields.push(("as_of", Pretty::debug(as_of)));
+            }
+            fields
         } else {
             vec![]
         };

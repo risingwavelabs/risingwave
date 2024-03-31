@@ -1470,10 +1470,7 @@ impl DdlController {
             create_type: stream_job.create_type(),
             ddl_type: stream_job.into(),
             replace_table_job_info,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/14793
-            option: CreateStreamingJobOption {
-                new_independent_compaction_group: false,
-            },
+            option: CreateStreamingJobOption {},
         };
 
         // 4. Mark tables as creating, including internal tables and the table of the stream job.
@@ -2061,8 +2058,8 @@ impl DdlController {
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
-        let timeout_secs = 30 * 60;
-        for _ in 0..timeout_secs {
+        let timeout_ms = 30 * 60 * 1000;
+        for _ in 0..timeout_ms {
             match &self.metadata_manager {
                 MetadataManager::V1(mgr) => {
                     if mgr
@@ -2086,10 +2083,10 @@ impl DdlController {
                 }
             }
 
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(1)).await;
         }
         Err(MetaError::cancelled(format!(
-            "timeout after {timeout_secs}s"
+            "timeout after {timeout_ms}ms"
         )))
     }
 

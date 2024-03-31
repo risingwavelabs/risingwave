@@ -586,6 +586,19 @@ impl TableFragments {
         actor_map
     }
 
+    pub fn mv_table_id(&self) -> Option<u32> {
+        if self
+            .fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.iter())
+            .any(|table_id| *table_id == self.table_id.table_id)
+        {
+            Some(self.table_id.table_id)
+        } else {
+            None
+        }
+    }
+
     /// Returns the internal table ids without the mview table.
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.fragments

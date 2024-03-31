@@ -31,6 +31,7 @@ mod plan_visitor;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+use risingwave_sqlparser::ast::OnConflict;
 
 mod logical_optimization;
 mod optimizer_context;
@@ -529,6 +530,7 @@ impl PlanRoot {
         pk_column_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         append_only: bool,
+        on_conflict: Option<OnConflict>,
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
@@ -709,9 +711,16 @@ impl PlanRoot {
             }
         }
 
-        let conflict_behavior = match append_only {
-            true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::Overwrite,
+        let conflict_behavior = match on_conflict {
+            Some(on_conflict) => match on_conflict {
+                OnConflict::OverWrite => ConflictBehavior::Overwrite,
+                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
+                OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+            },
+            None => match append_only {
+                true => ConflictBehavior::NoCheck,
+                false => ConflictBehavior::Overwrite,
+            },
         };
 
         let table_required_dist = {

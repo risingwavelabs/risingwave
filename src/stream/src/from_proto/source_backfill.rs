@@ -83,7 +83,6 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             params.executor_stats.clone(),
             params.env.system_params_manager_ref().get_params(),
             source_ctrl_opts.clone(),
-            params.env.connector_params(),
             backfill_state_table,
         );
         let [input]: [_; 1] = params.input.try_into().unwrap();
