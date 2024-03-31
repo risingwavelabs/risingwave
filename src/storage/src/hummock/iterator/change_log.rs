@@ -373,9 +373,9 @@ mod tests {
     use crate::memory::MemoryStateStore;
     use crate::store::{
         ChangeLogValue, InitOptions, LocalStateStore, NewLocalOptions, OpConsistencyLevel,
-        ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreRead, CHECK_BYTES_EQUAL,
+        ReadLogOptions, ReadOptions, SealCurrentEpochOptions, StateStoreIter, StateStoreRead,
+        CHECK_BYTES_EQUAL,
     };
-    use crate::store_impl::boxed_state_store::DynamicDispatchedStateStoreIter;
     use crate::StateStore;
 
     #[tokio::test]
