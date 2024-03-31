@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
+use either::Either::{Left, Right};
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
@@ -377,27 +378,33 @@ impl Binder {
                     Ok(Relation::BackCteRef(Box::new(BoundBackCteRef { share_id })))
                 }
                 BindingCteState::Bound { query } => {
-                    todo!()
-                    // self.bind_table_to_context(
-                    //     query
-                    //         .body
-                    //         .schema()
-                    //         .fields
-                    //         .iter()
-                    //         .map(|f| (false, f.clone())),
-                    //     table_name.clone(),
-                    //     Some(original_alias),
-                    // )?;
-                    // // Share the CTE.
-                    // let input_relation = Relation::Subquery(Box::new(BoundSubquery {
-                    //     query,
-                    //     lateral: false,
-                    // }));
-                    // let share_relation = Relation::Share(Box::new(BoundShare {
-                    //     share_id,
-                    //     input: input_relation,
-                    // }));
-                    // Ok(share_relation)
+                    let schema = match query.clone() {
+                        Left(normal) => normal.body.schema().clone(),
+                        Right(recursive) => recursive.recursive.body.schema().clone(),
+                    };
+                    self.bind_table_to_context(
+                        schema
+                            .fields
+                            .iter()
+                            .map(|f| (false, f.clone())),
+                        table_name.clone(),
+                        Some(original_alias),
+                    )?;
+                    // todo: to be further reviewed
+                    let query = match query {
+                        Left(normal) => normal,
+                        Right(recursive) => *recursive.recursive,
+                    };
+                    // Share the CTE.
+                    let input_relation = Relation::Subquery(Box::new(BoundSubquery {
+                        query,
+                        lateral: false,
+                    }));
+                    let share_relation = Relation::Share(Box::new(BoundShare {
+                        share_id,
+                        input: input_relation,
+                    }));
+                    Ok(share_relation)
                 }
             }
         } else {
