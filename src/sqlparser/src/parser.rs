@@ -5155,13 +5155,22 @@ impl Parser {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            Ok(Some(self.parse_number_value()?))
+            let number = self.parse_number_value()?;
+            // TODO(Kexiang): support LIMIT expr
+            if self.consume_token(&Token::DoubleColon) {
+                self.expect_keyword(Keyword::BIGINT)?
+            }
+            Ok(Some(number))
         }
     }
 
     /// Parse an OFFSET clause
     pub fn parse_offset(&mut self) -> Result<String, ParserError> {
         let value = self.parse_number_value()?;
+        // TODO(Kexiang): support LIMIT expr
+        if self.consume_token(&Token::DoubleColon) {
+            self.expect_keyword(Keyword::BIGINT)?;
+        }
         _ = self.parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS]);
         Ok(value)
     }
