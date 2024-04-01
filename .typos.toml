@@ -10,6 +10,7 @@ steam = "stream"        # You played with Steam games too much.
 ot = "ot"
 bui = "bui"
 mosquitto = "mosquitto" # This is a MQTT broker.
+abd = "abd"
 
 [default.extend-identifiers]
 
