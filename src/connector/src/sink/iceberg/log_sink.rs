@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -23,13 +24,17 @@ use crate::sink::{LogSinker, Result, SinkLogReader, SinkMetrics};
 pub struct IcebergLogSinkerOf<W> {
     writer: W,
     sink_metrics: SinkMetrics,
-    commit_checkpoint_interval: u64,
+    commit_checkpoint_interval: NonZeroU64,
 }
 
 impl<W> IcebergLogSinkerOf<W> {
     /// Create a log sinker with a commit checkpoint interval. The sinker should be used with a
     /// decouple log reader `KvLogStoreReader`.
-    pub fn new(writer: W, sink_metrics: SinkMetrics, commit_checkpoint_interval: u64) -> Self {
+    pub fn new(
+        writer: W,
+        sink_metrics: SinkMetrics,
+        commit_checkpoint_interval: NonZeroU64,
+    ) -> Self {
         IcebergLogSinkerOf {
             writer,
             sink_metrics,
@@ -112,9 +117,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for IcebergLogSinkerOf<W> {
                     };
                     if is_checkpoint {
                         current_checkpoint += 1;
-                        if commit_checkpoint_interval <= 1
-                            || current_checkpoint >= commit_checkpoint_interval
-                        {
+                        if current_checkpoint >= commit_checkpoint_interval.get() {
                             let start_time = Instant::now();
                             sink_writer.barrier(true).await?;
                             sink_metrics

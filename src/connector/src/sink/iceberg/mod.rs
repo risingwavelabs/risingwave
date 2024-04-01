@@ -19,6 +19,7 @@ mod prometheus;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -129,7 +130,7 @@ pub struct IcebergConfig {
     #[serde(skip)]
     pub java_catalog_props: HashMap<String, String>,
 
-    // Commit every n checkpoints, if n is not set, 0, 1, we will commit every checkpoint.
+    // Commit every n(>0) checkpoints, if n is not set, we will commit every checkpoint.
     #[serde(default, deserialize_with = "deserialize_optional_u64_from_string")]
     pub commit_checkpoint_interval: Option<u64>,
 }
@@ -182,6 +183,12 @@ impl IcebergConfig {
             })
             .map(|(k, v)| (k[8..].to_string(), v.to_string()))
             .collect();
+
+        if config.commit_checkpoint_interval == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "commit_checkpoint_interval must be greater than 0"
+            )));
+        }
 
         Ok(config)
     }
@@ -565,10 +572,16 @@ impl Sink for IcebergSink {
             inner,
         )
         .await?;
+
+        let commit_checkpoint_interval =
+            NonZeroU64::new(self.config.commit_checkpoint_interval.unwrap_or(1)).expect(
+                "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
+            );
+
         Ok(IcebergLogSinkerOf::new(
             writer,
             writer_param.sink_metrics,
-            self.config.commit_checkpoint_interval.unwrap_or_default(),
+            commit_checkpoint_interval,
         ))
     }
 
