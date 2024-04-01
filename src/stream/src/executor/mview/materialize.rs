@@ -508,12 +508,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                     if update_cache {
                         match conflict_behavior {
-                            ConflictBehavior::Overwrite => {
+                            ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                                 self.data.push(key, Some(CompactedRow { row: value }));
                             }
-                            ConflictBehavior::IgnoreConflict => {
-                                self.data.push(key, Some(CompactedRow { row: value }));
-                            }
+
                             _ => unreachable!(),
                         }
                     }
@@ -521,7 +519,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
 
                 Op::Delete | Op::UpdateDelete => {
                     match conflict_behavior {
-                        ConflictBehavior::Overwrite => {
+                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                             match self.force_get(&key) {
                                 Some(old_row) => {
                                     fixed_changes().delete(key.clone(), old_row.row.clone());
@@ -529,16 +527,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                 None => (), // delete a nonexistent value
                             };
                         }
-                        ConflictBehavior::IgnoreConflict => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    if old_row.row == value {
-                                        fixed_changes().delete(key.clone(), old_row.row.clone());
-                                    }
-                                }
-                                None => (), // delete a nonexistent value
-                            };
-                        }
+
                         _ => unreachable!(),
                     };
 
@@ -1460,10 +1449,7 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(
-                    row,
-                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
-                );
+                assert_eq!(row, None);
 
                 // check delete wrong pk
                 let row = table
@@ -1505,7 +1491,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(5_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
                 );
 
                 // check update wrong pk, should become insert
