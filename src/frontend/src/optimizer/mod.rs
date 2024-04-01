@@ -168,21 +168,22 @@ impl PlanRoot {
     pub fn into_array_agg(self) -> Result<PlanRef> {
         use generic::Agg;
         use plan_node::PlanAggCall;
-        use risingwave_common::types::DataType;
+        use risingwave_common::types::{DataType, ListValue};
         use risingwave_expr::aggregate::AggKind;
 
-        use crate::expr::InputRef;
+        use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
         let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
-        Ok(Agg::new(
+        let return_type = DataType::List(input_column_type.clone().into());
+        let agg = Agg::new(
             vec![PlanAggCall {
                 agg_kind: AggKind::ArrayAgg,
-                return_type: DataType::List(input_column_type.clone().into()),
-                inputs: vec![InputRef::new(select_idx, input_column_type)],
+                return_type: return_type.clone(),
+                inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
                 order_by: self.required_order.column_orders,
                 filter: Condition::true_cond(),
@@ -190,8 +191,19 @@ impl PlanRoot {
             }],
             IndexSet::empty(),
             self.plan,
-        )
-        .into())
+        );
+        Ok(LogicalProject::create(
+            agg.into(),
+            vec![FunctionCall::new(
+                ExprType::Coalesce,
+                vec![
+                    InputRef::new(0, return_type).into(),
+                    ExprImpl::literal_list(ListValue::empty(&input_column_type), input_column_type),
+                ],
+            )
+            .unwrap()
+            .into()],
+        ))
     }
 
     /// Apply logical optimization to the plan for stream.

@@ -101,7 +101,7 @@ impl AwsAuthProps {
             ))
         } else {
             Err(anyhow!(
-                "Both \"access_key\" and \"secret_access\" are required."
+                "Both \"access_key\" and \"secret_key\" are required."
             ))
         }
     }

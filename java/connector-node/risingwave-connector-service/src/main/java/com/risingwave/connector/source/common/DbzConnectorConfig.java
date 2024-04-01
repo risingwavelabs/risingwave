@@ -30,10 +30,6 @@ import org.slf4j.LoggerFactory;
 public class DbzConnectorConfig {
     private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
 
-    /* Debezium private configs */
-    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
-            "debezium.embedded.shutdown.pause.before.interrupt.ms";
-
     public static final String WAIT_FOR_STREAMING_START_BEFORE_EXIT_SECS =
             "cdc.source.wait.streaming.before.exit.seconds";
 

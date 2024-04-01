@@ -68,8 +68,8 @@ mod tests {
     use serde_json::Value;
 
     use crate::parser::{
-        DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
-        SourceStreamChunkBuilder, SpecificParserConfig,
+        DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
+        SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceContextRef;
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
@@ -94,7 +94,7 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
             }),
-            protocol_config: ProtocolProperties::Debezium,
+            protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
         DebeziumParser::new(props, rw_columns, source_ctx)
             .await

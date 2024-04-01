@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
-use crate::binder::Binder;
+use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
@@ -102,6 +102,8 @@ impl Binder {
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        // bind insert table
+        self.context.clause = Some(Clause::Insert);
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;

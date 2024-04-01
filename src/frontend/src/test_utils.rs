@@ -802,7 +802,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserId>,
+        _granted_by: UserId,
         _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,

@@ -33,11 +33,12 @@ except
 select * from mv;
 ----
 
-query T
-select * from mv
-except
-select * from v;
-----
+# https://github.com/risingwavelabs/risingwave/issues/15117
+# query T
+# select * from mv
+# except
+# select * from v;
+# ----
 
 statement ok
 commit;

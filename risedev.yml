@@ -925,6 +925,18 @@ profile:
       - use: prometheus
       - use: grafana
 
+  full-with-batch-query-limit:
+    config-path: src/config/full-with-batch-query-limit.toml
+    steps:
+        - use: minio
+        - use: etcd
+        - use: meta-node
+        - use: compute-node
+        - use: frontend
+        - use: compactor
+        - use: prometheus
+        - use: grafana
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"

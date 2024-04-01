@@ -229,6 +229,18 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
 
+    /// The number of streaming jobs per scaling operation.
+    #[serde(default = "default::meta::parallelism_control_batch_size")]
+    pub parallelism_control_batch_size: usize,
+
+    /// The period of parallelism control trigger.
+    #[serde(default = "default::meta::parallelism_control_trigger_period_sec")]
+    pub parallelism_control_trigger_period_sec: u64,
+
+    /// The first delay of parallelism control.
+    #[serde(default = "default::meta::parallelism_control_trigger_first_delay_sec")]
+    pub parallelism_control_trigger_first_delay_sec: u64,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
@@ -325,7 +337,7 @@ pub struct MetaConfig {
     pub developer: MetaDeveloperConfig,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
     Full,
@@ -451,8 +463,13 @@ pub struct BatchConfig {
     #[serde(default, with = "batch_prefix")]
     pub developer: BatchDeveloperConfig,
 
+    /// This is the max number of queries per sql session.
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    /// This is the max number of batch queries per frontend node.
+    #[serde(default)]
+    pub max_batch_queries_per_frontend_node: Option<u64>,
 
     #[serde(default = "default::batch::enable_barrier_read")]
     pub enable_barrier_read: bool,
@@ -929,6 +946,8 @@ pub struct S3ObjectStoreConfig {
         default = "default::object_store_config::s3::developer::object_store_retry_unknown_service_error"
     )]
     pub retry_unknown_service_error: bool,
+    #[serde(default = "default::object_store_config::s3::identity_resolution_timeout_s")]
+    pub identity_resolution_timeout_s: u64,
     #[serde(default)]
     pub developer: S3ObjectStoreDeveloperConfig,
 }
@@ -1103,6 +1122,18 @@ pub mod default {
         pub fn event_log_channel_max_size() -> u32 {
             10
         }
+
+        pub fn parallelism_control_batch_size() -> usize {
+            10
+        }
+
+        pub fn parallelism_control_trigger_period_sec() -> u64 {
+            10
+        }
+
+        pub fn parallelism_control_trigger_first_delay_sec() -> u64 {
+            30
+        }
     }
 
     pub mod server {
@@ -1235,7 +1266,7 @@ pub mod default {
             3
         }
         pub fn mem_table_spill_threshold() -> usize {
-            0 // disable
+            4 << 20
         }
 
         pub fn compactor_fast_max_compact_delete_ratio() -> u32 {
@@ -1545,6 +1576,7 @@ pub mod default {
             const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
             const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;
             const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
+            const DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S: u64 = 5;
 
             const DEFAULT_KEEPALIVE_MS: u64 = 600 * 1000; // 10min
 
@@ -1574,6 +1606,10 @@ pub mod default {
 
             pub fn object_store_req_retry_max_attempts() -> usize {
                 DEFAULT_RETRY_MAX_ATTEMPTS
+            }
+
+            pub fn identity_resolution_timeout_s() -> u64 {
+                DEFAULT_IDENTITY_RESOLUTION_TIMEOUT_S
             }
 
             pub mod developer {

@@ -252,7 +252,7 @@ pub async fn handle_revoke_privilege(
         .revoke_privilege(
             users,
             privileges,
-            granted_by_id,
+            granted_by_id.unwrap_or(session.user_id()),
             session.user_id(),
             revoke_grant_option,
             cascade,

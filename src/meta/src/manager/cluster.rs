@@ -32,6 +32,7 @@ use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -458,16 +459,27 @@ impl ClusterManager {
         core.list_worker_node(worker_type, worker_state)
     }
 
+    pub async fn subscribe_active_streaming_compute_nodes(
+        &self,
+    ) -> (Vec<WorkerNode>, UnboundedReceiver<LocalNotification>) {
+        let core = self.core.read().await;
+        let worker_nodes = core.list_streaming_worker_node(Some(State::Running));
+        let (tx, rx) = unbounded_channel();
+
+        // insert before release the read lock to ensure that we don't lose any update in between
+        self.env
+            .notification_manager()
+            .insert_local_sender(tx)
+            .await;
+        drop(core);
+        (worker_nodes, rx)
+    }
+
     /// A convenient method to get all running compute nodes that may have running actors on them
     /// i.e. CNs which are running
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_streaming_worker_node(Some(State::Running))
-    }
-
-    pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
-        let core = self.core.read().await;
-        core.list_active_streaming_parallel_units()
     }
 
     /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
@@ -700,13 +712,6 @@ impl ClusterManagerCore {
         self.list_worker_node(Some(WorkerType::ComputeNode), worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .collect()
-    }
-
-    fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
-        self.list_streaming_worker_node(Some(State::Running))
-            .into_iter()
-            .flat_map(|w| w.parallel_units)
             .collect()
     }
 
@@ -969,7 +974,12 @@ mod tests {
     }
 
     async fn assert_cluster_manager(cluster_manager: &ClusterManager, parallel_count: usize) {
-        let parallel_units = cluster_manager.list_active_streaming_parallel_units().await;
+        let parallel_units = cluster_manager
+            .list_active_serving_compute_nodes()
+            .await
+            .into_iter()
+            .flat_map(|w| w.parallel_units)
+            .collect_vec();
         assert_eq!(parallel_units.len(), parallel_count);
     }
 
