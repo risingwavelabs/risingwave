@@ -88,13 +88,30 @@ mod consistency {
         }
     }
 
-    macro_rules! inconsistency_panic {
+    macro_rules! consistency_error {
         ($($arg:tt)*) => {
-            tracing::error!($($arg)*);
-            if crate::consistency::enable_strict_consistency() {
-                panic!("inconsistency happened, see error log for details");
+            debug_assert!(!crate::consistency::enable_strict_consistency());
+
+            use std::sync::LazyLock;
+            use risingwave_common::log::LogSuppresser;
+
+            static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                tracing::error!(suppressed_count, $($arg)*);
             }
         };
     }
-    pub(crate) use inconsistency_panic;
+    pub(crate) use consistency_error;
+
+    macro_rules! consistency_panic {
+        ($($arg:tt)*) => {
+            if crate::consistency::enable_strict_consistency() {
+                tracing::error!($($arg)*);
+                panic!("inconsistency happened, see error log for details");
+            } else {
+                crate::consistency::consistency_error!($($arg)*);
+            }
+        };
+    }
+    pub(crate) use consistency_panic;
 }
