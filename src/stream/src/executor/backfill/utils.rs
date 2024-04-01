@@ -831,3 +831,20 @@ pub fn create_builder_and_limiter(
         (DataChunkBuilder::new(data_types, chunk_size), None)
     }
 }
+
+/// Creates a data chunk builder for snapshot read.
+/// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
+/// This is so we can partition snapshot read into smaller chunks than chunk size.
+pub fn create_builder(
+    rate_limit: Option<usize>,
+    chunk_size: usize,
+    data_types: Vec<DataType>,
+) -> DataChunkBuilder {
+    if let Some(rate_limit) = rate_limit
+        && rate_limit < chunk_size
+    {
+        DataChunkBuilder::new(data_types, rate_limit)
+    } else {
+        DataChunkBuilder::new(data_types, chunk_size)
+    }
+}

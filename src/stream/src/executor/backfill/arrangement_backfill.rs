@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU32;
 use std::pin::pin;
 use std::sync::Arc;
 
@@ -30,14 +29,13 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::utils::BackfillRateLimiter;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder_and_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
+    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
+    BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -46,7 +44,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-type Builders = HashMap<VirtualNode, (DataChunkBuilder, Option<BackfillRateLimiter>)>;
+type Builders = HashMap<VirtualNode, DataChunkBuilder>;
 
 /// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
@@ -134,12 +132,12 @@ where
             .vnodes()
             .iter_vnodes()
             .map(|vnode| {
-                let (builder, limiter) = create_builder_and_limiter(
+                let builder = create_builder(
                     self.rate_limit,
                     self.chunk_size,
                     snapshot_data_types.clone(),
                 );
-                (vnode, (builder, limiter))
+                (vnode, builder)
             })
             .collect();
 
@@ -290,9 +288,9 @@ where
                                 match msg? {
                                     None => {
                                         // Consume remaining rows in the builder.
-                                        for (vnode, (builder, limiter)) in &mut builders {
+                                        for (vnode, builder) in &mut builders {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                let chunk = Self::handle_snapshot_chunk(
+                                                yield Self::handle_snapshot_chunk(
                                                     data_chunk,
                                                     *vnode,
                                                     &pk_in_output_indices,
@@ -301,21 +299,6 @@ where
                                                     &mut total_snapshot_processed_rows,
                                                     &self.output_indices,
                                                 )?;
-                                                if let Some(rate_limit) = limiter.as_ref()
-                                                    && chunk.cardinality() > 0
-                                                {
-                                                    rate_limit
-                                                        .until_n_ready(
-                                                            NonZeroU32::new(
-                                                                chunk.cardinality() as u32
-                                                            )
-                                                            .unwrap(),
-                                                        )
-                                                        .await
-                                                        .unwrap();
-                                                }
-
-                                                yield Message::Chunk(chunk)
                                             }
                                         }
 
@@ -341,9 +324,9 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some((vnode, row)) => {
-                                        let (builder, limiter) = builders.get_mut(&vnode).unwrap();
+                                        let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
-                                            let chunk = Self::handle_snapshot_chunk(
+                                            yield Self::handle_snapshot_chunk(
                                                 chunk,
                                                 vnode,
                                                 &pk_in_output_indices,
@@ -352,19 +335,6 @@ where
                                                 &mut total_snapshot_processed_rows,
                                                 &self.output_indices,
                                             )?;
-                                            if let Some(rate_limit) = limiter.as_ref()
-                                                && chunk.cardinality() > 0
-                                            {
-                                                rate_limit
-                                                    .until_n_ready(
-                                                        NonZeroU32::new(chunk.cardinality() as u32)
-                                                            .unwrap(),
-                                                    )
-                                                    .await
-                                                    .unwrap();
-                                            }
-
-                                            yield Message::Chunk(chunk);
                                         }
                                     }
                                 }
@@ -378,7 +348,7 @@ where
                     // If paused, we also can't read any snapshot records.
                     if !has_snapshot_read && !paused {
                         // If we have not snapshot read, builders must all be empty.
-                        debug_assert!(builders.values().all(|b| b.0.is_empty()));
+                        debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
                         for msg in snapshot {
@@ -394,9 +364,9 @@ where
                                     break;
                                 }
                                 Some((vnode, row)) => {
-                                    let (builder, limiter) = builders.get_mut(&vnode).unwrap();
+                                    let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
-                                        let stream_chunk = Self::handle_snapshot_chunk(
+                                        yield Self::handle_snapshot_chunk(
                                             chunk,
                                             vnode,
                                             &pk_in_output_indices,
@@ -405,21 +375,8 @@ where
                                             &mut total_snapshot_processed_rows,
                                             &self.output_indices,
                                         )?;
-                                        if let Some(rate_limit) = limiter.as_ref()
-                                            && stream_chunk.cardinality() > 0
-                                        {
-                                            rate_limit
-                                                .until_n_ready(
-                                                    NonZeroU32::new(
-                                                        stream_chunk.cardinality() as u32
-                                                    )
-                                                    .unwrap(),
-                                                )
-                                                .await
-                                                .unwrap();
-                                        }
-                                        yield Message::Chunk(stream_chunk);
                                     }
+
                                     break;
                                 }
                             }
@@ -459,12 +416,12 @@ where
                 // consume snapshot rows left in builder.
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
                 // we encounter "higher-ranked lifetime error".
-                for (vnode, chunk, limiter) in builders.iter_mut().map(|(vnode, (b, limiter))| {
+                for (vnode, chunk) in builders.iter_mut().map(|(vnode, b)| {
                     let chunk = b.consume_all().map(|chunk| {
                         let ops = vec![Op::Insert; chunk.capacity()];
                         StreamChunk::from_parts(ops, chunk)
                     });
-                    (vnode, chunk, limiter)
+                    (vnode, chunk)
                 }) {
                     if let Some(chunk) = chunk {
                         let chunk_cardinality = chunk.cardinality() as u64;
@@ -479,19 +436,9 @@ where
                             chunk_cardinality,
                         )?;
 
-                        let chunk = mapping_chunk(chunk, &self.output_indices);
-                        if let Some(rate_limit) = limiter.as_ref()
-                            && chunk.cardinality() > 0
-                        {
-                            rate_limit
-                                .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                                .await
-                                .unwrap();
-                        }
-
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
-                        yield Message::Chunk(chunk);
+                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
                     }
                 }
 
@@ -503,7 +450,6 @@ where
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
                     if backfill_state.has_progress() {
-                        // we do not apply rate limit when forwarding upstream chunk.
                         yield Message::Chunk(mapping_chunk(
                             mark_chunk_ref_by_vnode(
                                 &chunk,
@@ -665,7 +611,7 @@ where
         cur_barrier_snapshot_processed_rows: &mut u64,
         total_snapshot_processed_rows: &mut u64,
         output_indices: &[usize],
-    ) -> StreamExecutorResult<StreamChunk> {
+    ) -> StreamExecutorResult<Message> {
         let chunk = StreamChunk::from_parts(vec![Op::Insert; chunk.capacity()], chunk);
         // Raise the current position.
         // As snapshot read streams are ordered by pk, so we can
@@ -682,7 +628,8 @@ where
         let chunk_cardinality = chunk.cardinality() as u64;
         *cur_barrier_snapshot_processed_rows += chunk_cardinality;
         *total_snapshot_processed_rows += chunk_cardinality;
-        Ok(mapping_chunk(chunk, output_indices))
+        let chunk = Message::Chunk(mapping_chunk(chunk, output_indices));
+        Ok(chunk)
     }
 
     /// Read snapshot per vnode.
