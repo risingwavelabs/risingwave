@@ -1585,21 +1585,21 @@ impl Parser {
                             negated,
                             expr: Box::new(expr),
                             pattern: Box::new(self.parse_subexpr(Precedence::Like)?),
-                            escape_char: self.parse_escape_char()?,
+                            escape_char: self.parse_escape()?,
                         })
                     } else if self.parse_keyword(Keyword::ILIKE) {
                         Ok(Expr::ILike {
                             negated,
                             expr: Box::new(expr),
                             pattern: Box::new(self.parse_subexpr(Precedence::Like)?),
-                            escape_char: self.parse_escape_char()?,
+                            escape_char: self.parse_escape()?,
                         })
                     } else if self.parse_keywords(&[Keyword::SIMILAR, Keyword::TO]) {
                         Ok(Expr::SimilarTo {
                             negated,
                             expr: Box::new(expr),
                             pattern: Box::new(self.parse_subexpr(Precedence::Like)?),
-                            escape_char: self.parse_escape_char()?,
+                            escape_char: self.parse_escape()?,
                         })
                     } else {
                         self.expected("IN, BETWEEN or SIMILAR TO after NOT", self.peek_token())
@@ -1625,17 +1625,20 @@ impl Parser {
     }
 
     /// parse the ESCAPE CHAR portion of LIKE, ILIKE, and SIMILAR TO
-    pub fn parse_escape_char(&mut self) -> Result<Option<EscapeChar>, ParserError> {
+    pub fn parse_escape(&mut self) -> Result<Option<EscapeChar>, ParserError> {
         if self.parse_keyword(Keyword::ESCAPE) {
             let s = self.parse_literal_string()?;
-            if s.is_empty() {
-                Ok(Some(EscapeChar::empty()))
-            } else if s.len() == 1 {
-                Ok(Some(EscapeChar::escape(s.chars().next().unwrap())))
+            let mut chs = s.chars();
+            if let Some(ch) = chs.next() {
+                if let Some(_) = chs.next() {
+                    parser_err!(format!(
+                        "Escape string must be empty or one character, found {s:?}"
+                    ))
+                } else {
+                    Ok(Some(EscapeChar::escape(ch)))
+                }
             } else {
-                parser_err!(format!(
-                    "Escape string must be empty or one character, found {s:?}"
-                ))
+                Ok(Some(EscapeChar::empty()))
             }
         } else {
             Ok(None)
