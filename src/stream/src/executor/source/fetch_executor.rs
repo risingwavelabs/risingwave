@@ -90,15 +90,15 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
 
     async fn replace_with_new_batch_reader<const BIASED: bool>(
         splits_on_fetch: &mut usize,
-        state_store_handler: &SourceStateTableHandler<S>,
+        state_store_guard: tokio::sync::MutexGuard<'_, SourceStateTableHandler<S>>,
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
-            let table_iter = state_store_handler
+        'vnodes: for vnode in state_store_guard.state_store.vnodes().iter_vnodes() {
+            let table_iter = state_store_guard
                 .state_store
                 .iter_with_vnode(
                     vnode,
@@ -190,7 +190,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         let barrier = expect_first_barrier(&mut upstream).await?;
 
         let mut core = self.stream_source_core.take().unwrap();
-        let mut state_store_handler = core.split_state_store;
 
         // Build source description from the builder.
         let source_desc_builder = core.source_desc_builder.take().unwrap();
@@ -205,7 +204,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         };
 
         // Initialize state table.
-        state_store_handler.init_epoch(barrier.epoch);
+        core.init_epoch(barrier.epoch).await;
 
         let mut splits_on_fetch: usize = 0;
         let mut stream =
@@ -218,9 +217,10 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         // If it is a recovery startup,
         // there can be file assignments in the state table.
         // Hence we try building a reader first.
+        let state_store_guard = core.split_state_store.lock().await;
         Self::replace_with_new_batch_reader(
             &mut splits_on_fetch,
-            &state_store_handler,
+            state_store_guard, // move into the function
             core.column_ids.clone(),
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
@@ -250,17 +250,15 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                     }
 
-                                    state_store_handler
-                                        .state_store
-                                        .commit(barrier.epoch)
-                                        .await?;
+                                    let mut state_store_guard = core.split_state_store.lock().await;
+                                    state_store_guard.state_store.commit(barrier.epoch).await?;
 
                                     if let Some(vnode_bitmap) =
                                         barrier.as_update_vnode_bitmap(self.actor_ctx.id)
                                     {
                                         // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
                                         let (_prev_vnode_bitmap, cache_may_stale) =
-                                            state_store_handler
+                                            state_store_guard
                                                 .state_store
                                                 .update_vnode_bitmap(vnode_bitmap);
 
@@ -272,7 +270,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     if splits_on_fetch == 0 {
                                         Self::replace_with_new_batch_reader(
                                             &mut splits_on_fetch,
-                                            &state_store_handler,
+                                            state_store_guard,
                                             core.column_ids.clone(),
                                             self.build_source_ctx(
                                                 &source_desc,
@@ -304,8 +302,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             )
                                         })
                                         .collect();
-                                    state_store_handler.set_states(file_assignment).await?;
-                                    state_store_handler.state_store.try_flush().await?;
+                                    let mut state_store_guard = core.split_state_store.lock().await;
+                                    state_store_guard.set_states(file_assignment).await?;
+                                    state_store_guard.state_store.try_flush().await?;
                                 }
                                 _ => unreachable!(),
                             }
@@ -317,7 +316,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     .unwrap();
                             debug_assert_eq!(mapping.len(), 1);
                             if let Some((split_id, offset)) = mapping.into_iter().next() {
-                                let row = state_store_handler
+                                let mut state_store_guard = core.split_state_store.lock().await;
+                                let row = state_store_guard
                                     .get(split_id.clone())
                                     .await?
                                     .expect("The fs_split should be in the state table.");
@@ -332,9 +332,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
 
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
                                     splits_on_fetch -= 1;
-                                    state_store_handler.delete(split_id).await?;
+                                    state_store_guard.delete(split_id).await?;
                                 } else {
-                                    state_store_handler
+                                    state_store_guard
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
                                 }

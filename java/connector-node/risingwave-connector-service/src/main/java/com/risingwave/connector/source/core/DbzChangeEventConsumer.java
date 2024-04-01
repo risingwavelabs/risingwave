@@ -18,13 +18,18 @@ import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import io.debezium.connector.postgresql.PostgresOffsetContext;
+import io.debezium.embedded.EmbeddedEngineChangeEvent;
 import io.debezium.engine.ChangeEvent;
 import io.debezium.engine.DebeziumEngine;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -40,9 +45,9 @@ enum EventType {
     DATA,
 }
 
-public class DbzCdcEventConsumer
+public class DbzChangeEventConsumer
         implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
-    static final Logger LOG = LoggerFactory.getLogger(DbzCdcEventConsumer.class);
+    static final Logger LOG = LoggerFactory.getLogger(DbzChangeEventConsumer.class);
 
     private final BlockingQueue<GetEventStreamResponse> outputChannel;
     private final long sourceId;
@@ -51,7 +56,10 @@ public class DbzCdcEventConsumer
     private final String heartbeatTopicPrefix;
     private final String transactionTopic;
 
-    DbzCdcEventConsumer(
+    private volatile DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>>
+            currentRecordCommitter;
+
+    DbzChangeEventConsumer(
             long sourceId,
             String heartbeatTopicPrefix,
             String transactionTopic,
@@ -199,9 +207,6 @@ public class DbzCdcEventConsumer
                 default:
                     break;
             }
-
-            // mark the event as processed
-            committer.markProcessed(event);
         }
 
         LOG.debug("recv {} events", respBuilder.getEventsCount());
@@ -211,16 +216,62 @@ public class DbzCdcEventConsumer
             var response = respBuilder.build();
             outputChannel.put(response);
         }
-
-        committer.markBatchFinished();
-    }
-
-    @Override
-    public boolean supportsTombstoneEvents() {
-        return DebeziumEngine.ChangeConsumer.super.supportsTombstoneEvents();
     }
 
     public BlockingQueue<GetEventStreamResponse> getOutputChannel() {
         return this.outputChannel;
+    }
+
+    /**
+     * Commit the offset to the Debezium engine. NOTES: The input offset is passed from the source
+     * executor to here
+     *
+     * @param persistedOffset persisted offset in the Source state table
+     */
+    @SuppressWarnings("unchecked")
+    public void commitOffset(DebeziumOffset persistedOffset) throws InterruptedException {
+        // Although the committer is read/write by multi-thread, the committer will be not changed
+        // frequently.
+        if (currentRecordCommitter == null) {
+            LOG.info(
+                    "commitOffset() called on Debezium change consumer which doesn't receive records yet.");
+            return;
+        }
+
+        // only the offset is used
+        SourceRecord recordWrapper =
+                new SourceRecord(
+                        persistedOffset.sourcePartition,
+                        adjustSourceOffset((Map<String, Object>) persistedOffset.sourceOffset),
+                        "DUMMY",
+                        Schema.BOOLEAN_SCHEMA,
+                        true);
+        ChangeEvent<SourceRecord, SourceRecord> changeEvent =
+                new EmbeddedEngineChangeEvent<>(
+                        null, recordWrapper, Collections.emptyList(), recordWrapper);
+        currentRecordCommitter.markProcessed(changeEvent);
+        currentRecordCommitter.markBatchFinished();
+    }
+
+    /**
+     * We have to adjust type of LSN values to Long, because it might be Integer after
+     * deserialization, however {@link
+     * io.debezium.connector.postgresql.PostgresStreamingChangeEventSource#commitOffset(Map, Map)}
+     * requires Long.
+     */
+    private Map<String, Object> adjustSourceOffset(Map<String, Object> sourceOffset) {
+        if (sourceOffset.containsKey(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY)) {
+            String value =
+                    sourceOffset
+                            .get(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY)
+                            .toString();
+            sourceOffset.put(
+                    PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY, Long.parseLong(value));
+        }
+        if (sourceOffset.containsKey(PostgresOffsetContext.LAST_COMMIT_LSN_KEY)) {
+            String value = sourceOffset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY).toString();
+            sourceOffset.put(PostgresOffsetContext.LAST_COMMIT_LSN_KEY, Long.parseLong(value));
+        }
+        return sourceOffset;
     }
 }

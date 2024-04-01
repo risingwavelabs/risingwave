@@ -29,7 +29,8 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -61,6 +62,43 @@ pub struct SourceExecutor<S: StateStore> {
 
     // config for the connector node
     connector_params: ConnectorParams,
+
+    wait_epoch_tx: UnboundedSender<Epoch>,
+}
+
+pub struct WaitEpochWoker<S: StateStore> {
+    wait_epoch_rx: UnboundedReceiver<Epoch>,
+    state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
+}
+
+impl<S: StateStore> WaitEpochWoker<S> {
+    pub async fn run(mut self) {
+        loop {
+            // poll the rx and wait for the epoch commit
+            match self.wait_epoch_rx.recv().await {
+                Some(epoch) => {
+                    let state_store_handler = self.state_table_handler.lock().await;
+                    match state_store_handler.state_store.wait_epoch(epoch.0).await {
+                        Ok(()) => {
+                            tracing::debug!(epoch = epoch.0, "wait epoch success");
+
+                            // TODO: send epoch commit notification to the cdc connector
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                            error = ?e.as_report(),
+                            "wait epoch {} failed", epoch.0
+                            );
+                        }
+                    }
+                }
+                None => {
+                    tracing::error!("wait epoch rx closed");
+                    break;
+                }
+            }
+        }
+    }
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -74,6 +112,16 @@ impl<S: StateStore> SourceExecutor<S> {
         source_ctrl_opts: SourceCtrlOpts,
         connector_params: ConnectorParams,
     ) -> Self {
+        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
+        if let Some(core) = stream_source_core.as_ref() {
+            let state_store_handler = core.split_state_store.clone();
+            let wait_epoch_worker = WaitEpochWoker {
+                wait_epoch_rx,
+                state_table_handler: state_store_handler,
+            };
+            tokio::spawn(wait_epoch_worker.run());
+        }
+
         Self {
             actor_ctx,
             stream_source_core,
@@ -82,6 +130,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             source_ctrl_opts,
             connector_params,
+            wait_epoch_tx,
         }
     }
 
@@ -200,8 +249,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
-                let initial_state = if let Some(recover_state) = core
-                    .split_state_store
+                let mut state_store_guard = core.split_state_store.lock().await;
+                let initial_state = if let Some(recover_state) = state_store_guard
                     .try_recover_from_state_store(&split)
                     .await?
                 {
@@ -244,7 +293,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
             if should_trim_state && !dropped_splits.is_empty() {
                 // trim dropped splits' state
-                core.split_state_store.trim_state(&dropped_splits).await?;
+                let mut state_store_guard = core.split_state_store.lock().await;
+                state_store_guard.trim_state(&dropped_splits).await?;
             }
 
             core.latest_split_info = target_state;
@@ -314,13 +364,14 @@ impl<S: StateStore> SourceExecutor<S> {
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
+        let mut state_store_guard = core.split_state_store.lock().await;
         if !cache.is_empty() {
             tracing::debug!(state = ?cache, "take snapshot");
-            core.split_state_store.set_states(cache).await?;
+            state_store_guard.set_states(cache).await?;
         }
 
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        state_store_guard.state_store.commit(epoch).await?;
         core.updated_splits_in_epoch.clear();
 
         Ok(())
@@ -329,20 +380,10 @@ impl<S: StateStore> SourceExecutor<S> {
     /// try mem table spill
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
-        core.split_state_store.state_store.try_flush().await?;
+        let mut state_store_guard = core.split_state_store.lock().await;
+        state_store_guard.state_store.try_flush().await?;
 
         Ok(())
-    }
-
-    pub async fn wait_epoch_committed(&self, epoch: u64) -> StreamExecutorResult<()> {
-        self.stream_source_core
-            .as_ref()
-            .unwrap()
-            .split_state_store
-            .state_store
-            .wait_epoch(epoch)
-            .await
-            .map_err(Into::into)
     }
 
     /// A source executor with a stream source receives:
@@ -398,15 +439,15 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        core.split_state_store.init_epoch(barrier.epoch);
-
-        for ele in &mut boot_state {
-            if let Some(recover_state) = core
-                .split_state_store
-                .try_recover_from_state_store(ele)
-                .await?
-            {
-                *ele = recover_state;
+        {
+            let mut state_store_guard = core.split_state_store.lock().await;
+            state_store_guard.init_epoch(barrier.epoch);
+            for ele in &mut boot_state {
+                if let Some(recover_state) =
+                    state_store_guard.try_recover_from_state_store(ele).await?
+                {
+                    *ele = recover_state;
+                }
             }
         }
 
@@ -503,11 +544,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.persist_state_and_clear_cache(epoch).await?;
 
                     yield Message::Barrier(barrier);
-
-                    // wait for previous epoch commit
+                    // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if is_checkpoint {
-                        self.wait_epoch_committed(epoch_to_wait).await?;
-                        // todo: send request to split reader to commit source offset
+                        self.wait_epoch_tx
+                            .send(Epoch(epoch_to_wait))
+                            .expect("wait_epoch_tx send success");
                     }
                 }
                 Either::Left(_) => {
