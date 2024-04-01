@@ -74,10 +74,12 @@ mod consistency {
     static INSANE_MODE: LazyLock<bool> =
         LazyLock::new(|| env_var_is_true("RW_UNSAFE_ENABLE_INSANE_MODE"));
 
+    /// Check if the insane mode is enabled.
     pub(crate) fn insane() -> bool {
         *INSANE_MODE
     }
 
+    /// Check if strict consistency is required.
     pub(crate) fn enable_strict_consistency() -> bool {
         let res = crate::CONFIG.try_with(|config| config.unsafe_enable_strict_consistency);
         if cfg!(test) {
@@ -88,6 +90,8 @@ mod consistency {
         }
     }
 
+    /// Log an error message for breaking consistency. Must only be called in non-strict mode.
+    /// The log message will be suppressed if it is called too frequently.
     macro_rules! consistency_error {
         ($($arg:tt)*) => {
             debug_assert!(!crate::consistency::enable_strict_consistency());
@@ -103,6 +107,8 @@ mod consistency {
     }
     pub(crate) use consistency_error;
 
+    /// Log an error message for breaking consistency, then panic if strict consistency is required.
+    /// The log message will be suppressed if it is called too frequently.
     macro_rules! consistency_panic {
         ($($arg:tt)*) => {
             if crate::consistency::enable_strict_consistency() {
