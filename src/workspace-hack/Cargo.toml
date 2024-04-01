@@ -49,7 +49,6 @@ digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 flate2 = { version = "1", features = ["zlib"] }
-flume = { version = "0.10" }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
@@ -60,7 +59,6 @@ futures-sink = { version = "0.3" }
 futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["js", "rdrand", "std"] }
 governor = { version = "0.6", default-features = false, features = ["dashmap", "jitter", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["raw"] }
@@ -137,7 +135,7 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-trai
 target-lexicon = { version = "0.12", features = ["std"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
-tokio = { version = "1", features = ["full", "tracing"] }
+tokio = { version = "1", features = ["full", "test-util", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88", features = ["with-chrono-0_4", "with-uuid-1"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
@@ -171,7 +169,6 @@ digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 generic-array = { version = "0.14", default-features = false, features = ["more_lengths", "zeroize"] }
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae", default-features = false, features = ["js", "rdrand", "std"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
 itertools = { version = "0.11" }
