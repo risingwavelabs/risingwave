@@ -58,6 +58,11 @@ impl Planner {
             Relation::BackCteRef(..) => {
                 bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
             }
+            // todo: ensure this will always be wrapped in a `Relation::Share`
+            // so that it will not be explicitly planned here
+            Relation::RecursiveUnion(..) => {
+                bail_not_implemented!(issue = 15135, "recursive CTE is not supported")
+            }
         }
     }
 

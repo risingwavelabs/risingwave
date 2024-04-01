@@ -79,12 +79,12 @@ pub struct LateralBindContext {
 /// WITH RECURSIVE t(n) AS (
 /// # -------------^ => Init
 ///     VALUES (1)
+/// # ----------^ => BaseResolved (after binding the base term)
 ///   UNION ALL
 ///     SELECT n+1 FROM t WHERE n < 100
-/// # ------------------^ => BaseResolved
+/// # ------------------^ => Bound (we know exactly what the entire cte looks like)
 /// )
 /// SELECT sum(n) FROM t;
-/// # -----------------^ => Bound
 /// ```
 #[derive(Default, Debug, Clone)]
 pub enum BindingCteState {
@@ -103,8 +103,12 @@ pub enum BindingCteState {
 /// reference: <https://github.com/risingwavelabs/risingwave/pull/15522/files#r1524367781>
 #[derive(Debug, Clone)]
 pub struct RecursiveUnion {
+    /// currently this *must* be true,
+    /// otherwise binding will fail.
     pub all: bool,
+    /// lhs part of the `UNION ALL` operator
     pub base: Box<BoundQuery>,
+    /// rhs part of the `UNION ALL` operator
     pub recursive: Box<BoundQuery>,
 }
 
@@ -128,7 +132,7 @@ pub struct BindContext {
     // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
     /// Map the cte's name to its binding state.
-    /// The `ShareId` of the value is used to help the planner identify the share plan.
+    /// The `ShareId` in `BindingCte` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
