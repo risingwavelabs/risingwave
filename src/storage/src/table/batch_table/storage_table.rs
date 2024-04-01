@@ -22,7 +22,7 @@ use std::{iter, mem};
 
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use foyer::memory::CacheContext;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
@@ -1062,12 +1062,12 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                         column_id,
                     ),
                 )
+            })
+            .skip(if non_pk_position_in_output_indices.is_empty() {
+                0
+            } else {
+                1
             });
-        // .skip(if output_pk_position_in_pk_indices.is_empty() {
-        //     1
-        // } else {
-        //     0
-        // });
         let mut iter_fut = Vec::with_capacity(1 + non_pk_position_in_output_indices.len());
         for (column_id, table_key_range) in iter_ranges {
             let col_prefix_hint = read_options.prefix_hint.as_ref().map(|bytes| {
@@ -1085,7 +1085,7 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
             iter_fut.push(fut);
         }
         let iters = try_join_all(iter_fut).await?;
-
+        tracing::debug!(iter_num = iters.len(), "column store iter num");
         store.validate_read_epoch(epoch)?;
         let iter = Self {
             iters,
@@ -1107,6 +1107,14 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
         ) -> &[u8] {
             &table_key.0.as_ref()[(VirtualNode::SIZE + mem::size_of::<ColumnId>())..]
         }
+        fn vnode_prefixed_key<T: AsRef<[u8]>>(table_key: &TableKey<T>) -> Bytes {
+            let mut buffer = BytesMut::new();
+            buffer.put_slice(&table_key.0.as_ref()[..VirtualNode::SIZE]);
+            buffer.put_slice(
+                &table_key.0.as_ref()[(VirtualNode::SIZE + mem::size_of::<ColumnId>())..],
+            );
+            buffer.freeze()
+        }
         loop {
             let mut fut_iter = Vec::with_capacity(self.iters.len());
             for iter in &mut self.iters {
@@ -1118,30 +1126,34 @@ impl<S: StateStore> ColumnarStoreStorageTableInnerIterInner<S> {
                 assert!(kvs.iter().all(|kv| kv.is_none()));
                 break;
             }
-            let mut kvs = kvs.into_iter().map(|kv| kv.unwrap());
             let mut iter_output = Vec::with_capacity(self.output_indices.len());
-            let table_key_with_vnode_and_column_id = kvs.next().unwrap().0.user_key.table_key;
-            let table_key =
-                strip_vnode_and_column_id_from_table_key(&table_key_with_vnode_and_column_id);
-            let pk = self.pk_serializer.deserialize(table_key)?;
-            // TODO(columnar_store): this serialize_pk_with_vnode can be optimized out.
+            let table_key_with_vnode_and_column_id = kvs[0].as_ref().unwrap().0.user_key.table_key;
             let vnode_prefixed_key =
-                serialize_pk_with_vnode(pk.clone(), &self.pk_serializer, self.vnode);
-            for datum in pk
-                .project(&self.output_pk_position_in_pk_indices)
-                .into_owned_row()
-            {
-                iter_output.push(datum);
+                TableKey(vnode_prefixed_key(&table_key_with_vnode_and_column_id));
+            if !self.output_pk_position_in_pk_indices.is_empty() {
+                // TODO(columnar_store): try to optimize deserialize out.
+                let table_key =
+                    strip_vnode_and_column_id_from_table_key(&table_key_with_vnode_and_column_id);
+                let pk = self.pk_serializer.deserialize(table_key)?;
+                for datum in pk
+                    .project(&self.output_pk_position_in_pk_indices)
+                    .into_owned_row()
+                {
+                    iter_output.push(datum);
+                }
             }
-            for (pos, (_, value)) in self
-                .non_pk_position_in_output_indices
-                .iter()
-                .zip_eq_debug(kvs)
-            {
-                // TODO(columnar_store): use a deserializer
-                let data_type = &self.data_types[*pos];
-                let col_val = deserialize_datum(value, data_type)?;
-                iter_output.push(col_val);
+            if !self.non_pk_position_in_output_indices.is_empty() {
+                let kvs = kvs.into_iter().map(|kv| kv.unwrap());
+                for (pos, (_, value)) in self
+                    .non_pk_position_in_output_indices
+                    .iter()
+                    .zip_eq_debug(kvs)
+                {
+                    // TODO(columnar_store): use a deserializer
+                    let data_type = &self.data_types[*pos];
+                    let col_val = deserialize_datum(value, data_type)?;
+                    iter_output.push(col_val);
+                }
             }
             let row = self
                 .mapping
