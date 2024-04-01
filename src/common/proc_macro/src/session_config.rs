@@ -40,6 +40,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut get_match_branches = vec![];
     let mut reset_match_branches = vec![];
     let mut show_all_list = vec![];
+    let mut list_all_list = vec![];
     let mut alias_to_entry_name_branches = vec![];
 
     for field in fields {
@@ -224,15 +225,16 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             #entry_name => Ok(self.#reset_func_name(reporter)),
         });
 
+        let var_info = quote! {
+            VariableInfo {
+                name: #entry_name.to_string(),
+                setting: self.#field_ident.to_string(),
+                description : #description.to_string(),
+            },
+        };
+        list_all_list.push(var_info.clone());
         if !flags.contains(&"NO_SHOW_ALL") {
-            show_all_list.push(quote! {
-                VariableInfo {
-                    name: #entry_name.to_string(),
-                    setting: self.#field_ident.to_string(),
-                    description : #description.to_string(),
-                },
-
-            });
+            show_all_list.push(var_info);
         }
     }
 
@@ -292,10 +294,17 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 }
             }
 
-            /// Show all parameters.
+            /// Show all parameters except those specified `NO_SHOW_ALL`.
             pub fn show_all(&self) -> Vec<VariableInfo> {
                 vec![
                     #(#show_all_list)*
+                ]
+            }
+
+            /// List all parameters
+            pub fn list_all(&self) -> Vec<VariableInfo> {
+                vec![
+                    #(#list_all_list)*
                 ]
             }
         }

@@ -46,6 +46,7 @@ pub mod source;
 pub mod streaming_job;
 pub mod subscription;
 pub mod system_parameter;
+pub mod session_parameter;
 pub mod table;
 pub mod user;
 pub mod user_privilege;

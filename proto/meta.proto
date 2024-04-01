@@ -606,12 +606,12 @@ message SetSessionParamRequest {
 }
 
 message SetSessionParamResponse {
-  optional SystemParams params = 1;
+  string params = 1;
 }
 
 service SessionParamService {
   rpc GetSessionParams(GetSessionParamsRequest) returns (GetSessionParamsResponse);
-  rpc SetSystemParam(SetSessionParamRequest) returns (SetSessionParamResponse);
+  rpc SetSessionParam(SetSessionParamRequest) returns (SetSessionParamResponse);
 }
 
 message GetServingVnodeMappingsRequest {}

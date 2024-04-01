@@ -23,10 +23,11 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
 
-use super::{SystemParamsManager, SystemParamsManagerRef};
+use super::{SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef};
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
 };
+use crate::controller::session_params::{SessionParamsController, SessionParamsControllerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
 use crate::hummock::sequence::SequenceGenerator;
@@ -74,8 +75,11 @@ pub struct MetaSrvEnv {
     /// system param controller.
     system_params_controller: Option<SystemParamsControllerRef>,
 
-    /// Session param
-    session_config: SessionConfig,
+    /// Session param manager
+    session_params_manager: Option<SessionParamsManagerRef>,
+
+    /// Session param controller
+    session_params_controller: Option< SessionParamsControllerRef>,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -296,7 +300,7 @@ impl MetaSrvEnv {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let stream_client_pool = Arc::new(StreamClientPool::default());
 
-        let (id_gen_manager, mut cluster_id, system_params_manager) = match meta_store.clone() {
+        let (id_gen_manager, mut cluster_id, system_params_manager, session_params_manager) = match meta_store.clone() {
             Some(meta_store) => {
                 // change to sync after refactor `IdGeneratorManager::new` sync.
                 let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
@@ -315,13 +319,15 @@ impl MetaSrvEnv {
                     )
                     .await?,
                 );
+                let session_params_manager = Arc::new(SessionParamsManager::new(meta_store.clone(), init_session_config.clone(), cluster_first_launch).await?);
                 (
                     Some(id_gen_manager),
                     Some(cluster_id),
                     Some(system_params_manager),
+                    Some(session_params_manager),
                 )
             }
-            None => (None, None, None),
+            None => (None, None, None, None),
         };
         let system_params_controller = match &meta_store_sql {
             Some(store) => {
@@ -342,6 +348,11 @@ impl MetaSrvEnv {
                 ))
             }
             None => None,
+        };
+        let session_params_controller = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(SessionParamsController::new(store.clone(), init_session_config).await?))
+        } else {
+            None
         };
 
         let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
@@ -369,11 +380,12 @@ impl MetaSrvEnv {
             event_log_manager,
             system_params_manager,
             system_params_controller,
+            session_params_manager,
+            session_params_controller,
             cluster_id: cluster_id.unwrap(),
             connector_client,
             opts: opts.into(),
             hummock_seq,
-            session_config: init_session_config,
         })
     }
 
@@ -442,6 +454,22 @@ impl MetaSrvEnv {
 
     pub fn system_params_controller(&self) -> Option<&SystemParamsControllerRef> {
         self.system_params_controller.as_ref()
+    }
+
+    pub fn session_params_manager_ref(&self) -> Option<SessionParamsManagerRef> {
+        self.session_params_manager.clone()
+    }
+
+    pub fn session_params_manager(&self) -> Option<&SessionParamsManagerRef> {
+        self.session_params_manager.as_ref()
+    }
+
+    pub fn session_params_controller_ref(&self) -> Option<SessionParamsControllerRef> {
+        self.session_params_controller.clone()
+    }
+
+    pub fn session_params_controller(&self) -> Option<&SessionParamsControllerRef> {
+        self.session_params_controller.as_ref()
     }
 
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
@@ -539,7 +567,8 @@ impl MetaSrvEnv {
             connector_client: None,
             opts,
             hummock_seq,
-            session_config: Default::default(),
+            session_params_controller: Default::default(),
+            session_params_manager: Default::default(),
         }
     }
 }

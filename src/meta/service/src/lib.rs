@@ -35,6 +35,7 @@ pub mod serving_service;
 pub mod sink_coordination_service;
 pub mod stream_service;
 pub mod system_params_service;
+pub mod session_config;
 pub mod telemetry_service;
 pub mod user_service;
 

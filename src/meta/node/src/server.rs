@@ -51,6 +51,7 @@ use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
 use risingwave_meta_service::scale_service::ScaleServiceImpl;
 use risingwave_meta_service::serving_service::ServingServiceImpl;
+use risingwave_meta_service::session_config::SessionParamsServiceImpl;
 use risingwave_meta_service::sink_coordination_service::SinkCoordinationServiceImpl;
 use risingwave_meta_service::stream_service::StreamServiceImpl;
 use risingwave_meta_service::system_params_service::SystemParamsServiceImpl;
@@ -70,6 +71,7 @@ use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::serving_service_server::ServingServiceServer;
+use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
@@ -669,6 +671,11 @@ pub async fn start_service_as_election_leader(
         env.system_params_manager_ref(),
         env.system_params_controller_ref(),
     );
+    let session_params_srv = if let Some(controller) = env.session_params_controller_ref() {
+        SessionParamsServiceImpl::Controller(controller)
+    } else {
+        SessionParamsServiceImpl::Manager(env.session_params_manager_ref().unwrap())
+    };
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
@@ -840,6 +847,7 @@ pub async fn start_service_as_election_leader(
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
+        .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))

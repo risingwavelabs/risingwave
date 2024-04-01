@@ -12,29 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog;
-mod cluster;
-pub mod diagnose;
-mod env;
-pub mod event_log;
-mod id;
-mod idle;
-mod metadata;
-mod notification;
-mod notification_version;
-pub mod sink_coordination;
-mod streaming_job;
-mod system_param;
-mod session_params;
+use sea_orm::entity::prelude::*;
 
-pub use catalog::*;
-pub use cluster::{WorkerKey, *};
-pub use env::{MetaSrvEnv, *};
-pub use id::*;
-pub use idle::*;
-pub use metadata::*;
-pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
-pub use risingwave_meta_model_v2::prelude;
-pub use streaming_job::*;
-pub use system_param::*;
-pub use session_params::*;
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[sea_orm(table_name = "session_parameter")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub name: String,
+    pub value: String,
+    pub is_mutable: bool,
+    pub description: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}

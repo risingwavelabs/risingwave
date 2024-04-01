@@ -37,6 +37,7 @@ pub use super::source::Entity as Source;
 pub use super::streaming_job::Entity as StreamingJob;
 pub use super::subscription::Entity as Subscription;
 pub use super::system_parameter::Entity as SystemParameter;
+pub use super::session_parameter::Entity as SessionParameter;
 pub use super::table::Entity as Table;
 pub use super::user::Entity as User;
 pub use super::user_privilege::Entity as UserPrivilege;

@@ -35,6 +35,7 @@ pub mod id;
 pub mod rename;
 pub mod streaming_job;
 pub mod system_param;
+pub mod session_params;
 pub mod user;
 pub mod utils;
 
