@@ -1255,7 +1255,7 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "pin-utils",
- "rustls 0.21.8",
+ "rustls 0.21.10",
  "tokio",
  "tracing",
 ]
@@ -5065,7 +5065,7 @@ dependencies = [
  "http 0.2.9",
  "hyper",
  "log",
- "rustls 0.21.8",
+ "rustls 0.21.10",
  "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -8606,7 +8606,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.8",
+ "rustls 0.21.10",
  "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
  "serde",
@@ -9959,7 +9959,7 @@ dependencies = [
  "opendal",
  "prometheus",
  "risingwave_common",
- "rustls 0.21.8",
+ "rustls 0.22.3",
  "spin 0.9.8",
  "thiserror",
  "thiserror-ext",
@@ -10638,9 +10638,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.8"
+version = "0.21.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446e14c5cda4f3f30fe71863c34ec70f5ac79d6087097ad0bb433e1be5edf04c"
+checksum = "f9d5a6813c0759e4609cd494e8e725babae6a2ca7b62a5536a13daaec6fcb7ba"
 dependencies = [
  "log",
  "ring 0.17.5",
@@ -12577,7 +12577,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.8",
+ "rustls 0.21.10",
  "tokio",
 ]
 
@@ -12743,7 +12743,7 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
- "rustls 0.21.8",
+ "rustls 0.21.10",
  "rustls-pemfile 1.0.4",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -14454,7 +14454,7 @@ dependencies = [
  "itertools 0.10.5",
  "log",
  "percent-encoding",
- "rustls 0.21.8",
+ "rustls 0.21.10",
  "rustls-pemfile 1.0.4",
  "seahash",
  "serde",
