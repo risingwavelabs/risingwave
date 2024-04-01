@@ -1,8 +1,8 @@
 init_sqls = [
     'CREATE SCHEMA IF NOT EXISTS demo_db',
-    'DROP TABLE IF EXISTS demo_db.demo_table',
+    'DROP TABLE IF EXISTS demo_db.partition_upsert_table',
     '''
-    CREATE TABLE demo_db.demo_table (
+    CREATE TABLE demo_db.partition_upsert_table (
     id int,
     v1 int,
     v2 long,
@@ -18,7 +18,7 @@ slt = 'test_case/iceberg_sink_upsert.slt'
 
 verify_schema = ['int','int','long','string']
 
-verify_sql = 'SELECT * FROM demo_db.demo_table ORDER BY id, v1 ASC'
+verify_sql = 'SELECT * FROM demo_db.partition_upsert_table ORDER BY id, v1 ASC'
 
 verify_data = """
 1,1,50,1-50,2022-03-11
@@ -31,6 +31,6 @@ verify_data = """
 """
 
 drop_sqls = [
- 'DROP TABLE IF EXISTS demo_db.demo_table',
+ 'DROP TABLE IF EXISTS demo_db.partition_upsert_table',
  'DROP SCHEMA IF EXISTS demo_db'
 ]

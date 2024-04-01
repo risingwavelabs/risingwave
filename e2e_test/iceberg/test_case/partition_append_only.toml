@@ -1,8 +1,8 @@
 init_sqls = [
     'CREATE SCHEMA IF NOT EXISTS demo_db',
-    'DROP TABLE IF EXISTS demo_db.demo_table',
+    'DROP TABLE IF EXISTS demo_db.partition_append_only_table',
     '''
-    CREATE TABLE demo_db.demo_table (
+    CREATE TABLE demo_db.partition_append_only_table (
     id long,
     v_int int,
     v_long long,
@@ -24,7 +24,7 @@ slt = 'test_case/iceberg_sink_append_only.slt'
 
 verify_schema = ['long', 'int', 'long', 'float', 'double', 'string', 'boolean', 'date', 'timestamp', 'timestamp_ntz','decimal']
 
-verify_sql = 'SELECT * FROM demo_db.demo_table ORDER BY id ASC'
+verify_sql = 'SELECT * FROM demo_db.partition_append_only_table ORDER BY id ASC'
 
 
 verify_data = """
@@ -36,6 +36,6 @@ verify_data = """
 """
 
 drop_sqls = [
- 'DROP TABLE IF EXISTS demo_db.demo_table',
+ 'DROP TABLE IF EXISTS demo_db.partition_append_only_table',
  'DROP SCHEMA IF EXISTS demo_db'
 ]
