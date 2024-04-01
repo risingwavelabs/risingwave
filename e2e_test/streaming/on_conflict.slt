@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t1 (v1 int, v2 int, v3 int, primary key(v1)) on conflict ignore;
 
 statement ok
@@ -19,6 +22,9 @@ select v1, v2, v3 from mv1;
 1 4 2
 2 3 3
 3 4 5
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
 create table t2 (v1 int, v2 int, v3 int, primary key(v1)) on conflict overwrite;
@@ -53,3 +59,29 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t3 (v1 int, v2 int, v3 int, primary key(v1)) on conflict do update if not null;
+
+statement ok
+insert into t3 values (1,4,null), (2,3,3);
+
+statement ok
+insert into t3 values (3,null,5), (3,6,null);
+
+statement ok
+insert into t3 values (1,5,3);
+
+statement ok
+create materialized view mv3 as select * from t3;
+
+query III rowsort
+select v1, v2, v3 from mv3;
+----
+1 5 NULL
+2 3 3
+3 NULL NULL
