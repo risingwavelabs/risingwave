@@ -22,6 +22,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::jvm_runtime::execute_with_jni_env;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
@@ -643,7 +644,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
-pub struct WaitEpochWoker<S: StateStore> {
+struct WaitEpochWoker<S: StateStore> {
     wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
     state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
 }
@@ -653,13 +654,25 @@ impl<S: StateStore> WaitEpochWoker<S> {
         loop {
             // poll the rx and wait for the epoch commit
             match self.wait_epoch_rx.recv().await {
-                Some((epoch, _updated_offsets)) => {
-                    let state_store_handler = self.state_table_handler.lock().await;
-                    match state_store_handler.state_store.wait_epoch(epoch.0).await {
+                Some((epoch, updated_offsets)) => {
+                    let state_store_guard = self.state_table_handler.lock().await;
+                    let ret = state_store_guard.state_store.wait_epoch(epoch.0).await;
+                    drop(state_store_guard);
+
+                    match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
+                            // currently only support cdc source, which has only one split
+                            assert_eq!(1, updated_offsets.len());
                             // notify cdc connector to commit offset
+                            let jvm = risingwave_connector::jvm_runtime::JVM
+                                .get_or_init()
+                                .expect("jvm should init success");
+
+                            let ret = execute_with_jni_env(&jvm, |env| Ok(()));
+
+                            ret.unwrap();
                         }
                         Err(e) => {
                             tracing::error!(

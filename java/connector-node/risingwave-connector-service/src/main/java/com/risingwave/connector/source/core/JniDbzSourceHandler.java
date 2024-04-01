@@ -97,6 +97,7 @@ public class JniDbzSourceHandler implements Runnable {
         this.executor.submit(this);
     }
 
+    /** called from split reader in Rust * */
     public void commitOffset(DebeziumOffset offset) throws InterruptedException {
         var changeEventConsumer = runner.getChangeEventConsumer();
         if (changeEventConsumer != null) {
@@ -104,27 +105,6 @@ public class JniDbzSourceHandler implements Runnable {
         } else {
             LOG.warn("Engine#{}: changeEventConsumer is null", config.getSourceId());
         }
-    }
-
-    private boolean sendHandshakeMessage(
-            DbzCdcEngineRunner runner, long channelPtr, boolean startOk) throws Exception {
-        // send a handshake message to notify the Source executor
-        // if the handshake is not ok, the split reader will return error to source actor
-        var controlInfo =
-                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(startOk).build();
-
-        var handshakeMsg =
-                GetEventStreamResponse.newBuilder()
-                        .setSourceId(config.getSourceId())
-                        .setControl(controlInfo)
-                        .build();
-        var success = Binding.sendCdcSourceMsgToChannel(channelPtr, handshakeMsg.toByteArray());
-        if (!success) {
-            LOG.info(
-                    "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
-            runner.stop();
-        }
-        return success;
     }
 
     @Override
@@ -175,5 +155,26 @@ public class JniDbzSourceHandler implements Runnable {
                 LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
         }
+    }
+
+    private boolean sendHandshakeMessage(
+            DbzCdcEngineRunner runner, long channelPtr, boolean startOk) throws Exception {
+        // send a handshake message to notify the Source executor
+        // if the handshake is not ok, the split reader will return error to source actor
+        var controlInfo =
+                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(startOk).build();
+
+        var handshakeMsg =
+                GetEventStreamResponse.newBuilder()
+                        .setSourceId(config.getSourceId())
+                        .setControl(controlInfo)
+                        .build();
+        var success = Binding.sendCdcSourceMsgToChannel(channelPtr, handshakeMsg.toByteArray());
+        if (!success) {
+            LOG.info(
+                    "Engine#{}: JNI sender broken detected, stop the engine", config.getSourceId());
+            runner.stop();
+        }
+        return success;
     }
 }

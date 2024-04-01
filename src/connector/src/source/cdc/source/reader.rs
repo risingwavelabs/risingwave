@@ -16,8 +16,11 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use jni::objects::GlobalRef;
+use jni::JavaVM;
 use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
@@ -49,7 +52,18 @@ pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     snapshot_done: bool,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+
+    jvm: &'static JavaVM,
+    debezium_change_consumer: GlobalRef,
+
     rx: JniReceiverType<anyhow::Result<GetEventStreamResponse>>,
+}
+
+impl<T: CdcSourceTypeTrait> CdcSplitReader<T> {
+    pub fn commit_offset(&self, encoded_offset: String) -> ConnectorResult<()> {
+        let source_id = self.source_id;
+        todo!();
+    }
 }
 
 const DEFAULT_CHANNEL_SIZE: usize = 16;
@@ -168,6 +182,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 snapshot_done: split.snapshot_done(),
                 parser_config,
                 source_ctx,
+                jvm,
+                debezium_change_consumer: GlobalRef::default(),
                 rx,
             }),
             CdcSourceType::Citus => Ok(Self {
@@ -179,6 +195,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 snapshot_done: split.snapshot_done(),
                 parser_config,
                 source_ctx,
+                jvm,
+                debezium_change_consumer: GlobalRef::default(),
                 rx,
             }),
             CdcSourceType::Unspecified => {
