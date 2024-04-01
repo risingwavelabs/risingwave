@@ -491,9 +491,11 @@ impl Binder {
         let pattern = self.bind_expr_inner(pattern)?;
         match (expr.return_type(), pattern.return_type()) {
             (DataType::Varchar, DataType::Varchar) => {}
-            (string_ty, pattern_ty) => {
-                bail_no_function!("LIKE({}, {})", string_ty, pattern_ty);
-            }
+            (string_ty, pattern_ty) => match expr_type {
+                ExprType::Like => bail_no_function!("like({}, {})", string_ty, pattern_ty),
+                ExprType::ILike => bail_no_function!("ilike({}, {})", string_ty, pattern_ty),
+                _ => unreachable!(),
+            },
         }
         let func_call =
             FunctionCall::new_unchecked(expr_type, vec![expr, pattern], DataType::Boolean);
