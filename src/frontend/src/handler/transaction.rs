@@ -35,6 +35,8 @@ pub async fn handle_begin(
 ) -> Result<RwPgResponse> {
     let HandlerArgs { session, .. } = handler_args;
 
+    let mut builder = RwPgResponse::builder(stmt_type);
+
     let access_mode = {
         let mut access_mode = None;
         for mode in modes {
@@ -42,7 +44,14 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
+                TransactionMode::IsolationLevel(_) => {
+                    // Note: This is for compatibility with some external drivers (like postgres_fdw) that
+                    // always start a transaction with an Isolation Level.
+                    const MESSAGE: &str = "\
+                        Transaction with given Isolation Level is not supported yet.\n\
+                        For compatibility, this statement will proceed with RepeatableRead.";
+                    builder = builder.notice(MESSAGE);
+                }
             }
         }
 
@@ -56,15 +65,14 @@ pub async fn handle_begin(
                 const MESSAGE: &str = "\
                     Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
                     For compatibility, this statement will still succeed but no transaction is actually started.";
-
-                return Ok(RwPgResponse::builder(stmt_type).notice(MESSAGE).into());
+                builder = builder.notice(MESSAGE);
+                return Ok(builder.into());
             }
         }
     };
 
     session.txn_begin_explicit(access_mode);
-
-    Ok(RwPgResponse::empty_result(stmt_type))
+    Ok(builder.into())
 }
 
 #[expect(clippy::unused_async)]
