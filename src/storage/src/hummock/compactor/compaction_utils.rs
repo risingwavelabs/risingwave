@@ -220,7 +220,7 @@ fn generate_splits_fast(
     let mut last_split_key_count = 0;
     for key in indexes {
         if last_split_key_count >= parallel_key_count {
-            splits.last_mut().unwrap().right = key.clone();
+            splits.last_mut().unwrap().right.clone_from(&key);
             splits.push(KeyRange_vec::new(key.clone(), vec![]));
             last_split_key_count = 0;
         }
@@ -289,7 +289,7 @@ pub async fn generate_splits(
                     && !last_key.eq(&key)
                     && remaining_size > parallel_compact_size
                 {
-                    splits.last_mut().unwrap().right = key.clone();
+                    splits.last_mut().unwrap().right.clone_from(&key);
                     splits.push(KeyRange_vec::new(key.clone(), vec![]));
                     last_buffer_size = data_size;
                 } else {
@@ -348,7 +348,6 @@ pub async fn check_compaction_result(
 
     let mut table_iters = Vec::new();
     let mut del_iter = ForwardMergeRangeIterator::default();
-    let compact_io_retry_time = context.storage_opts.compact_iter_recreate_timeout_ms;
     for level in &compact_task.input_ssts {
         if level.table_infos.is_empty() {
             continue;
@@ -365,7 +364,7 @@ pub async fn check_compaction_result(
                 KeyRange::inf(),
                 context.sstable_store.clone(),
                 Arc::new(TaskProgress::default()),
-                compact_io_retry_time,
+                context.storage_opts.compactor_iter_max_io_retry_times,
             ));
         } else {
             let mut stats = StoreLocalStatistic::default();
@@ -381,7 +380,7 @@ pub async fn check_compaction_result(
                     KeyRange::inf(),
                     context.sstable_store.clone(),
                     Arc::new(TaskProgress::default()),
-                    compact_io_retry_time,
+                    context.storage_opts.compactor_iter_max_io_retry_times,
                 ));
             }
         }
@@ -394,12 +393,6 @@ pub async fn check_compaction_result(
         u64::MAX,
         0,
         None,
-        del_iter,
-    );
-    let mut del_iter = ForwardMergeRangeIterator::default();
-    del_iter.add_concat_iter(
-        compact_task.sorted_output_ssts.clone(),
-        context.sstable_store.clone(),
     );
     let iter = ConcatSstableIterator::new(
         compact_task.existing_table_ids.clone(),
@@ -407,7 +400,7 @@ pub async fn check_compaction_result(
         KeyRange::inf(),
         context.sstable_store.clone(),
         Arc::new(TaskProgress::default()),
-        compact_io_retry_time,
+        context.storage_opts.compactor_iter_max_io_retry_times,
     );
     let right_iter = UserIterator::new(
         SkipWatermarkIterator::from_safe_epoch_watermarks(iter, &compact_task.table_watermarks),
@@ -415,7 +408,6 @@ pub async fn check_compaction_result(
         u64::MAX,
         0,
         None,
-        del_iter,
     );
 
     check_result(left_iter, right_iter).await
@@ -427,8 +419,6 @@ pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
     sort_ssts: Vec<SstableInfo>,
     context: CompactorContext,
 ) -> HummockResult<bool> {
-    let mut del_iter = ForwardMergeRangeIterator::default();
-    del_iter.add_concat_iter(sort_ssts.clone(), context.sstable_store.clone());
     let iter = ConcatSstableIterator::new(
         existing_table_ids.clone(),
         sort_ssts.clone(),
@@ -443,7 +433,6 @@ pub async fn check_flush_result<I: HummockIterator<Direction = Forward>>(
         u64::MAX,
         0,
         None,
-        del_iter,
     );
     check_result(left_iter, right_iter).await
 }

@@ -52,6 +52,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -331,8 +332,12 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
-        false
+    /// `user_specified` is the value of `sink_decouple` config.
+    fn is_sink_decouple(_desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
+        match user_specified {
+            SinkDecouple::Disable | SinkDecouple::Default => Ok(false),
+            SinkDecouple::Enable => Ok(true),
+        }
     }
 
     async fn validate(&self) -> Result<()>;

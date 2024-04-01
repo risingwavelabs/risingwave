@@ -31,7 +31,8 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, StorageConfig,
+    extract_storage_memory_config, load_config, EvictionConfig, NoOverride, ObjectStoreConfig,
+    StorageConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -115,7 +116,10 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         path: storage_opts.data_directory.to_string(),
         block_cache_capacity: storage_opts.block_cache_capacity_mb * (1 << 20),
         meta_cache_capacity: storage_opts.meta_cache_capacity_mb * (1 << 20),
-        high_priority_ratio: storage_opts.high_priority_ratio,
+        block_cache_shard_num: storage_opts.block_cache_shard_num,
+        meta_cache_shard_num: storage_opts.meta_cache_shard_num,
+        block_cache_eviction: EvictionConfig::for_test(),
+        meta_cache_eviction: EvictionConfig::for_test(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
         data_file_cache: FileCache::none(),
@@ -159,6 +163,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         key_filter_manager,
         state_store_metrics,
         compactor_metrics,
+        None,
     )
     .await
     .expect("fail to create a HummockStorage object");

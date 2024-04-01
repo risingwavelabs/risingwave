@@ -18,8 +18,8 @@ use std::ops::Range;
 use downcast_rs::{impl_downcast, Downcast};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common_estimate_size::EstimateSize;
 
 use crate::sig::FuncBuilder;
 use crate::{ExprError, Result};

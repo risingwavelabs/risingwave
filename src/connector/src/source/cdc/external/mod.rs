@@ -15,7 +15,11 @@
 pub mod mock_external_table;
 mod postgres;
 
+#[cfg(not(madsim))]
+mod maybe_tls_connector;
+
 use std::collections::HashMap;
+use std::fmt;
 
 use anyhow::Context;
 use futures::stream::BoxStream;
@@ -36,6 +40,7 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
+use crate::WithPropertiesExt;
 
 #[derive(Debug)]
 pub enum CdcTableType {
@@ -46,11 +51,8 @@ pub enum CdcTableType {
 }
 
 impl CdcTableType {
-    pub fn from_properties(with_properties: &HashMap<String, String>) -> Self {
-        let connector = with_properties
-            .get("connector")
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
+    pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
+        let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
             "mysql-cdc" => Self::MySql,
             "postgres-cdc" => Self::Postgres,
@@ -214,6 +216,7 @@ pub trait ExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 }
 
@@ -246,6 +249,35 @@ pub struct ExternalTableConfig {
     pub schema: String,
     #[serde(rename = "table.name")]
     pub table: String,
+    /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
+    /// Choices include `disable`, `prefer`, and `require`.
+    /// This field is optional. `prefer` is used if not specified.
+    #[serde(rename = "ssl.mode", default = "Default::default")]
+    pub sslmode: SslMode,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SslMode {
+    Disable,
+    Prefer,
+    Require,
+}
+
+impl Default for SslMode {
+    fn default() -> Self {
+        Self::Prefer
+    }
+}
+
+impl fmt::Display for SslMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            SslMode::Disable => "disable",
+            SslMode::Prefer => "prefer",
+            SslMode::Require => "require",
+        })
+    }
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
@@ -276,8 +308,9 @@ impl ExternalTableReader for MySqlExternalTableReader {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 }
 
@@ -329,6 +362,7 @@ impl MySqlExternalTableReader {
         table_name: SchemaTableName,
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let order_key = primary_keys
             .iter()
@@ -336,19 +370,19 @@ impl MySqlExternalTableReader {
             .join(",");
         let sql = if start_pk_row.is_none() {
             format!(
-                "SELECT {} FROM {} ORDER BY {}",
+                "SELECT {} FROM {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
-                order_key
+                order_key,
             )
         } else {
             let filter_expr = Self::filter_expression(&primary_keys);
             format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {limit}",
                 self.field_names,
                 self.get_normalized_table_name(&table_name),
                 filter_expr,
-                order_key
+                order_key,
             )
         };
 
@@ -358,21 +392,18 @@ impl MySqlExternalTableReader {
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
         if start_pk_row.is_none() {
-            let mut result_set = conn.query_iter(sql).await?;
-            let rs_stream = result_set.stream::<mysql_async::Row>().await?;
-            if let Some(rs_stream) = rs_stream {
-                let row_stream = rs_stream.map(|row| {
-                    // convert mysql row into OwnedRow
-                    let mut row = row?;
-                    Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-                });
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut *conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
 
-                pin_mut!(row_stream);
-                #[for_await]
-                for row in row_stream {
-                    let row = row?;
-                    yield row;
-                }
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                yield row;
             }
         } else {
             let field_map = self
@@ -494,8 +525,9 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 }
 
@@ -516,16 +548,17 @@ impl ExternalTableReaderImpl {
         table_name: SchemaTableName,
         start_pk: Option<OwnedRow>,
         primary_keys: Vec<String>,
+        limit: u32,
     ) {
         let stream = match self {
             ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.snapshot_read(table_name, start_pk, primary_keys)
+                mysql.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Postgres(postgres) => {
-                postgres.snapshot_read(table_name, start_pk, primary_keys)
+                postgres.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
             ExternalTableReaderImpl::Mock(mock) => {
-                mock.snapshot_read(table_name, start_pk, primary_keys)
+                mock.snapshot_read(table_name, start_pk, primary_keys, limit)
             }
         };
 
@@ -621,7 +654,7 @@ mod tests {
             table_name: "t1".to_string(),
         };
 
-        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()]);
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()], 1000);
         pin_mut!(stream);
         #[for_await]
         for row in stream {

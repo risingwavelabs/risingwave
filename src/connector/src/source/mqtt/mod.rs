@@ -22,7 +22,7 @@ use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
-use crate::mqtt_common::{MqttCommon, QualityOfService};
+use crate::connector_common::{MqttCommon, MqttQualityOfService};
 use crate::source::mqtt::enumerator::MqttSplitEnumerator;
 use crate::source::mqtt::source::{MqttSplit, MqttSplitReader};
 use crate::source::SourceProperties;
@@ -38,7 +38,7 @@ pub struct MqttProperties {
     /// The quality of service to use when publishing messages. Defaults to at_most_once.
     /// Could be at_most_once, at_least_once or exactly_once
     #[serde_as(as = "Option<DisplayFromStr>")]
-    pub qos: Option<QualityOfService>,
+    pub qos: Option<MqttQualityOfService>,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,

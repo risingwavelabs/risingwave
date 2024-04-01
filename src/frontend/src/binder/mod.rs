@@ -422,7 +422,9 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -440,7 +442,9 @@ impl Binder {
 
     fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.context.cte_to_relation = new_context.cte_to_relation.clone();
+        self.context
+            .cte_to_relation
+            .clone_from(&new_context.cte_to_relation);
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,

@@ -156,8 +156,8 @@ pub struct SessionConfig {
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
-    streaming_enable_arrangement_backfill: bool,
+    #[parameter(default = true)]
+    streaming_use_arrangement_backfill: bool,
 
     /// Allow `jsonb` in stream key
     #[serde(rename = "rw_streaming_allow_jsonb_in_stream_key")]
@@ -231,7 +231,7 @@ pub struct SessionConfig {
     synchronize_seqscans: bool,
 
     /// Abort query statement that takes more than the specified amount of time in sec. If
-    /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
+    /// `log_min_error_statement` is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
     #[parameter(default = 0u32)]
@@ -261,7 +261,7 @@ pub struct SessionConfig {
     streaming_rate_limit: ConfigNonZeroU64,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
+    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "rw_streaming_over_window_cache_policy")]
     #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]

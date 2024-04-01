@@ -35,13 +35,18 @@ use pgwire::pg_server::{
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
+use risingwave_batch::worker_manager::worker_node_manager::{
+    WorkerNodeManager, WorkerNodeManagerRef,
+};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
+use risingwave_common::config::{
+    load_config, BatchConfig, MetaConfig, MetricLevel, StreamingConfig,
+};
 use risingwave_common::session_config::{SessionConfig, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::{
     LocalSystemParamsManager, LocalSystemParamsManagerRef,
@@ -95,7 +100,6 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
-use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
     GLOBAL_DISTRIBUTED_QUERY_METRICS,
@@ -128,8 +132,8 @@ pub struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
-    /// Each session is identified by (process_id,
-    /// secret_key). When Cancel Request received, find corresponding session and cancel all
+    /// Each session is identified by (`process_id`,
+    /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
     /// running queries.
     sessions_map: SessionMapRef,
 
@@ -139,6 +143,7 @@ pub struct FrontendEnv {
 
     batch_config: BatchConfig,
     meta_config: MetaConfig,
+    streaming_config: StreamingConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -206,6 +211,7 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
+            streaming_config: StreamingConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
@@ -224,6 +230,7 @@ impl FrontendEnv {
 
         let batch_config = config.batch;
         let meta_config = config.meta;
+        let streaming_config = config.streaming;
 
         let frontend_address: HostAddr = opts
             .advertise_addr
@@ -400,6 +407,7 @@ impl FrontendEnv {
                 sessions_map,
                 batch_config,
                 meta_config,
+                streaming_config,
                 source_metrics,
                 creating_streaming_job_tracker,
                 compute_runtime,
@@ -479,6 +487,10 @@ impl FrontendEnv {
         &self.meta_config
     }
 
+    pub fn streaming_config(&self) -> &StreamingConfig {
+        &self.streaming_config
+    }
+
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
     }
@@ -548,7 +560,7 @@ pub struct SessionImpl {
     /// buffer the Notices to users,
     notices: RwLock<Vec<String>>,
 
-    /// Identified by process_id, secret_key. Corresponds to SessionManager.
+    /// Identified by `process_id`, `secret_key`. Corresponds to `SessionManager`.
     id: (i32, i32),
 
     /// Client address

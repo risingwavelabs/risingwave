@@ -16,8 +16,8 @@
 
 mod arrow;
 pub use arrow::{
-    to_deltalake_record_batch_with_schema, to_iceberg_record_batch_with_schema,
-    to_record_batch_with_schema,
+    iceberg_to_arrow_type, to_deltalake_record_batch_with_schema,
+    to_iceberg_record_batch_with_schema, to_record_batch_with_schema,
 };
 mod bool_array;
 pub mod bytes_array;
@@ -62,6 +62,7 @@ pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
@@ -70,7 +71,6 @@ pub use utf8_array::*;
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
-use crate::estimate_size::EstimateSize;
 use crate::types::*;
 use crate::{dispatch_array_builder_variants, dispatch_array_variants, for_all_array_variants};
 pub type ArrayResult<T> = Result<T, ArrayError>;
@@ -281,10 +281,10 @@ pub trait Array:
         }
     }
 
-    fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
+    fn hash_vec<H: Hasher>(&self, hashers: &mut [H], vis: &Bitmap) {
         assert_eq!(hashers.len(), self.len());
-        for (idx, state) in hashers.iter_mut().enumerate() {
-            self.hash_at(idx, state);
+        for idx in vis.iter_ones() {
+            self.hash_at(idx, &mut hashers[idx]);
         }
     }
 
@@ -554,8 +554,8 @@ impl ArrayImpl {
         dispatch_array_variants!(self, inner, { inner.hash_at(idx, state) })
     }
 
-    pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
-        dispatch_array_variants!(self, inner, { inner.hash_vec(hashers) })
+    pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H], vis: &Bitmap) {
+        dispatch_array_variants!(self, inner, { inner.hash_vec(hashers, vis) })
     }
 
     /// Select some elements from `Array` based on `visibility` bitmap.
@@ -711,6 +711,7 @@ mod test_util {
     use std::hash::{BuildHasher, Hasher};
 
     use super::Array;
+    use crate::buffer::Bitmap;
     use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {
@@ -732,8 +733,9 @@ mod test_util {
                 arr.hash_at(i, state)
             }
         });
+        let vis = Bitmap::ones(len);
         arrs.iter()
-            .for_each(|arr| arr.hash_vec(&mut states_vec[..]));
+            .for_each(|arr| arr.hash_vec(&mut states_vec[..], &vis));
         itertools::cons_tuples(
             expects
                 .iter()

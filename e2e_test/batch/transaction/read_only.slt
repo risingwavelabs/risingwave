@@ -56,6 +56,48 @@ select * from t;
 2
 3
 
+# test transaction with ISOLATION LEVEL
+statement ok
+START TRANSACTION READ ONLY, ISOLATION LEVEL REPEATABLE READ;
+
+statement ok
+COMMIT;
+
+# test read-write transaction
+statement ok
+START TRANSACTION READ WRITE;
+
+statement ok
+COMMIT;
+
+# test read-write transaction, with ISOLATION LEVEL
+statement ok
+START TRANSACTION READ WRITE, ISOLATION LEVEL REPEATABLE READ;
+
+query I rowsort
+select * from t;
+----
+1
+2
+3
+
+statement ok
+insert into t values (4);
+
+statement ok
+COMMIT;
+
+statement ok
+flush;
+
+query I rowsort
+select * from t;
+----
+1
+2
+3
+4
+
 statement ok
 drop table t;
 

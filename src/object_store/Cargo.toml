@@ -27,10 +27,10 @@ hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = "0.12"
 madsim = "0.2.22"
-opendal = "0.44.2"
+opendal = "0.45.1"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
-rustls = "0.21.8"
+rustls = "0.22.3"
 spin = "0.9"
 thiserror = "1"
 thiserror-ext = { workspace = true }

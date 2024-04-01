@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
@@ -40,7 +41,6 @@ use risingwave_pb::user::grant_privilege::Object;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;

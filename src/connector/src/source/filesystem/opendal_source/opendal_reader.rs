@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::IntoFuture;
+
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
@@ -126,6 +128,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         let reader = op
             .reader_with(&object_name)
             .range(split.offset as u64..)
+            .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
             .await?;
 
         let stream_reader = StreamReader::new(

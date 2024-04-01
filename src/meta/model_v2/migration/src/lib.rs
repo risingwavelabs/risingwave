@@ -28,7 +28,9 @@ macro_rules! assert_not_has_tables {
             assert!(
                 !$manager
                     .has_table($table::Table.to_string())
-                    .await?
+                    .await?,
+                "Table `{}` already exists",
+                $table::Table.to_string()
             );
         )+
     };

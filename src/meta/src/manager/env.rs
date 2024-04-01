@@ -20,7 +20,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
+use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
 
 use super::{SessionParamsManager, SessionParamsManagerRef, SystemParamsManager, SystemParamsManagerRef};
@@ -83,9 +83,6 @@ pub struct MetaSrvEnv {
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
-
-    /// Client to connector node. `None` if endpoint unspecified or unable to connect.
-    connector_client: Option<ConnectorClient>,
 
     pub hummock_seq: Option<Arc<SequenceGenerator>>,
 
@@ -157,27 +154,23 @@ pub struct MetaOpts {
     /// A usable security group id to assign to a vpc endpoint
     pub security_group_id: Option<String>,
 
-    /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
-    pub connector_rpc_endpoint: Option<String>,
-
     /// Default tag for the endpoint created when creating a privatelink connection.
     /// Will be appended to the tags specified in the `tags` field in with clause in `create
     /// connection`.
     pub privatelink_endpoint_default_tags: Option<Vec<(String, String)>>,
 
-    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `space_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
     /// telemetry enabled in config file or not
     pub telemetry_enabled: bool,
-    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `ttl_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule tombstone_reclaim_compaction for all compaction groups with this interval.
+    /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule split_compaction_group for all compaction groups with this interval.
+    /// Schedule `split_compaction_group` for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
 
     /// The size limit to split a large compaction group.
@@ -204,11 +197,11 @@ pub struct MetaOpts {
 
     /// hybird compaction group config
     ///
-    /// hybird_partition_vnode_count determines the granularity of vnodes in the hybrid compaction group for SST alignment.
-    /// When hybird_partition_vnode_count > 0, in hybrid compaction group
+    /// `hybird_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
+    /// When `hybird_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    /// When hybird_partition_vnode_count = 0,no longer be special alignment operations for the hybird compaction group
+    /// When `hybird_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
     pub hybird_partition_vnode_count: u32,
 
     pub event_log_enabled: bool,
@@ -257,7 +250,6 @@ impl MetaOpts {
             prometheus_selector: None,
             vpc_id: None,
             security_group_id: None,
-            connector_rpc_endpoint: None,
             privatelink_endpoint_default_tags: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
@@ -355,7 +347,6 @@ impl MetaSrvEnv {
             None
         };
 
-        let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
         let event_log_manager = Arc::new(start_event_log_manager(
             opts.event_log_enabled,
             opts.event_log_channel_max_size,
@@ -383,7 +374,6 @@ impl MetaSrvEnv {
             session_params_manager,
             session_params_controller,
             cluster_id: cluster_id.unwrap(),
-            connector_client,
             opts: opts.into(),
             hummock_seq,
         })
@@ -484,10 +474,6 @@ impl MetaSrvEnv {
         &self.cluster_id
     }
 
-    pub fn connector_client(&self) -> Option<ConnectorClient> {
-        self.connector_client.clone()
-    }
-
     pub fn event_log_manager_ref(&self) -> EventLogMangerRef {
         self.event_log_manager.clone()
     }
@@ -564,7 +550,6 @@ impl MetaSrvEnv {
             system_params_manager: Some(system_params_manager),
             system_params_controller,
             cluster_id,
-            connector_client: None,
             opts,
             hummock_seq,
             session_params_controller: Default::default(),

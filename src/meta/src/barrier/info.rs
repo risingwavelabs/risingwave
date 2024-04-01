@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use risingwave_pb::common::PbWorkerNode;
 use tracing::warn;
 
-use crate::manager::{ActorInfos, WorkerId};
+use crate::manager::{ActiveStreamingWorkerNodes, ActorInfos, WorkerId};
 use crate::model::ActorId;
 
 #[derive(Debug, Clone)]
@@ -37,29 +37,23 @@ pub struct CommandActorChanges {
 /// [`crate::barrier::GlobalBarrierManager`].
 #[derive(Default, Clone)]
 pub struct InflightActorInfo {
-    /// node_id => node
+    /// `node_id` => node
     pub node_map: HashMap<WorkerId, PbWorkerNode>,
 
-    /// node_id => actors
+    /// `node_id` => actors
     pub actor_map: HashMap<WorkerId, HashSet<ActorId>>,
 
-    /// node_id => barrier inject actors
+    /// `node_id` => barrier inject actors
     pub actor_map_to_send: HashMap<WorkerId, HashSet<ActorId>>,
 
-    /// actor_id => WorkerId
+    /// `actor_id` => `WorkerId`
     pub actor_location_map: HashMap<ActorId, WorkerId>,
 }
 
 impl InflightActorInfo {
     /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn resolve(
-        all_nodes: impl IntoIterator<Item = PbWorkerNode>,
-        actor_infos: ActorInfos,
-    ) -> Self {
-        let node_map = all_nodes
-            .into_iter()
-            .map(|node| (node.id, node))
-            .collect::<HashMap<_, _>>();
+    pub fn resolve(active_nodes: &ActiveStreamingWorkerNodes, actor_infos: ActorInfos) -> Self {
+        let node_map = active_nodes.current().clone();
 
         let actor_map = actor_infos
             .actor_maps
