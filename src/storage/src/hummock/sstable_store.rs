@@ -264,6 +264,10 @@ impl SstableStore {
             }
         };
         let meta_cache = Arc::new(meta_cache);
+        let prefetch_buffer_capacity = std::env::var("RW_PREFETCH_BUFFER_CAPACITY")
+            .unwrap_or("1024".into())
+            .parse()
+            .unwrap();
 
         Self {
             path: config.path,
@@ -276,7 +280,8 @@ impl SstableStore {
 
             recent_filter: config.recent_filter,
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
-            prefetch_buffer_capacity: config.prefetch_buffer_capacity,
+            prefetch_buffer_capacity,
+            // prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
         }
     }
