@@ -314,7 +314,6 @@ impl Binder {
                 should_be_empty(offset, "OFFSET")?;
                 should_be_empty(fetch, "FETCH")?;
 
-
                 let SetExpr::SetOperation {
                     op: SetOperator::Union,
                     all,
