@@ -167,7 +167,7 @@ where
 
         let data_types = self.upstream_table.schema().data_types();
 
-        // We do not need to cut chunks in half because we've enforced the rate limit as the chunk's max size.
+        // Chunk builder will be instantiated with min(rate_limit, self.chunk_size) as the chunk's max size.
         let (mut builder, mut limiter) =
             create_builder_and_limiter(rate_limit, self.chunk_size, data_types.clone());
 
