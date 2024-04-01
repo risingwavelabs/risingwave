@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use rumqttc::tokio_rustls::rustls;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions};
 use serde_derive::Deserialize;
@@ -141,26 +142,22 @@ impl MqttCommon {
             .unwrap_or(QoS::AtMostOnce)
     }
 
-    fn get_tls_config(&self) -> ConnectorResult<tokio_rustls::rustls::ClientConfig> {
-        let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
+    fn get_tls_config(&self) -> ConnectorResult<rustls::ClientConfig> {
+        let mut root_cert_store = rustls::RootCertStore::empty();
         if let Some(ca) = &self.ca {
             let certificates = load_certs(ca)?;
             for cert in certificates {
-                root_cert_store.add(&cert).unwrap();
+                root_cert_store.add(cert).unwrap();
             }
         } else {
             for cert in
                 rustls_native_certs::load_native_certs().expect("could not load platform certs")
             {
-                root_cert_store
-                    .add(&tokio_rustls::rustls::Certificate(cert.to_vec()))
-                    .unwrap();
+                root_cert_store.add(cert).unwrap();
             }
         }
 
-        let builder = tokio_rustls::rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_cert_store);
+        let builder = rustls::ClientConfig::builder().with_root_certificates(root_cert_store);
 
         let tls_config = if let (Some(client_cert), Some(client_key)) =
             (self.client_cert.as_ref(), self.client_key.as_ref())
