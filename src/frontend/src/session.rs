@@ -387,10 +387,10 @@ impl FrontendEnv {
         // Heartbeat
         let heartbeat_worker_node_manager = worker_node_manager.clone();
         let join_handle = tokio::spawn(async move {
-            let duration = std::cmp::max(
-                Duration::from_secs(meta_config.max_heartbeat_interval_secs as _) / 10,
-                Duration::from_secs(1),
-            );
+            let duration = Duration::from_secs(std::cmp::max(
+                batch_config.mask_worker_temporary_secs as u64,
+                1,
+            ));
 
             let mut check_heartbeat_interval =
                 tokio::time::interval(core::time::Duration::from_secs(2));
