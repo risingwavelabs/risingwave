@@ -10145,6 +10145,7 @@ dependencies = [
  "matches",
  "serde",
  "tracing",
+ "tracing-subscriber",
  "workspace-hack",
 ]
 
