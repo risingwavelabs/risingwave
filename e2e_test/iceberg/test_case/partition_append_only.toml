@@ -20,7 +20,7 @@ init_sqls = [
     '''
 ]
 
-slt = 'test_case/iceberg_sink_append_only.slt'
+slt = 'test_case/iceberg_sink_partition_append_only_table.slt'
 
 verify_schema = ['long', 'int', 'long', 'float', 'double', 'string', 'boolean', 'date', 'timestamp', 'timestamp_ntz','decimal']
 

@@ -13,7 +13,7 @@ init_sqls = [
     '''
 ]
 
-slt = 'test_case/iceberg_sink_upsert.slt'
+slt = 'test_case/iceberg_sink_no_partition_upsert_table.slt'
 
 verify_schema = ['int','int','long','string']
 
