@@ -1083,6 +1083,7 @@ impl HummockManager {
         } else {
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+            // partition_count is based on compaction config. When compaction group is set to partition, the dynamically calculated value in memory will be invalid.
             if group_config.compaction_config.split_weight_by_vnode > 0 {
                 table_to_vnode_partition.clear();
                 for table_id in &compact_task.existing_table_ids {
@@ -3150,20 +3151,27 @@ impl HummockManager {
                 rewrite_cg_ids.push(*cg_id);
             }
 
-            if let Some(levels) = current_version.levels.get(cg_id) {
-                if levels.member_table_ids.len() == 1 {
-                    restore_cg_to_partition_vnode.insert(
-                        *cg_id,
-                        vec![(
-                            levels.member_table_ids[0],
-                            compaction_group_config
-                                .compaction_config
-                                .split_weight_by_vnode,
-                        )]
-                        .into_iter()
+            if let Some(levels) = current_version.levels.get(cg_id)
+                && compaction_group_config
+                    .compaction_config
+                    .split_weight_by_vnode
+                    > 0
+            {
+                restore_cg_to_partition_vnode.insert(
+                    *cg_id,
+                    levels
+                        .member_table_ids
+                        .iter()
+                        .map(|table_id| {
+                            (
+                                *table_id,
+                                compaction_group_config
+                                    .compaction_config
+                                    .split_weight_by_vnode,
+                            )
+                        })
                         .collect(),
-                    );
-                }
+                );
             }
         }
 

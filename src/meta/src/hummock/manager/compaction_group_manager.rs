@@ -449,9 +449,15 @@ impl HummockManager {
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
+        partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let result = self
-            .move_state_table_to_compaction_group(parent_group_id, table_ids, None, 0)
+            .move_state_table_to_compaction_group(
+                parent_group_id,
+                table_ids,
+                None,
+                partition_vnode_count,
+            )
             .await?;
         self.group_to_table_vnode_partition
             .write()
@@ -975,6 +981,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::TombstoneReclaimRatio(c) => {
                 target.tombstone_reclaim_ratio = *c;
+            }
+            MutableConfig::PartitionVnodeCount(c) => {
+                target.split_weight_by_vnode = *c;
             }
         }
     }
