@@ -35,9 +35,9 @@ use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
-mod recursive_union;
 mod cte_ref;
 mod join;
+mod recursive_union;
 mod share;
 mod subquery;
 mod table_function;
