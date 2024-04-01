@@ -50,7 +50,7 @@ use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::MetaResult;
+use crate::{model, MetaResult};
 
 impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
@@ -698,24 +698,52 @@ impl GlobalBarrierManagerContext {
         let mgr = self.metadata_manager.as_v2_ref();
         debug!("start resetting actors distribution");
 
+        let available_parallelism = active_nodes
+            .current()
+            .values()
+            .flat_map(|worker_node| worker_node.parallel_units.iter())
+            .count();
+
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
-            streaming_parallelisms
-                .into_iter()
-                .map(|(table_id, parallelism)| {
-                    // no custom for sql backend
-                    let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                    };
+            let mut result = HashMap::new();
 
-                    (table_id as u32, table_parallelism)
-                })
-                .collect()
+            for (object_id, streaming_parallelism) in streaming_parallelisms {
+                let actual_fragment_parallelism = mgr
+                    .catalog_controller
+                    .get_actual_job_fragment_parallelism(object_id)
+                    .await?;
+
+                let table_parallelism = match streaming_parallelism {
+                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                    StreamingParallelism::Custom => model::TableParallelism::Custom,
+                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                };
+
+                let target_parallelism = Self::derive_target_parallelism(
+                    available_parallelism,
+                    table_parallelism,
+                    actual_fragment_parallelism,
+                    self.env.opts.default_parallelism,
+                );
+
+                if target_parallelism != table_parallelism {
+                    tracing::info!(
+                        "resetting table {} parallelism from {:?} to {:?}",
+                        object_id,
+                        table_parallelism,
+                        target_parallelism
+                    );
+                }
+
+                result.insert(object_id as u32, target_parallelism);
+            }
+
+            result
         };
 
         let schedulable_worker_ids = active_nodes
