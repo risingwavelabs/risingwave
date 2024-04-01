@@ -171,9 +171,7 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        let await_tree_reg = await_tree_config
-            .clone()
-            .map(|config| await_tree::Registry::new(config));
+        let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 
