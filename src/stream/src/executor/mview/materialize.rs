@@ -551,8 +551,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                                         row_serde.deserializer.deserialize(value.clone())?;
 
                                     let new_row = do_update_if_not_null(
-                                        old_row_deserialized,
-                                        new_row_deserialized,
+                                        old_row_deserialized.clone(),
+                                        new_row_deserialized.clone(),
                                     );
 
                                     let new_value_serialized =
@@ -703,12 +703,11 @@ fn do_update_if_not_null(old_row: OwnedRow, new_row: OwnedRow) -> OwnedRow {
         .into_inner()
         .iter()
         .enumerate()
-        .map(|(i, &ref value)| match value {
+        .map(|(i,  value)| match value {
             Some(_) => new_row.clone().into_inner().get(i).cloned().unwrap(),
             None => None,
         })
         .collect_vec();
-    println!("do_update_if_not_null res: {:?}", res);
     OwnedRow::new(res)
 }
 #[cfg(test)]
