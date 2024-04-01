@@ -120,6 +120,7 @@ rumqttc = { version = "0.24.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs = "0.7"
 rustls-pemfile = "2"
+rustls-pki-types = "1"
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
@@ -143,7 +144,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
-tokio-rustls = "0.24"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }
