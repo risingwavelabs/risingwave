@@ -4104,7 +4104,6 @@ checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
 dependencies = [
  "futures-core",
  "futures-sink",
- "nanorand",
  "pin-project",
  "spin 0.9.8",
 ]
@@ -6399,15 +6398,6 @@ name = "naive-timer"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "034a0ad7deebf0c2abcf2435950a6666c3c15ea9d8fad0c0f48efa8a7f843fed"
-
-[[package]]
-name = "nanorand"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
-dependencies = [
- "getrandom",
-]
 
 [[package]]
 name = "native-tls"
@@ -14287,7 +14277,6 @@ dependencies = [
  "either",
  "fail",
  "flate2",
- "flume 0.10.14",
  "frunk_core",
  "futures",
  "futures-channel",
@@ -14298,7 +14287,6 @@ dependencies = [
  "futures-task",
  "futures-util",
  "generic-array",
- "getrandom",
  "governor",
  "hashbrown 0.13.2",
  "hashbrown 0.14.3",
