@@ -33,9 +33,9 @@ use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
-    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillState,
+    compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
+    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
+    update_pos_by_vnode, wait_for_rate_limiter, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -231,6 +231,7 @@ where
                     self.actor_id.to_string().as_str(),
                 ]);
 
+            let limiter = self.rate_limit.map(create_limiter);
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
@@ -290,7 +291,7 @@ where
                                         // Consume remaining rows in the builder.
                                         for (vnode, builder) in &mut builders {
                                             if let Some(data_chunk) = builder.consume_all() {
-                                                yield Self::handle_snapshot_chunk(
+                                                let chunk = Self::handle_snapshot_chunk(
                                                     data_chunk,
                                                     *vnode,
                                                     &pk_in_output_indices,
@@ -299,6 +300,14 @@ where
                                                     &mut total_snapshot_processed_rows,
                                                     &self.output_indices,
                                                 )?;
+                                                if let Some(rate_limit) = limiter.as_ref() {
+                                                    wait_for_rate_limiter(
+                                                        rate_limit,
+                                                        chunk.cardinality(),
+                                                    )
+                                                    .await;
+                                                }
+                                                yield Message::Chunk(chunk)
                                             }
                                         }
 
@@ -312,10 +321,17 @@ where
                                             let chunk_cardinality = chunk.cardinality() as u64;
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk_cardinality;
-                                            yield Message::Chunk(mapping_chunk(
-                                                chunk,
-                                                &self.output_indices,
-                                            ));
+                                            let chunk = mapping_chunk(chunk, &self.output_indices);
+
+                                            if let Some(rate_limit) = limiter.as_ref() {
+                                                wait_for_rate_limiter(
+                                                    rate_limit,
+                                                    chunk.cardinality(),
+                                                )
+                                                .await;
+                                            }
+
+                                            yield Message::Chunk(chunk);
                                         }
                                         backfill_snapshot_read_row_count_metric
                                             .inc_by(cur_barrier_snapshot_processed_rows);
@@ -326,7 +342,7 @@ where
                                     Some((vnode, row)) => {
                                         let builder = builders.get_mut(&vnode).unwrap();
                                         if let Some(chunk) = builder.append_one_row(row) {
-                                            yield Self::handle_snapshot_chunk(
+                                            let chunk = Self::handle_snapshot_chunk(
                                                 chunk,
                                                 vnode,
                                                 &pk_in_output_indices,
@@ -335,6 +351,15 @@ where
                                                 &mut total_snapshot_processed_rows,
                                                 &self.output_indices,
                                             )?;
+                                            if let Some(rate_limit) = limiter.as_ref() {
+                                                wait_for_rate_limiter(
+                                                    rate_limit,
+                                                    chunk.cardinality(),
+                                                )
+                                                .await;
+                                            }
+
+                                            yield Message::Chunk(chunk);
                                         }
                                     }
                                 }
@@ -366,7 +391,7 @@ where
                                 Some((vnode, row)) => {
                                     let builder = builders.get_mut(&vnode).unwrap();
                                     if let Some(chunk) = builder.append_one_row(row) {
-                                        yield Self::handle_snapshot_chunk(
+                                        let chunk = Self::handle_snapshot_chunk(
                                             chunk,
                                             vnode,
                                             &pk_in_output_indices,
@@ -375,6 +400,11 @@ where
                                             &mut total_snapshot_processed_rows,
                                             &self.output_indices,
                                         )?;
+                                        if let Some(rate_limit) = limiter.as_ref() {
+                                            wait_for_rate_limiter(rate_limit, chunk.cardinality())
+                                                .await;
+                                        }
+                                        yield Message::Chunk(chunk);
                                     }
 
                                     break;
@@ -438,7 +468,12 @@ where
 
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                         total_snapshot_processed_rows += chunk_cardinality;
-                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+
+                        let chunk = mapping_chunk(chunk, &self.output_indices);
+                        if let Some(rate_limit) = limiter.as_ref() {
+                            wait_for_rate_limiter(rate_limit, chunk.cardinality()).await;
+                        }
+                        yield Message::Chunk(chunk);
                     }
                 }
 
@@ -450,7 +485,7 @@ where
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
                     if backfill_state.has_progress() {
-                        yield Message::Chunk(mapping_chunk(
+                        let chunk = mapping_chunk(
                             mark_chunk_ref_by_vnode(
                                 &chunk,
                                 &backfill_state,
@@ -458,7 +493,11 @@ where
                                 &pk_order,
                             )?,
                             &self.output_indices,
-                        ));
+                        );
+                        if let Some(rate_limit) = limiter.as_ref() {
+                            wait_for_rate_limiter(rate_limit, chunk.cardinality()).await;
+                        }
+                        yield Message::Chunk(chunk);
                     }
 
                     // Replicate
@@ -611,7 +650,7 @@ where
         cur_barrier_snapshot_processed_rows: &mut u64,
         total_snapshot_processed_rows: &mut u64,
         output_indices: &[usize],
-    ) -> StreamExecutorResult<Message> {
+    ) -> StreamExecutorResult<StreamChunk> {
         let chunk = StreamChunk::from_parts(vec![Op::Insert; chunk.capacity()], chunk);
         // Raise the current position.
         // As snapshot read streams are ordered by pk, so we can
@@ -628,8 +667,7 @@ where
         let chunk_cardinality = chunk.cardinality() as u64;
         *cur_barrier_snapshot_processed_rows += chunk_cardinality;
         *total_snapshot_processed_rows += chunk_cardinality;
-        let chunk = Message::Chunk(mapping_chunk(chunk, output_indices));
-        Ok(chunk)
+        Ok(mapping_chunk(chunk, output_indices))
     }
 
     /// Read snapshot per vnode.

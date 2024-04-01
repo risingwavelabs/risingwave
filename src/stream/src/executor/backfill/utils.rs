@@ -820,12 +820,9 @@ pub fn create_builder_and_limiter(
         && rate_limit > 0
         && rate_limit < chunk_size
     {
-        let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
-        let clock = MonotonicClock;
-
         (
             DataChunkBuilder::new(data_types, rate_limit),
-            Some(RateLimiter::direct_with_clock(quota, &clock)),
+            Some(create_limiter(rate_limit)),
         )
     } else {
         (DataChunkBuilder::new(data_types, chunk_size), None)
@@ -846,5 +843,20 @@ pub fn create_builder(
         DataChunkBuilder::new(data_types, rate_limit)
     } else {
         DataChunkBuilder::new(data_types, chunk_size)
+    }
+}
+
+pub fn create_limiter(rate_limit: usize) -> BackfillRateLimiter {
+    let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
+    let clock = MonotonicClock;
+    RateLimiter::direct_with_clock(quota, &clock)
+}
+
+pub async fn wait_for_rate_limiter(limiter: &BackfillRateLimiter, chunk_cardinality: usize) {
+    if chunk_cardinality > 0 {
+        limiter
+            .until_n_ready(NonZeroU32::new(chunk_cardinality as u32).unwrap())
+            .await
+            .unwrap();
     }
 }
