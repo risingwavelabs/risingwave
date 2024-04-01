@@ -395,7 +395,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         let streaming_parallelism = match &table_fragment.assigned_parallelism {
             TableParallelism::Adaptive => StreamingParallelism::Adaptive,
             TableParallelism::Fixed(n) => StreamingParallelism::Fixed(*n),
-            TableParallelism::Custom => todo!("custom parallelism"),
+            TableParallelism::Custom => StreamingParallelism::Custom,
         };
         let status = match table_fragment.state() {
             State::Unspecified => unreachable!(),
