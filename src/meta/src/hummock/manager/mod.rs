@@ -1250,6 +1250,7 @@ impl HummockManager {
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<Option<CompactTask>> {
+        let _timer = start_measure_real_process_timer!(self);
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
@@ -1324,6 +1325,7 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
+        let _timer = start_measure_real_process_timer!(self);
         self.report_compact_task_impl(
             task_id,
             None,
