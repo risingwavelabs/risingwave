@@ -97,10 +97,10 @@ impl Planner {
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
         if source.is_backfillable_cdc_connector() {
-            return Err(ErrorCode::InternalError(
+            Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
             )
-            .into());
+            .into())
         } else {
             let as_of = source.as_of.clone();
             match as_of {

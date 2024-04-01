@@ -91,7 +91,7 @@ impl StreamSourceScan {
         self.core
             .catalog
             .clone()
-            .expect("source backfill should have source cataglog")
+            .expect("source scan should have source cataglog")
     }
 
     pub fn infer_internal_table_catalog() -> TableCatalog {
@@ -203,6 +203,6 @@ impl ExprVisitable for StreamSourceScan {}
 
 impl StreamNode for StreamSourceScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
-        unreachable!("stream source backfill cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!("stream source scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
