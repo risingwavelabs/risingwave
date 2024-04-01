@@ -95,7 +95,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
-                    params.env.connector_params(),
                 )
                 .boxed()
             }
@@ -105,7 +104,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
-                    params.env.connector_params(),
                 )
                 .boxed()
             }
@@ -115,7 +113,6 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source_ctrl_opts,
-                    params.env.connector_params(),
                 )
                 .boxed()
             }

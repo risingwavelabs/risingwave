@@ -29,7 +29,7 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
-use crate::common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
+use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};

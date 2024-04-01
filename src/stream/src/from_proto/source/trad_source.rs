@@ -230,7 +230,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source_ctrl_opts.clone(),
-                        params.env.connector_params(),
                     )
                     .boxed()
                 } else {
@@ -241,7 +240,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source_ctrl_opts.clone(),
-                        params.env.connector_params(),
                     )
                     .boxed()
                 }
@@ -272,7 +270,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 system_params,
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
-                params.env.connector_params(),
             );
             Ok((params.info, exec).into())
         }

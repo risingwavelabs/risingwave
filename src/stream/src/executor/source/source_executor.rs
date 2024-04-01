@@ -30,7 +30,6 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
-use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -62,9 +61,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
-
-    // config for the connector node
-    connector_params: ConnectorParams,
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
@@ -109,7 +105,6 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit: Option<u
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: Option<StreamSourceCore<S>>,
@@ -117,7 +112,6 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
@@ -126,7 +120,6 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
-            connector_params,
         }
     }
 
@@ -146,7 +139,6 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
-            self.connector_params.connector_client.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
@@ -738,7 +730,6 @@ mod tests {
             barrier_rx,
             system_params_manager.get_params(),
             SourceCtrlOpts::default(),
-            ConnectorParams::default(),
         );
         let mut executor = executor.boxed().execute();
 
@@ -827,7 +818,6 @@ mod tests {
             barrier_rx,
             system_params_manager.get_params(),
             SourceCtrlOpts::default(),
-            ConnectorParams::default(),
         );
         let mut handler = executor.boxed().execute();
 

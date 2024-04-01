@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_meta_model_v2::StreamingParallelism;
-use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -49,7 +49,7 @@ use crate::controller::catalog::ReleaseContext;
 use crate::manager::{ActiveStreamingWorkerNodes, MetadataManager, WorkerId};
 use crate::model::{MetadataModel, MigrationPlan, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::MetaResult;
+use crate::{model, MetaResult};
 
 impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
@@ -398,16 +398,10 @@ impl GlobalBarrierManager {
                         .pre_apply_drop_cancel(&self.scheduled_barriers)
                         .await?;
 
-                    let active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
+                    let mut active_streaming_nodes = ActiveStreamingWorkerNodes::new_snapshot(
                         self.context.metadata_manager.clone(),
                     )
                     .await?;
-
-                    let all_nodes = active_streaming_nodes
-                        .current()
-                        .values()
-                        .cloned()
-                        .collect_vec();
 
                     let background_streaming_jobs = self
                         .context
@@ -422,14 +416,14 @@ impl GlobalBarrierManager {
                         && background_streaming_jobs.is_empty()
                     {
                         self.context
-                            .scale_actors(all_nodes.clone())
+                            .scale_actors(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "scale actors failed");
                             })?;
 
                         self.context
-                            .resolve_actor_info(all_nodes.clone())
+                            .resolve_actor_info(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -437,7 +431,7 @@ impl GlobalBarrierManager {
                     } else {
                         // Migrate actors in expired CN to newly joined one.
                         self.context
-                            .migrate_actors(all_nodes.clone())
+                            .migrate_actors(&mut active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "migrate actors failed");
@@ -463,7 +457,7 @@ impl GlobalBarrierManager {
                     {
                         info = self
                             .context
-                            .resolve_actor_info(all_nodes.clone())
+                            .resolve_actor_info(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -554,14 +548,20 @@ impl GlobalBarrierManager {
 
 impl GlobalBarrierManagerContext {
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
-    async fn migrate_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<InflightActorInfo> {
+    async fn migrate_actors(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<InflightActorInfo> {
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.migrate_actors_v1(all_nodes).await,
-            MetadataManager::V2(_) => self.migrate_actors_v2(all_nodes).await,
+            MetadataManager::V1(_) => self.migrate_actors_v1(active_nodes).await,
+            MetadataManager::V2(_) => self.migrate_actors_v2(active_nodes).await,
         }
     }
 
-    async fn migrate_actors_v2(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<InflightActorInfo> {
+    async fn migrate_actors_v2(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v2_ref();
 
         let all_inuse_parallel_units: HashSet<_> = mgr
@@ -571,8 +571,9 @@ impl GlobalBarrierManagerContext {
             .into_iter()
             .collect();
 
-        let active_parallel_units: HashSet<_> = all_nodes
-            .iter()
+        let active_parallel_units: HashSet<_> = active_nodes
+            .current()
+            .values()
             .flat_map(|node| node.parallel_units.iter().map(|pu| pu.id as i32))
             .collect();
 
@@ -582,7 +583,7 @@ impl GlobalBarrierManagerContext {
             .collect();
         if expired_parallel_units.is_empty() {
             debug!("no expired parallel units, skipping.");
-            return self.resolve_actor_info(all_nodes.clone()).await;
+            return self.resolve_actor_info(active_nodes).await;
         }
 
         debug!("start migrate actors.");
@@ -599,8 +600,9 @@ impl GlobalBarrierManagerContext {
         let start = Instant::now();
         let mut plan = HashMap::new();
         'discovery: while !to_migrate_parallel_units.is_empty() {
-            let new_parallel_units = all_nodes
-                .iter()
+            let new_parallel_units = active_nodes
+                .current()
+                .values()
                 .flat_map(|node| {
                     node.parallel_units
                         .iter()
@@ -623,26 +625,44 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             }
-            warn!(
-                "waiting for new workers to join, elapsed: {}s",
-                start.elapsed().as_secs()
-            );
+
+            if to_migrate_parallel_units.is_empty() {
+                break;
+            }
+
             // wait to get newly joined CN
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let changed = active_nodes
+                .wait_changed(Duration::from_millis(5000), |active_nodes| {
+                    let current_nodes = active_nodes
+                        .current()
+                        .values()
+                        .map(|node| (node.id, &node.host, &node.parallel_units))
+                        .collect_vec();
+                    warn!(
+                        current_nodes = ?current_nodes,
+                        "waiting for new workers to join, elapsed: {}s",
+                        start.elapsed().as_secs()
+                    );
+                })
+                .await;
+            warn!(?changed, "get worker changed. Retry migrate");
         }
 
         mgr.catalog_controller.migrate_actors(plan).await?;
 
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info(all_nodes).await
+        self.resolve_actor_info(active_nodes).await
     }
 
     /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
-    async fn migrate_actors_v1(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<InflightActorInfo> {
+    async fn migrate_actors_v1(
+        &self,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
+    ) -> MetaResult<InflightActorInfo> {
         let mgr = self.metadata_manager.as_v1_ref();
 
-        let info = self.resolve_actor_info(all_nodes.clone()).await?;
+        let info = self.resolve_actor_info(active_nodes).await?;
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -658,7 +678,7 @@ impl GlobalBarrierManagerContext {
 
         debug!("start migrate actors.");
         let migration_plan = self
-            .generate_migration_plan(expired_workers, &all_nodes)
+            .generate_migration_plan(expired_workers, active_nodes)
             .await?;
         // 2. start to migrate fragment one-by-one.
         mgr.fragment_manager
@@ -668,22 +688,28 @@ impl GlobalBarrierManagerContext {
         migration_plan.delete(self.env.meta_store_checked()).await?;
         debug!("migrate actors succeed.");
 
-        self.resolve_actor_info(all_nodes).await
+        self.resolve_actor_info(active_nodes).await
     }
 
-    async fn scale_actors(&self, all_nodes: Vec<WorkerNode>) -> MetaResult<()> {
+    async fn scale_actors(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
         let Ok(_guard) = self.scale_controller.reschedule_lock.try_write() else {
             return Err(anyhow!("scale_actors failed to acquire reschedule_lock").into());
         };
         match &self.metadata_manager {
-            MetadataManager::V1(_) => self.scale_actors_v1(all_nodes).await,
-            MetadataManager::V2(_) => self.scale_actors_v2(all_nodes).await,
+            MetadataManager::V1(_) => self.scale_actors_v1(active_nodes).await,
+            MetadataManager::V2(_) => self.scale_actors_v2(active_nodes).await,
         }
     }
 
-    async fn scale_actors_v2(&self, workers: Vec<WorkerNode>) -> MetaResult<()> {
+    async fn scale_actors_v2(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
         let mgr = self.metadata_manager.as_v2_ref();
         debug!("start resetting actors distribution");
+
+        let available_parallelism = active_nodes
+            .current()
+            .values()
+            .flat_map(|worker_node| worker_node.parallel_units.iter())
+            .count();
 
         let table_parallelisms: HashMap<_, _> = {
             let streaming_parallelisms = mgr
@@ -691,22 +717,45 @@ impl GlobalBarrierManagerContext {
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
-            streaming_parallelisms
-                .into_iter()
-                .map(|(table_id, parallelism)| {
-                    // no custom for sql backend
-                    let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                    };
+            let mut result = HashMap::new();
 
-                    (table_id as u32, table_parallelism)
-                })
-                .collect()
+            for (object_id, streaming_parallelism) in streaming_parallelisms {
+                let actual_fragment_parallelism = mgr
+                    .catalog_controller
+                    .get_actual_job_fragment_parallelism(object_id)
+                    .await?;
+
+                let table_parallelism = match streaming_parallelism {
+                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                    StreamingParallelism::Custom => model::TableParallelism::Custom,
+                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                };
+
+                let target_parallelism = Self::derive_target_parallelism(
+                    available_parallelism,
+                    table_parallelism,
+                    actual_fragment_parallelism,
+                    self.env.opts.default_parallelism,
+                );
+
+                if target_parallelism != table_parallelism {
+                    tracing::info!(
+                        "resetting table {} parallelism from {:?} to {:?}",
+                        object_id,
+                        table_parallelism,
+                        target_parallelism
+                    );
+                }
+
+                result.insert(object_id as u32, target_parallelism);
+            }
+
+            result
         };
 
-        let schedulable_worker_ids = workers
-            .iter()
+        let schedulable_worker_ids = active_nodes
+            .current()
+            .values()
             .filter(|worker| {
                 !worker
                     .property
@@ -813,8 +862,8 @@ impl GlobalBarrierManagerContext {
         }
     }
 
-    async fn scale_actors_v1(&self, workers: Vec<WorkerNode>) -> MetaResult<()> {
-        let info = self.resolve_actor_info(workers.clone()).await?;
+    async fn scale_actors_v1(&self, active_nodes: &ActiveStreamingWorkerNodes) -> MetaResult<()> {
+        let info = self.resolve_actor_info(active_nodes).await?;
 
         let mgr = self.metadata_manager.as_v1_ref();
         debug!("start resetting actors distribution");
@@ -859,8 +908,9 @@ impl GlobalBarrierManagerContext {
                 .collect()
         };
 
-        let schedulable_worker_ids: BTreeSet<_> = workers
-            .iter()
+        let schedulable_worker_ids: BTreeSet<_> = active_nodes
+            .current()
+            .values()
             .filter(|worker| {
                 !worker
                     .property
@@ -935,7 +985,7 @@ impl GlobalBarrierManagerContext {
     async fn generate_migration_plan(
         &self,
         expired_workers: HashSet<WorkerId>,
-        all_nodes: &Vec<WorkerNode>,
+        active_nodes: &mut ActiveStreamingWorkerNodes,
     ) -> MetaResult<MigrationPlan> {
         let mgr = self.metadata_manager.as_v1_ref();
 
@@ -985,8 +1035,9 @@ impl GlobalBarrierManagerContext {
         let start = Instant::now();
         // if in-used expire parallel units are not empty, should wait for newly joined worker.
         'discovery: while !to_migrate_parallel_units.is_empty() {
-            let mut new_parallel_units = all_nodes
-                .iter()
+            let mut new_parallel_units = active_nodes
+                .current()
+                .values()
                 .flat_map(|worker| worker.parallel_units.iter().cloned())
                 .collect_vec();
             new_parallel_units.retain(|pu| !inuse_parallel_units.contains(&pu.id));
@@ -1008,12 +1059,27 @@ impl GlobalBarrierManagerContext {
                     }
                 }
             }
-            warn!(
-                "waiting for new workers to join, elapsed: {}s",
-                start.elapsed().as_secs()
-            );
+
+            if to_migrate_parallel_units.is_empty() {
+                break;
+            }
+
             // wait to get newly joined CN
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let changed = active_nodes
+                .wait_changed(Duration::from_millis(5000), |active_nodes| {
+                    let current_nodes = active_nodes
+                        .current()
+                        .values()
+                        .map(|node| (node.id, &node.host, &node.parallel_units))
+                        .collect_vec();
+                    warn!(
+                        current_nodes = ?current_nodes,
+                        "waiting for new workers to join, elapsed: {}s",
+                        start.elapsed().as_secs()
+                    );
+                })
+                .await;
+            warn!(?changed, "get worker changed. Retry migrate");
         }
 
         // update migration plan, if there is a chain in the plan, update it.
