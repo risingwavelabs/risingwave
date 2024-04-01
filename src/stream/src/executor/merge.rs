@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::mem;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -20,6 +21,7 @@ use anyhow::Context as _;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
@@ -51,6 +53,9 @@ pub struct MergeExecutor {
 
     /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
+
+    chunk_size: usize,
+    data_types: Vec<DataType>,
 }
 
 impl MergeExecutor {
@@ -63,6 +68,8 @@ impl MergeExecutor {
         context: Arc<SharedContext>,
         _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
+        data_types: Vec<DataType>,
     ) -> Self {
         Self {
             actor_context: ctx,
@@ -71,6 +78,8 @@ impl MergeExecutor {
             upstream_fragment_id,
             context,
             metrics,
+            chunk_size,
+            data_types,
         }
     }
 
@@ -91,6 +100,8 @@ impl MergeExecutor {
             SharedContext::for_test().into(),
             810,
             StreamingMetrics::unused().into(),
+            1024,
+            vec![],
         )
     }
 
@@ -106,6 +117,8 @@ impl MergeExecutor {
             self.fragment_id,
             self.upstream_fragment_id,
         );
+        let mut chunk_builder = StreamChunkBuilder::new(self.chunk_size, self.data_types.clone());
+        let mut watermark: Option<super::Watermark> = None;
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
@@ -117,13 +130,28 @@ impl MergeExecutor {
             let mut msg: Message = msg?;
 
             match &mut msg {
-                Message::Watermark(_) => {
-                    // Do nothing.
+                Message::Watermark(w) => {
+                    watermark = Some(w.clone());
                 }
                 Message::Chunk(chunk) => {
+                    for (op, r) in chunk.rows() {
+                        if let Some(c) = chunk_builder.append_row(op, r) {
+                            yield Message::Chunk(c);
+                            if let Some(w) = mem::take(&mut watermark) {
+                                yield Message::Watermark(w)
+                            }
+                        };
+                    }
                     metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
+                    if let Some(c) = chunk_builder.take() {
+                        yield Message::Chunk(c);
+                        if let Some(w) = mem::take(&mut watermark) {
+                            yield Message::Watermark(w)
+                        }
+                    };
+
                     tracing::debug!(
                         target: "events::stream::barrier::path",
                         actor_id = actor_id,
@@ -225,10 +253,9 @@ impl MergeExecutor {
 
                         select_all.update_actor_ids();
                     }
+                    yield msg;
                 }
             }
-
-            yield msg;
             start_time = Instant::now();
         }
     }
@@ -579,6 +606,8 @@ mod tests {
             ctx.clone(),
             233,
             metrics.clone(),
+            1024,
+            vec![],
         )
         .boxed()
         .execute();

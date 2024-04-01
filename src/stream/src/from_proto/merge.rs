@@ -55,7 +55,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             // There should be always only one upstream with no-shuffle dispatcher.
             DispatcherType::NoShuffle => true,
         };
-
+        let chunk_size = params.env.config().developer.chunk_size;
+        let data_types = params.info.schema.data_types();
         let exec = if always_single_input {
             ReceiverExecutor::new(
                 params.actor_context,
@@ -76,6 +77,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 params.shared_context.clone(),
                 params.operator_id,
                 params.executor_stats.clone(),
+                chunk_size,
+                data_types,
             )
             .boxed()
         };
