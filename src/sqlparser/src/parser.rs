@@ -1630,7 +1630,7 @@ impl Parser {
             let s = self.parse_literal_string()?;
             let mut chs = s.chars();
             if let Some(ch) = chs.next() {
-                if let Some(_) = chs.next() {
+                if chs.next().is_some() {
                     parser_err!(format!(
                         "Escape string must be empty or one character, found {s:?}"
                     ))
