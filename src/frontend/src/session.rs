@@ -68,7 +68,6 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
-use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -883,9 +882,7 @@ impl SessionImpl {
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(&sql).inspect_err(
-            |e| tracing::error!(error = %e.as_report(), %sql, "failed to parse sql"),
-        )?;
+        let mut stmts = Parser::parse_sql(&sql)?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
@@ -899,9 +896,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await.inspect_err(
-            |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
-        )?;
+        let rsp = handle(self, stmt, sql.clone(), formats).await?;
         Ok(rsp)
     }
 
@@ -1091,11 +1086,7 @@ impl Session for SessionImpl {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
-        let rsp = handle(self, stmt, sql.clone(), vec![format])
-            .await
-            .inspect_err(
-                |e| tracing::error!(error = %e.as_report(), %sql, "failed to handle sql"),
-            )?;
+        let rsp = handle(self, stmt, sql.clone(), vec![format]).await?;
         Ok(rsp)
     }
 
@@ -1138,9 +1129,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let rsp = handle_execute(self, portal)
-            .await
-            .inspect_err(|e| tracing::error!(error=%e.as_report(), "failed to handle execute"))?;
+        let rsp = handle_execute(self, portal).await?;
         Ok(rsp)
     }
 
