@@ -60,7 +60,7 @@ impl BoundSource {
     }
 
     pub fn is_shared(&self) -> bool {
-        self.catalog.info.is_shared
+        self.catalog.info.is_shared_compatible()
     }
 }
 

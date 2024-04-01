@@ -1454,7 +1454,7 @@ impl CatalogManager {
                     }
 
                     if let Some(info) = source.info
-                        && info.is_shared
+                        && info.is_shared_compatible()
                     {
                         all_streaming_job_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager

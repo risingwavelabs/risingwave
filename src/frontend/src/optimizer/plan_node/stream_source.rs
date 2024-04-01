@@ -44,7 +44,7 @@ impl StreamSource {
         // XXX: If we don't add here, these cols are also added in source reader, but pruned in the SourceExecutor's output.
         // Should we simply add them here for all sources for consistency?
         if let Some(source_catalog) = &core.catalog
-            && source_catalog.info.is_shared
+            && source_catalog.info.is_shared_compatible()
         {
             let (columns_exist, additional_columns) =
                 add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());

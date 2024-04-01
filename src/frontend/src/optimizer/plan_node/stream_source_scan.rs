@@ -56,7 +56,7 @@ impl StreamSourceScan {
         // XXX: do we need to include partition and offset cols here? It's needed by Backfill's input, but maybe not output?
         // But the source's "schema" contains the hidden columns.
         if let Some(source_catalog) = &core.catalog
-            && source_catalog.info.is_shared
+            && source_catalog.info.is_shared_compatible()
         {
             let (columns_exist, additional_columns) =
                 add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());
