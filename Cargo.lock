@@ -6009,9 +6009,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.3.1+0.34.0"
+version = "0.3.4+0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79bf1f687bdd0146a72d6132478032d770ebe1dbe42e1f46799c4dcbd9b31cbc"
+checksum = "0992d46c19414bda24bad935ea223ad025dcd7e64f38f0acee388efa8ff5319b"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -8183,7 +8183,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.12.1",
+ "parking_lot 0.11.2",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
