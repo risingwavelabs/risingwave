@@ -19,7 +19,6 @@ use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
 
-use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, RwError};
 use crate::scheduler::plan_fragmenter::QueryId;
 
@@ -34,15 +33,6 @@ pub enum SchedulerError {
         #[backtrace]
         RpcError,
     ),
-
-    #[error("Empty workers found")]
-    EmptyWorkerNodes,
-
-    #[error("Serving vnode mapping not found for fragment {0}")]
-    ServingVnodeMappingNotFound(FragmentId),
-
-    #[error("Streaming vnode mapping not found for fragment {0}")]
-    StreamingVnodeMappingNotFound(FragmentId),
 
     #[error("{0}")]
     TaskExecutionError(String),

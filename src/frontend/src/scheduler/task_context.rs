@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_batch::error::Result;
 use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
@@ -94,5 +95,9 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
         MemoryContext::none()
+    }
+
+    fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
+        Some(self.session.env().worker_node_manager_ref())
     }
 }
