@@ -52,4 +52,8 @@ impl SplitMetaData for PubsubSplit {
         self.start_offset = Some(start_offset);
         Ok(())
     }
+
+    fn get_encoded_offset(&self) -> String {
+        self.start_offset.clone().unwrap_or_default()
+    }
 }

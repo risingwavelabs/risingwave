@@ -478,6 +478,10 @@ impl SplitMetaData for SplitImpl {
             inner.update_with_offset(start_offset)
         )
     }
+
+    fn get_encoded_offset(&self) -> String {
+        dispatch_split_impl!(self, inner, IgnoreType, inner.get_encoded_offset())
+    }
 }
 
 impl SplitImpl {
@@ -561,6 +565,8 @@ pub trait SplitMetaData: Sized {
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_with_offset(&mut self, start_offset: String) -> crate::error::ConnectorResult<()>;
+
+    fn get_encoded_offset(&self) -> String;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

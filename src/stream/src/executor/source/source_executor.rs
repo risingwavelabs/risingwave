@@ -63,11 +63,11 @@ pub struct SourceExecutor<S: StateStore> {
     // config for the connector node
     connector_params: ConnectorParams,
 
-    wait_epoch_tx: UnboundedSender<Epoch>,
+    wait_epoch_tx: UnboundedSender<(Epoch, HashMap<SplitId, String>)>,
 }
 
 pub struct WaitEpochWoker<S: StateStore> {
-    wait_epoch_rx: UnboundedReceiver<Epoch>,
+    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
     state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
 }
 
@@ -76,13 +76,13 @@ impl<S: StateStore> WaitEpochWoker<S> {
         loop {
             // poll the rx and wait for the epoch commit
             match self.wait_epoch_rx.recv().await {
-                Some(epoch) => {
+                Some((epoch, _updated_offsets)) => {
                     let state_store_handler = self.state_table_handler.lock().await;
                     match state_store_handler.state_store.wait_epoch(epoch.0).await {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
-                            // TODO: send epoch commit notification to the cdc connector
+                            // notify cdc connector to commit offset
                         }
                         Err(e) => {
                             tracing::error!(
@@ -355,7 +355,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn persist_state_and_clear_cache(
         &mut self,
         epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<HashMap<SplitId, String>> {
         let core = self.stream_source_core.as_mut().unwrap();
 
         let cache = core
@@ -372,9 +372,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // commit anyway, even if no message saved
         state_store_guard.state_store.commit(epoch).await?;
-        core.updated_splits_in_epoch.clear();
 
-        Ok(())
+        let mut updated_offsets = HashMap::new();
+
+        core.updated_splits_in_epoch
+            .drain()
+            .for_each(|(split_id, split_impl)| {
+                updated_offsets.insert(split_id, split_impl.get_encoded_offset());
+            });
+
+        assert!(core.updated_splits_in_epoch.is_empty());
+        Ok(updated_offsets)
     }
 
     /// try mem table spill
@@ -541,13 +549,13 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let is_checkpoint = barrier.kind.is_checkpoint();
                     let epoch_to_wait = epoch.prev;
-                    self.persist_state_and_clear_cache(epoch).await?;
+                    let updated_offsets = self.persist_state_and_clear_cache(epoch).await?;
 
                     yield Message::Barrier(barrier);
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if is_checkpoint {
                         self.wait_epoch_tx
-                            .send(Epoch(epoch_to_wait))
+                            .send((Epoch(epoch_to_wait), updated_offsets))
                             .expect("wait_epoch_tx send success");
                     }
                 }

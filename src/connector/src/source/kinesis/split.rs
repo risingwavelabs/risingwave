@@ -57,6 +57,10 @@ impl SplitMetaData for KinesisSplit {
         self.start_position = start_offset;
         Ok(())
     }
+
+    fn get_encoded_offset(&self) -> String {
+        todo!()
+    }
 }
 
 impl KinesisSplit {

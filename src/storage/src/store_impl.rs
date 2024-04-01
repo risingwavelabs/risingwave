@@ -878,7 +878,7 @@ pub mod boxed_state_store {
 
         fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> Arc<Bitmap>;
 
-        async fn wait_epoch_committed(&self, epoch: HummockEpoch) -> StorageResult<()>;
+        async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -948,7 +948,7 @@ pub mod boxed_state_store {
             self.update_vnode_bitmap(vnodes)
         }
 
-        async fn wait_epoch_committed(&self, epoch: HummockEpoch) -> StorageResult<()> {
+        async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
             self.wait_epoch(epoch).await
         }
     }
@@ -1027,7 +1027,7 @@ pub mod boxed_state_store {
         }
 
         async fn wait_epoch(&self, epoch: HummockEpoch) -> StorageResult<()> {
-            self.deref().wait_epoch_committed(epoch).await
+            self.deref().wait_epoch(epoch).await
         }
     }
 

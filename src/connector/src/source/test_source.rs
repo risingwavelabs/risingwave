@@ -158,6 +158,10 @@ impl SplitMetaData for TestSourceSplit {
         self.offset = start_offset;
         Ok(())
     }
+
+    fn get_encoded_offset(&self) -> String {
+        self.offset.clone()
+    }
 }
 
 pub struct TestSourceSplitEnumerator {

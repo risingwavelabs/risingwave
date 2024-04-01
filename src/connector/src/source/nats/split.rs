@@ -60,6 +60,10 @@ impl SplitMetaData for NatsSplit {
         self.start_sequence = start_sequence;
         Ok(())
     }
+
+    fn get_encoded_offset(&self) -> String {
+        serde_json::to_string(&self.start_sequence).unwrap()
+    }
 }
 
 impl NatsSplit {
