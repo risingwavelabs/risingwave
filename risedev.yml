@@ -873,6 +873,11 @@ profile:
       - use: etcd
       - use: minio
 
+  ci-meta-etcd-for-migration:
+    config-path: src/config/ci.toml
+    steps:
+      - use: etcd
+
   ci-iceberg-test:
     config-path: src/config/ci-iceberg-test.toml
     steps:
