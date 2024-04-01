@@ -24,7 +24,8 @@ public class EsSinkConfig extends CommonSinkConfig {
     /** Required */
     private String url;
 
-    /** Required */
+    /** Optional */
+    @JsonProperty(value = "index")
     private String index;
 
     /** Optional, delimiter for generating id */
@@ -37,11 +38,12 @@ public class EsSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "password")
     private String password;
 
+    @JsonProperty(value = "index_column")
+    private String indexColumn;
+
     @JsonCreator
-    public EsSinkConfig(
-            @JsonProperty(value = "url") String url, @JsonProperty(value = "index") String index) {
+    public EsSinkConfig(@JsonProperty(value = "url") String url) {
         this.url = url;
-        this.index = index;
     }
 
     public String getUrl() {
@@ -50,6 +52,11 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public String getIndex() {
         return index;
+    }
+
+    public EsSinkConfig withIndex(String index) {
+        this.index = index;
+        return this;
     }
 
     public String getDelimiter() {
@@ -76,6 +83,15 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     public EsSinkConfig withPassword(String password) {
         this.password = password;
+        return this;
+    }
+
+    public String getIndexColumn() {
+        return indexColumn;
+    }
+
+    public EsSinkConfig withIndexColumn(String indexColumn) {
+        this.indexColumn = indexColumn;
         return this;
     }
 }

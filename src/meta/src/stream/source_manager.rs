@@ -31,7 +31,6 @@ use risingwave_connector::source::{
 };
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_rpc_client::ConnectorClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -40,7 +39,7 @@ use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::manager::{MetaSrvEnv, MetadataManager, SourceId};
+use crate::manager::{MetadataManager, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
@@ -53,7 +52,6 @@ pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 /// and sends a split assignment command if split changes detected ([`Self::tick`]).
 pub struct SourceManager {
     pub paused: Mutex<()>,
-    env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
@@ -77,7 +75,6 @@ struct ConnectorSourceWorker<P: SourceProperties> {
     period: Duration,
     metrics: Arc<MetaMetrics>,
     connector_properties: P,
-    connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
     source_is_up: LabelGuardedIntGauge<2>,
 }
@@ -105,7 +102,6 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 info: SourceEnumeratorInfo {
                     source_id: self.source_id,
                 },
-                connector_client: self.connector_client.clone(),
             }),
         )
         .await
@@ -119,7 +115,6 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
     /// On creation, connection to the external source service will be established, but `splits`
     /// will not be updated until `tick` is called.
     pub async fn create(
-        connector_client: &Option<ConnectorClient>,
         source: &Source,
         connector_properties: P,
         period: Duration,
@@ -133,7 +128,6 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 info: SourceEnumeratorInfo {
                     source_id: source.id,
                 },
-                connector_client: connector_client.clone(),
             }),
         )
         .await
@@ -151,7 +145,6 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
             period,
             metrics,
             connector_properties,
-            connector_client: connector_client.clone(),
             fail_cnt: 0,
             source_is_up,
         })
@@ -551,7 +544,6 @@ impl SourceManager {
     const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
         metadata_manager: MetadataManager,
         metrics: Arc<MetaMetrics>,
@@ -560,12 +552,7 @@ impl SourceManager {
         {
             let sources = metadata_manager.list_sources().await?;
             for source in sources {
-                Self::create_source_worker_async(
-                    env.connector_client(),
-                    source,
-                    &mut managed_sources,
-                    metrics.clone(),
-                )?
+                Self::create_source_worker_async(source, &mut managed_sources, metrics.clone())?
             }
         }
 
@@ -626,7 +613,6 @@ impl SourceManager {
         ));
 
         Ok(Self {
-            env,
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
@@ -784,14 +770,9 @@ impl SourceManager {
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
         } else {
-            Self::create_source_worker(
-                self.env.connector_client(),
-                source,
-                &mut core.managed_sources,
-                self.metrics.clone(),
-            )
-            .await
-            .context("failed to create source worker")?;
+            Self::create_source_worker(source, &mut core.managed_sources, self.metrics.clone())
+                .await
+                .context("failed to create source worker")?;
         }
         Ok(())
     }
@@ -808,7 +789,6 @@ impl SourceManager {
 
     /// Used on startup ([`Self::new`]). Failed sources will not block meta startup.
     fn create_source_worker_async(
-        connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
@@ -831,7 +811,6 @@ impl SourceManager {
                     ticker.tick().await;
 
                     match ConnectorSourceWorker::create(
-                        &connector_client,
                         &source,
                         prop.deref().clone(),
                         DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
@@ -869,7 +848,6 @@ impl SourceManager {
     ///
     /// It will call `ConnectorSourceWorker::tick()` to fetch split metadata once before returning.
     async fn create_source_worker(
-        connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
@@ -885,7 +863,6 @@ impl SourceManager {
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = dispatch_source_prop!(connector_properties, prop, {
             let mut worker = ConnectorSourceWorker::create(
-                &connector_client,
                 source,
                 *prop,
                 DEFAULT_SOURCE_WORKER_TICK_INTERVAL,

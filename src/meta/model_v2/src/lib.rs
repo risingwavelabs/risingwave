@@ -232,6 +232,7 @@ derive_from_json_struct!(
 pub enum StreamingParallelism {
     Adaptive,
     Fixed(usize),
+    Custom,
 }
 
 impl Eq for StreamingParallelism {}

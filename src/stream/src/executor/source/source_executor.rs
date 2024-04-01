@@ -26,7 +26,6 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitMetaData,
 };
-use risingwave_connector::ConnectorParams;
 use risingwave_storage::StateStore;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -60,49 +59,10 @@ pub struct SourceExecutor<S: StateStore> {
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
 
-    // config for the connector node
-    connector_params: ConnectorParams,
-
     wait_epoch_tx: UnboundedSender<(Epoch, HashMap<SplitId, String>)>,
 }
 
-pub struct WaitEpochWoker<S: StateStore> {
-    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
-    state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
-}
-
-impl<S: StateStore> WaitEpochWoker<S> {
-    pub async fn run(mut self) {
-        loop {
-            // poll the rx and wait for the epoch commit
-            match self.wait_epoch_rx.recv().await {
-                Some((epoch, _updated_offsets)) => {
-                    let state_store_handler = self.state_table_handler.lock().await;
-                    match state_store_handler.state_store.wait_epoch(epoch.0).await {
-                        Ok(()) => {
-                            tracing::debug!(epoch = epoch.0, "wait epoch success");
-
-                            // notify cdc connector to commit offset
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                            error = ?e.as_report(),
-                            "wait epoch {} failed", epoch.0
-                            );
-                        }
-                    }
-                }
-                None => {
-                    tracing::error!("wait epoch rx closed");
-                    break;
-                }
-            }
-        }
-    }
-}
-
 impl<S: StateStore> SourceExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: Option<StreamSourceCore<S>>,
@@ -110,7 +70,6 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
     ) -> Self {
         let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
         if let Some(core) = stream_source_core.as_ref() {
@@ -129,7 +88,6 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             source_ctrl_opts,
-            connector_params,
             wait_epoch_tx,
         }
     }
@@ -150,7 +108,6 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.fragment_id,
             source_desc.metrics.clone(),
             self.source_ctrl_opts.clone(),
-            self.connector_params.connector_client.clone(),
             source_desc.source.config.clone(),
             self.stream_source_core
                 .as_ref()
@@ -686,6 +643,41 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
+pub struct WaitEpochWoker<S: StateStore> {
+    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
+    state_table_handler: Arc<Mutex<SourceStateTableHandler<S>>>,
+}
+
+impl<S: StateStore> WaitEpochWoker<S> {
+    pub async fn run(mut self) {
+        loop {
+            // poll the rx and wait for the epoch commit
+            match self.wait_epoch_rx.recv().await {
+                Some((epoch, _updated_offsets)) => {
+                    let state_store_handler = self.state_table_handler.lock().await;
+                    match state_store_handler.state_store.wait_epoch(epoch.0).await {
+                        Ok(()) => {
+                            tracing::debug!(epoch = epoch.0, "wait epoch success");
+
+                            // notify cdc connector to commit offset
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                            error = ?e.as_report(),
+                            "wait epoch {} failed", epoch.0
+                            );
+                        }
+                    }
+                }
+                None => {
+                    tracing::error!("wait epoch rx closed");
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -759,7 +751,6 @@ mod tests {
             barrier_rx,
             system_params_manager.get_params(),
             SourceCtrlOpts::default(),
-            ConnectorParams::default(),
         );
         let mut executor = executor.boxed().execute();
 
@@ -848,7 +839,6 @@ mod tests {
             barrier_rx,
             system_params_manager.get_params(),
             SourceCtrlOpts::default(),
-            ConnectorParams::default(),
         );
         let mut handler = executor.boxed().execute();
 

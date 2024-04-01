@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
-use risingwave_common::{bail_not_implemented, not_implemented};
+use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
-    Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
-    Query, StructField, TrimWhereField, UnaryOperator,
+    Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
+    ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
@@ -147,12 +147,24 @@ impl Binder {
                 low,
                 high,
             } => self.bind_between(*expr, negated, *low, *high),
+            Expr::Like {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => self.bind_like(ExprType::Like, *expr, negated, *pattern, escape_char),
+            Expr::ILike {
+                negated,
+                expr,
+                pattern,
+                escape_char,
+            } => self.bind_like(ExprType::ILike, *expr, negated, *pattern, escape_char),
             Expr::SimilarTo {
                 expr,
                 negated,
-                pat,
-                esc_text,
-            } => self.bind_similar_to(*expr, negated, *pat, esc_text),
+                pattern,
+                escape_char,
+            } => self.bind_similar_to(*expr, negated, *pattern, escape_char),
             Expr::InList {
                 expr,
                 list,
@@ -443,22 +455,74 @@ impl Binder {
         Ok(func_call.into())
     }
 
+    fn bind_like(
+        &mut self,
+        expr_type: ExprType,
+        expr: Expr,
+        negated: bool,
+        pattern: Expr,
+        escape_char: Option<EscapeChar>,
+    ) -> Result<ExprImpl> {
+        if matches!(pattern, Expr::AllOp(_) | Expr::SomeOp(_)) {
+            if escape_char.is_some() {
+                // PostgreSQL also don't support the pattern due to the complexity of implementation.
+                // The SQL will failed on PostgreSQL 16.1:
+                // ```sql
+                // select 'a' like any(array[null]) escape '';
+                // ```
+                bail_not_implemented!(
+                    "LIKE with both ALL|ANY pattern and escape character is not supported"
+                )
+            }
+            // Use the `bind_binary_op` path to handle the ALL|ANY pattern.
+            let op = match (expr_type, negated) {
+                (ExprType::Like, false) => BinaryOperator::PGLikeMatch,
+                (ExprType::Like, true) => BinaryOperator::PGNotLikeMatch,
+                (ExprType::ILike, false) => BinaryOperator::PGILikeMatch,
+                (ExprType::ILike, true) => BinaryOperator::PGNotILikeMatch,
+                _ => unreachable!(),
+            };
+            return self.bind_binary_op(expr, op, pattern);
+        }
+        if escape_char.is_some() {
+            bail_not_implemented!(issue = 15701, "LIKE with escape character is not supported");
+        }
+        let expr = self.bind_expr_inner(expr)?;
+        let pattern = self.bind_expr_inner(pattern)?;
+        match (expr.return_type(), pattern.return_type()) {
+            (DataType::Varchar, DataType::Varchar) => {}
+            (string_ty, pattern_ty) => match expr_type {
+                ExprType::Like => bail_no_function!("like({}, {})", string_ty, pattern_ty),
+                ExprType::ILike => bail_no_function!("ilike({}, {})", string_ty, pattern_ty),
+                _ => unreachable!(),
+            },
+        }
+        let func_call =
+            FunctionCall::new_unchecked(expr_type, vec![expr, pattern], DataType::Boolean);
+        let func_call = if negated {
+            FunctionCall::new_unchecked(ExprType::Not, vec![func_call.into()], DataType::Boolean)
+        } else {
+            func_call
+        };
+        Ok(func_call.into())
+    }
+
     /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     pub(super) fn bind_similar_to(
         &mut self,
         expr: Expr,
         negated: bool,
-        pat: Expr,
-        esc_text: Option<Box<Expr>>,
+        pattern: Expr,
+        escape_char: Option<EscapeChar>,
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
-        let pat = self.bind_expr_inner(pat)?;
+        let pattern = self.bind_expr_inner(pattern)?;
 
-        let esc_inputs = if let Some(et) = esc_text {
-            let esc_text = self.bind_expr_inner(*et)?;
-            vec![pat, esc_text]
+        let esc_inputs = if let Some(escape_char) = escape_char {
+            let escape_char = ExprImpl::literal_varchar(escape_char.to_string());
+            vec![pattern, escape_char]
         } else {
-            vec![pat]
+            vec![pattern]
         };
 
         let esc_call =
@@ -935,10 +999,23 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?,
             types.iter().map(|f| f.name.real_value()).collect_vec(),
         ),
-        AstDataType::Custom(qualified_type_name) if qualified_type_name.0.len() == 1 => {
-            // In PostgreSQL, these are not keywords but pre-defined names that could be extended by
-            // `CREATE TYPE`.
-            match qualified_type_name.0[0].real_value().as_str() {
+        AstDataType::Custom(qualified_type_name) => {
+            let idents = qualified_type_name
+                .0
+                .iter()
+                .map(|n| n.real_value())
+                .collect_vec();
+            let name = if idents.len() == 1 {
+                idents[0].as_str() // `int2`
+            } else if idents.len() == 2 && idents[0] == PG_CATALOG_SCHEMA_NAME {
+                idents[1].as_str() // `pg_catalog.text`
+            } else {
+                return Err(new_err().into());
+            };
+
+            // In PostgreSQL, these are non-keywords or non-reserved keywords but pre-defined
+            // names that could be extended by `CREATE TYPE`.
+            match name {
                 "int2" => DataType::Int16,
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
@@ -946,6 +1023,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
+                "text" => DataType::Varchar,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -961,7 +1039,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid
-        | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)
         | AstDataType::Time(true) => return Err(new_err().into()),
     };
