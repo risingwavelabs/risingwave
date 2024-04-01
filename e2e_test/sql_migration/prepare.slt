@@ -8,6 +8,9 @@ statement ok
 create schema schema1;
 
 statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;
+
+statement ok
 create source src (v int) with (
     connector = 'datagen',
     fields.v.kind = 'sequence',

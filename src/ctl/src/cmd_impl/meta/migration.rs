@@ -325,6 +325,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     owner_id: Set(object.owner as _),
                     database_id: Set(Some(*db_rewrite.get(&object.database_id).unwrap() as _)),
                     schema_id: Set(Some(*schema_rewrite.get(&object.schema_id).unwrap() as _)),
+                    initialized_at_cluster_version: Set(object
+                        .initialized_at_cluster_version
+                        .clone()),
+                    created_at_cluster_version: Set(object.created_at_cluster_version.clone()),
                     ..Default::default()
                 };
                 if let Some(epoch) = object.initialized_at_epoch.map(Epoch::from) {
@@ -354,6 +358,8 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             owner_id: Set(table.owner as _),
             database_id: Set(Some(*db_rewrite.get(&table.database_id).unwrap() as _)),
             schema_id: Set(Some(*schema_rewrite.get(&table.schema_id).unwrap() as _)),
+            initialized_at_cluster_version: Set(table.initialized_at_cluster_version.clone()),
+            created_at_cluster_version: Set(table.created_at_cluster_version.clone()),
             ..Default::default()
         };
         if let Some(epoch) = table.initialized_at_epoch.map(Epoch::from) {
@@ -567,9 +573,11 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("subscriptions migrated");
 
     // object_dependency
-    ObjectDependency::insert_many(object_dependencies)
-        .exec(&meta_store_sql.conn)
-        .await?;
+    if !object_dependencies.is_empty() {
+        ObjectDependency::insert_many(object_dependencies)
+            .exec(&meta_store_sql.conn)
+            .await?;
+    }
     println!("object dependencies migrated");
 
     // user privilege

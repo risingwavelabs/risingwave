@@ -16,6 +16,11 @@ public
 rw_catalog
 schema1
 
+query T
+SELECT setting FROM pg_catalog.pg_settings where name = 'max_concurrent_creating_streaming_jobs';
+----
+4
+
 query T rowsort
 select name, relation_type from rw_relations where relation_type != 'system table' AND relation_type != 'view';
 ----
