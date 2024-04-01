@@ -298,11 +298,11 @@ pub fn gen_batch_plan_fragmenter(
     })
 }
 
-async fn execute(
+pub async fn create_stream(
     session: Arc<SessionImpl>,
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
-) -> Result<RwPgResponse> {
+) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
     let BatchPlanFragmenterResult {
         plan_fragmenter,
         query_mode,
@@ -326,7 +326,6 @@ async fn execute(
         _ => {}
     }
 
-    let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -337,10 +336,7 @@ async fn execute(
         .collect::<Vec<PgFieldDescriptor>>();
     let column_types = schema.fields().iter().map(|f| f.data_type()).collect_vec();
 
-    // Used in counting row count.
-    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
-
-    let mut row_stream = match query_mode {
+    let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
             local_execute(session.clone(), query, can_timeout_cancel).await?,
@@ -358,6 +354,23 @@ async fn execute(
             ))
         }
     };
+
+    Ok((row_stream, pg_descs))
+}
+
+async fn execute(
+    session: Arc<SessionImpl>,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+    let query_mode = plan_fragmenter_result.query_mode;
+    let stmt_type = plan_fragmenter_result.stmt_type;
+
+    let query_start_time = Instant::now();
+    let (mut row_stream, pg_descs) =
+        create_stream(session.clone(), plan_fragmenter_result, formats).await?;
 
     let row_cnt: Option<i32> = match stmt_type {
         StatementType::SELECT
@@ -450,7 +463,7 @@ async fn execute(
         .into())
 }
 
-pub async fn distribute_execute(
+async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
@@ -472,7 +485,8 @@ pub async fn distribute_execute(
         .map_err(|err| err.into())
 }
 
-pub async fn local_execute(
+#[expect(clippy::unused_async)]
+async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,

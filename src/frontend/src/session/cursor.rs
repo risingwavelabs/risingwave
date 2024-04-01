@@ -16,17 +16,14 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::Row;
-use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{transaction, PgResponseStream};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::query::{distribute_execute, local_execute, BatchPlanFragmenterResult};
-use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
+use crate::handler::query::{create_stream, BatchPlanFragmenterResult};
 use crate::session::SessionImpl;
 
 pub struct Cursor {
@@ -40,59 +37,13 @@ impl Cursor {
         plan_fragmenter_result: BatchPlanFragmenterResult,
         session: Arc<SessionImpl>,
     ) -> Result<Self> {
-        let (row_stream, pg_descs) = Self::create_stream(plan_fragmenter_result, session).await?;
+        assert_eq!(plan_fragmenter_result.stmt_type, StatementType::SELECT);
+        let (row_stream, pg_descs) = create_stream(session, plan_fragmenter_result, vec![]).await?;
         Ok(Self {
             row_stream,
             pg_descs,
             remaining_rows: VecDeque::<Row>::new(),
         })
-    }
-
-    async fn create_stream(
-        plan_fragmenter_result: BatchPlanFragmenterResult,
-        session: Arc<SessionImpl>,
-    ) -> Result<(PgResponseStream, Vec<PgFieldDescriptor>)> {
-        let BatchPlanFragmenterResult {
-            plan_fragmenter,
-            query_mode,
-            schema,
-            stmt_type,
-            ..
-        } = plan_fragmenter_result;
-        assert_eq!(stmt_type, StatementType::SELECT);
-
-        let can_timeout_cancel = true;
-
-        let query = plan_fragmenter.generate_complete_query().await?;
-        tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
-
-        let pg_descs = schema
-            .fields()
-            .iter()
-            .map(to_pg_field)
-            .collect::<Vec<PgFieldDescriptor>>();
-        let column_types = schema.fields().iter().map(|f| f.data_type()).collect_vec();
-
-        let row_stream: PgResponseStream = match query_mode {
-            QueryMode::Auto => unreachable!(),
-            QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, can_timeout_cancel).await?,
-                column_types,
-                vec![],
-                session.clone(),
-            )),
-            // Local mode do not support cancel tasks.
-            QueryMode::Distributed => {
-                PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, can_timeout_cancel).await?,
-                    column_types,
-                    vec![],
-                    session.clone(),
-                ))
-            }
-        };
-
-        Ok((row_stream, pg_descs))
     }
 
     pub async fn next_once(&mut self) -> Result<Option<Row>> {
