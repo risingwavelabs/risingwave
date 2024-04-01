@@ -39,7 +39,7 @@ use tracing::{debug, error, info, trace, warn};
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::filter_key_extractor::FilterKeyExtractorManager;
-use crate::hummock::compactor::{compact, CompactorContext};
+use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
@@ -246,7 +246,7 @@ impl HummockEventHandler {
                 let tree_root = upload_compactor_context.await_tree_reg.as_ref().map(|reg| {
                     let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
                     reg.register(
-                        format!("spawn_upload_task/{}", upload_task_id),
+                        await_tree_key::SpawnUploadTask { id: upload_task_id },
                         format!("Spawn Upload Task: {}", task_info),
                     )
                 });

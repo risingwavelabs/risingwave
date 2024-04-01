@@ -29,6 +29,7 @@ use risingwave_pb::monitor_service::{
     StackTraceResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
+use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
@@ -90,9 +91,9 @@ impl MonitorService for MonitorServiceImpl {
             self.stream_mgr.env.state_store().as_hummock()
             && let Some(m) = hummock.compaction_await_tree_reg()
         {
-            m.collect::<String>()
+            m.collect::<Compaction>()
                 .into_iter()
-                .map(|(k, v)| (k, v.to_string()))
+                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
                 .collect()
         } else {
             Default::default()

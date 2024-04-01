@@ -30,6 +30,19 @@ pub fn new_compaction_await_tree_reg_ref(config: await_tree::Config) -> Compacti
     await_tree::Registry::new(config)
 }
 
+pub mod await_tree_key {
+    /// Await-tree key type for compaction tasks.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Compaction {
+        CompactRunner { task_id: u64, split_index: usize },
+        CompactSharedBuffer { id: usize },
+        SpawnUploadTask { id: usize },
+        MergingTask { id: usize },
+    }
+
+    pub use Compaction::*;
+}
+
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {

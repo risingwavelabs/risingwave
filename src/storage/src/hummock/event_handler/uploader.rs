@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
 use crate::hummock::compactor::{
-    merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
+    await_tree_key, merge_imms_in_memory, CompactionAwaitTreeRegRef, CompactionExecutor,
 };
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
@@ -90,7 +90,9 @@ pub(crate) fn default_spawn_merging_task(
             let tree_root = await_tree_reg.as_ref().map(|reg| {
                 let merging_task_id = NEXT_MERGING_TASK_ID.fetch_add(1, Relaxed);
                 reg.register(
-                    format!("merging_task/{}", merging_task_id),
+                    await_tree_key::MergingTask {
+                        id: merging_task_id,
+                    },
                     format!(
                         "Merging Imm {:?} {:?} {:?}",
                         table_id,
