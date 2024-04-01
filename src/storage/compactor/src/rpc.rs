@@ -85,9 +85,9 @@ impl MonitorService for MonitorServiceImpl {
         let compaction_task_traces = match &self.await_tree_reg {
             None => Default::default(),
             Some(await_tree_reg) => await_tree_reg
-                .read()
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<String>()
+                .into_iter()
+                .map(|(k, v)| (k, v.to_string()))
                 .collect(),
         };
         Ok(Response::new(StackTraceResponse {

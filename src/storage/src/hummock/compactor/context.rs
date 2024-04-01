@@ -16,7 +16,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use more_asserts::assert_ge;
-use parking_lot::RwLock;
 
 use super::task_progress::TaskProgressManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
@@ -25,10 +24,10 @@ use crate::hummock::MemoryLimiter;
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 
-pub type CompactionAwaitTreeRegRef = Arc<RwLock<await_tree::Registry<String>>>;
+pub type CompactionAwaitTreeRegRef = await_tree::Registry;
 
 pub fn new_compaction_await_tree_reg_ref(config: await_tree::Config) -> CompactionAwaitTreeRegRef {
-    Arc::new(RwLock::new(await_tree::Registry::new(config)))
+    await_tree::Registry::new(config)
 }
 
 /// A `CompactorContext` describes the context of a compactor.

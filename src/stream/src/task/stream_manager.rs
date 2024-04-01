@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::HashMap;
 use std::fmt::Debug;
-use std::io::Write;
 use std::mem::take;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -25,7 +23,6 @@ use async_recursion::async_recursion;
 use futures::stream::BoxStream;
 use futures::FutureExt;
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -76,8 +73,8 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 /// `LocalStreamManager` manages all stream executors in this project.
 #[derive(Clone)]
 pub struct LocalStreamManager {
-    await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
-    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    await_tree_reg: Option<await_tree::Registry>,
+    barrier_await_tree_reg: Option<await_tree::Registry>,
 
     pub env: StreamEnvironment,
 
@@ -165,9 +162,9 @@ impl LocalStreamManager {
     ) -> Self {
         let await_tree_reg = await_tree_config
             .clone()
-            .map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
+            .map(|config| await_tree::Registry::new(config));
         let barrier_await_tree_reg =
-            await_tree_config.map(|config| Arc::new(Mutex::new(await_tree::Registry::new(config))));
+            await_tree_config.map(|config| await_tree::Registry::new(config));
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 
@@ -187,48 +184,18 @@ impl LocalStreamManager {
         }
     }
 
-    /// Print the traces of all actors periodically, used for debugging only.
-    pub fn spawn_print_trace(self: Arc<Self>) -> JoinHandle<!> {
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-                let mut o = std::io::stdout().lock();
-
-                for (k, trace) in self
-                    .await_tree_reg
-                    .as_ref()
-                    .expect("async stack trace not enabled")
-                    .lock()
-                    .iter()
-                {
-                    writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
-                }
-
-                for (e, trace) in self
-                    .barrier_await_tree_reg
-                    .as_ref()
-                    .expect("async stack trace not enabled")
-                    .lock()
-                    .iter()
-                {
-                    writeln!(o, ">> Barrier {}\n\n{}", e, trace).ok();
-                }
-            }
-        })
-    }
-
     /// Get await-tree contexts for all actors.
-    pub fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
+    pub fn get_actor_traces(&self) -> Vec<(ActorId, await_tree::Tree)> {
         match &self.await_tree_reg.as_ref() {
-            Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
+            Some(reg) => reg.collect::<ActorId>(),
             None => Default::default(),
         }
     }
 
     /// Get await-tree contexts for all barrier.
-    pub fn get_barrier_traces(&self) -> HashMap<u64, await_tree::TreeContext> {
+    pub fn get_barrier_traces(&self) -> Vec<(u64, await_tree::Tree)> {
         match &self.barrier_await_tree_reg.as_ref() {
-            Some(mgr) => mgr.lock().iter().map(|(k, v)| (*k, v)).collect(),
+            Some(reg) => reg.collect::<u64>(),
             None => Default::default(),
         }
     }
@@ -328,7 +295,7 @@ impl LocalBarrierWorker {
         }
         self.actor_manager_state.clear_state();
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
-            m.lock().clear();
+            m.clear();
         }
         dispatch_state_store!(&self.actor_manager.env.state_store(), store, {
             store.clear_shared_buffer(prev_epoch).await;
@@ -641,7 +608,6 @@ impl LocalBarrierWorker {
                 });
                 let traced = match &self.actor_manager.await_tree_reg {
                     Some(m) => m
-                        .lock()
                         .register(actor_id, trace_span)
                         .instrument(actor)
                         .left_future(),

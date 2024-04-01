@@ -89,7 +89,7 @@ pub(crate) fn default_spawn_merging_task(
                 LazyLock::new(|| AtomicUsize::new(0));
             let tree_root = await_tree_reg.as_ref().map(|reg| {
                 let merging_task_id = NEXT_MERGING_TASK_ID.fetch_add(1, Relaxed);
-                reg.write().register(
+                reg.register(
                     format!("merging_task/{}", merging_task_id),
                     format!(
                         "Merging Imm {:?} {:?} {:?}",

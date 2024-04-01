@@ -186,7 +186,7 @@ async fn compact_shared_buffer(
                 LazyLock::new(|| AtomicUsize::new(0));
             let tree_root = context.await_tree_reg.as_ref().map(|reg| {
                 let id = NEXT_SHARED_BUFFER_COMPACT_ID.fetch_add(1, Relaxed);
-                reg.write().register(
+                reg.register(
                     format!("compact_shared_buffer/{}", id),
                     format!(
                         "Compact Shared Buffer: {:?}",

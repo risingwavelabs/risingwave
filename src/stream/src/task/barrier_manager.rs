@@ -287,7 +287,7 @@ pub(crate) struct StreamActorManager {
     pub(super) watermark_epoch: AtomicU64Ref,
 
     /// Manages the await-trees of all actors.
-    pub(super) await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
+    pub(super) await_tree_reg: Option<await_tree::Registry>,
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
@@ -324,7 +324,7 @@ pub(super) struct LocalBarrierWorker {
 impl LocalBarrierWorker {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+        barrier_await_tree_reg: Option<await_tree::Registry>,
     ) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
@@ -744,8 +744,8 @@ impl LocalBarrierWorker {
     pub fn spawn(
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
-        await_tree_reg: Option<Arc<Mutex<await_tree::Registry<ActorId>>>>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+        await_tree_reg: Option<await_tree::Registry>,
+        barrier_await_tree_reg: Option<await_tree::Registry>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {

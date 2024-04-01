@@ -75,9 +75,7 @@ use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
-use crate::rpc::service::monitor_service::{
-    AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, MonitorServiceImpl,
-};
+use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
@@ -371,17 +369,7 @@ pub async fn compute_node_serve(
         memory_mgr.get_watermark_epoch(),
     );
 
-    let grpc_await_tree_reg = await_tree_config
-        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-
-    // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
-    // this is not the case, we can use the following command to get it printed into the logs
-    // periodically.
-    //
-    // Comment out the following line to enable.
-    // TODO: may optionally enable based on the features
-    #[cfg(any())]
-    stream_mgr.clone().spawn_print_trace();
+    let grpc_await_tree_reg = await_tree_config.map(|config| await_tree::Registry::new(config));
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);

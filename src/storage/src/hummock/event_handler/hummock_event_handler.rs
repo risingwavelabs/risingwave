@@ -245,7 +245,7 @@ impl HummockEventHandler {
                     LazyLock::new(|| AtomicUsize::new(0));
                 let tree_root = upload_compactor_context.await_tree_reg.as_ref().map(|reg| {
                     let upload_task_id = NEXT_UPLOAD_TASK_ID.fetch_add(1, Relaxed);
-                    reg.write().register(
+                    reg.register(
                         format!("spawn_upload_task/{}", upload_task_id),
                         format!("Spawn Upload Task: {}", task_info),
                     )

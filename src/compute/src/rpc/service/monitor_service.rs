@@ -79,10 +79,9 @@ impl MonitorService for MonitorServiceImpl {
             .collect();
 
         let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
-            m.lock()
-                .await
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+            m.collect::<String>() // TODO
+                .into_iter()
+                .map(|(k, v)| (k, v.to_string()))
                 .collect()
         } else {
             Default::default()
@@ -92,9 +91,9 @@ impl MonitorService for MonitorServiceImpl {
             self.stream_mgr.env.state_store().as_hummock()
             && let Some(m) = hummock.compaction_await_tree_reg()
         {
-            m.read()
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_string()))
+            m.collect::<String>()
+                .into_iter()
+                .map(|(k, v)| (k, v.to_string()))
                 .collect()
         } else {
             Default::default()
@@ -296,12 +295,11 @@ pub mod grpc_middleware {
     use either::Either;
     use futures::Future;
     use hyper::Body;
-    use tokio::sync::Mutex;
     use tonic::transport::NamedService;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
+    pub type AwaitTreeRegistryRef = await_tree::Registry;
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -372,7 +370,7 @@ pub mod grpc_middleware {
             };
 
             Either::Right(async move {
-                let root = registry.lock().await.register(key, req.uri().path());
+                let root = registry.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })

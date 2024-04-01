@@ -23,7 +23,6 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::stream::FuturesOrdered;
 use futures::{FutureExt, StreamExt};
-use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -142,7 +141,7 @@ pub(super) struct ManagedBarrierState {
     await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
 
     /// Manages the await-trees of all barriers.
-    barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+    barrier_await_tree_reg: Option<await_tree::Registry>,
 }
 
 impl ManagedBarrierState {
@@ -159,7 +158,7 @@ impl ManagedBarrierState {
     pub(super) fn new(
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
-        barrier_await_tree_reg: Option<Arc<Mutex<await_tree::Registry<u64>>>>,
+        barrier_await_tree_reg: Option<await_tree::Registry>,
     ) -> Self {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
@@ -171,11 +170,9 @@ impl ManagedBarrierState {
         }
     }
 
-    pub(super) fn reset_and_take_barrier_await_tree_reg(
-        &mut self,
-    ) -> Option<Arc<Mutex<await_tree::Registry<u64>>>> {
+    pub(super) fn reset_and_take_barrier_await_tree_reg(&mut self) -> Option<await_tree::Registry> {
         if let Some(reg) = &self.barrier_await_tree_reg {
-            reg.lock().clear();
+            reg.clear();
         }
         self.barrier_await_tree_reg.take()
     }
@@ -300,8 +297,7 @@ impl ManagedBarrierState {
                         },
                     );
                 if let Some(reg) = &self.barrier_await_tree_reg {
-                    reg.lock()
-                        .register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
+                    reg.register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
                         .instrument(future)
                         .left_future()
                 } else {

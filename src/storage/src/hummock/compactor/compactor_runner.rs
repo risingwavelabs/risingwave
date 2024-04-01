@@ -628,7 +628,6 @@ pub async fn compact(
         let traced = match context.await_tree_reg.as_ref() {
             None => runner.right_future(),
             Some(await_tree_reg) => await_tree_reg
-                .write()
                 .register(
                     format!("compact_runner/{}-{}", compact_task.task_id, split_index),
                     format!(
