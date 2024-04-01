@@ -110,6 +110,8 @@ pub struct RecursiveUnion {
     pub base: Box<BoundQuery>,
     /// rhs part of the `UNION ALL` operator
     pub recursive: Box<BoundQuery>,
+    /// the aligned schema for this union
+    pub schema: Schema,
 }
 
 #[derive(Clone, Debug)]

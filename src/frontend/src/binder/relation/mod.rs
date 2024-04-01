@@ -35,9 +35,9 @@ use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
+mod recursive_union;
 mod cte_ref;
 mod join;
-mod recursive_union;
 mod share;
 mod subquery;
 mod table_function;
@@ -388,7 +388,7 @@ impl Binder {
                 BindingCteState::Bound { query } => {
                     let schema = match query.clone() {
                         Left(normal) => normal.body.schema().clone(),
-                        Right(recursive) => recursive.recursive.body.schema().clone(),
+                        Right(recursive) => recursive.schema.clone(),
                     };
                     self.bind_table_to_context(
                         schema

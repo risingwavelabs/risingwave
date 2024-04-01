@@ -314,12 +314,13 @@ impl Binder {
                 should_be_empty(offset, "OFFSET")?;
                 should_be_empty(fetch, "FETCH")?;
 
+
                 let SetExpr::SetOperation {
                     op: SetOperator::Union,
                     all,
                     left,
                     right,
-                } = body
+                } = body.clone()
                 else {
                     return Err(ErrorCode::BindError(
                         "`UNION` is required in recursive CTE".to_string(),
@@ -333,6 +334,9 @@ impl Binder {
                     )
                     .into());
                 }
+
+                // align the schema
+                let schema = self.bind_set_expr(body)?.schema().clone();
 
                 let entry = self
                     .context
@@ -372,7 +376,7 @@ impl Binder {
                 let base = self.bind_query(left)?;
 
                 entry.borrow_mut().state = BindingCteState::BaseResolved {
-                    schema: base.schema().clone(),
+                    schema: schema.clone(),
                 };
 
                 // bind the rest of the recursive cte
@@ -382,6 +386,7 @@ impl Binder {
                     all,
                     base: Box::new(base),
                     recursive: Box::new(recursive),
+                    schema,
                 };
 
                 entry.borrow_mut().state = BindingCteState::Bound {
