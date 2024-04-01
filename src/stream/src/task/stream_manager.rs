@@ -70,11 +70,22 @@ pub type ActorHandle = JoinHandle<()>;
 
 pub type AtomicU64Ref = Arc<AtomicU64>;
 
+pub mod await_tree_key {
+    /// Await-tree key type for actors.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct Actor(pub crate::task::ActorId);
+
+    /// Await-tree key type for barriers.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct BarrierAwait {
+        pub prev_epoch: u64,
+    }
+}
+
 /// `LocalStreamManager` manages all stream executors in this project.
 #[derive(Clone)]
 pub struct LocalStreamManager {
     await_tree_reg: Option<await_tree::Registry>,
-    barrier_await_tree_reg: Option<await_tree::Registry>,
 
     pub env: StreamEnvironment,
 
@@ -163,8 +174,6 @@ impl LocalStreamManager {
         let await_tree_reg = await_tree_config
             .clone()
             .map(|config| await_tree::Registry::new(config));
-        let barrier_await_tree_reg =
-            await_tree_config.map(|config| await_tree::Registry::new(config));
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 
@@ -172,32 +181,19 @@ impl LocalStreamManager {
             env.clone(),
             streaming_metrics,
             await_tree_reg.clone(),
-            barrier_await_tree_reg.clone(),
             watermark_epoch,
             actor_op_rx,
         );
         Self {
             await_tree_reg,
-            barrier_await_tree_reg,
             env,
             actor_op_tx: EventSender(actor_op_tx),
         }
     }
 
-    /// Get await-tree contexts for all actors.
-    pub fn get_actor_traces(&self) -> Vec<(ActorId, await_tree::Tree)> {
-        match &self.await_tree_reg.as_ref() {
-            Some(reg) => reg.collect::<ActorId>(),
-            None => Default::default(),
-        }
-    }
-
-    /// Get await-tree contexts for all barrier.
-    pub fn get_barrier_traces(&self) -> Vec<(u64, await_tree::Tree)> {
-        match &self.barrier_await_tree_reg.as_ref() {
-            Some(reg) => reg.collect::<u64>(),
-            None => Default::default(),
-        }
+    /// Get the registry of await-trees.
+    pub fn await_tree_reg(&self) -> Option<&await_tree::Registry> {
+        self.await_tree_reg.as_ref()
     }
 
     /// Receive a new control stream request from meta. Notify the barrier worker to reset the CN and use the new control stream
@@ -608,7 +604,7 @@ impl LocalBarrierWorker {
                 });
                 let traced = match &self.actor_manager.await_tree_reg {
                     Some(m) => m
-                        .register(actor_id, trace_span)
+                        .register(await_tree_key::Actor(actor_id), trace_span)
                         .instrument(actor)
                         .left_future(),
                     None => actor.right_future(),

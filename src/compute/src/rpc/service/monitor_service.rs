@@ -30,6 +30,7 @@ use risingwave_pb::monitor_service::{
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
+use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
@@ -37,19 +38,13 @@ use tonic::{Code, Request, Response, Status};
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: LocalStreamManager,
-    grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
     server_config: ServerConfig,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(
-        stream_mgr: LocalStreamManager,
-        grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
-        server_config: ServerConfig,
-    ) -> Self {
+    pub fn new(stream_mgr: LocalStreamManager, server_config: ServerConfig) -> Self {
         Self {
             stream_mgr,
-            grpc_await_tree_reg,
             server_config,
         }
     }
@@ -64,24 +59,28 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<StackTraceResponse>, Status> {
         let _req = request.into_inner();
 
-        let actor_traces = self
-            .stream_mgr
-            .get_actor_traces()
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
-
-        let barrier_traces = self
-            .stream_mgr
-            .get_barrier_traces()
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
-
-        let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
-            m.collect::<String>() // TODO
+        let actor_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<Actor>()
                 .into_iter()
-                .map(|(k, v)| (k, v.to_string()))
+                .map(|(k, v)| (k.0, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let barrier_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<BarrierAwait>()
+                .into_iter()
+                .map(|(k, v)| (k.prev_epoch, v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        let rpc_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
+            reg.collect::<GrpcCall>()
+                .into_iter()
+                .map(|(k, v)| (k.desc, v.to_string()))
                 .collect()
         } else {
             Default::default()
@@ -301,6 +300,12 @@ pub mod grpc_middleware {
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
     pub type AwaitTreeRegistryRef = await_tree::Registry;
 
+    /// Await-tree key type for gRPC calls.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub struct GrpcCall {
+        pub desc: String,
+    }
+
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
         registry: Option<AwaitTreeRegistryRef>,
@@ -363,11 +368,12 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            let key = if let Some(authority) = req.uri().authority() {
+            let desc = if let Some(authority) = req.uri().authority() {
                 format!("{authority} - {id}")
             } else {
                 format!("?? - {id}")
             };
+            let key = GrpcCall { desc };
 
             Either::Right(async move {
                 let root = registry.register(key, req.uri().path());

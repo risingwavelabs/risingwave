@@ -369,18 +369,12 @@ pub async fn compute_node_serve(
         memory_mgr.get_watermark_epoch(),
     );
 
-    let grpc_await_tree_reg = await_tree_config.map(|config| await_tree::Registry::new(config));
-
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(
-        stream_mgr.clone(),
-        grpc_await_tree_reg.clone(),
-        config.server.clone(),
-    );
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), config.server.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
@@ -412,6 +406,7 @@ pub async fn compute_node_serve(
                 ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
             )
             .add_service({
+                let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
                 let srv =
                     StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);
                 #[cfg(madsim)]
@@ -420,7 +415,7 @@ pub async fn compute_node_serve(
                 }
                 #[cfg(not(madsim))]
                 {
-                    AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg).layer(srv)
+                    AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
                 }
             })
             .add_service(MonitorServiceServer::new(monitor_srv))

@@ -38,7 +38,7 @@ use super::BarrierCompleteResult;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, Mutation};
-use crate::task::ActorId;
+use crate::task::{await_tree_key, ActorId};
 
 /// The state machine of local barrier manager.
 #[derive(Debug)]
@@ -170,13 +170,6 @@ impl ManagedBarrierState {
         }
     }
 
-    pub(super) fn reset_and_take_barrier_await_tree_reg(&mut self) -> Option<await_tree::Registry> {
-        if let Some(reg) = &self.barrier_await_tree_reg {
-            reg.clear();
-        }
-        self.barrier_await_tree_reg.take()
-    }
-
     pub fn read_barrier_mutation(
         &mut self,
         barrier: &Barrier,
@@ -297,9 +290,12 @@ impl ManagedBarrierState {
                         },
                     );
                 if let Some(reg) = &self.barrier_await_tree_reg {
-                    reg.register(prev_epoch, format!("SyncEpoch({})", prev_epoch))
-                        .instrument(future)
-                        .left_future()
+                    reg.register(
+                        await_tree_key::BarrierAwait { prev_epoch },
+                        format!("SyncEpoch({})", prev_epoch),
+                    )
+                    .instrument(future)
+                    .left_future()
                 } else {
                     future.right_future()
                 }

@@ -322,10 +322,7 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(
-        actor_manager: Arc<StreamActorManager>,
-        barrier_await_tree_reg: Option<await_tree::Registry>,
-    ) -> Self {
+    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -342,7 +339,7 @@ impl LocalBarrierWorker {
             state: ManagedBarrierState::new(
                 actor_manager.env.state_store(),
                 actor_manager.streaming_metrics.clone(),
-                barrier_await_tree_reg,
+                actor_manager.await_tree_reg.clone(),
             ),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
@@ -678,10 +675,7 @@ impl LocalBarrierWorker {
 
     /// Reset all internal states.
     pub(super) fn reset_state(&mut self) {
-        *self = Self::new(
-            self.actor_manager.clone(),
-            self.state.reset_and_take_barrier_await_tree_reg(),
-        );
+        *self = Self::new(self.actor_manager.clone());
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -745,7 +739,6 @@ impl LocalBarrierWorker {
         env: StreamEnvironment,
         streaming_metrics: Arc<StreamingMetrics>,
         await_tree_reg: Option<await_tree::Registry>,
-        barrier_await_tree_reg: Option<await_tree::Registry>,
         watermark_epoch: AtomicU64Ref,
         actor_op_rx: UnboundedReceiver<LocalActorOperation>,
     ) -> JoinHandle<()> {
@@ -768,7 +761,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, barrier_await_tree_reg);
+        let worker = LocalBarrierWorker::new(actor_manager);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -869,7 +862,6 @@ impl LocalBarrierManager {
         let _join_handle = LocalBarrierWorker::spawn(
             StreamEnvironment::for_test(),
             Arc::new(StreamingMetrics::unused()),
-            None,
             None,
             Arc::new(AtomicU64::new(0)),
             rx,
