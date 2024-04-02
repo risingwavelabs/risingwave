@@ -48,7 +48,7 @@ impl<'a> OpRowMutRefTuple<'a> {
             (Op::Insert, Op::Insert) => {
                 consistency_panic!("receive duplicated insert on the stream");
                 // If need to tolerate inconsistency, override the previous insert.
-                // Note that becasue the primary key constraint has been violated, we
+                // Note that because the primary key constraint has been violated, we
                 // don't mind losing some data here.
                 self.prev.set_vis(false);
                 self.prev = curr;
@@ -56,7 +56,7 @@ impl<'a> OpRowMutRefTuple<'a> {
             (Op::Delete, Op::Delete) => {
                 consistency_panic!("receive duplicated delete on the stream");
                 // If need to tolerate inconsistency, override the previous delete.
-                // Note that becasue the primary key constraint has been violated, we
+                // Note that because the primary key constraint has been violated, we
                 // don't mind losing some data here.
                 self.prev.set_vis(false);
                 self.prev = curr;
